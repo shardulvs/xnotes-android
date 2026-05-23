@@ -351,7 +351,7 @@ class Editor(context: Context) {
      *  reopens this note where the user left off, unsaved edits included. */
     private fun saveSession() {
         val contentChanged = contentVersion != lastSessionContentVersion
-        session.save(state.document, state.zoom, state.scrollX, state.scrollY, writeDocument = contentChanged)
+        session.save(state.document, state.zoom, state.scrollX, state.scrollY, zoomLocked, writeDocument = contentChanged)
         lastSessionContentVersion = contentVersion
     }
 
@@ -370,6 +370,8 @@ class Editor(context: Context) {
         } else {
             state.didInitialFit = false
         }
+        zoomLocked = snap.zoomLocked
+        state.zoomLocked = snap.zoomLocked
         state.relayout()
         if (state.viewportW > 0) {
             if (!state.didInitialFit) {

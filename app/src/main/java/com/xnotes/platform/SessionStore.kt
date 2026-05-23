@@ -24,14 +24,27 @@ class SessionStore(private val dir: File, private val codec: DocumentCodec) {
     private val meta = JsonStore(File(dir, "session.json"))
 
     /** A restored session: the document plus the view state to reapply. */
-    class Snapshot(val document: Document, val zoom: Double, val scrollX: Double, val scrollY: Double)
+    class Snapshot(
+        val document: Document,
+        val zoom: Double,
+        val scrollX: Double,
+        val scrollY: Double,
+        val zoomLocked: Boolean,
+    )
 
     /**
      * Save [document] and view state. Pass [writeDocument] = false to refresh only
      * the (cheap) view-state sidecar when the document content hasn't changed since
      * the last save — avoiding re-serializing a large note on every pause.
      */
-    fun save(document: Document, zoom: Double, scrollX: Double, scrollY: Double, writeDocument: Boolean) {
+    fun save(
+        document: Document,
+        zoom: Double,
+        scrollX: Double,
+        scrollY: Double,
+        zoomLocked: Boolean,
+        writeDocument: Boolean,
+    ) {
         runCatching {
             dir.mkdirs()
             if (writeDocument || !docFile.exists()) {
@@ -47,6 +60,7 @@ class SessionStore(private val dir: File, private val codec: DocumentCodec) {
                 .put("zoom", zoom)
                 .put("scrollX", scrollX)
                 .put("scrollY", scrollY)
+                .put("zoomLocked", zoomLocked)
             document.path?.let { m.put("path", it) }
             document.displayName?.let { m.put("displayName", it) }
             meta.write(m)
@@ -61,6 +75,12 @@ class SessionStore(private val dir: File, private val codec: DocumentCodec) {
         doc.path = m.optString("path", "").ifEmpty { null }
         doc.displayName = m.optString("displayName", "").ifEmpty { null }
         doc.dirty = m.optBoolean("dirty", false)
-        return Snapshot(doc, m.optDouble("zoom", 0.0), m.optDouble("scrollX", 0.0), m.optDouble("scrollY", 0.0))
+        return Snapshot(
+            doc,
+            m.optDouble("zoom", 0.0),
+            m.optDouble("scrollX", 0.0),
+            m.optDouble("scrollY", 0.0),
+            m.optBoolean("zoomLocked", false),
+        )
     }
 }
