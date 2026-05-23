@@ -8,13 +8,16 @@ import com.xnotes.core.model.Rgba
 enum class FillRule { NONZERO, EVEN_ODD }
 
 /**
- * A **cosmetic** pen: its [width] is in *device* pixels and does **not** scale
- * with the current transform, so selection outlines, page borders and resize
- * handles stay ~1–1.3 px regardless of zoom (spec 01 §1).
+ * An outline pen. When [cosmetic] is true the [width] is in *device* pixels and
+ * does **not** scale with the current transform (selection outlines, page
+ * borders, resize handles stay ~1–1.3 px regardless of zoom — spec 01 §1). When
+ * false the width is in the current coordinate system (page pixels), so shape
+ * outlines thicken with zoom like the content they belong to.
  */
-data class CosmeticPen(
+data class Pen(
     val color: Rgba,
     val width: Double = 1.0,
+    val cosmetic: Boolean = true,
     val dashed: Boolean = false,
 )
 
@@ -40,12 +43,13 @@ interface Renderer {
     fun fillRect(rect: Rect, color: Rgba)
     fun fillPolygon(points: List<Pt>, color: Rgba, rule: FillRule = FillRule.NONZERO)
     fun fillCircle(center: Pt, radius: Double, color: Rgba)
+    fun fillEllipse(center: Pt, rx: Double, ry: Double, color: Rgba)
 
-    // --- cosmetic outlines ---
-    fun strokeRect(rect: Rect, pen: CosmeticPen)
-    fun strokePolyline(points: List<Pt>, pen: CosmeticPen)
-    fun strokePolygon(points: List<Pt>, pen: CosmeticPen)
-    fun strokeEllipse(center: Pt, rx: Double, ry: Double, pen: CosmeticPen)
+    // --- outlines (cosmetic for chrome, page-space for shapes) ---
+    fun strokeRect(rect: Rect, pen: Pen)
+    fun strokePolyline(points: List<Pt>, pen: Pen)
+    fun strokePolygon(points: List<Pt>, pen: Pen)
+    fun strokeEllipse(center: Pt, rx: Double, ry: Double, pen: Pen)
 
     // --- raster + text ---
     /** Draw [raster] scaled into [dest] (optionally only [src] sub-rect), smooth sampling. */
