@@ -23,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.focusable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -191,7 +192,7 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
                 if (editor.sidebarVisible) {
                     com.xnotes.ui.SidePanel(editor)
                 }
-                Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                Box(modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
                     AndroidView(factory = { editor.view }, modifier = Modifier.fillMaxSize())
                     editor.editingField?.let { field ->
                         com.xnotes.ui.TextEditorOverlay(editor, field)
