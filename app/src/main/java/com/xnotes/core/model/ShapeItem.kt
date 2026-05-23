@@ -137,9 +137,25 @@ class ShapeItem(
 
     override fun centroid(): Pt = bounds().center
 
-    override fun intersectsCircle(cx: Double, cy: Double, radius: Double): Boolean =
-        // Shapes are immune to the object eraser; this is only used defensively.
-        bounds().distanceTo(Pt(cx, cy)) <= radius
+    /** True if an eraser circle of [radius] at (cx,cy) touches the shape's geometry. */
+    override fun intersectsCircle(cx: Double, cy: Double, radius: Double): Boolean {
+        val p = Pt(cx, cy)
+        if (bounds().distanceTo(p) > radius) return false // cheap AABB reject
+        val tol = radius + strokeWidth / 2.0
+        return when (shape) {
+            ShapeKind.LINE, ShapeKind.ARROW -> Geometry.distancePointToSegment(p, start, end) <= tol
+            ShapeKind.RECTANGLE ->
+                if (fillRgba != null && box.contains(p)) true else nearRectOutline(p, tol)
+            ShapeKind.TRIANGLE -> {
+                val v = triangleVertices()
+                if (fillRgba != null && Geometry.pointInPolygon(v, p)) true else nearPolyOutline(v, p, tol)
+            }
+            ShapeKind.ELLIPSE -> {
+                val poly = ellipsePolygon()
+                if (fillRgba != null && Geometry.pointInPolygon(poly, p)) true else nearPolyOutline(poly, p, tol)
+            }
+        }
+    }
 
     override fun geometry(): GeoHandle = ShapeHandle(start, end)
 

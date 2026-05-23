@@ -74,6 +74,12 @@ class InteractionController(
         private set
     var inkColor: Rgba = InkPalette.DEFAULT
 
+    /** Whether a finger draws (true) or pans (false). The stylus always uses the armed tool. */
+    var fingerDraws: Boolean = false
+
+    /** Tool the S Pen side button activates while held, or null to ignore the button. */
+    var penButtonTool: Tool? = Tool.ERASER
+
     private val toolConfigs: MutableMap<Tool, ToolConfig> =
         Tool.entries.associateWith { ToolDefaults.configFor(it) }.toMutableMap()
 
@@ -200,20 +206,28 @@ class InteractionController(
         // A press elsewhere commits an open text edit (the field's focus-out also fires).
         if (tool != Tool.TEXT) commitTextEdit()
 
-        // Stylus eraser end erases over any armed tool (spec 06 §2.1).
-        if (toolType == MotionEvent.TOOL_TYPE_ERASER) {
-            clearSelection()
-            beginErase(vx, vy)
-            return
+        // Resolve which tool this pointer drives:
+        //  - the stylus eraser end, or the held side button, force the eraser/side-button tool;
+        //  - a finger pans unless finger-draw is enabled;
+        //  - otherwise the armed tool.
+        val buttonHeld = drawingIsStylus &&
+            (e.buttonState and (MotionEvent.BUTTON_STYLUS_PRIMARY or MotionEvent.BUTTON_SECONDARY)) != 0
+        val effectiveTool: Tool = when {
+            toolType == MotionEvent.TOOL_TYPE_ERASER -> Tool.ERASER
+            buttonHeld && penButtonTool != null -> penButtonTool!!
+            // A finger pans instead of drawing freehand ink (other tools stay usable by finger).
+            toolType == MotionEvent.TOOL_TYPE_FINGER && !fingerDraws && tool.isStroke -> Tool.PAN
+            else -> tool
         }
+
         when {
-            tool == Tool.PAN -> beginPan(vx, vy)
-            tool.isStroke -> beginDraw(content, resolvePressure(e, 0, toolType))
-            tool == Tool.ERASER -> beginErase(vx, vy)
-            tool == Tool.SELECT -> beginSelect(content)
-            tool == Tool.LASSO -> beginLasso(content)
-            tool == Tool.SHAPE -> beginShape(content)
-            tool == Tool.TEXT -> beginText(content)
+            effectiveTool == Tool.PAN -> beginPan(vx, vy)
+            effectiveTool.isStroke -> beginDraw(content, resolvePressure(e, 0, toolType), effectiveTool)
+            effectiveTool == Tool.ERASER -> { clearSelection(); beginErase(vx, vy) }
+            effectiveTool == Tool.SELECT -> beginSelect(content)
+            effectiveTool == Tool.LASSO -> beginLasso(content)
+            effectiveTool == Tool.SHAPE -> beginShape(content)
+            effectiveTool == Tool.TEXT -> beginText(content)
             else -> Unit
         }
         armLongPress(Pt(vx, vy), content)
@@ -270,10 +284,10 @@ class InteractionController(
 
     // --- DRAW ---
 
-    private fun beginDraw(content: Pt, pressure: Double) {
+    private fun beginDraw(content: Pt, pressure: Double, drawTool: Tool = tool) {
         val pageIndex = state.pageIndexAtContent(content) ?: return
         val pr = state.pageRects[pageIndex]
-        val stroke = Stroke(tool, configFor(tool).copy(rgba = inkColor))
+        val stroke = Stroke(drawTool, configFor(drawTool).copy(rgba = inkColor))
         stroke.addSample(Sample(content.x - pr.left, content.y - pr.top, pressure))
         liveStroke = stroke
         strokePageIndex = pageIndex
@@ -353,8 +367,9 @@ class InteractionController(
             val page = state.document.pages[pi]
             val cx = content.x - pr.left
             val cy = content.y - pr.top
+            // Erase strokes and shapes; images are deliberately-placed and protected.
             val toRemove = page.items.filter {
-                it !is ImageItem && it !is ShapeItem && it.intersectsCircle(cx, cy, radius)
+                it !is ImageItem && it.intersectsCircle(cx, cy, radius)
             }
             if (toRemove.isNotEmpty()) {
                 for (item in toRemove) {

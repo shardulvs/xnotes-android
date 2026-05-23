@@ -19,6 +19,10 @@ data class Preferences(
     val defaultTemplate: String = "color", // "color" | "pdf"
     val defaultPageSize: PageSize = PageSize.A4,
     val defaultPageOrientation: Orientation = Orientation.PORTRAIT,
+    /** Whether a finger draws (true) or pans (false, default). The stylus always draws. */
+    val fingerDraws: Boolean = false,
+    /** Tool the S Pen side button activates while held; "none" disables it. */
+    val penButtonTool: String = "eraser",
 ) {
     val isDark: Boolean get() = uiAppearance != "light"
 
@@ -32,6 +36,8 @@ data class Preferences(
         .put("default_template", defaultTemplate)
         .put("default_page_size", defaultPageSize.displayName)
         .put("default_page_orientation", defaultPageOrientation.toName())
+        .put("finger_draws", fingerDraws)
+        .put("pen_button_tool", penButtonTool)
 
     companion object {
         val DEFAULT_ACCENT = Rgba(0, 230, 118, 255)
@@ -50,6 +56,8 @@ data class Preferences(
                 defaultTemplate = template,
                 defaultPageSize = PageSize.fromName(o.optString("default_page_size", "A4")),
                 defaultPageOrientation = Orientation.fromName(o.optString("default_page_orientation", "portrait")),
+                fingerDraws = o.optBoolean("finger_draws", false),
+                penButtonTool = o.optString("pen_button_tool", "eraser").ifEmpty { "eraser" },
             )
         }
     }

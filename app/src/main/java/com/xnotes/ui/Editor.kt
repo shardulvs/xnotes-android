@@ -252,6 +252,8 @@ class Editor(context: Context) {
         palette = Palette.forAppearance(p.isDark, p.accentColor)
         state.palette = palette
         state.pageColorOverride = if (p.defaultTemplate == "color") p.pageColor else null
+        controller.fingerDraws = p.fingerDraws
+        controller.penButtonTool = if (p.penButtonTool == "none") null else (Tool.fromId(p.penButtonTool) ?: Tool.ERASER)
     }
 
     /** Apply edited preferences live and persist (used by the Preferences dialog). */
