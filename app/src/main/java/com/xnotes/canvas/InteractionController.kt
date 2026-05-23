@@ -386,9 +386,11 @@ class InteractionController(
         eraserCursor = Pt(vx, vy)
         val content = state.viewportToContent(Pt(vx, vy))
         val radius = eraserRadius()
+        val eraserBox = Rect(content.x - radius, content.y - radius, radius * 2, radius * 2)
         var changed = false
         for (pi in state.document.pages.indices) {
             val pr = state.pageRects.getOrNull(pi) ?: continue
+            if (!pr.intersects(eraserBox)) continue // skip pages the eraser isn't over
             val page = state.document.pages[pi]
             val cx = content.x - pr.left
             val cy = content.y - pr.top

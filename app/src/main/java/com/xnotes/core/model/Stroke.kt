@@ -26,6 +26,7 @@ class Stroke(
     override val resizable = false
 
     private var cachedGeometry: StrokeGeometry? = null
+    private var cachedRawBounds: Rect? = null
 
     /** Ink colour with the tool's alpha scale applied (highlighter ×0.35). */
     val renderColor get() = config.rgba.scaleAlpha(tool.alphaScale)
@@ -46,6 +47,7 @@ class Stroke(
 
     fun invalidate() {
         cachedGeometry = null
+        cachedRawBounds = null
     }
 
     fun addSample(s: Sample) {
@@ -113,13 +115,37 @@ class Stroke(
         return Pt(sx / samples.size, sy / samples.size)
     }
 
+    /**
+     * AABB of the *raw* input samples, cached and invalidated with the geometry.
+     * Built in one allocation-free pass (no `samples.map { it.pos }`), so an eraser
+     * sweep that bbox-rejects thousands of strokes per move stays cheap.
+     */
+    private fun rawBounds(): Rect {
+        cachedRawBounds?.let { return it }
+        var minX = samples[0].x
+        var minY = samples[0].y
+        var maxX = minX
+        var maxY = minY
+        for (i in 1 until samples.size) {
+            val s = samples[i]
+            if (s.x < minX) minX = s.x else if (s.x > maxX) maxX = s.x
+            if (s.y < minY) minY = s.y else if (s.y > maxY) maxY = s.y
+        }
+        return Rect(minX, minY, maxX - minX, maxY - minY).also { cachedRawBounds = it }
+    }
+
     /** Cheap sample test after a bounding-box reject (spec 02 §5.1). */
     override fun intersectsCircle(cx: Double, cy: Double, radius: Double): Boolean {
         if (samples.isEmpty()) return false
-        val c = Pt(cx, cy)
         // Reject against the *raw* sample box (the smoothed geometry lags inward).
-        if (Rect.bounding(samples.map { it.pos }).distanceTo(c) > radius) return false
-        return samples.any { it.pos.distanceTo(c) <= radius }
+        if (rawBounds().distanceTo(Pt(cx, cy)) > radius) return false
+        val r2 = radius * radius
+        for (s in samples) {
+            val dx = s.x - cx
+            val dy = s.y - cy
+            if (dx * dx + dy * dy <= r2) return true
+        }
+        return false
     }
 
     companion object {
