@@ -41,8 +41,10 @@ import kotlin.math.roundToInt
 @Stable
 class Editor(context: Context) {
 
+    private val appContext = context.applicationContext
     private val settingsRepo = SettingsRepository(context)
     private var settings = settingsRepo.load()
+    private var pdfSource: com.xnotes.platform.PdfSource? = null
 
     val state = CanvasState(
         Document.blank(Document.DEFAULT_NEW_PAGES, settings.prefs.defaultPageSize, settings.prefs.defaultPageOrientation),
@@ -108,6 +110,54 @@ class Editor(context: Context) {
         view.hover = { controller.onHover(it) }
         view.drawOverlay = { renderer, _ -> controller.drawOverlay(renderer) }
         applySettings()
+        rebuildPdfSource()
+    }
+
+    private fun rebuildPdfSource() {
+        pdfSource?.close()
+        pdfSource = state.document.pdfBytes?.let { com.xnotes.platform.PdfSource.create(appContext, it) }
+        installPdfBackground()
+        state.invalidateAllCaches()
+    }
+
+    private fun installPdfBackground() {
+        val src = pdfSource
+        state.paintPageBackground = if (src == null) {
+            null
+        } else {
+            { page, renderer, res ->
+                val pi = page.pdfPage
+                if (pi != null) {
+                    val w = (page.width * res).toInt()
+                    val h = (page.height * res).toInt()
+                    src.renderPage(pi, w, h, settings.prefs.pdfDarkMode)?.let { bg ->
+                        renderer.drawRaster(bg, com.xnotes.core.geometry.Rect(0.0, 0.0, page.width, page.height))
+                        bg.recycle()
+                    }
+                }
+            }
+        }
+    }
+
+    fun importPdf(bytes: ByteArray) {
+        val source = com.xnotes.platform.PdfSource.create(appContext, bytes)
+        if (source == null) {
+            message = "Could not import the PDF."
+            return
+        }
+        val doc = com.xnotes.platform.PdfImporter.import(bytes, source, state.document.dpi)
+        source.close()
+        doc.dirty = true
+        replaceDocument(doc)
+    }
+
+    fun exportPdf(output: OutputStream) {
+        try {
+            com.xnotes.platform.PdfExporter.export(state.document, pdfSource, output)
+            message = "Exported to PDF."
+        } catch (e: Exception) {
+            message = "Could not export to PDF."
+        }
     }
 
     val preferences: Preferences get() = settings.prefs
@@ -208,6 +258,7 @@ class Editor(context: Context) {
         controller.commitTextEdit()
         controller.clearSelection()
         state.document = doc
+        rebuildPdfSource()
         history.clear()
         state.invalidateAllCaches()
         state.didInitialFit = false

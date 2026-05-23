@@ -55,6 +55,8 @@ fun Toolbar(
     onOpen: () -> Unit,
     onSave: () -> Unit,
     onSaveAs: () -> Unit,
+    onImportPdf: () -> Unit,
+    onExportPdf: () -> Unit,
     onPreferences: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -70,7 +72,7 @@ fun Toolbar(
             .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        FileMenu(editor, onOpen, onSave, onSaveAs)
+        FileMenu(editor, onOpen, onSave, onSaveAs, onImportPdf, onExportPdf)
         EditMenu(editor, onPreferences)
         Label(editor.title + if (editor.dirty) " *" else "")
         Separator()
@@ -195,7 +197,14 @@ private fun Separator() {
 }
 
 @Composable
-private fun FileMenu(editor: Editor, onOpen: () -> Unit, onSave: () -> Unit, onSaveAs: () -> Unit) {
+private fun FileMenu(
+    editor: Editor,
+    onOpen: () -> Unit,
+    onSave: () -> Unit,
+    onSaveAs: () -> Unit,
+    onImportPdf: () -> Unit,
+    onExportPdf: () -> Unit,
+) {
     var expanded by remember { mutableStateOf(false) }
     Box {
         ToolbarIcon(XnotesIcons.file, "File") { expanded = true }
@@ -204,6 +213,8 @@ private fun FileMenu(editor: Editor, onOpen: () -> Unit, onSave: () -> Unit, onS
             DropdownMenuItem(text = { Text("Open…") }, onClick = { onOpen(); expanded = false })
             DropdownMenuItem(text = { Text("Save") }, onClick = { onSave(); expanded = false })
             DropdownMenuItem(text = { Text("Save as…") }, onClick = { onSaveAs(); expanded = false })
+            DropdownMenuItem(text = { Text("Import PDF…") }, onClick = { onImportPdf(); expanded = false })
+            DropdownMenuItem(text = { Text("Export to PDF…") }, onClick = { onExportPdf(); expanded = false })
         }
     }
 }

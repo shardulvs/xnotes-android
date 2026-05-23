@@ -89,6 +89,21 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
         }
     }
 
+    val importPdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let {
+            runCatching { resolver.openInputStream(it)?.use { s -> editor.importPdf(s.readBytes()) } }
+                .onFailure { editor.message = "Could not import the PDF." }
+        }
+    }
+    val exportPdfLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/pdf"),
+    ) { uri ->
+        uri?.let {
+            runCatching { resolver.openOutputStream(it)?.use { o -> editor.exportPdf(o) } }
+                .onFailure { editor.message = "Could not export to PDF." }
+        }
+    }
+
     fun saveOrPrompt() {
         val uri = editor.currentUri
         if (uri != null) {
@@ -114,6 +129,8 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
                 onOpen = { openLauncher.launch(arrayOf("*/*")) },
                 onSave = { saveOrPrompt() },
                 onSaveAs = { createLauncher.launch("${editor.title}.xnote") },
+                onImportPdf = { importPdfLauncher.launch(arrayOf("application/pdf")) },
+                onExportPdf = { exportPdfLauncher.launch("${editor.title}.pdf") },
                 onPreferences = { showPreferences = true },
             )
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
