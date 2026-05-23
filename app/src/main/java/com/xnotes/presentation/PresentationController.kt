@@ -10,12 +10,16 @@ import com.xnotes.platform.PresentationServer
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Owns the presentation run state (spec 12 §2): on/off, mode, quality, frame
  * rate. Emits frames on change, throttled to the max FPS — never as constant
- * video when idle. Rendering reads the model on the main thread; JPEG encode and
- * network push happen off-thread.
+ * video when idle. The main thread only snapshots a cheap frame plan (cache refs +
+ * a copy of the live stroke); the blit, JPEG encode and network push all run on a
+ * background thread, so presenting never competes with on-screen drawing. Only one
+ * frame is in flight at a time — bursts coalesce to the latest, with a guaranteed
+ * trailing frame — and nothing is rendered while no viewer is connected.
  */
 class PresentationController(
     state: CanvasState,
@@ -44,9 +48,11 @@ class PresentationController(
 
     private var lastFrameAt = 0L
     private var scheduled = false
+    private val frameInFlight = AtomicBoolean(false)
+    @Volatile private var framePending = false
 
     init {
-        server.onClientCountChanged = { handler.post { onStateChanged() } }
+        server.onClientCountChanged = { handler.post { onStateChanged(); notifyChanged() } }
         server.statusJson = { statusJson() }
         server.onQualityRequest = { q -> handler.post { setQuality(q) } }
     }
@@ -102,21 +108,39 @@ class PresentationController(
 
     private fun produceFrame() {
         if (!running) return
+        if (server.clientCount == 0) return // no viewer connected: skip rendering entirely
+        if (!frameInFlight.compareAndSet(false, true)) {
+            framePending = true // a frame is still in flight; emit the latest once it finishes
+            return
+        }
+        framePending = false
         lastFrameAt = SystemClock.uptimeMillis()
-        val cap = longEdge()
-        val surface = try {
-            if (mode == "follow") frameSource.renderFollow(cap) else frameSource.renderPage(cap)
+        // Cheap main-thread phase: snapshot what the frame needs (cache refs + a copy
+        // of the live stroke). The expensive blit + JPEG encode run off-thread so they
+        // never compete with on-screen drawing.
+        val plan = try {
+            if (mode == "follow") frameSource.planFollow(longEdge()) else frameSource.planPage(longEdge())
         } catch (_: Exception) {
+            null
+        }
+        if (plan == null) {
+            frameInFlight.set(false)
             return
         }
         val q = jpegQuality()
         encoder.execute {
             try {
-                server.pushFrame(imageCodec.encodeJpeg(surface, q))
+                val surface = frameSource.render(plan)
+                try {
+                    server.pushFrame(imageCodec.encodeJpeg(surface, q))
+                } finally {
+                    surface.recycle()
+                }
             } catch (_: Exception) {
                 // drop this frame
             } finally {
-                surface.recycle()
+                frameInFlight.set(false)
+                if (framePending) handler.post { if (running) produceFrame() }
             }
         }
     }

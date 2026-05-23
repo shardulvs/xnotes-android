@@ -56,6 +56,12 @@ class CanvasState(
     /** Optional page-background painter (PDF / template) drawn into the cache before items. */
     var paintPageBackground: ((page: Page, renderer: com.xnotes.core.pal.Renderer, res: Double) -> Unit)? = null
 
+    /**
+     * Per-page ink caches. Surfaces are intentionally **not** recycled on eviction:
+     * the presentation thread reads a page's cache surface off the main thread, so a
+     * surface must stay valid after it leaves this map — GC reclaims it once nothing
+     * holds it. The map itself is touched only on the main thread.
+     */
     private val caches = HashMap<Page, CacheEntry>()
 
     var pageRects: List<Rect> = emptyList()
@@ -216,7 +222,6 @@ class CanvasState(
         val res = clampedRes(page)
         val existing = caches[page]
         if (existing != null && (zoomingInProgress || abs(existing.res - res) < 1e-6)) return existing
-        existing?.surface?.recycle()
         return buildCache(page, res).also { caches[page] = it }
     }
 
@@ -271,22 +276,18 @@ class CanvasState(
     }
 
     fun invalidatePage(page: Page) {
-        caches.remove(page)?.surface?.recycle()
+        caches.remove(page)
     }
 
     fun invalidateAllCaches() {
-        for (e in caches.values) e.surface.recycle()
         caches.clear()
     }
 
     fun dropCachesExcept(visible: Set<Page>) {
         val it = caches.iterator()
         while (it.hasNext()) {
-            val (page, entry) = it.next()
-            if (page !in visible) {
-                entry.surface.recycle()
-                it.remove()
-            }
+            val (page, _) = it.next()
+            if (page !in visible) it.remove()
         }
     }
 
