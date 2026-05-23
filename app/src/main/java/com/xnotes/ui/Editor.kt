@@ -243,6 +243,20 @@ class Editor(context: Context) {
         controller.shapeConfig = shapeConfig
     }
 
+    fun updateShapeConfig(config: ShapeConfig) {
+        shapeConfig = config
+        controller.shapeConfig = config
+    }
+
+    /** The live config for a stroke tool (read by its config popup). */
+    fun toolConfig(t: Tool): com.xnotes.core.tools.ToolConfig = controller.configFor(t)
+
+    fun updateToolConfig(t: Tool, config: com.xnotes.core.tools.ToolConfig) {
+        controller.setToolConfig(t, config.copy(rgba = controller.inkColor))
+    }
+
+    val recentColors: List<Rgba> get() = settings.recentColors
+
     // --- history ---
 
     fun undo() {

@@ -59,6 +59,8 @@ fun Toolbar(
     modifier: Modifier = Modifier,
 ) {
     val palette = LocalPalette.current
+    var configForTool by remember { mutableStateOf<Tool?>(null) }
+    var switcherIndex by remember { mutableStateOf<Int?>(null) }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -76,20 +78,39 @@ fun Toolbar(
         ToolbarIcon(XnotesIcons.sidebar, "Side panel", active = editor.sidebarVisible) { editor.toggleSidebar() }
         Separator()
 
-        // Tools (P C H E | Pan V L | S T)
+        // Tools (P C H E | Pan V L | S T); re-clicking the armed stroke/shape tool opens its popup.
         toolIcons.forEachIndexed { i, (tool, icon) ->
-            ToolbarIcon(icon, tool.name, active = editor.tool == tool) { editor.selectTool(tool) }
+            Box {
+                ToolbarIcon(icon, tool.name, active = editor.tool == tool) {
+                    if (editor.tool == tool && (tool.isStroke || tool == Tool.SHAPE)) {
+                        configForTool = tool
+                    } else {
+                        editor.selectTool(tool)
+                        configForTool = null
+                    }
+                }
+                if (configForTool == tool) {
+                    if (tool == Tool.SHAPE) {
+                        ShapeConfigPopup(editor) { configForTool = null }
+                    } else {
+                        ToolConfigPopup(editor, tool) { configForTool = null }
+                    }
+                }
+            }
             if (i == 3 || i == 6) Separator()
         }
         Separator()
 
-        // Ink swatches
+        // Ink swatches; re-clicking the active swatch opens the colour switcher.
         editor.toolbarColors.forEachIndexed { i, color ->
-            Swatch(
-                color = color.toComposeColor(),
-                active = i == editor.activeColorIndex,
-                onClick = { editor.pickColor(i) },
-            )
+            Box {
+                Swatch(
+                    color = color.toComposeColor(),
+                    active = i == editor.activeColorIndex,
+                    onClick = { if (i == editor.activeColorIndex) switcherIndex = i else editor.pickColor(i) },
+                )
+                if (switcherIndex == i) ColorSwitcherPopup(editor, i) { switcherIndex = null }
+            }
         }
         Separator()
 
