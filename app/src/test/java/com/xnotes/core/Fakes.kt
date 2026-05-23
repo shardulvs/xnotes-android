@@ -23,6 +23,7 @@ class FakeRenderer : Renderer {
     override fun translate(dx: Double, dy: Double) { ops += "translate" }
     override fun scale(sx: Double, sy: Double) { ops += "scale" }
     override fun clipRect(rect: Rect) { ops += "clipRect" }
+    override fun clear() { ops += "clear" }
     override fun fillBackground(rect: Rect, color: Rgba) { ops += "fillBackground" }
     override fun fillRect(rect: Rect, color: Rgba) { ops += "fillRect" }
     override fun fillPolygon(points: List<Pt>, color: Rgba, rule: FillRule) { ops += "fillPolygon" }

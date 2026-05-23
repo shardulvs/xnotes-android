@@ -399,11 +399,17 @@ class InteractionController(
                 it !is ImageItem && it.intersectsCircle(cx, cy, radius)
             }
             if (toRemove.isNotEmpty()) {
+                var dirty: Rect? = null
                 for (item in toRemove) {
                     page.items.remove(item)
                     eraseRemovals.add(page to item)
+                    val b = item.bounds()
+                    dirty = dirty?.union(b) ?: b
                 }
-                state.invalidatePage(page)
+                // Repaint only the erased area in place; fall back to a full
+                // rebuild when that isn't possible (e.g. a PDF page background).
+                val rect = dirty?.outset(REPAIR_PAD)
+                if (rect == null || !state.repairRegion(page, rect)) state.invalidatePage(page)
                 changed = true
             }
         }
@@ -1131,6 +1137,10 @@ class InteractionController(
     companion object {
         const val MIN_SAMPLE_DIST = 1.0
         const val MOVE_EPS = 0.01
+
+        /** Padding (content px) added around erased items' bounds when repairing
+         *  the cache, to cover stroke anti-aliasing at the dirty-rect edge. */
+        const val REPAIR_PAD = 2.0
         const val HANDLE_HIT = 9.0
         const val SHAPE_MIN_DRAG = 3.0
         const val LONG_PRESS_MS = 450L

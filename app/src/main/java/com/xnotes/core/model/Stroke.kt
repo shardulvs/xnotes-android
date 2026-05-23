@@ -27,6 +27,7 @@ class Stroke(
 
     private var cachedGeometry: StrokeGeometry? = null
     private var cachedRawBounds: Rect? = null
+    private var cachedBounds: Rect? = null
 
     /** Ink colour with the tool's alpha scale applied (highlighter ×0.35). */
     val renderColor get() = config.rgba.scaleAlpha(tool.alphaScale)
@@ -48,6 +49,7 @@ class Stroke(
     fun invalidate() {
         cachedGeometry = null
         cachedRawBounds = null
+        cachedBounds = null
     }
 
     fun addSample(s: Sample) {
@@ -77,15 +79,27 @@ class Stroke(
     }
 
     override fun bounds(): Rect {
+        cachedBounds?.let { return it }
         val g = geometry()
-        val pts = ArrayList<Pt>(g.outline.size + g.caps.size * 2)
-        pts.addAll(g.outline)
-        for (cap in g.caps) {
-            pts.add(Pt(cap.center.x - cap.radius, cap.center.y - cap.radius))
-            pts.add(Pt(cap.center.x + cap.radius, cap.center.y + cap.radius))
+        if (g.outline.isEmpty() && g.caps.isEmpty()) {
+            val b = if (samples.isEmpty()) Rect(0.0, 0.0, 0.0, 0.0) else rawBounds()
+            return b.also { cachedBounds = it }
         }
-        if (pts.isEmpty()) return Rect.bounding(samples.map { it.pos })
-        return Rect.bounding(pts)
+        var minX = Double.POSITIVE_INFINITY
+        var minY = Double.POSITIVE_INFINITY
+        var maxX = Double.NEGATIVE_INFINITY
+        var maxY = Double.NEGATIVE_INFINITY
+        for (p in g.outline) {
+            if (p.x < minX) minX = p.x else if (p.x > maxX) maxX = p.x
+            if (p.y < minY) minY = p.y else if (p.y > maxY) maxY = p.y
+        }
+        for (cap in g.caps) {
+            if (cap.center.x - cap.radius < minX) minX = cap.center.x - cap.radius
+            if (cap.center.x + cap.radius > maxX) maxX = cap.center.x + cap.radius
+            if (cap.center.y - cap.radius < minY) minY = cap.center.y - cap.radius
+            if (cap.center.y + cap.radius > maxY) maxY = cap.center.y + cap.radius
+        }
+        return Rect(minX, minY, maxX - minX, maxY - minY).also { cachedBounds = it }
     }
 
     override fun translate(dx: Double, dy: Double) {

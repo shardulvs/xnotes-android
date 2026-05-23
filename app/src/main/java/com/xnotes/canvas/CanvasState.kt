@@ -245,6 +245,31 @@ class CanvasState(
         item.paint(r)
     }
 
+    /**
+     * Repair just [dirtyRect] (page-local content space) of [page]'s cache in
+     * place, instead of rebuilding the whole page — used after the eraser removes
+     * strokes from a small area. Clears the region and repaints only the surviving
+     * items overlapping it, so the cost scales with the dirty area, not the page.
+     *
+     * Returns false when it can't safely repair (no live cache, or a baked page
+     * background that would be costly to re-rasterize); the caller should then
+     * [invalidatePage] for a full rebuild.
+     */
+    fun repairRegion(page: Page, dirtyRect: Rect): Boolean {
+        val entry = caches[page] ?: return false
+        if (paintPageBackground != null) return false
+        val r = entry.surface.renderer()
+        r.save()
+        r.scale(entry.res, entry.res)
+        r.clipRect(dirtyRect)
+        r.clear()
+        for (item in page.items) {
+            if (!isLiftedItem(item) && item.bounds().intersects(dirtyRect)) item.paint(r)
+        }
+        r.restore()
+        return true
+    }
+
     fun invalidatePage(page: Page) {
         caches.remove(page)?.surface?.recycle()
     }

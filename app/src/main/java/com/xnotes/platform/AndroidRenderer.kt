@@ -4,6 +4,7 @@ import android.graphics.Canvas
 import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.PorterDuff
 import android.graphics.RectF
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
@@ -73,6 +74,10 @@ class AndroidRenderer(private val canvas: Canvas) : Renderer {
 
     override fun clipRect(rect: Rect) {
         canvas.clipRect(rect.left.toFloat(), rect.top.toFloat(), rect.right.toFloat(), rect.bottom.toFloat())
+    }
+
+    override fun clear() {
+        canvas.drawColor(0, PorterDuff.Mode.CLEAR)
     }
 
     override fun fillBackground(rect: Rect, color: Rgba) = fillRect(rect, color)

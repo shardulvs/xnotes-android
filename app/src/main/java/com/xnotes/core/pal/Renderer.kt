@@ -46,6 +46,14 @@ interface Renderer {
     /** Intersect the clip region with an axis-aligned rectangle (content space). */
     fun clipRect(rect: Rect)
 
+    /**
+     * Clear the current clip region to fully transparent (replace, not composite).
+     * Lets a cached surface be repaired in place: clip to a dirty rect, [clear] it,
+     * then repaint only the items there — instead of rebuilding the whole page
+     * (used by the eraser).
+     */
+    fun clear()
+
     // --- fills ---
     fun fillBackground(rect: Rect, color: Rgba)
     fun fillRect(rect: Rect, color: Rgba)
