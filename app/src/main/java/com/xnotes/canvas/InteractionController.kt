@@ -2,6 +2,7 @@ package com.xnotes.canvas
 
 import android.os.Handler
 import android.os.Looper
+import android.view.Choreographer
 import android.view.MotionEvent
 import com.xnotes.core.geometry.Geometry
 import com.xnotes.core.geometry.Pt
@@ -38,6 +39,7 @@ import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
 import com.xnotes.core.tools.ToolDefaults
 import kotlin.math.abs
+import kotlin.math.exp
 
 /** The pointer state machine modes (spec 06 §1). */
 enum class PointerMode { IDLE, DRAW, ERASE, BAND, LASSO_DRAW, SHAPE, MOVE, RESIZE, PAN, PINCH }
@@ -98,8 +100,15 @@ class InteractionController(
     private var drawingPointerId = -1
     private var drawingIsStylus = false
 
-    // PAN
+    // PAN + inertial fling
     private var lastPan = Pt.ZERO
+    private var lastMoveMs = 0L
+    private var panVel = Pt.ZERO // smoothed finger velocity, viewport px/s
+    private val choreographer = Choreographer.getInstance()
+    private var flinging = false
+    private var flingVel = Pt.ZERO // scroll-space velocity, viewport px/s
+    private var lastFlingMs = 0L
+    private val flingFrame = Choreographer.FrameCallback { frameTimeNanos -> stepFling(frameTimeNanos) }
 
     // PINCH
     private var pinchInitDist = 1.0
@@ -208,6 +217,7 @@ class InteractionController(
     }
 
     private fun handleDown(e: MotionEvent) {
+        stopFling() // a new touch halts any in-progress glide
         val toolType = e.getToolType(0)
         val vx = e.getX(0).toDouble()
         val vy = e.getY(0).toDouble()
@@ -282,7 +292,10 @@ class InteractionController(
         val content = state.viewportToContent(Pt(e.getX(idx).toDouble(), e.getY(idx).toDouble()))
         when (mode) {
             PointerMode.DRAW -> endDraw(e)
-            PointerMode.PAN -> mode = PointerMode.IDLE
+            PointerMode.PAN -> {
+                mode = PointerMode.IDLE
+                startFling(panVel)
+            }
             PointerMode.PINCH -> endPinch()
             PointerMode.ERASE -> endErase()
             PointerMode.BAND -> endBand()
@@ -923,14 +936,64 @@ class InteractionController(
 
     private fun beginPan(vx: Double, vy: Double) {
         mode = PointerMode.PAN
-        lastPan = Pt(vx, vy)
+        startTrackingVelocity(vx, vy)
     }
 
     private fun extendPan(vx: Double, vy: Double) {
+        trackVelocity(vx, vy)
         state.scrollBy(-(vx - lastPan.x), -(vy - lastPan.y))
         lastPan = Pt(vx, vy)
         onViewChanged()
         requestRender()
+    }
+
+    // --- inertial fling ---
+
+    private fun startTrackingVelocity(vx: Double, vy: Double) {
+        stopFling()
+        lastPan = Pt(vx, vy)
+        lastMoveMs = System.nanoTime() / 1_000_000L
+        panVel = Pt.ZERO
+    }
+
+    private fun trackVelocity(vx: Double, vy: Double) {
+        val now = System.nanoTime() / 1_000_000L
+        val dt = ((now - lastMoveMs).coerceAtLeast(1L)) / 1000.0
+        val inst = Pt((vx - lastPan.x) / dt, (vy - lastPan.y) / dt)
+        panVel = Pt(panVel.x * VEL_SMOOTH + inst.x * (1 - VEL_SMOOTH), panVel.y * VEL_SMOOTH + inst.y * (1 - VEL_SMOOTH))
+        lastMoveMs = now
+    }
+
+    private fun startFling(fingerVel: Pt) {
+        if (fingerVel.length() < FLING_MIN_START) return
+        flingVel = Pt(-fingerVel.x, -fingerVel.y) // scroll moves opposite the finger
+        flinging = true
+        lastFlingMs = System.nanoTime() / 1_000_000L
+        choreographer.postFrameCallback(flingFrame)
+    }
+
+    private fun stopFling() {
+        flinging = false
+    }
+
+    private fun stepFling(frameTimeNanos: Long) {
+        if (!flinging) return
+        val now = frameTimeNanos / 1_000_000L
+        val dt = ((now - lastFlingMs).coerceIn(1L, 40L)) / 1000.0
+        lastFlingMs = now
+        val beforeX = state.scrollX
+        val beforeY = state.scrollY
+        state.scrollBy(flingVel.x * dt, flingVel.y * dt)
+        val decay = exp(-FLING_FRICTION * dt)
+        flingVel = Pt(flingVel.x * decay, flingVel.y * decay)
+        onViewChanged()
+        requestRender()
+        val moved = state.scrollX != beforeX || state.scrollY != beforeY
+        if (flingVel.length() < FLING_MIN_STOP || !moved) {
+            flinging = false
+        } else {
+            choreographer.postFrameCallback(flingFrame)
+        }
     }
 
     // --- PINCH ---
@@ -947,6 +1010,7 @@ class InteractionController(
         pinchInitDist = a.distanceTo(b).coerceAtLeast(1.0)
         pinchInitZoom = state.zoom
         pinchAnchorContent = state.viewportToContent(mid)
+        startTrackingVelocity(mid.x, mid.y)
         state.zoomingInProgress = true
     }
 
@@ -957,6 +1021,7 @@ class InteractionController(
         val dist = a.distanceTo(b)
         if (dist < 1e-3) return
         val mid = (a + b) * 0.5
+        trackVelocity(mid.x, mid.y)
         // Zoom lock: pan only (keep the initial zoom).
         val z = if (state.zoomLocked) pinchInitZoom
         else (pinchInitZoom * (dist / pinchInitDist)).coerceIn(CanvasState.MIN_ZOOM, CanvasState.MAX_ZOOM)
@@ -964,6 +1029,7 @@ class InteractionController(
         state.scrollX = pinchAnchorContent.x * z - mid.x
         state.scrollY = pinchAnchorContent.y * z - mid.y
         state.clampScroll()
+        lastPan = mid
         requestRender()
     }
 
@@ -973,10 +1039,12 @@ class InteractionController(
         state.invalidateAllCaches()
         onViewChanged()
         requestRender()
+        startFling(panVel)
     }
 
     private fun abortGesture() {
         cancelLongPress()
+        stopFling()
         liveStroke = null
         strokePageIndex = null
         pendingShape = null
@@ -1065,5 +1133,11 @@ class InteractionController(
         const val SHAPE_MIN_DRAG = 3.0
         const val LONG_PRESS_MS = 450L
         const val LONG_PRESS_SLOP = 6.0
+
+        // Inertial fling tuning (viewport px/s).
+        const val VEL_SMOOTH = 0.4 // EMA weight on the previous velocity estimate
+        const val FLING_FRICTION = 2.5 // higher = stops sooner; lower = floatier
+        const val FLING_MIN_START = 120.0 // minimum flick velocity to start a glide
+        const val FLING_MIN_STOP = 24.0 // velocity at which the glide ends
     }
 }
