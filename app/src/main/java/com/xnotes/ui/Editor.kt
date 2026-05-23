@@ -9,10 +9,13 @@ import com.xnotes.canvas.CanvasState
 import com.xnotes.canvas.CanvasView
 import com.xnotes.canvas.EditingField
 import com.xnotes.canvas.InteractionController
+import com.xnotes.core.geometry.Rect
+import com.xnotes.core.history.AddItem
 import com.xnotes.core.history.AddPage
 import com.xnotes.core.history.DeletePage
 import com.xnotes.core.history.History
 import com.xnotes.core.model.Document
+import com.xnotes.core.model.ImageItem
 import com.xnotes.core.model.Orientation
 import com.xnotes.core.model.Page
 import com.xnotes.core.model.PageSize
@@ -54,7 +57,8 @@ class Editor(context: Context) {
     val history = History()
     val view = CanvasView(context).also { it.state = state }
     private val textMeasurer = AndroidTextMeasurer()
-    private val codec = DocumentCodec(AndroidImageCodec(), textMeasurer)
+    private val imageCodec = AndroidImageCodec()
+    private val codec = DocumentCodec(imageCodec, textMeasurer)
 
     var tool by mutableStateOf(Tool.DEFAULT)
         private set
@@ -149,6 +153,42 @@ class Editor(context: Context) {
         source.close()
         doc.dirty = true
         replaceDocument(doc)
+    }
+
+    fun insertImage(bytes: ByteArray) {
+        val raster = imageCodec.decode(bytes)
+        if (raster == null) {
+            message = "Could not read the image."
+            return
+        }
+        val index = state.currentPageIndex().coerceIn(0, state.document.pages.lastIndex)
+        val page = state.document.pages[index]
+        val maxW = page.width * 0.6
+        val maxH = page.height * 0.6
+        val scale = minOf(1.0, maxW / raster.width, maxH / raster.height)
+        val w = raster.width * scale
+        val h = raster.height * scale
+        val rect = Rect((page.width - w) / 2.0, (page.height - h) / 2.0, w, h)
+        val item = ImageItem(raster, rect)
+        page.items.add(item)
+        state.appendToCache(page, item)
+        history.push(AddItem(page, item))
+        state.document.dirty = true
+        refreshContent()
+        view.requestRender()
+    }
+
+    fun pasteImage() {
+        val clipboard = appContext.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+        val uri = clipboard?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri
+        if (uri == null) {
+            message = "The clipboard has no image to paste."
+            return
+        }
+        runCatching { appContext.contentResolver.openInputStream(uri)?.use { it.readBytes() } }
+            .getOrNull()
+            ?.let { insertImage(it) }
+            ?: run { message = "The clipboard has no image to paste." }
     }
 
     fun exportPdf(output: OutputStream) {

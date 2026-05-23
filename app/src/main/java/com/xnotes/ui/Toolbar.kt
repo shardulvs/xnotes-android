@@ -57,6 +57,7 @@ fun Toolbar(
     onSaveAs: () -> Unit,
     onImportPdf: () -> Unit,
     onExportPdf: () -> Unit,
+    onInsertImage: () -> Unit,
     onPreferences: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -101,6 +102,9 @@ fun Toolbar(
             }
             if (i == 3 || i == 6) Separator()
         }
+        Separator()
+
+        ImageMenu(editor, onInsertImage)
         Separator()
 
         // Ink swatches; re-clicking the active swatch opens the colour switcher.
@@ -215,6 +219,18 @@ private fun FileMenu(
             DropdownMenuItem(text = { Text("Save as…") }, onClick = { onSaveAs(); expanded = false })
             DropdownMenuItem(text = { Text("Import PDF…") }, onClick = { onImportPdf(); expanded = false })
             DropdownMenuItem(text = { Text("Export to PDF…") }, onClick = { onExportPdf(); expanded = false })
+        }
+    }
+}
+
+@Composable
+private fun ImageMenu(editor: Editor, onInsertImage: () -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        ToolbarIcon(XnotesIcons.image, "Image") { expanded = true }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(text = { Text("Paste image") }, onClick = { editor.pasteImage(); expanded = false })
+            DropdownMenuItem(text = { Text("Insert image…") }, onClick = { onInsertImage(); expanded = false })
         }
     }
 }

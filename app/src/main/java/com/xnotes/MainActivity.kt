@@ -104,6 +104,13 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
         }
     }
 
+    val insertImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let {
+            runCatching { resolver.openInputStream(it)?.use { s -> editor.insertImage(s.readBytes()) } }
+                .onFailure { editor.message = "Could not read the image." }
+        }
+    }
+
     fun saveOrPrompt() {
         val uri = editor.currentUri
         if (uri != null) {
@@ -131,6 +138,7 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
                 onSaveAs = { createLauncher.launch("${editor.title}.xnote") },
                 onImportPdf = { importPdfLauncher.launch(arrayOf("application/pdf")) },
                 onExportPdf = { exportPdfLauncher.launch("${editor.title}.pdf") },
+                onInsertImage = { insertImageLauncher.launch(arrayOf("image/*")) },
                 onPreferences = { showPreferences = true },
             )
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
