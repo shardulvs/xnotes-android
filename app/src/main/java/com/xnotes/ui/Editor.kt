@@ -82,6 +82,8 @@ class Editor(context: Context) {
     var renderScale by mutableStateOf(1.0)
         private set
     var sidebarVisible by mutableStateOf(false)
+    var zoomLocked by mutableStateOf(false)
+        private set
     var hasSelection by mutableStateOf(false)
         private set
     var shapeConfig by mutableStateOf(ShapeConfig())
@@ -235,8 +237,9 @@ class Editor(context: Context) {
     private fun applySettings() {
         toolbarColors = settings.toolbarColors
         activeColorIndex = settings.activeColor.coerceIn(0, toolbarColors.lastIndex)
-        renderScale = settings.renderScale
-        state.renderScale = settings.renderScale
+        // Render always at 1x (the DPI/supersampling control was removed).
+        renderScale = 1.0
+        state.renderScale = 1.0
         sidebarVisible = settings.sidebarVisible
         shapeConfig = settings.shapeConfig
         controller.shapeConfig = settings.shapeConfig
@@ -450,11 +453,9 @@ class Editor(context: Context) {
     fun nextPage() { state.goToPage(state.currentPageIndex() + 1); afterView() }
     fun goToPage(index: Int) { state.goToPage(index); afterView() }
 
-    fun applyRenderScale(scale: Double) {
-        renderScale = scale
-        state.renderScale = scale
-        state.invalidateAllCaches()
-        view.requestRender()
+    fun toggleZoomLock() {
+        zoomLocked = !zoomLocked
+        state.zoomLocked = zoomLocked
     }
 
     // --- pages ---

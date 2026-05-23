@@ -41,11 +41,12 @@ import com.xnotes.ui.theme.XnotesTheme
 
 class MainActivity : ComponentActivity() {
 
-    private var fullscreen = false
+    private var fullscreen = true // open in full screen by default
     private var editor: Editor? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        applyFullscreen()
         setContent {
             val context = LocalContext.current
             val ed = remember { Editor(context).also { editor = it } }
@@ -53,6 +54,11 @@ class MainActivity : ComponentActivity() {
                 EditorScreen(ed, onToggleFullscreen = ::toggleFullscreen)
             }
         }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && fullscreen) applyFullscreen() // re-hide transient bars after they swipe in
     }
 
     override fun onPause() {
@@ -67,6 +73,10 @@ class MainActivity : ComponentActivity() {
 
     private fun toggleFullscreen() {
         fullscreen = !fullscreen
+        applyFullscreen()
+    }
+
+    private fun applyFullscreen() {
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         if (fullscreen) {
             controller.hide(WindowInsetsCompat.Type.systemBars())

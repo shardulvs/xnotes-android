@@ -134,13 +134,17 @@ fun Toolbar(
         Separator()
 
         // Zoom
-        ToolbarIcon(XnotesIcons.zoomOut, "Zoom out") { editor.zoomOut() }
+        ToolbarIcon(XnotesIcons.zoomOut, "Zoom out", enabled = !editor.zoomLocked) { editor.zoomOut() }
         Label("${editor.zoomPercent}%")
-        ToolbarIcon(XnotesIcons.zoomIn, "Zoom in") { editor.zoomIn() }
+        ToolbarIcon(XnotesIcons.zoomIn, "Zoom in", enabled = !editor.zoomLocked) { editor.zoomIn() }
         FitMenu(editor)
+        ToolbarIcon(
+            if (editor.zoomLocked) XnotesIcons.lock else XnotesIcons.unlock,
+            "Zoom lock",
+            active = editor.zoomLocked,
+        ) { editor.toggleZoomLock() }
         Separator()
 
-        RenderMenu(editor)
         ToolbarIcon(XnotesIcons.fullscreen, "Full screen") { onToggleFullscreen() }
         ToolbarIcon(XnotesIcons.present, "Present", active = editor.presentationRunning) { onPresent() }
     }
@@ -278,28 +282,3 @@ private fun FitMenu(editor: Editor) {
     }
 }
 
-@Composable
-private fun RenderMenu(editor: Editor) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        IconButton(onClick = { expanded = true }, modifier = Modifier.size(54.dp)) {
-            Text(
-                "DPI ${formatScale(editor.renderScale)}",
-                color = LocalPalette.current.textDim.toComposeColor(),
-                fontFamily = FontFamily.Monospace,
-                fontSize = 9.sp,
-            )
-        }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            listOf(1.0, 1.5, 2.0).forEach { scale ->
-                DropdownMenuItem(
-                    text = { Text("${formatScale(scale)} render") },
-                    onClick = { editor.applyRenderScale(scale); expanded = false },
-                )
-            }
-        }
-    }
-}
-
-private fun formatScale(s: Double): String =
-    if (s == s.toLong().toDouble()) "${s.toLong()}x" else "${s}x"

@@ -837,7 +837,9 @@ class InteractionController(
         val dist = a.distanceTo(b)
         if (dist < 1e-3) return
         val mid = (a + b) * 0.5
-        val z = (pinchInitZoom * (dist / pinchInitDist)).coerceIn(CanvasState.MIN_ZOOM, CanvasState.MAX_ZOOM)
+        // Zoom lock: pan only (keep the initial zoom).
+        val z = if (state.zoomLocked) pinchInitZoom
+        else (pinchInitZoom * (dist / pinchInitDist)).coerceIn(CanvasState.MIN_ZOOM, CanvasState.MAX_ZOOM)
         state.zoom = z
         state.scrollX = pinchAnchorContent.x * z - mid.x
         state.scrollY = pinchAnchorContent.y * z - mid.y

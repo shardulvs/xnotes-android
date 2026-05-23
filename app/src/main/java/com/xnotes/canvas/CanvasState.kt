@@ -44,6 +44,9 @@ class CanvasState(
      *  the gesture ends. */
     var zoomingInProgress: Boolean = false
 
+    /** When true, zoom is fixed (pinch pans only, zoom buttons/fit are no-ops). */
+    var zoomLocked: Boolean = false
+
     /** Items excluded from the cache (lifted for selection/editing); set by the interaction layer. */
     var isLiftedItem: (CanvasItem) -> Boolean = { false }
 
@@ -144,7 +147,9 @@ class CanvasState(
         if (pageRects.isEmpty()) return
         val i = index.coerceIn(0, pageRects.size - 1)
         val pr = pageRects[i]
-        scrollY = pr.top * zoom - 24.0
+        // Scroll so the page label (just above the page top) clears the toolbar with a small gap,
+        // so no part of the page is hidden behind the chrome.
+        scrollY = ((pr.top - PAGE_LABEL_OFFSET) * zoom - TOP_GAP).coerceAtLeast(0.0)
         scrollX = pr.centerX * zoom - viewportW / 2.0
         clampScroll()
     }
@@ -152,6 +157,7 @@ class CanvasState(
     // --- zoom ---
 
     fun setZoomAnchored(focusViewport: Pt, newZoom: Double) {
+        if (zoomLocked) return
         val z = newZoom.coerceIn(MIN_ZOOM, MAX_ZOOM)
         if (abs(z - zoom) < 1e-9) return
         val anchor = viewportToContent(focusViewport)
@@ -168,7 +174,7 @@ class CanvasState(
     }
 
     fun fitWidth() {
-        if (contentW <= 0.0 || viewportW == 0) return
+        if (zoomLocked || contentW <= 0.0 || viewportW == 0) return
         val cur = currentPageIndex()
         zoom = (viewportW / contentW).coerceIn(MIN_ZOOM, MAX_ZOOM)
         invalidateAllCaches()
@@ -177,7 +183,7 @@ class CanvasState(
 
     fun fitHeight() {
         val pages = document.pages
-        if (pages.isEmpty() || viewportH == 0) return
+        if (zoomLocked || pages.isEmpty() || viewportH == 0) return
         val cur = currentPageIndex()
         zoom = ((viewportH - 60.0) / pages[cur].height).coerceIn(MIN_ZOOM, MAX_ZOOM)
         invalidateAllCaches()
@@ -186,7 +192,7 @@ class CanvasState(
 
     fun fitPage() {
         val pages = document.pages
-        if (pages.isEmpty() || viewportW == 0 || viewportH == 0) return
+        if (zoomLocked || pages.isEmpty() || viewportW == 0 || viewportH == 0) return
         val cur = currentPageIndex()
         val page = pages[cur]
         zoom = min((viewportW - 60.0) / page.width, (viewportH - 60.0) / page.height).coerceIn(MIN_ZOOM, MAX_ZOOM)
@@ -264,6 +270,12 @@ class CanvasState(
         const val ZOOM_STEP = 1.25
         const val CTRL_WHEEL_BASE = 1.01
         const val MAX_CACHE_PX = 4096.0
+
+        /** The page label sits ~26px above the page top (content space). */
+        const val PAGE_LABEL_OFFSET = 26.0
+
+        /** Gap (viewport px) left above the page label so nothing hides behind the toolbar. */
+        const val TOP_GAP = 16.0
         val TRANSPARENT = Rgba(0, 0, 0, 0)
     }
 }

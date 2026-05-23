@@ -79,4 +79,9 @@ object XnotesIcons {
     val bookmark = icon("M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2Z")
     val contents = icon("M8 6h13", "M8 12h13", "M8 18h13", "M3 6h.01", "M3 12h.01", "M3 18h.01")
     val thumbnails = icon(rect(3.0, 3.0, 7.0, 7.0), rect(14.0, 3.0, 7.0, 7.0), rect(3.0, 14.0, 7.0, 7.0), rect(14.0, 14.0, 7.0, 7.0))
+    val lock = icon(rect(3.0, 11.0, 18.0, 11.0), "M7 11V7a5 5 0 0 1 10 0v4")
+    val unlock = icon(rect(3.0, 11.0, 18.0, 11.0), "M7 11V7a5 5 0 0 1 9.9-1")
+    val copy = icon(rect(9.0, 9.0, 13.0, 13.0), "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1")
+    val cut = icon(circle(6.0, 6.0, 3.0), circle(6.0, 18.0, 3.0), "M20 4 8.12 15.88", "M14.47 14.48 20 20", "M8.12 8.12 12 12")
+    val duplicate = icon(rect(8.0, 8.0, 12.0, 12.0), "M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2")
 }
