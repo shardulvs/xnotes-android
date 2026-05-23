@@ -6,7 +6,6 @@ SourceCode: https://github.com/shardulvs/xnotes-android
 IssueTracker: https://github.com/shardulvs/xnotes-android/issues
 
 AutoName: xnotes
-Summary: Handwriting notes and sketching app with stylus support
 Description: |-
   xnotes is a handwriting-first notebook for phones and tablets, built for
   pen and stylus input. Write, sketch and annotate with pressure-sensitive,
@@ -22,8 +21,7 @@ Description: |-
   * Save and open notebooks in the .xnote format
   * Undo and redo
   * Side panel with page thumbnails, contents and bookmarks
-  * Stylus-aware input: finger panning, pinch to zoom and a configurable
-    pen side-button action
+  * Stylus-aware input: finger panning, pinch to zoom and a configurable pen side-button action
   * A live presentation mode that streams the canvas over your local network
   * Customisable theme, accent colour and page defaults
 
@@ -38,7 +36,7 @@ Builds:
     gradle:
       - yes
 
-AutoUpdateMode: Version v%v
+AutoUpdateMode: Version
 UpdateCheckMode: Tags
 CurrentVersion: 0.1.0
 CurrentVersionCode: 1
