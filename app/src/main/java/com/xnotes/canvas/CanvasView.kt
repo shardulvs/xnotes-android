@@ -3,6 +3,7 @@ package com.xnotes.canvas
 import android.content.Context
 import android.graphics.Canvas
 import android.util.AttributeSet
+import android.view.MotionEvent
 import android.view.View
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.Page
@@ -30,10 +31,17 @@ class CanvasView @JvmOverloads constructor(
     /** Hook for overlay drawing (selection/live-stroke/eraser), set by the interaction layer. */
     var drawOverlay: ((renderer: AndroidRenderer, canvas: Canvas) -> Unit)? = null
 
+    /** Pointer handler installed by the interaction layer. */
+    var input: ((MotionEvent) -> Boolean)? = null
+
     init {
         isFocusableInTouchMode = true
         setWillNotDraw(false)
     }
+
+    @Suppress("ClickableViewAccessibility")
+    override fun onTouchEvent(event: MotionEvent): Boolean =
+        input?.invoke(event) ?: super.onTouchEvent(event)
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
@@ -86,6 +94,6 @@ class CanvasView @JvmOverloads constructor(
         r.drawText(label, Rect(pr.left, pr.top - 26.0, 140.0, 24.0), FontSpec(9.0), st.palette.textDim)
     }
 
-    /** Request a repaint (display-paced flushing is added with the live stroke). */
-    fun requestRender() = invalidate()
+    /** Request a vsync-aligned repaint (rides the display refresh while drawing). */
+    fun requestRender() = postInvalidateOnAnimation()
 }

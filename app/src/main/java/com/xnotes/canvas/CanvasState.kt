@@ -39,6 +39,11 @@ class CanvasState(
     var pageColorOverride: Rgba? = null
     var didInitialFit: Boolean = false
 
+    /** While true (during a pinch/zoom drag) caches are blitted stale-scaled
+     *  instead of rebuilt every frame; they rebuild at the final resolution when
+     *  the gesture ends. */
+    var zoomingInProgress: Boolean = false
+
     /** Items excluded from the cache (lifted for selection/editing); set by the interaction layer. */
     var isLiftedItem: (CanvasItem) -> Boolean = { false }
 
@@ -201,7 +206,7 @@ class CanvasState(
     fun cacheFor(page: Page): CacheEntry {
         val res = clampedRes(page)
         val existing = caches[page]
-        if (existing != null && abs(existing.res - res) < 1e-6) return existing
+        if (existing != null && (zoomingInProgress || abs(existing.res - res) < 1e-6)) return existing
         existing?.surface?.recycle()
         return buildCache(page, res).also { caches[page] = it }
     }
