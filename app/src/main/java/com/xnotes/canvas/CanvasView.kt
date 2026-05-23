@@ -34,6 +34,9 @@ class CanvasView @JvmOverloads constructor(
     /** Pointer handler installed by the interaction layer. */
     var input: ((MotionEvent) -> Boolean)? = null
 
+    /** Invoked after the viewport is (re)laid out and the initial fit applied. */
+    var afterLayout: (() -> Unit)? = null
+
     /** Hover handler (stylus/mouse hover) for the eraser cursor. */
     var hover: ((MotionEvent) -> Boolean)? = null
 
@@ -60,6 +63,7 @@ class CanvasView @JvmOverloads constructor(
             st.didInitialFit = true
         }
         st.clampScroll()
+        afterLayout?.invoke()
         invalidate()
     }
 

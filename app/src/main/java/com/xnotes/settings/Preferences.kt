@@ -23,6 +23,8 @@ data class Preferences(
     val fingerDraws: Boolean = false,
     /** Tool the S Pen side button activates while held; "none" disables it. */
     val penButtonTool: String = "eraser",
+    /** Horizontal margin (px) on each side of the page column; 0 ⇒ fit-width fills the screen. */
+    val sideMargin: Double = 16.0,
 ) {
     val isDark: Boolean get() = uiAppearance != "light"
 
@@ -38,6 +40,7 @@ data class Preferences(
         .put("default_page_orientation", defaultPageOrientation.toName())
         .put("finger_draws", fingerDraws)
         .put("pen_button_tool", penButtonTool)
+        .put("side_margin", sideMargin)
 
     companion object {
         val DEFAULT_ACCENT = Rgba(0, 230, 118, 255)
@@ -58,6 +61,7 @@ data class Preferences(
                 defaultPageOrientation = Orientation.fromName(o.optString("default_page_orientation", "portrait")),
                 fingerDraws = o.optBoolean("finger_draws", false),
                 penButtonTool = o.optString("pen_button_tool", "eraser").ifEmpty { "eraser" },
+                sideMargin = o.optDouble("side_margin", 16.0).coerceIn(0.0, 80.0),
             )
         }
     }

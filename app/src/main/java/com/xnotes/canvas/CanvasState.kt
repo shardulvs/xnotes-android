@@ -39,6 +39,9 @@ class CanvasState(
     var pageColorOverride: Rgba? = null
     var didInitialFit: Boolean = false
 
+    /** Horizontal margin on each side of the page column (0 ⇒ fit-width fills the viewport). */
+    var sideMargin: Double = MARGIN
+
     /** While true (during a pinch/zoom drag) caches are blitted stale-scaled
      *  instead of rebuilt every frame; they rebuild at the final resolution when
      *  the gesture ends. */
@@ -68,20 +71,20 @@ class CanvasState(
         val pages = document.pages
         if (pages.isEmpty()) {
             pageRects = emptyList()
-            contentW = 2 * MARGIN
+            contentW = 2 * sideMargin
             contentH = 2 * MARGIN
             return
         }
         val maxW = pages.maxOf { it.width }
         val rects = ArrayList<Rect>(pages.size)
-        var y = MARGIN
+        var y = MARGIN // vertical top margin (keeps the page below the toolbar)
         for (p in pages) {
-            val left = MARGIN + (maxW - p.width) / 2.0
+            val left = sideMargin + (maxW - p.width) / 2.0
             rects.add(Rect(left, y, p.width, p.height))
             y += p.height + GAP
         }
         pageRects = rects
-        contentW = maxW + 2 * MARGIN
+        contentW = maxW + 2 * sideMargin
         contentH = (y - GAP) + MARGIN
         clampScroll()
     }

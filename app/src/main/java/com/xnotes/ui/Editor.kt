@@ -158,6 +158,7 @@ class Editor(context: Context) {
         view.input = { controller.onTouch(it) }
         view.hover = { controller.onHover(it) }
         view.drawOverlay = { renderer, _ -> controller.drawOverlay(renderer) }
+        view.afterLayout = { refreshView() }
         controller.clipboardHasImage = { clipboardImageUri() != null }
         applySettings()
         rebuildPdfSource()
@@ -310,13 +311,20 @@ class Editor(context: Context) {
         state.pageColorOverride = if (p.defaultTemplate == "color") p.pageColor else null
         controller.fingerDraws = p.fingerDraws
         controller.penButtonTool = if (p.penButtonTool == "none") null else (Tool.fromId(p.penButtonTool) ?: Tool.ERASER)
+        state.sideMargin = p.sideMargin
+        state.relayout()
     }
 
     /** Apply edited preferences live and persist (used by the Preferences dialog). */
     fun applyPreferences(p: Preferences) {
+        val marginChanged = p.sideMargin != settings.prefs.sideMargin
         settings = settings.copy(prefs = p)
         applyPagePrefsToState(p)
         state.invalidateAllCaches()
+        if (marginChanged) {
+            state.fitWidth() // re-fit so the new side margin takes effect immediately
+            refreshView()
+        }
         settingsRepo.save(settings)
         view.requestRender()
     }

@@ -23,6 +23,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -123,6 +124,13 @@ fun PreferencesDialog(initial: Preferences, onDismiss: () -> Unit, onSave: (Pref
                         prefs = prefs.copy(defaultPageOrientation = Orientation.LANDSCAPE)
                     }
                 }
+                FieldLabel("Side margin  ${prefs.sideMargin.toInt()} px")
+                Slider(
+                    value = prefs.sideMargin.toFloat(),
+                    onValueChange = { prefs = prefs.copy(sideMargin = it.toDouble()) },
+                    valueRange = 0f..64f,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 CheckRow("Page colour follows the theme", prefs.pageColor == null) {
                     prefs = prefs.copy(pageColor = if (it) null else pageColorPresets.first())
                 }
