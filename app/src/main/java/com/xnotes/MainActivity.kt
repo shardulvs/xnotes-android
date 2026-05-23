@@ -23,7 +23,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.focusable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowInsetsCompat
@@ -129,6 +135,20 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
         }
     }
 
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
+    editor.keyActions = remember {
+        Editor.KeyActions(
+            newNote = { editor.newNote() },
+            open = { openLauncher.launch(arrayOf("*/*")) },
+            save = { saveOrPrompt() },
+            saveAs = { createLauncher.launch("${editor.title}.xnote") },
+            exportPdf = { exportPdfLauncher.launch("${editor.title}.pdf") },
+            preferences = { showPreferences = true },
+            fullscreen = onToggleFullscreen,
+        )
+    }
+
     LaunchedEffect(editor.message) {
         editor.message?.let {
             snackbar.showSnackbar(it)
@@ -137,7 +157,16 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
     }
 
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { inner ->
-        Column(modifier = Modifier.fillMaxSize().padding(inner)) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(inner)
+                .focusRequester(focusRequester)
+                .focusable()
+                .onPreviewKeyEvent { ke ->
+                    ke.type == KeyEventType.KeyDown && editor.handleKeyDown(ke.nativeKeyEvent)
+                },
+        ) {
             Toolbar(
                 editor,
                 onToggleFullscreen = onToggleFullscreen,

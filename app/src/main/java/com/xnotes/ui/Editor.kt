@@ -535,6 +535,64 @@ class Editor(context: Context) {
         presentationUrl = presentation.url()
     }
 
+    // --- keyboard shortcuts (spec 11 §2) ---
+
+    /** File-ish actions that live in the Compose layer (SAF launchers, dialogs). */
+    class KeyActions(
+        val newNote: () -> Unit = {},
+        val open: () -> Unit = {},
+        val save: () -> Unit = {},
+        val saveAs: () -> Unit = {},
+        val exportPdf: () -> Unit = {},
+        val preferences: () -> Unit = {},
+        val fullscreen: () -> Unit = {},
+    )
+
+    var keyActions = KeyActions()
+
+    fun handleKeyDown(e: android.view.KeyEvent): Boolean {
+        // While editing a text box, let the field consume keys (only Escape commits).
+        if (editingField != null) {
+            if (e.keyCode == android.view.KeyEvent.KEYCODE_ESCAPE) { escape(); return true }
+            return false
+        }
+        val ctrl = e.isCtrlPressed
+        val shift = e.isShiftPressed
+        when {
+            ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_Z && shift -> redo()
+            ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_Z -> undo()
+            ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_N -> keyActions.newNote()
+            ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_O -> keyActions.open()
+            ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_S && shift -> keyActions.saveAs()
+            ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_S -> keyActions.save()
+            ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_E -> keyActions.exportPdf()
+            ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_A -> selectAll()
+            ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_B -> toggleSidebar()
+            ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_COMMA -> keyActions.preferences()
+            ctrl && (e.keyCode == android.view.KeyEvent.KEYCODE_PLUS || e.keyCode == android.view.KeyEvent.KEYCODE_EQUALS) -> zoomIn()
+            ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_MINUS -> zoomOut()
+            ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_0 -> fitWidth()
+            ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_9 -> fitPage()
+            ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_8 -> fitHeight()
+            ctrl -> return false
+            e.keyCode == android.view.KeyEvent.KEYCODE_DEL || e.keyCode == android.view.KeyEvent.KEYCODE_FORWARD_DEL -> deleteSelection()
+            e.keyCode == android.view.KeyEvent.KEYCODE_ESCAPE -> escape()
+            e.keyCode == android.view.KeyEvent.KEYCODE_PAGE_UP -> prevPage()
+            e.keyCode == android.view.KeyEvent.KEYCODE_PAGE_DOWN -> nextPage()
+            e.keyCode == android.view.KeyEvent.KEYCODE_F11 -> keyActions.fullscreen()
+            e.keyCode == android.view.KeyEvent.KEYCODE_P -> selectTool(Tool.PEN)
+            e.keyCode == android.view.KeyEvent.KEYCODE_C -> selectTool(Tool.CALLIGRAPHY)
+            e.keyCode == android.view.KeyEvent.KEYCODE_H -> selectTool(Tool.HIGHLIGHTER)
+            e.keyCode == android.view.KeyEvent.KEYCODE_E -> selectTool(Tool.ERASER)
+            e.keyCode == android.view.KeyEvent.KEYCODE_V -> selectTool(Tool.SELECT)
+            e.keyCode == android.view.KeyEvent.KEYCODE_L -> selectTool(Tool.LASSO)
+            e.keyCode == android.view.KeyEvent.KEYCODE_S -> selectTool(Tool.SHAPE)
+            e.keyCode == android.view.KeyEvent.KEYCODE_T -> selectTool(Tool.TEXT)
+            else -> return false
+        }
+        return true
+    }
+
     fun newNote() {
         state.document = Document.blank(
             Document.DEFAULT_NEW_PAGES,
