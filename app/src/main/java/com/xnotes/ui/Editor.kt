@@ -14,6 +14,7 @@ import com.xnotes.core.history.AddItem
 import com.xnotes.core.history.AddPage
 import com.xnotes.core.history.DeletePage
 import com.xnotes.core.history.History
+import com.xnotes.core.model.Bookmark
 import com.xnotes.core.model.Document
 import com.xnotes.core.model.ImageItem
 import com.xnotes.core.model.Orientation
@@ -93,8 +94,18 @@ class Editor(context: Context) {
     var dirty by mutableStateOf(false)
         private set
 
+    /** Bumped whenever page content changes, to refresh thumbnails. */
+    var contentVersion by mutableStateOf(0)
+        private set
+
+    /** Bumped when the bookmark list changes. */
+    var bookmarkVersion by mutableStateOf(0)
+        private set
+
     /** The current document's storage location (a SAF content URI string), or null. */
     val currentUri: String? get() = state.document.path
+
+    val bookmarks: List<Bookmark> get() = state.document.bookmarks.toList()
 
     val controller = InteractionController(
         state,
@@ -265,7 +276,41 @@ class Editor(context: Context) {
         pageCount = state.document.pages.size
         dirty = state.document.dirty
         title = state.document.title
+        contentVersion++
         refreshView()
+    }
+
+    // --- side panel ---
+
+    /** Renders a page to a thumbnail bitmap (paper + PDF/template background + items). */
+    fun renderThumbnail(pageIndex: Int, widthPx: Int): android.graphics.Bitmap? {
+        val page = state.document.pages.getOrNull(pageIndex) ?: return null
+        val scale = widthPx / page.width
+        val w = widthPx.coerceAtLeast(1)
+        val h = (page.height * scale).toInt().coerceAtLeast(1)
+        val surface = com.xnotes.platform.AndroidRasterSurface.create(w, h)
+        surface.fill(state.paperColor(page))
+        val r = surface.renderer()
+        r.scale(scale, scale)
+        state.paintPageBackground?.invoke(page, r, scale)
+        for (item in page.items) item.paint(r)
+        return surface.bitmap
+    }
+
+    fun addBookmark(label: String) {
+        state.document.bookmarks.add(Bookmark(state.currentPageIndex(), label))
+        state.document.dirty = true
+        bookmarkVersion++
+        dirty = true
+    }
+
+    fun removeBookmark(index: Int) {
+        if (index in state.document.bookmarks.indices) {
+            state.document.bookmarks.removeAt(index)
+            state.document.dirty = true
+            bookmarkVersion++
+            dirty = true
+        }
     }
 
     // --- file operations (SAF streams provided by the activity) ---
