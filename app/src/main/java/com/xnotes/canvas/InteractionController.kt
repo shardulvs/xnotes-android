@@ -7,6 +7,7 @@ import com.xnotes.core.geometry.Geometry
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.history.AddItem
+import com.xnotes.core.history.AddItems
 import com.xnotes.core.history.EraseItems
 import com.xnotes.core.history.History
 import com.xnotes.core.history.EditText
@@ -67,7 +68,13 @@ class InteractionController(
     private val onToolChanged: (Tool) -> Unit = {},
     private val onTextEditStart: (EditingField?) -> Unit = {},
     private val onTextEditEnd: () -> Unit = {},
+    /** Selection menu: a viewport rect to show it anchored to, or null to hide. */
+    private val onSelectionMenu: (Rect?) -> Unit = {},
+    /** Long-press on empty space: open a context menu at (viewport, content). */
+    private val onContextMenu: (Pt, Pt) -> Unit = { _, _ -> },
 ) {
+    /** Whether the system clipboard currently holds an image (provided by the host). */
+    var clipboardHasImage: () -> Boolean = { false }
     val document: Document get() = state.document
 
     var tool: Tool = Tool.DEFAULT
@@ -111,6 +118,10 @@ class InteractionController(
     private val eraseRemovals = mutableListOf<Pair<Page, CanvasItem>>()
     private var eraserCursor: Pt? = null // viewport pixels
 
+    // ITEM CLIPBOARD (in-app, for copy/cut/paste/duplicate)
+    private val itemClipboard = mutableListOf<CanvasItem>()
+    fun hasClipboardItems(): Boolean = itemClipboard.isNotEmpty()
+
     // SHAPE
     var shapeConfig: ShapeConfig = ShapeConfig()
     private var pendingShape: ShapeItem? = null
@@ -126,6 +137,7 @@ class InteractionController(
     private val handler = Handler(Looper.getMainLooper())
     private var longPressRunnable: Runnable? = null
     private var longPressStart = Pt.ZERO
+    private var longPressContent = Pt.ZERO
     private var longPressCandidate: Selected? = null
     private var longPressPrevTool: Tool? = null
 
@@ -443,6 +455,7 @@ class InteractionController(
         bandRect?.let { setSelection(SelectionMath.bandMembers(state.document.pages, state.pageRects, it)) }
         bandRect = null
         mode = PointerMode.IDLE
+        refreshSelectionMenu()
         requestRender()
     }
 
@@ -479,6 +492,7 @@ class InteractionController(
         }
         lassoPoints.clear()
         mode = PointerMode.IDLE
+        refreshSelectionMenu()
         requestRender()
     }
 
@@ -488,6 +502,7 @@ class InteractionController(
         mode = PointerMode.MOVE
         moveOrigin = content
         moveOffset = Pt.ZERO
+        onSelectionMenu(null) // hide while dragging
     }
 
     private fun extendMove(content: Pt) {
@@ -508,6 +523,7 @@ class InteractionController(
         }
         moveOffset = Pt.ZERO
         mode = PointerMode.IDLE
+        refreshSelectionMenu()
         requestRender()
     }
 
@@ -519,6 +535,7 @@ class InteractionController(
         resizePageIndex = sel.pageIndex
         resizeOldGeom = (sel.item as Resizable).geometry()
         mode = PointerMode.RESIZE
+        onSelectionMenu(null) // hide while resizing
     }
 
     private fun extendResize(content: Pt) {
@@ -560,6 +577,7 @@ class InteractionController(
         resizeHandle = null
         resizeOldGeom = null
         mode = PointerMode.IDLE
+        refreshSelectionMenu()
         requestRender()
     }
 
@@ -678,14 +696,21 @@ class InteractionController(
 
     private fun armLongPress(viewport: Pt, content: Pt) {
         cancelLongPress()
-        val eligible = tool.isStroke || tool == Tool.PAN || tool == Tool.LASSO || tool == Tool.SHAPE || tool == Tool.TEXT
-        if (!eligible) return
-        val pageIndex = state.pageIndexAtContent(content) ?: return
-        val pr = state.pageRects[pageIndex]
-        val local = Pt(content.x - pr.left, content.y - pr.top)
-        val hit = state.document.pages[pageIndex].items.lastOrNull { it.contains(local) } ?: return
+        val grabEligible = tool.isStroke || tool == Tool.PAN || tool == Tool.LASSO || tool == Tool.SHAPE || tool == Tool.TEXT
+        val pageIndex = state.pageIndexAtContent(content)
+        val hit = if (pageIndex != null) {
+            val pr = state.pageRects[pageIndex]
+            val local = Pt(content.x - pr.left, content.y - pr.top)
+            state.document.pages[pageIndex].items.lastOrNull { it.contains(local) }
+        } else {
+            null
+        }
         longPressStart = viewport
-        longPressCandidate = Selected(pageIndex, hit)
+        longPressContent = content
+        longPressCandidate = if (grabEligible && hit != null) Selected(pageIndex!!, hit) else null
+        // Arm to grab an item, or (on empty space) to open the paste menu when there is content to paste.
+        val showEmptyMenu = hit == null && (hasClipboardItems() || clipboardHasImage())
+        if (longPressCandidate == null && !showEmptyMenu) return
         val r = Runnable { triggerLongPress() }
         longPressRunnable = r
         handler.postDelayed(r, LONG_PRESS_MS)
@@ -702,8 +727,8 @@ class InteractionController(
     }
 
     private fun triggerLongPress() {
-        val candidate = longPressCandidate ?: return
         longPressRunnable = null
+        val candidate = longPressCandidate
         longPressCandidate = null
         // Abort the in-progress gesture (keep eraser removals); commit any text edit.
         commitTextEdit()
@@ -713,11 +738,18 @@ class InteractionController(
         shapePageIndex = null
         bandRect = null
         lassoPoints.clear()
-        longPressPrevTool = tool
-        tool = Tool.SELECT
-        onToolChanged(tool)
-        setSelection(listOf(candidate))
-        beginMove(state.viewportToContent(longPressStart))
+        if (candidate != null) {
+            // Grab the item: switch to select, select it, and start a move.
+            longPressPrevTool = tool
+            tool = Tool.SELECT
+            onToolChanged(tool)
+            setSelection(listOf(candidate))
+            beginMove(state.viewportToContent(longPressStart))
+        } else {
+            // Empty space: open the paste context menu at the press point.
+            mode = PointerMode.IDLE
+            onContextMenu(longPressStart, longPressContent)
+        }
         requestRender()
     }
 
@@ -742,6 +774,7 @@ class InteractionController(
             longPressPrevTool = null
             onToolChanged(tool)
         }
+        onSelectionMenu(null)
         if (selection.isEmpty() && lassoPolygon == null) return
         val affected = selection.map { it.pageIndex }.toSet()
         selection.clear()
@@ -812,6 +845,78 @@ class InteractionController(
         commitTextEdit()
         clearSelection()
         requestRender()
+    }
+
+    // --- clipboard: copy / cut / duplicate / paste ---
+
+    fun copySelection() {
+        if (selection.isEmpty()) return
+        itemClipboard.clear()
+        selection.forEach { itemClipboard.add(cloneItem(it.item)) }
+    }
+
+    fun cutSelection() {
+        if (selection.isEmpty()) return
+        copySelection()
+        deleteSelection()
+    }
+
+    fun duplicateSelection() {
+        if (selection.isEmpty()) return
+        copySelection()
+        val pageIndex = selection.first().pageIndex
+        // Paste offset slightly from the originals (not repositioned to a point).
+        pasteClonesOnPage(pageIndex, Pt.ZERO, offsetFromBoundsTopLeft = false, nudge = 24.0)
+    }
+
+    /** Paste the clipboard items so their top-left lands at the given content point. */
+    fun pasteItemsAt(content: Pt) {
+        val pageIndex = state.pageIndexAtContent(content) ?: state.currentPageIndex()
+        pasteClonesOnPage(pageIndex, content, offsetFromBoundsTopLeft = true, nudge = 0.0)
+    }
+
+    private fun pasteClonesOnPage(pageIndex: Int, target: Pt, offsetFromBoundsTopLeft: Boolean, nudge: Double) {
+        if (itemClipboard.isEmpty()) return
+        val page = state.document.pages.getOrNull(pageIndex) ?: return
+        val pr = state.pageRects.getOrNull(pageIndex) ?: return
+        val clones = itemClipboard.map { cloneItem(it) }
+        // Collective bounds (page-local) of the clones.
+        var box: Rect? = null
+        for (c in clones) box = box?.union(c.bounds()) ?: c.bounds()
+        val b = box ?: return
+        val targetLocal = Pt(target.x - pr.left, target.y - pr.top)
+        val dx = if (offsetFromBoundsTopLeft) targetLocal.x - b.left + nudge else nudge
+        val dy = if (offsetFromBoundsTopLeft) targetLocal.y - b.top + nudge else nudge
+        for (c in clones) c.translate(dx, dy)
+        page.items.addAll(clones)
+        history.push(AddItems(page, clones))
+        state.document.dirty = true
+        state.invalidatePage(page)
+        setSelection(clones.map { Selected(pageIndex, it) })
+        refreshSelectionMenu()
+        onContentChanged()
+    }
+
+    private fun cloneItem(item: CanvasItem): CanvasItem = when (item) {
+        is Stroke -> Stroke(item.tool, item.config, item.samples.toMutableList())
+        is ImageItem -> ImageItem(item.raster, item.rect)
+        is TextItem -> TextItem(item.pos, item.width, item.text, item.rgba, item.pointSize, textMeasurer)
+        is ShapeItem -> ShapeItem(item.shape, item.start, item.end, item.strokeRgba, item.strokeWidth, item.fillRgba)
+        else -> item
+    }
+
+    // --- selection menu ---
+
+    /** Show the selection menu when a selection is settled (idle), else hide it. */
+    private fun refreshSelectionMenu() {
+        onSelectionMenu(if (selection.isNotEmpty() && mode == PointerMode.IDLE) selectionBoundsViewport() else null)
+    }
+
+    private fun selectionBoundsViewport(): Rect? {
+        val content = selectionBoundsContent() ?: return null
+        val tl = state.contentToViewport(content.topLeft)
+        val br = state.contentToViewport(Pt(content.right, content.bottom))
+        return Rect.fromPoints(tl, br)
     }
 
     // --- PAN ---

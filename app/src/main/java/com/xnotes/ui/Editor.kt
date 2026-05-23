@@ -42,6 +42,9 @@ import kotlin.math.roundToInt
  * InteractionController + History) and the Compose chrome. Exposes Compose-
  * observable state and the actions the toolbar/menus invoke.
  */
+/** Target of the long-press paste context menu (viewport position + paste point). */
+data class ContextMenuTarget(val viewportX: Double, val viewportY: Double, val content: com.xnotes.core.geometry.Pt)
+
 @Stable
 class Editor(context: Context) {
 
@@ -91,6 +94,14 @@ class Editor(context: Context) {
     var message by mutableStateOf<String?>(null)
     var editingField by mutableStateOf<EditingField?>(null)
         private set
+
+    /** Viewport rect to anchor the on-selection menu, or null when hidden. */
+    var selectionMenu by mutableStateOf<com.xnotes.core.geometry.Rect?>(null)
+        private set
+
+    /** Long-press paste context menu target, or null when hidden. */
+    var contextMenu by mutableStateOf<ContextMenuTarget?>(null)
+        private set
     var title by mutableStateOf(state.document.title)
         private set
     var dirty by mutableStateOf(false)
@@ -120,6 +131,8 @@ class Editor(context: Context) {
         onToolChanged = { t -> tool = t },
         onTextEditStart = { field -> editingField = field },
         onTextEditEnd = { editingField = null },
+        onSelectionMenu = { rect -> selectionMenu = rect },
+        onContextMenu = { vp, content -> contextMenu = ContextMenuTarget(vp.x, vp.y, content) },
     )
 
     val presentation = com.xnotes.presentation.PresentationController(
@@ -145,8 +158,42 @@ class Editor(context: Context) {
         view.input = { controller.onTouch(it) }
         view.hover = { controller.onHover(it) }
         view.drawOverlay = { renderer, _ -> controller.drawOverlay(renderer) }
+        controller.clipboardHasImage = { clipboardImageUri() != null }
         applySettings()
         rebuildPdfSource()
+    }
+
+    // --- selection menu / clipboard ---
+
+    val hasClipboardItems: Boolean get() = controller.hasClipboardItems()
+    val clipboardHasImage: Boolean get() = clipboardImageUri() != null
+
+    fun copySelection() = controller.copySelection()
+    fun cutSelection() = controller.cutSelection()
+    fun duplicateSelection() = controller.duplicateSelection()
+    fun dismissSelectionMenu() { selectionMenu = null }
+    fun dismissContextMenu() { contextMenu = null }
+
+    fun pasteItemsAt(content: com.xnotes.core.geometry.Pt) {
+        controller.pasteItemsAt(content)
+    }
+
+    fun pasteClipboardImageAt(content: com.xnotes.core.geometry.Pt) {
+        val uri = clipboardImageUri() ?: run { message = "The clipboard has no image to paste."; return }
+        runCatching { appContext.contentResolver.openInputStream(uri)?.use { it.readBytes() } }
+            .getOrNull()
+            ?.let { insertImageAt(it, content) }
+            ?: run { message = "The clipboard has no image to paste." }
+    }
+
+    private fun clipboardImageUri(): android.net.Uri? {
+        val cm = appContext.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager ?: return null
+        val clip = cm.primaryClip ?: return null
+        if (clip.itemCount == 0) return null
+        val uri = clip.getItemAt(0).uri ?: return null
+        val type = appContext.contentResolver.getType(uri)
+        val isImage = type?.startsWith("image/") == true || clip.description?.hasMimeType("image/*") == true
+        return if (isImage) uri else null
     }
 
     private fun rebuildPdfSource() {
@@ -187,20 +234,29 @@ class Editor(context: Context) {
         replaceDocument(doc)
     }
 
-    fun insertImage(bytes: ByteArray) {
+    fun insertImage(bytes: ByteArray) = insertImageAt(bytes, null)
+
+    /** Insert an image, centred on [atContent] (or on the current page when null). */
+    fun insertImageAt(bytes: ByteArray, atContent: com.xnotes.core.geometry.Pt?) {
         val raster = imageCodec.decode(bytes)
         if (raster == null) {
             message = "Could not read the image."
             return
         }
-        val index = state.currentPageIndex().coerceIn(0, state.document.pages.lastIndex)
+        val index = (atContent?.let { state.pageIndexAtContent(it) } ?: state.currentPageIndex())
+            .coerceIn(0, state.document.pages.lastIndex)
         val page = state.document.pages[index]
+        val pr = state.pageRects.getOrNull(index)
         val maxW = page.width * 0.6
         val maxH = page.height * 0.6
         val scale = minOf(1.0, maxW / raster.width, maxH / raster.height)
         val w = raster.width * scale
         val h = raster.height * scale
-        val rect = Rect((page.width - w) / 2.0, (page.height - h) / 2.0, w, h)
+        val rect = if (atContent != null && pr != null) {
+            Rect((atContent.x - pr.left - w / 2).coerceIn(0.0, page.width - w), (atContent.y - pr.top - h / 2).coerceIn(0.0, page.height - h), w, h)
+        } else {
+            Rect((page.width - w) / 2.0, (page.height - h) / 2.0, w, h)
+        }
         val item = ImageItem(raster, rect)
         page.items.add(item)
         state.appendToCache(page, item)

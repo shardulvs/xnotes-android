@@ -96,6 +96,7 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
     var showPresentation by remember { mutableStateOf(false) }
     var guardAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var pendingAfterSave by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var pendingInsertContent by remember { mutableStateOf<com.xnotes.core.geometry.Pt?>(null) }
     val resolver = context.contentResolver
     val rwFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
 
@@ -134,9 +135,11 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
 
     val insertImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let {
-            runCatching { resolver.openInputStream(it)?.use { s -> editor.insertImage(s.readBytes()) } }
-                .onFailure { editor.message = "Could not read the image." }
+            runCatching {
+                resolver.openInputStream(it)?.use { s -> editor.insertImageAt(s.readBytes(), pendingInsertContent) }
+            }.onFailure { editor.message = "Could not read the image." }
         }
+        pendingInsertContent = null
     }
 
     fun saveOrPrompt() {
@@ -194,7 +197,7 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
                 onSaveAs = { createLauncher.launch("${editor.title}.xnote") },
                 onImportPdf = { importPdfLauncher.launch(arrayOf("application/pdf")) },
                 onExportPdf = { exportPdfLauncher.launch("${editor.title}.pdf") },
-                onInsertImage = { insertImageLauncher.launch(arrayOf("image/*")) },
+                onInsertImage = { pendingInsertContent = null; insertImageLauncher.launch(arrayOf("image/*")) },
                 onPreferences = { showPreferences = true },
                 onPresent = { showPresentation = true },
             )
@@ -207,6 +210,11 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
                     editor.editingField?.let { field ->
                         com.xnotes.ui.TextEditorOverlay(editor, field)
                     }
+                    com.xnotes.ui.SelectionMenu(editor)
+                    com.xnotes.ui.LongPressMenu(editor, onInsertImageAt = { c ->
+                        pendingInsertContent = c
+                        insertImageLauncher.launch(arrayOf("image/*"))
+                    })
                 }
             }
         }

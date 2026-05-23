@@ -28,6 +28,17 @@ class AddItem(private val page: Page, private val item: CanvasItem) : Command {
     }
 }
 
+/** Append several items to a page as one edit (paste / duplicate). */
+class AddItems(private val page: Page, private val items: List<CanvasItem>) : Command {
+    override fun redo() {
+        for (item in items) if (!page.items.containsRef(item)) page.items.add(item)
+    }
+
+    override fun undo() {
+        for (item in items) page.items.removeRef(item)
+    }
+}
+
 /** Remove a set of (page, item) pairs (object erase, or delete selection). */
 class EraseItems(private val removals: List<Pair<Page, CanvasItem>>) : Command {
     override fun redo() {
