@@ -85,4 +85,11 @@ object XnotesIcons {
     val cut = icon(circle(6.0, 6.0, 3.0), circle(6.0, 18.0, 3.0), "M20 4 8.12 15.88", "M14.47 14.48 20 20", "M8.12 8.12 12 12")
     val duplicate = icon(rect(8.0, 8.0, 12.0, 12.0), "M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2")
     val front = icon(rect(3.0, 3.0, 12.0, 12.0), rect(9.0, 9.0, 12.0, 12.0))
+
+    // Backstage (File area) commands.
+    val folder = icon("M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2Z")
+    val save = icon("M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z", "M17 21v-8H7v8", "M7 3v5h8")
+    val importDoc = icon("M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "M7 10l5 5 5-5", "M12 15V3")
+    val exportDoc = icon("M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "M17 8l-5-5-5 5", "M12 3v12")
+    val sliders = icon("M4 21v-7", "M4 10V3", "M12 21v-9", "M12 8V3", "M20 21v-5", "M20 12V3", "M1 14h6", "M9 8h6", "M17 16h6")
 }

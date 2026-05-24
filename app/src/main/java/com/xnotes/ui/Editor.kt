@@ -67,6 +67,9 @@ class Editor(context: Context) {
     private var lastSessionContentVersion = -1
     private var sessionLoaded = false
 
+    /** In-memory cache of recent-file thumbnails, keyed by SAF URI (pruned to the recent list). */
+    private val recentThumbs = java.util.concurrent.ConcurrentHashMap<String, android.graphics.Bitmap>()
+
     var tool by mutableStateOf(Tool.DEFAULT)
         private set
     var palette by mutableStateOf(state.palette)
@@ -120,6 +123,9 @@ class Editor(context: Context) {
 
     /** The current document's storage location (a SAF content URI string), or null. */
     val currentUri: String? get() = state.document.path
+
+    /** Most-recent-first SAF URIs of recently opened/saved notes (capped at 10). */
+    val recentFiles: List<String> get() = settings.recentFiles
 
     val bookmarks: List<Bookmark> get() = state.document.bookmarks.toList()
 
@@ -455,6 +461,7 @@ class Editor(context: Context) {
             doc.displayName = name
             doc.dirty = false
             replaceDocument(doc)
+            rememberRecent(uri)
         } catch (e: XNoteFormatException) {
             message = e.message ?: "Not an xnotes document."
         } catch (e: Exception) {
@@ -469,9 +476,79 @@ class Editor(context: Context) {
             if (name != null) state.document.displayName = name
             state.document.dirty = false
             refreshContent()
+            rememberRecent(uri)
+            recentThumbs.remove(uri) // its first page may have changed; re-render next time
         } catch (e: Exception) {
             message = "Could not save the note."
         }
+    }
+
+    // --- recent files (backstage) ---
+
+    private fun rememberRecent(uri: String) {
+        settings = settings.rememberFile(uri)
+        settingsRepo.save(settings)
+    }
+
+    /** Drop a recent entry (e.g., the file was moved or deleted) and its cached thumbnail. */
+    fun removeRecentFile(uri: String) {
+        settings = settings.copy(recentFiles = settings.recentFiles.filter { it != uri })
+        settingsRepo.save(settings)
+        recentThumbs.remove(uri)
+    }
+
+    /** A short, user-visible label for a recent file (storage display name, sans extension). */
+    fun recentLabel(uri: String): String {
+        val name = runCatching {
+            appContext.contentResolver.query(
+                android.net.Uri.parse(uri),
+                arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                null, null, null,
+            )?.use { c ->
+                if (c.moveToFirst()) {
+                    val i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (i >= 0) c.getString(i) else null
+                } else null
+            }
+        }.getOrNull()
+        return com.xnotes.core.util.Paths.stem(name ?: android.net.Uri.parse(uri).lastPathSegment ?: "Note")
+    }
+
+    /**
+     * Renders the first page of a recent (unopened) note at [uri] to a thumbnail
+     * [widthPx] wide, or null when it can't be read. Heavy — loads and decodes the
+     * whole note — so call off the main thread; results are cached per URI.
+     */
+    fun renderRecentThumbnail(uri: String, widthPx: Int): android.graphics.Bitmap? {
+        recentThumbs[uri]?.let { if (!it.isRecycled) return it }
+        val doc = runCatching {
+            appContext.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { codec.read(it) }
+        }.getOrNull() ?: return null
+        val page = doc.pages.firstOrNull() ?: return null
+        val scale = widthPx.toDouble() / page.width
+        val w = widthPx.coerceAtLeast(1)
+        val h = (page.height * scale).toInt().coerceAtLeast(1)
+        val surface = com.xnotes.platform.AndroidRasterSurface.create(w, h)
+        surface.fill(state.paperColor(page))
+        val r = surface.renderer()
+        r.scale(scale, scale)
+        doc.pdfBytes?.let { bytes ->
+            runCatching {
+                com.xnotes.platform.PdfSource.create(appContext, bytes)?.let { src ->
+                    page.pdfPage?.let { pi ->
+                        src.renderPage(pi, w, h, settings.prefs.pdfDarkMode)?.let { bg ->
+                            r.drawRaster(bg, Rect(0.0, 0.0, page.width, page.height))
+                            bg.recycle()
+                        }
+                    }
+                    src.close()
+                }
+            }
+        }
+        for (item in page.items) item.paint(r)
+        recentThumbs.keys.retainAll(settings.recentFiles.toSet())
+        recentThumbs[uri] = surface.bitmap
+        return surface.bitmap
     }
 
     private fun replaceDocument(doc: Document) {

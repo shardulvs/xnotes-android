@@ -52,12 +52,7 @@ private val toolIcons: List<Pair<Tool, ImageVector>> = listOf(
 fun Toolbar(
     editor: Editor,
     onToggleFullscreen: () -> Unit,
-    onNew: () -> Unit,
-    onOpen: () -> Unit,
-    onSave: () -> Unit,
-    onSaveAs: () -> Unit,
-    onImportPdf: () -> Unit,
-    onExportPdf: () -> Unit,
+    onOpenBackstage: () -> Unit,
     onInsertImage: () -> Unit,
     onPreferences: () -> Unit,
     onPresent: () -> Unit,
@@ -75,7 +70,7 @@ fun Toolbar(
             .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        FileMenu(onNew, onOpen, onSave, onSaveAs, onImportPdf, onExportPdf)
+        ToolbarIcon(XnotesIcons.file, "File") { onOpenBackstage() }
         EditMenu(editor, onPreferences)
         Label(editor.title + if (editor.dirty) " *" else "")
         Separator()
@@ -204,29 +199,6 @@ private fun Separator() {
             .height(26.dp)
             .background(LocalPalette.current.border.toComposeColor()),
     )
-}
-
-@Composable
-private fun FileMenu(
-    onNew: () -> Unit,
-    onOpen: () -> Unit,
-    onSave: () -> Unit,
-    onSaveAs: () -> Unit,
-    onImportPdf: () -> Unit,
-    onExportPdf: () -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        ToolbarIcon(XnotesIcons.file, "File") { expanded = true }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(text = { Text("New note") }, onClick = { onNew(); expanded = false })
-            DropdownMenuItem(text = { Text("Open…") }, onClick = { onOpen(); expanded = false })
-            DropdownMenuItem(text = { Text("Save") }, onClick = { onSave(); expanded = false })
-            DropdownMenuItem(text = { Text("Save as…") }, onClick = { onSaveAs(); expanded = false })
-            DropdownMenuItem(text = { Text("Import PDF…") }, onClick = { onImportPdf(); expanded = false })
-            DropdownMenuItem(text = { Text("Export to PDF…") }, onClick = { onExportPdf(); expanded = false })
-        }
-    }
 }
 
 @Composable

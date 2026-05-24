@@ -116,6 +116,7 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
     val snackbar = remember { SnackbarHostState() }
     var showPreferences by remember { mutableStateOf(false) }
     var showPresentation by remember { mutableStateOf(false) }
+    var showBackstage by remember { mutableStateOf(false) }
     var guardAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var pendingAfterSave by remember { mutableStateOf<(() -> Unit)?>(null) }
     var pendingInsertContent by remember { mutableStateOf<com.xnotes.core.geometry.Pt?>(null) }
@@ -180,6 +181,18 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
         if (editor.dirty) guardAction = action else action()
     }
 
+    fun openRecent(uriStr: String) {
+        val uri = Uri.parse(uriStr)
+        val name = displayNameOf(resolver, uri)
+        val opened = runCatching {
+            resolver.openInputStream(uri)?.use { s -> editor.open(s, uriStr, name) } != null
+        }.getOrDefault(false)
+        if (!opened) {
+            editor.message = "Couldn’t open that note — it may have been moved or deleted."
+            editor.removeRecentFile(uriStr)
+        }
+    }
+
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
     editor.keyActions = remember {
@@ -215,12 +228,7 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
             Toolbar(
                 editor,
                 onToggleFullscreen = onToggleFullscreen,
-                onNew = { guarded { editor.newNote() } },
-                onOpen = { guarded { openLauncher.launch(arrayOf("*/*")) } },
-                onSave = { saveOrPrompt() },
-                onSaveAs = { createLauncher.launch("${editor.title}.xnote") },
-                onImportPdf = { importPdfLauncher.launch(arrayOf("application/pdf")) },
-                onExportPdf = { exportPdfLauncher.launch("${editor.title}.pdf") },
+                onOpenBackstage = { showBackstage = true },
                 onInsertImage = { pendingInsertContent = null; insertImageLauncher.launch(arrayOf("image/*")) },
                 onPreferences = { showPreferences = true },
                 onPresent = { showPresentation = true },
@@ -244,6 +252,20 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
         }
     }
 
+    if (showBackstage) {
+        com.xnotes.ui.Backstage(
+            editor = editor,
+            onNew = { showBackstage = false; guarded { editor.newNote() } },
+            onOpen = { showBackstage = false; guarded { openLauncher.launch(arrayOf("*/*")) } },
+            onSave = { showBackstage = false; saveOrPrompt() },
+            onSaveAs = { showBackstage = false; createLauncher.launch("${editor.title}.xnote") },
+            onImportPdf = { showBackstage = false; importPdfLauncher.launch(arrayOf("application/pdf")) },
+            onExportPdf = { showBackstage = false; exportPdfLauncher.launch("${editor.title}.pdf") },
+            onPreferences = { showBackstage = false; showPreferences = true },
+            onOpenRecent = { uri -> showBackstage = false; guarded { openRecent(uri) } },
+            onDismiss = { showBackstage = false },
+        )
+    }
     if (showPreferences) {
         com.xnotes.ui.PreferencesDialog(
             initial = editor.preferences,
