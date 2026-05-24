@@ -48,6 +48,16 @@ data class ContextMenuTarget(val viewportX: Double, val viewportY: Double, val c
 /** One entry (folder or .xnote file) in the in-app explorer. [documentUri] is a SAF document URI. */
 data class BrowseEntry(val name: String, val documentUri: String, val isDir: Boolean)
 
+/** A recent note's thumbnail plus the details shown in the backstage list view. */
+data class RecentInfo(
+    val thumbnail: android.graphics.Bitmap?,
+    val label: String,
+    val pageCount: Int,
+    val location: String?,
+    val modified: Long,
+    val sizeBytes: Long,
+)
+
 @Stable
 class Editor(context: Context) {
 
@@ -72,6 +82,8 @@ class Editor(context: Context) {
 
     /** In-memory cache of recent-file thumbnails, keyed by SAF URI (pruned to the recent list). */
     private val recentThumbs = java.util.concurrent.ConcurrentHashMap<String, android.graphics.Bitmap>()
+    /** Cached page counts per recent URI (filled alongside the thumbnail's doc load). */
+    private val recentPages = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
     var tool by mutableStateOf(Tool.DEFAULT)
         private set
@@ -487,6 +499,7 @@ class Editor(context: Context) {
             refreshContent()
             rememberRecent(uri)
             recentThumbs.remove(uri) // its first page may have changed; re-render next time
+            recentPages.remove(uri)
         } catch (e: Exception) {
             message = "Could not save the note."
         }
@@ -504,35 +517,57 @@ class Editor(context: Context) {
         settings = settings.copy(recentFiles = settings.recentFiles.filter { it != uri })
         settingsRepo.save(settings)
         recentThumbs.remove(uri)
+        recentPages.remove(uri)
     }
+
+    /** The storage display name for a document/tree URI (no extension stripped), or null. */
+    private fun queryDisplayName(uri: android.net.Uri): String? = runCatching {
+        appContext.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) {
+                val i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (i >= 0) c.getString(i) else null
+            } else null
+        }
+    }.getOrNull()
 
     /** A short, user-visible label for a recent file (storage display name, sans extension). */
     fun recentLabel(uri: String): String {
-        val name = runCatching {
-            appContext.contentResolver.query(
-                android.net.Uri.parse(uri),
-                arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
-                null, null, null,
-            )?.use { c ->
-                if (c.moveToFirst()) {
-                    val i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                    if (i >= 0) c.getString(i) else null
-                } else null
-            }
-        }.getOrNull()
-        return com.xnotes.core.util.Paths.stem(name ?: android.net.Uri.parse(uri).lastPathSegment ?: "Note")
+        val u = android.net.Uri.parse(uri)
+        return com.xnotes.core.util.Paths.stem(queryDisplayName(u) ?: u.lastPathSegment ?: "Note")
     }
 
     /**
-     * Renders the first page of a recent (unopened) note at [uri] to a thumbnail
-     * [widthPx] wide, or null when it can't be read. Heavy — loads and decodes the
-     * whole note — so call off the main thread; results are cached per URI.
+     * A recent note's thumbnail ([widthPx] wide) plus list-view details. Heavy — loads
+     * and decodes the whole note — so call off the main thread; thumbnail and page
+     * count are cached per URI.
      */
-    fun renderRecentThumbnail(uri: String, widthPx: Int): android.graphics.Bitmap? {
-        recentThumbs[uri]?.let { if (!it.isRecycled) return it }
-        val doc = runCatching {
-            appContext.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { codec.read(it) }
-        }.getOrNull() ?: return null
+    fun recentInfo(uri: String, widthPx: Int): RecentInfo {
+        val haveThumb = recentThumbs[uri]?.let { !it.isRecycled } ?: false
+        if (!haveThumb || !recentPages.containsKey(uri)) {
+            val doc = runCatching {
+                appContext.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { codec.read(it) }
+            }.getOrNull()
+            if (doc != null) {
+                recentPages[uri] = doc.pages.size
+                if (!haveThumb) renderDocThumbnail(doc, widthPx)?.let { recentThumbs[uri] = it }
+                val keep = settings.recentFiles.toSet()
+                recentThumbs.keys.retainAll(keep)
+                recentPages.keys.retainAll(keep)
+            }
+        }
+        val (size, modified) = recentStat(uri)
+        return RecentInfo(
+            thumbnail = recentThumbs[uri]?.takeIf { !it.isRecycled },
+            label = recentLabel(uri),
+            pageCount = recentPages[uri] ?: 0,
+            location = recentLocation(uri),
+            modified = modified,
+            sizeBytes = size,
+        )
+    }
+
+    /** Renders a loaded document's first page to a [widthPx]-wide thumbnail bitmap. */
+    private fun renderDocThumbnail(doc: Document, widthPx: Int): android.graphics.Bitmap? {
         val page = doc.pages.firstOrNull() ?: return null
         val scale = widthPx.toDouble() / page.width
         val w = widthPx.coerceAtLeast(1)
@@ -555,16 +590,39 @@ class Editor(context: Context) {
             }
         }
         for (item in page.items) item.paint(r)
-        recentThumbs.keys.retainAll(settings.recentFiles.toSet())
-        recentThumbs[uri] = surface.bitmap
         return surface.bitmap
     }
 
-    /** Empty the recent-notes list (and its thumbnail cache). */
+    /** (sizeBytes, lastModifiedMillis) for a recent URI, each 0 when unknown. */
+    private fun recentStat(uri: String): Pair<Long, Long> = runCatching {
+        appContext.contentResolver.query(
+            android.net.Uri.parse(uri),
+            arrayOf(android.provider.OpenableColumns.SIZE, android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED),
+            null, null, null,
+        )?.use { c ->
+            if (c.moveToFirst()) {
+                val si = c.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                val mi = c.getColumnIndex(android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+                val size = if (si >= 0 && !c.isNull(si)) c.getLong(si) else 0L
+                val mod = if (mi >= 0 && !c.isNull(mi)) c.getLong(mi) else 0L
+                size to mod
+            } else 0L to 0L
+        } ?: (0L to 0L)
+    }.getOrDefault(0L to 0L)
+
+    /** The parent folder name of a recent URI (best-effort from its document id), or null. */
+    private fun recentLocation(uri: String): String? = runCatching {
+        val id = android.provider.DocumentsContract.getDocumentId(android.net.Uri.parse(uri))
+        val path = id.substringAfter(':', "")
+        if ('/' !in path) null else path.substringBeforeLast('/').substringAfterLast('/').ifEmpty { null }
+    }.getOrNull()
+
+    /** Empty the recent-notes list (and its caches). */
     fun clearRecentFiles() {
         settings = settings.copy(recentFiles = emptyList())
         settingsRepo.save(settings)
         recentThumbs.clear()
+        recentPages.clear()
     }
 
     fun updateRecentGrid(grid: Boolean) {
@@ -580,6 +638,38 @@ class Editor(context: Context) {
         settings = settings.copy(browseRoot = treeUri)
         settingsRepo.save(settings)
     }
+
+    /** Forget the granted folder: release its SAF permission and clear the root. */
+    fun clearBrowseRoot() {
+        browseRoot?.let { old ->
+            runCatching {
+                appContext.contentResolver.releasePersistableUriPermission(
+                    android.net.Uri.parse(old),
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
+            }
+        }
+        browseRoot = null
+        settings = settings.copy(browseRoot = null)
+        settingsRepo.save(settings)
+    }
+
+    /** The granted root folder's display name (e.g. "Documents"), or null. */
+    fun browseRootName(treeUri: String): String? {
+        val tree = android.net.Uri.parse(treeUri)
+        val root = android.provider.DocumentsContract.buildDocumentUriUsingTree(
+            tree, android.provider.DocumentsContract.getTreeDocumentId(tree),
+        )
+        return queryDisplayName(root)
+    }
+
+    /** Creates a subfolder [name] under [parentDocId] in tree [treeUri]; IO, call off-thread. */
+    fun createFolder(treeUri: String, parentDocId: String, name: String): Boolean = runCatching {
+        val parent = android.provider.DocumentsContract.buildDocumentUriUsingTree(android.net.Uri.parse(treeUri), parentDocId)
+        android.provider.DocumentsContract.createDocument(
+            appContext.contentResolver, parent, android.provider.DocumentsContract.Document.MIME_TYPE_DIR, name,
+        ) != null
+    }.getOrDefault(false)
 
     /** The document id of the explorer root, for listing its top-level children. */
     fun browseRootDocId(treeUri: String): String =
