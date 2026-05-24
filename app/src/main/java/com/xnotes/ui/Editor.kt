@@ -36,6 +36,7 @@ import com.xnotes.ui.theme.Palette
 import java.io.InputStream
 import java.io.OutputStream
 import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 /**
  * The app-side glue between the imperative canvas (CanvasView + CanvasState +
@@ -84,6 +85,12 @@ class Editor(context: Context) {
     private val recentThumbs = java.util.concurrent.ConcurrentHashMap<String, android.graphics.Bitmap>()
     /** Cached page counts per recent URI (filled alongside the thumbnail's doc load). */
     private val recentPages = java.util.concurrent.ConcurrentHashMap<String, Int>()
+
+    /** When non-null, the current note lives in the granted folder and autosaves to this URI. */
+    var autosaveUri: String? = null
+        private set
+    private val autosaveScope = kotlinx.coroutines.MainScope()
+    private var autosaveJob: kotlinx.coroutines.Job? = null
 
     var tool by mutableStateOf(Tool.DEFAULT)
         private set
@@ -370,6 +377,7 @@ class Editor(context: Context) {
             sidebarVisible = sidebarVisible,
             renderScale = renderScale,
         )
+        flushAutosave() // write the current note back to its folder file if it autosaves
         currentUri?.let { settings = settings.rememberFile(it) }
         settingsRepo.save(settings)
         saveSession()
@@ -410,6 +418,7 @@ class Editor(context: Context) {
                 }
                 state.clampScroll()
             }
+            maybeBindAutosave(state.document.path) // resume autosave if the restored note is in the folder
             refreshContent()
             view.requestRender()
         }
@@ -438,6 +447,7 @@ class Editor(context: Context) {
         title = state.document.title
         contentVersion++
         refreshView()
+        if (autosaveUri != null && state.document.dirty) scheduleAutosave()
     }
 
     // --- side panel ---
@@ -482,6 +492,7 @@ class Editor(context: Context) {
             doc.displayName = name
             doc.dirty = false
             replaceDocument(doc)
+            maybeBindAutosave(uri) // resume autosaving if this note lives in the granted folder
             rememberRecent(uri)
         } catch (e: XNoteFormatException) {
             message = e.message ?: "Not an xnotes document."
@@ -496,6 +507,7 @@ class Editor(context: Context) {
             state.document.path = uri
             if (name != null) state.document.displayName = name
             state.document.dirty = false
+            maybeBindAutosave(uri) // saving into the folder makes it autosave thereafter
             refreshContent()
             rememberRecent(uri)
             recentThumbs.remove(uri) // its first page may have changed; re-render next time
@@ -671,6 +683,101 @@ class Editor(context: Context) {
         ) != null
     }.getOrDefault(false)
 
+    /** Resolves a note file name: blank -> "untitled_N.xnote" (N avoids conflicts); else ensures .xnote. */
+    private fun resolveNoteName(treeUri: String, parentDocId: String, raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.isNotEmpty()) return if (trimmed.endsWith(".xnote", ignoreCase = true)) trimmed else "$trimmed.xnote"
+        val taken = browseChildren(treeUri, parentDocId).map { it.name.lowercase() }.toSet()
+        var n = 1
+        while ("untitled_$n.xnote" in taken) n++
+        return "untitled_$n.xnote"
+    }
+
+    /** Creates a blank `.xnote` under [parentDocId]; returns its URI, or null. IO — call off-thread. */
+    fun createBlankNoteFile(treeUri: String, parentDocId: String, rawName: String): String? = runCatching {
+        val name = resolveNoteName(treeUri, parentDocId, rawName)
+        val parent = android.provider.DocumentsContract.buildDocumentUriUsingTree(android.net.Uri.parse(treeUri), parentDocId)
+        val uri = android.provider.DocumentsContract.createDocument(
+            appContext.contentResolver, parent, "application/octet-stream", name,
+        ) ?: return null
+        val blank = Document.blank(Document.DEFAULT_NEW_PAGES, settings.prefs.defaultPageSize, settings.prefs.defaultPageOrientation)
+        appContext.contentResolver.openOutputStream(uri, "wt")?.use { codec.write(blank, it) }
+        uri.toString()
+    }.getOrNull()
+
+    /** Adopts a just-created folder note [uri] as the current document (blank, autosaving). Main thread. */
+    fun adoptFolderNote(uri: String) {
+        val doc = Document.blank(Document.DEFAULT_NEW_PAGES, settings.prefs.defaultPageSize, settings.prefs.defaultPageOrientation)
+        doc.path = uri
+        doc.displayName = queryDisplayName(android.net.Uri.parse(uri))
+        doc.dirty = false
+        replaceDocument(doc)   // clears autosaveUri
+        maybeBindAutosave(uri) // it lives in the folder, so it autosaves
+        rememberRecent(uri)
+    }
+
+    /** Renames a document (file or folder) to [newName]; follows the open note. IO, call off-thread. */
+    fun renameDocument(docUri: String, newName: String): Boolean {
+        val result = runCatching {
+            android.provider.DocumentsContract.renameDocument(appContext.contentResolver, android.net.Uri.parse(docUri), newName)
+        }
+        if (result.isFailure) return false
+        val resultUri = result.getOrNull()?.toString() ?: docUri
+        if (state.document.path == docUri) {
+            state.document.path = resultUri
+            state.document.displayName = newName
+            if (autosaveUri == docUri) autosaveUri = resultUri
+            title = state.document.title
+        }
+        if (resultUri != docUri) {
+            settings = settings.copy(recentFiles = settings.recentFiles.map { if (it == docUri) resultUri else it })
+            settingsRepo.save(settings)
+            recentThumbs.remove(docUri)
+            recentPages.remove(docUri)
+        }
+        return true
+    }
+
+    // --- autosave (notes living in the granted folder write back automatically) ---
+
+    private fun isUnderTree(fileUri: String, treeUri: String): Boolean = runCatching {
+        val f = android.net.Uri.parse(fileUri)
+        val t = android.net.Uri.parse(treeUri)
+        if (f.authority != t.authority) return false
+        val treeId = android.provider.DocumentsContract.getTreeDocumentId(t)
+        val fileId = android.provider.DocumentsContract.getDocumentId(f)
+        fileId == treeId || fileId.startsWith("$treeId/")
+    }.getOrDefault(false)
+
+    private fun maybeBindAutosave(uri: String?) {
+        autosaveUri = if (uri != null && browseRoot?.let { isUnderTree(uri, it) } == true) uri else null
+    }
+
+    private fun scheduleAutosave() {
+        val uri = autosaveUri ?: return
+        autosaveJob?.cancel()
+        autosaveJob = autosaveScope.launch {
+            kotlinx.coroutines.delay(1200L) // debounce: write after a short idle
+            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    appContext.contentResolver.openOutputStream(android.net.Uri.parse(uri), "wt")?.use { codec.write(state.document, it) } != null
+                }.getOrDefault(false)
+            }
+            if (ok) { state.document.dirty = false; dirty = false }
+        }
+    }
+
+    /** Write the current note to its autosave file now (synchronous, main thread); a no-op when not autosaving. */
+    fun flushAutosave() {
+        autosaveJob?.cancel()
+        val uri = autosaveUri ?: return
+        if (!state.document.dirty) return
+        val ok = runCatching {
+            appContext.contentResolver.openOutputStream(android.net.Uri.parse(uri), "wt")?.use { codec.write(state.document, it) } != null
+        }.getOrDefault(false)
+        if (ok) { state.document.dirty = false; dirty = false }
+    }
+
     /** The document id of the explorer root, for listing its top-level children. */
     fun browseRootDocId(treeUri: String): String =
         android.provider.DocumentsContract.getTreeDocumentId(android.net.Uri.parse(treeUri))
@@ -716,6 +823,8 @@ class Editor(context: Context) {
         com.xnotes.platform.PdfExporter.export(state.document, pdfSource, out)
 
     private fun replaceDocument(doc: Document) {
+        flushAutosave() // save the outgoing note if it was autosaving to the folder
+        autosaveUri = null
         controller.commitTextEdit()
         controller.clearSelection()
         state.document = doc
@@ -949,6 +1058,8 @@ class Editor(context: Context) {
     }
 
     fun newNote() {
+        flushAutosave()
+        autosaveUri = null
         state.document = Document.blank(
             Document.DEFAULT_NEW_PAGES,
             settings.prefs.defaultPageSize,

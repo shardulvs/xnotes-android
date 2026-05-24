@@ -187,7 +187,11 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
     }
 
     fun guarded(action: () -> Unit) {
-        if (editor.dirty) guardAction = action else action()
+        when {
+            editor.autosaveUri != null -> action() // autosaved notes are flushed on doc-swap; no prompt
+            editor.dirty -> guardAction = action
+            else -> action()
+        }
     }
 
     fun openRecent(uriStr: String) {
@@ -293,7 +297,8 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
             editor = editor,
             view = backstageView,
             onSelectView = { backstageView = it },
-            onNew = { showBackstage = false; guarded { editor.newNote() } },
+            onNewBlank = { showBackstage = false; guarded { editor.newNote() } },
+            onOpenSystem = { showBackstage = false; guarded { openLauncher.launch(arrayOf("*/*")) } },
             onSave = { showBackstage = false; saveOrPrompt() },
             onSaveAs = { showBackstage = false; createLauncher.launch("${editor.title}.xnote") },
             onShare = { showBackstage = false; showShareChooser = true },
