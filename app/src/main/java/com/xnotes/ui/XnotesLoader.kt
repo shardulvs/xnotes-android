@@ -24,7 +24,7 @@ import com.xnotes.R
 @Composable
 fun XnotesLoader(modifier: Modifier = Modifier) {
     val cfg = LocalConfiguration.current
-    val side = (minOf(cfg.screenWidthDp, cfg.screenHeightDp) * 0.7f).dp
+    val side = (minOf(cfg.screenWidthDp, cfg.screenHeightDp) * 0.35f).dp
     Box(
         modifier.fillMaxSize().background(Color.Black),
         contentAlignment = Alignment.Center,
