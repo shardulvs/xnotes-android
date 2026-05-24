@@ -44,6 +44,10 @@ data class Settings(
     val activeColor: Int = 0,
     val recentColors: List<Rgba> = emptyList(),
     val recentFiles: List<String> = emptyList(),
+    /** Backstage recent view: true = thumbnail grid, false = list. */
+    val recentGrid: Boolean = true,
+    /** Persisted SAF tree URI for the in-app file explorer's root folder, or null. */
+    val browseRoot: String? = null,
     val sidebarVisible: Boolean = false,
     val renderScale: Double = 1.0,
     val presentation: PresentationSettings = PresentationSettings(),
@@ -71,6 +75,8 @@ data class Settings(
             .put("active_color", activeColor)
             .put("recent_colors", JSONArray().apply { recentColors.forEach { put(rgbaArr(it)) } })
             .put("recent_files", JSONArray().apply { recentFiles.forEach { put(it) } })
+            .put("recent_grid", recentGrid)
+            .apply { browseRoot?.let { put("browse_root", it) } }
             .put("sidebar_visible", sidebarVisible)
             .put("render_scale", renderScale)
             .put("presentation", presentation.toJson())
@@ -100,6 +106,8 @@ data class Settings(
                 recentFiles = (0 until (o.optJSONArray("recent_files")?.length() ?: 0))
                     .mapNotNull { o.optJSONArray("recent_files")?.optString(it) }
                     .filter { it.isNotEmpty() }.take(10),
+                recentGrid = o.optBoolean("recent_grid", true),
+                browseRoot = o.optString("browse_root", "").ifEmpty { null },
                 sidebarVisible = o.optBoolean("sidebar_visible", false),
                 renderScale = o.optDouble("render_scale", 1.0),
                 presentation = PresentationSettings.fromJson(o.optJSONObject("presentation")),

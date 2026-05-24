@@ -54,7 +54,6 @@ fun Toolbar(
     onToggleFullscreen: () -> Unit,
     onOpenBackstage: () -> Unit,
     onInsertImage: () -> Unit,
-    onPreferences: () -> Unit,
     onPresent: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -71,7 +70,7 @@ fun Toolbar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         ToolbarIcon(XnotesIcons.file, "File") { onOpenBackstage() }
-        EditMenu(editor, onPreferences)
+        EditMenu(editor)
         Label(editor.title + if (editor.dirty) " *" else "")
         Separator()
 
@@ -214,7 +213,7 @@ private fun ImageMenu(editor: Editor, onInsertImage: () -> Unit) {
 }
 
 @Composable
-private fun EditMenu(editor: Editor, onPreferences: () -> Unit) {
+private fun EditMenu(editor: Editor) {
     var expanded by remember { mutableStateOf(false) }
     Box {
         ToolbarIcon(XnotesIcons.edit, "Edit") { expanded = true }
@@ -224,7 +223,6 @@ private fun EditMenu(editor: Editor, onPreferences: () -> Unit) {
             DropdownMenuItem(text = { Text("Delete selection") }, enabled = editor.hasSelection, onClick = { editor.deleteSelection(); expanded = false })
             DropdownMenuItem(text = { Text("Bring to front") }, enabled = editor.hasSelection, onClick = { editor.bringToFront(); expanded = false })
             DropdownMenuItem(text = { Text("Select all") }, onClick = { editor.selectAll(); expanded = false })
-            DropdownMenuItem(text = { Text("Preferences…") }, onClick = { onPreferences(); expanded = false })
         }
     }
 }

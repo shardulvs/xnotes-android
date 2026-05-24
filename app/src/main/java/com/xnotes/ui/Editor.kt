@@ -45,6 +45,9 @@ import kotlin.math.roundToInt
 /** Target of the long-press paste context menu (viewport position + paste point). */
 data class ContextMenuTarget(val viewportX: Double, val viewportY: Double, val content: com.xnotes.core.geometry.Pt)
 
+/** One entry (folder or .xnote file) in the in-app explorer. [documentUri] is a SAF document URI. */
+data class BrowseEntry(val name: String, val documentUri: String, val isDir: Boolean)
+
 @Stable
 class Editor(context: Context) {
 
@@ -91,6 +94,12 @@ class Editor(context: Context) {
     var renderScale by mutableStateOf(1.0)
         private set
     var sidebarVisible by mutableStateOf(false)
+    /** Backstage recent view mode: true = thumbnail grid, false = list. */
+    var recentGrid by mutableStateOf(settings.recentGrid)
+        private set
+    /** Granted explorer root (a SAF tree URI), or null until the user picks a folder. */
+    var browseRoot by mutableStateOf(settings.browseRoot)
+        private set
     var zoomLocked by mutableStateOf(false)
         private set
     var hasSelection by mutableStateOf(false)
@@ -550,6 +559,71 @@ class Editor(context: Context) {
         recentThumbs[uri] = surface.bitmap
         return surface.bitmap
     }
+
+    /** Empty the recent-notes list (and its thumbnail cache). */
+    fun clearRecentFiles() {
+        settings = settings.copy(recentFiles = emptyList())
+        settingsRepo.save(settings)
+        recentThumbs.clear()
+    }
+
+    fun updateRecentGrid(grid: Boolean) {
+        recentGrid = grid
+        settings = settings.copy(recentGrid = grid)
+        settingsRepo.save(settings)
+    }
+
+    // --- in-app file explorer (a user-granted SAF tree) ---
+
+    fun updateBrowseRoot(treeUri: String) {
+        browseRoot = treeUri
+        settings = settings.copy(browseRoot = treeUri)
+        settingsRepo.save(settings)
+    }
+
+    /** The document id of the explorer root, for listing its top-level children. */
+    fun browseRootDocId(treeUri: String): String =
+        android.provider.DocumentsContract.getTreeDocumentId(android.net.Uri.parse(treeUri))
+
+    /** The document id of a folder entry, for descending into it. */
+    fun browseDocId(documentUri: String): String =
+        android.provider.DocumentsContract.getDocumentId(android.net.Uri.parse(documentUri))
+
+    /** Lists folders and `.xnote` files under [parentDocId] within tree [treeUri]; IO, call off-thread. */
+    fun browseChildren(treeUri: String, parentDocId: String): List<BrowseEntry> {
+        val tree = android.net.Uri.parse(treeUri)
+        val childrenUri = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(tree, parentDocId)
+        val out = ArrayList<BrowseEntry>()
+        runCatching {
+            appContext.contentResolver.query(
+                childrenUri,
+                arrayOf(
+                    android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                    android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE,
+                ),
+                null, null, null,
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val name = c.getString(0) ?: continue
+                    val id = c.getString(1) ?: continue
+                    val isDir = c.getString(2) == android.provider.DocumentsContract.Document.MIME_TYPE_DIR
+                    if (isDir || name.endsWith(".xnote", ignoreCase = true)) {
+                        val docUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, id).toString()
+                        out.add(BrowseEntry(name, docUri, isDir))
+                    }
+                }
+            }
+        }
+        return out.sortedWith(compareBy({ !it.isDir }, { it.name.lowercase() }))
+    }
+
+    // --- sharing (writes the current document for an ACTION_SEND intent) ---
+
+    fun writeCurrentDocument(out: OutputStream) = codec.write(state.document, out)
+
+    fun writeCurrentPdf(out: OutputStream) =
+        com.xnotes.platform.PdfExporter.export(state.document, pdfSource, out)
 
     private fun replaceDocument(doc: Document) {
         controller.commitTextEdit()
