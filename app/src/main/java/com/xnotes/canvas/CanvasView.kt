@@ -195,8 +195,7 @@ class CanvasView @JvmOverloads constructor(
         st.viewportH = h
         st.relayout()
         if (!st.didInitialFit && w > 0 && h > 0) {
-            st.fitWidth()
-            st.didInitialFit = true
+            st.establishInitialView()
         }
         st.clampScroll()
         afterLayout?.invoke()

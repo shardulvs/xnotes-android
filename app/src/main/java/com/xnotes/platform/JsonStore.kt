@@ -35,5 +35,9 @@ class JsonStore(private val file: File) {
         /** The app's per-user settings file under the private config directory. */
         fun settings(context: Context): JsonStore =
             JsonStore(File(File(context.filesDir, "config"), "settings.json"))
+
+        /** Per-note view state (zoom/scroll) for folder notes, under the private config directory. */
+        fun viewStates(context: Context): JsonStore =
+            JsonStore(File(File(context.filesDir, "config"), "view_states.json"))
     }
 }

@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import com.xnotes.canvas.CanvasState
 import com.xnotes.canvas.CanvasView
 import com.xnotes.canvas.EditingField
+import com.xnotes.canvas.InitialView
 import com.xnotes.canvas.InteractionController
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.history.AddItem
@@ -84,6 +85,7 @@ class Editor(context: Context) {
     private val imageCodec = AndroidImageCodec()
     private val codec = DocumentCodec(imageCodec, textMeasurer)
     private val session = com.xnotes.platform.SessionStore(java.io.File(appContext.filesDir, "session"), codec)
+    private val viewStates = com.xnotes.platform.ViewStateStore(com.xnotes.platform.JsonStore.viewStates(appContext))
     private var lastSessionContentVersion = -1
     private var sessionLoaded = false
 
@@ -406,6 +408,7 @@ class Editor(context: Context) {
             renderScale = renderScale,
         )
         flushAutosave() // write the current note back to its folder file if it autosaves
+        saveViewState() // remember this folder note's view for next time
         currentUri?.let {
             settings = settings.copy(recentFiles = dedupRecents(listOf(it) + settings.recentFiles))
             recentFiles = settings.recentFiles
@@ -433,22 +436,19 @@ class Editor(context: Context) {
             rebuildPdfSource()
             history.clear()
             state.invalidateAllCaches()
-            if (snap.zoom > 0.0) {
-                state.zoom = snap.zoom.coerceIn(CanvasState.MIN_ZOOM, CanvasState.MAX_ZOOM)
-                state.scrollX = snap.scrollX
-                state.scrollY = snap.scrollY
-                state.didInitialFit = true // keep the restored zoom/scroll instead of fitting width
+            // Prefer this note's own remembered view (folder notes); fall back to the session's
+            // saved view for a non-folder/unsaved note; otherwise fit width.
+            val saved = viewKey(snap.document.path)?.let { viewStates.get(it) }
+            state.pendingInitialView = when {
+                saved != null -> InitialView.Restore(saved.zoom, saved.scrollX, saved.scrollY)
+                snap.zoom > 0.0 -> InitialView.Restore(snap.zoom, snap.scrollX, snap.scrollY)
+                else -> InitialView.FitWidth
             }
+            state.didInitialFit = false
             zoomLocked = snap.zoomLocked
             state.zoomLocked = snap.zoomLocked
             state.relayout()
-            if (state.viewportW > 0) {
-                if (!state.didInitialFit) {
-                    state.fitWidth()
-                    state.didInitialFit = true
-                }
-                state.clampScroll()
-            }
+            if (state.viewportW > 0) state.establishInitialView()
             maybeBindAutosave(state.document.path) // resume autosave if the restored note is in the folder
             refreshContent()
             view.requestRender()
@@ -742,6 +742,7 @@ class Editor(context: Context) {
         settingsRepo.save(settings)
         browseCache.clear()
         rootNameCache.clear()
+        viewStates.clear() // forget every remembered per-note view for the released folder
     }
 
     /** The granted root folder's display name (e.g. "Documents"), or null. */
@@ -905,6 +906,38 @@ class Editor(context: Context) {
         if (ok) { state.document.dirty = false; dirty = false; invalidateRecentThumb(uri) }
     }
 
+    // --- per-document view state (folder notes remember their own zoom + scroll) ---
+
+    /**
+     * The view-state key for a note in the granted folder — its document identity, shared with
+     * [recentKey] — or null when it isn't a folder document, so only folder notes remember a view.
+     */
+    private fun viewKey(uri: String?): String? {
+        val u = uri ?: return null
+        val root = browseRoot ?: return null
+        return if (isUnderTree(u, root)) recentKey(u) else null
+    }
+
+    /** Remember the current note's view (zoom + scroll); a no-op unless it's a laid-out folder note. */
+    private fun saveViewState() {
+        if (!state.didInitialFit || state.viewportW <= 0) return // nothing meaningful established yet
+        val key = viewKey(currentUri) ?: return
+        viewStates.put(key, state.zoom, state.scrollX, state.scrollY)
+    }
+
+    /**
+     * Choose a just-installed document's initial view — its remembered view for a folder note,
+     * else fit-width — and apply it now if the viewport is sized, else on the next layout. Setting
+     * it explicitly is what stops the previous document's zoom/scroll from carrying over.
+     */
+    private fun installInitialView(path: String?) {
+        val saved = viewKey(path)?.let { viewStates.get(it) }
+        state.pendingInitialView =
+            if (saved != null) InitialView.Restore(saved.zoom, saved.scrollX, saved.scrollY) else InitialView.FitWidth
+        state.didInitialFit = false
+        if (state.viewportW > 0) state.establishInitialView()
+    }
+
     /** The document id of the explorer root, for listing its top-level children. */
     fun browseRootDocId(treeUri: String): String =
         android.provider.DocumentsContract.getTreeDocumentId(android.net.Uri.parse(treeUri))
@@ -974,6 +1007,7 @@ class Editor(context: Context) {
         com.xnotes.platform.PdfExporter.export(state.document, pdfSource, out)
 
     private fun replaceDocument(doc: Document) {
+        saveViewState() // remember the outgoing folder note's view before switching away
         flushAutosave() // save the outgoing note if it was autosaving to the folder
         autosaveUri = null
         controller.commitTextEdit()
@@ -982,12 +1016,8 @@ class Editor(context: Context) {
         rebuildPdfSource()
         history.clear()
         state.invalidateAllCaches()
-        state.didInitialFit = false
         state.relayout()
-        if (state.viewportW > 0) {
-            state.fitWidth()
-            state.didInitialFit = true
-        }
+        installInitialView(doc.path) // this note's remembered view, or fit width — never the last note's
         refreshContent()
         view.requestRender()
     }
@@ -1209,6 +1239,7 @@ class Editor(context: Context) {
     }
 
     fun newNote() {
+        saveViewState()
         flushAutosave()
         autosaveUri = null
         state.document = Document.blank(
@@ -1219,12 +1250,8 @@ class Editor(context: Context) {
         history.clear()
         controller.clearSelection()
         state.invalidateAllCaches()
-        state.didInitialFit = false
         state.relayout()
-        if (state.viewportW > 0) {
-            state.fitWidth()
-            state.didInitialFit = true
-        }
+        installInitialView(null) // a fresh in-memory note: fit width
         refreshContent()
         view.requestRender()
     }

@@ -20,6 +20,15 @@ import kotlin.math.min
 /** A rasterized page cache plus the resolution it was built at. */
 class CacheEntry(val surface: RasterSurface, val res: Double)
 
+/** How a freshly opened document's initial view is chosen (see [CanvasState.establishInitialView]). */
+sealed class InitialView {
+    /** Fit the page width and start at the first page. */
+    object FitWidth : InitialView()
+
+    /** Reapply a remembered zoom + scroll. */
+    class Restore(val zoom: Double, val scrollX: Double, val scrollY: Double) : InitialView()
+}
+
 /**
  * Owns the view-side state of the canvas (spec 05): document layout in content
  * space, the viewport (scroll + zoom), the content<->viewport transforms, page
@@ -41,6 +50,10 @@ class CanvasState(
     var renderScale: Double = 1.0
     var pageColorOverride: Rgba? = null
     var didInitialFit: Boolean = false
+
+    /** The view to install on the next layout for a just-opened document (null ⇒ fit width);
+     *  consumed by [establishInitialView] once the viewport is sized. */
+    var pendingInitialView: InitialView? = null
 
     /** Horizontal margin on each side of the page column (0 ⇒ fit-width fills the viewport). */
     var sideMargin: Double = MARGIN
@@ -272,6 +285,45 @@ class CanvasState(
         zoom = min((viewportW - 60.0) / page.width, (viewportH - 60.0) / page.height).coerceIn(MIN_ZOOM, MAX_ZOOM)
         invalidateCachesForZoom()
         goToPage(cur)
+    }
+
+    // --- initial view (on opening a document) ---
+
+    /**
+     * Set zoom + scroll directly when opening a document. Unlike [setZoomAnchored] this
+     * ignores the zoom lock — switching documents isn't a user zoom gesture, and the new
+     * document must land at its own view rather than inherit the previous one's.
+     */
+    fun setView(newZoom: Double, sx: Double, sy: Double) {
+        zoom = newZoom.coerceIn(MIN_ZOOM, MAX_ZOOM)
+        scrollX = sx
+        scrollY = sy
+        invalidateCachesForZoom()
+        clampScroll()
+    }
+
+    /** Fit page width and scroll to the first page, ignoring the zoom lock (document open). */
+    fun resetViewToFitWidth() {
+        if (contentW <= 0.0 || viewportW == 0) return
+        zoom = (viewportW / contentW).coerceIn(MIN_ZOOM, MAX_ZOOM)
+        invalidateCachesForZoom()
+        goToPage(0)
+    }
+
+    /**
+     * Apply [pendingInitialView] (or fit width when it's null/[InitialView.FitWidth]) once the
+     * viewport is sized, and mark the initial fit done. Called when a document is opened and from
+     * the view's first layout; resets the view explicitly so a previous document's zoom/scroll
+     * (or a stale zoom lock) can never carry over.
+     */
+    fun establishInitialView() {
+        if (viewportW <= 0 || viewportH <= 0) return
+        when (val v = pendingInitialView) {
+            is InitialView.Restore -> setView(v.zoom, v.scrollX, v.scrollY)
+            else -> resetViewToFitWidth()
+        }
+        pendingInitialView = null
+        didInitialFit = true
     }
 
     // --- page cache ---
