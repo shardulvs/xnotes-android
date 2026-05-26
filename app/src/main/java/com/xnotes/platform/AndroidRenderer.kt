@@ -1,14 +1,17 @@
 package com.xnotes.platform
 
+import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PorterDuff
 import android.graphics.RectF
+import android.os.Build
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.pal.BlendMode
 import com.xnotes.core.pal.FillRule
 import com.xnotes.core.pal.FontSpec
 import com.xnotes.core.pal.Pen
@@ -33,6 +36,8 @@ class AndroidRenderer(private val canvas: Canvas) : Renderer {
         strokeCap = Paint.Cap.ROUND
     }
     private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply { isDither = true }
+    private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val layerPaint = Paint()
 
     private val scaleStack = ArrayDeque<Float>()
     private var scaleX = 1f
@@ -57,6 +62,25 @@ class AndroidRenderer(private val canvas: Canvas) : Renderer {
         canvas.saveLayerAlpha(
             bounds.left.toFloat(), bounds.top.toFloat(), bounds.right.toFloat(), bounds.bottom.toFloat(),
             (alpha.coerceIn(0.0, 1.0) * 255).toInt(),
+        )
+        scaleStack.addLast(scaleX)
+        scaleStack.addLast(scaleY)
+    }
+
+    // MULTIPLY uses the W3C separable blend (BlendMode, API 29+), which over a
+    // transparent backdrop *deposits* the source and over ink *multiplies* — so it
+    // works the same in the transparent ink cache and on the composed screen. Below
+    // API 29 (and for SRC_OVER) we just use plain alpha compositing.
+    override fun saveLayerBlended(bounds: Rect, alpha: Double, blend: BlendMode) {
+        if (blend != BlendMode.MULTIPLY || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return saveLayerAlpha(bounds, alpha)
+        }
+        layerPaint.reset()
+        layerPaint.alpha = (alpha.coerceIn(0.0, 1.0) * 255).toInt()
+        layerPaint.blendMode = android.graphics.BlendMode.MULTIPLY
+        canvas.saveLayer(
+            bounds.left.toFloat(), bounds.top.toFloat(), bounds.right.toFloat(), bounds.bottom.toFloat(),
+            layerPaint,
         )
         scaleStack.addLast(scaleX)
         scaleStack.addLast(scaleY)
@@ -96,6 +120,25 @@ class AndroidRenderer(private val canvas: Canvas) : Renderer {
     override fun fillCircle(center: Pt, radius: Double, color: Rgba) {
         fillPaint.color = color.toArgb()
         canvas.drawCircle(center.x.toFloat(), center.y.toFloat(), radius.toFloat(), fillPaint)
+    }
+
+    // The blur radius is a page-space length: the canvas scale grows it with zoom,
+    // so the halo tracks the ink (exactly like a non-cosmetic pen width).
+    override fun fillPolygonGlow(points: List<Pt>, color: Rgba, rule: FillRule, blurRadius: Double) {
+        if (points.size < 3) return
+        if (blurRadius <= 0.0) return fillPolygon(points, color, rule)
+        glowPaint.color = color.toArgb()
+        glowPaint.maskFilter = BlurMaskFilter(blurRadius.toFloat().coerceAtLeast(0.1f), BlurMaskFilter.Blur.NORMAL)
+        canvas.drawPath(buildPath(points, close = true, rule), glowPaint)
+        glowPaint.maskFilter = null
+    }
+
+    override fun fillCircleGlow(center: Pt, radius: Double, color: Rgba, blurRadius: Double) {
+        if (blurRadius <= 0.0) return fillCircle(center, radius, color)
+        glowPaint.color = color.toArgb()
+        glowPaint.maskFilter = BlurMaskFilter(blurRadius.toFloat().coerceAtLeast(0.1f), BlurMaskFilter.Blur.NORMAL)
+        canvas.drawCircle(center.x.toFloat(), center.y.toFloat(), radius.toFloat(), glowPaint)
+        glowPaint.maskFilter = null
     }
 
     override fun fillEllipse(center: Pt, rx: Double, ry: Double, color: Rgba) {

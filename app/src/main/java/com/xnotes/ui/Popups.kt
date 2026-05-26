@@ -31,39 +31,68 @@ import com.xnotes.core.model.Rgba
 import com.xnotes.core.tools.ShapeConfig
 import com.xnotes.core.tools.ShapeKind
 import com.xnotes.core.tools.Tool
-import com.xnotes.core.tools.ToolConfig
 import com.xnotes.core.tools.ToolConversions
 import com.xnotes.ui.theme.ColorMath
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
 
-/** Stroke-tool configuration popup (spec 10 §3): PRESSURE / SENSITIVITY / MULTIPLIER / WIDTH. */
+/**
+ * Stroke-tool configuration popup (spec 10 §3): PRESSURE / SENSITIVITY, then the
+ * tool's signature control — MULTIPLIER (calligraphy), SPEED (speed pen) or TAPER
+ * (taper pen) — then WIDTH, and a GLOW (neon) toggle available on any stroke tool.
+ */
 @Composable
 fun ToolConfigPopup(editor: Editor, tool: Tool, onDismiss: () -> Unit) {
     val base = remember { editor.toolConfig(tool) }
     var pressure by remember { mutableStateOf(base.pressureEnabled) }
     var sensitivity by remember { mutableStateOf(ToolConversions.minFactorToSensitivity(base.pressureMinFactor).toFloat()) }
     var multiplier by remember { mutableStateOf(ToolConversions.directionStrengthToMultiplier(base.directionStrength).toFloat()) }
+    var speed by remember { mutableStateOf(ToolConversions.strengthToSpeed(base.speedStrength).toFloat()) }
+    var taper by remember { mutableStateOf(ToolConversions.amountToTaper(base.taperAmount).toFloat()) }
     var width by remember { mutableStateOf(base.baseWidth.toFloat()) }
+    var glow by remember { mutableStateOf(base.neon) }
 
     fun emit() {
         val m = ToolConversions.sensitivityToMinFactor(sensitivity.toDouble())
         val ds = if (tool == Tool.CALLIGRAPHY) ToolConversions.multiplierToDirectionStrength(multiplier.toDouble()) else 0.0
-        editor.updateToolConfig(tool, ToolConfig(width.toDouble(), pressure, m, ds))
+        val sp = if (tool == Tool.SPEED) ToolConversions.speedToStrength(speed.toDouble()) else 0.0
+        val tp = if (tool == Tool.TAPER) ToolConversions.taperToAmount(taper.toDouble()) else 0.0
+        editor.updateToolConfig(
+            tool,
+            base.copy(
+                baseWidth = width.toDouble(),
+                pressureEnabled = pressure,
+                pressureMinFactor = m,
+                directionStrength = ds,
+                speedStrength = sp,
+                taperAmount = tp,
+                neon = glow,
+            ),
+        )
     }
 
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
         Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
             PopupTitle(tool.name)
-            if (tool == Tool.PEN || tool == Tool.CALLIGRAPHY) {
+            val hasPressure = tool == Tool.PEN || tool == Tool.CALLIGRAPHY || tool == Tool.SPEED || tool == Tool.TAPER
+            if (hasPressure) {
                 ToggleRow("PRESSURE", pressure) { pressure = it; emit() }
                 SliderRow("SENSITIVITY", sensitivity, 0f..100f, enabled = pressure) { sensitivity = it; emit() }
             }
             if (tool == Tool.CALLIGRAPHY) {
                 SliderRow("MULTIPLIER", multiplier, 1f..5f) { multiplier = it; emit() }
             }
+            if (tool == Tool.SPEED) {
+                SliderRow("SPEED", speed, 0f..100f) { speed = it; emit() }
+            }
+            if (tool == Tool.TAPER) {
+                SliderRow("TAPER", taper, 0f..100f) { taper = it; emit() }
+            }
             val range = ToolConversions.widthRange(tool)
             SliderRow("WIDTH", width, range.start.toFloat()..range.endInclusive.toFloat()) { width = it; emit() }
+            if (tool.isStroke) {
+                ToggleRow("GLOW", glow) { glow = it; emit() }
+            }
         }
     }
 }

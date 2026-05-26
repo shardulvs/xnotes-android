@@ -6,16 +6,26 @@ import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.Document
 import com.xnotes.core.model.Page
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.model.Stroke
 import com.xnotes.core.pal.FontSpec
 import com.xnotes.core.pal.Pen
 import com.xnotes.core.pal.RasterSurface
 import com.xnotes.core.pal.Renderer
 import com.xnotes.core.pal.SurfaceFactory
+import com.xnotes.core.tools.Tool
 import com.xnotes.ui.theme.Palette
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
+
+/**
+ * Highlighters are composited live over the finished page each frame (so their MULTIPLY
+ * blend darkens against paper, PDF background and ink alike), never baked into the
+ * transparent ink cache that sits above the background — see [CanvasView]. All other
+ * ink is cached.
+ */
+internal fun CanvasItem.isHighlighterInk(): Boolean = this is Stroke && this.tool == Tool.HIGHLIGHTER
 
 /** A rasterized page cache plus the resolution it was built at. */
 class CacheEntry(val surface: RasterSurface, val res: Double)
@@ -359,7 +369,7 @@ class CanvasState(
     private fun scheduleInk(page: Page, res: Double) {
         if (!pendingInk.add(page)) return
         val gen = cacheGen
-        val items = page.items.filterNot(isLiftedItem) // snapshot on the UI thread
+        val items = cacheItems(page) // snapshot on the UI thread
         runAsync {
             val entry = renderInk(page, res, items)
             postToMain {
@@ -372,8 +382,13 @@ class CanvasState(
         }
     }
 
+    /** Items baked into a page's ink cache: all but lifted items and highlighters
+     *  ([isHighlighterInk] — those composite live so they MULTIPLY against the background). */
+    private fun cacheItems(page: Page): List<CanvasItem> =
+        page.items.filter { !isLiftedItem(it) && !it.isHighlighterInk() }
+
     private fun buildCache(page: Page, res: Double): CacheEntry =
-        renderInk(page, res, page.items.filterNot(isLiftedItem))
+        renderInk(page, res, cacheItems(page))
 
     private fun renderInk(page: Page, res: Double, items: List<CanvasItem>): CacheEntry {
         val w = ceil(page.width * res).toInt().coerceAtLeast(1)
@@ -438,6 +453,7 @@ class CanvasState(
 
     /** Append a single just-committed stroke into an existing cache (cheap), else rebuild. */
     fun appendToCache(page: Page, item: CanvasItem) {
+        if (item.isHighlighterInk()) return // composited live over the page, never cached
         appendToSharpInk(page, item) // keep the sharp viewport crisp without a full re-render
         val res = clampedRes(page)
         val existing = caches[page]
@@ -469,7 +485,7 @@ class CanvasState(
         r.clipRect(dirtyRect)
         r.clear()
         for (item in page.items) {
-            if (!isLiftedItem(item) && item.bounds().intersects(dirtyRect)) item.paint(r)
+            if (!isLiftedItem(item) && !item.isHighlighterInk() && item.bounds().intersects(dirtyRect)) item.paint(r)
         }
         r.restore()
         return true
@@ -584,7 +600,7 @@ class CanvasState(
                 Pt(max(pr.left, visible.left) - pr.left, max(pr.top, visible.top) - pr.top),
                 Pt(min(pr.right, visible.right) - pr.left, min(pr.bottom, visible.bottom) - pr.top),
             )
-            draws.add(SharpPageSnap(page, pr, page.items.filterNot(isLiftedItem), region, i))
+            draws.add(SharpPageSnap(page, pr, cacheItems(page), region, i))
         }
         if (draws.isEmpty()) return
         pendingSharp = true
@@ -672,7 +688,7 @@ class CanvasState(
         r.clipRect(dirtyRect)
         r.clear()
         for (item in page.items) {
-            if (!isLiftedItem(item) && item.bounds().intersects(dirtyRect)) item.paint(r)
+            if (!isLiftedItem(item) && !item.isHighlighterInk() && item.bounds().intersects(dirtyRect)) item.paint(r)
         }
         r.restore()
     }

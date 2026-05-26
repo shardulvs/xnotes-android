@@ -255,6 +255,27 @@ class CanvasView @JvmOverloads constructor(
             st.clearSharpViewport()
         }
 
+        // Highlighters composite here, over the finished page (paper + background + ink), so
+        // their MULTIPLY blend darkens against everything beneath instead of washing it out —
+        // matching the live preview. They're few and drawn at screen resolution (so crisp at
+        // any zoom); pen/calligraphy ink stays cached underneath.
+        r.withSave {
+            r.translate(origin.x, origin.y)
+            r.scale(st.zoom, st.zoom)
+            for (i in st.document.pages.indices) {
+                val pr = st.pageRects.getOrNull(i) ?: continue
+                if (!pr.intersects(visible)) continue
+                val page = st.document.pages[i]
+                r.withSave {
+                    r.clipRect(pr)
+                    r.translate(pr.left, pr.top)
+                    for (item in page.items) {
+                        if (item.isHighlighterInk() && !st.isLiftedItem(item)) item.paint(r)
+                    }
+                }
+            }
+        }
+
         drawOverlay?.invoke(r, canvas)
 
         st.dropCachesExcept(visiblePages)

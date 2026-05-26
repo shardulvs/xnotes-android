@@ -2,9 +2,11 @@ package com.xnotes.presentation
 
 import com.xnotes.canvas.CanvasState
 import com.xnotes.core.geometry.Rect
+import com.xnotes.core.model.Page
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.Stroke
 import com.xnotes.core.pal.RasterSurface
+import com.xnotes.core.tools.Tool
 import com.xnotes.platform.AndroidRasterSurface
 import kotlin.math.ceil
 import kotlin.math.max
@@ -29,7 +31,7 @@ class PresentationFrameSource(
     private val state: CanvasState,
     private val liveStroke: () -> Pair<Int, Stroke>?,
 ) {
-    /** One page composited into a frame: its cache, paper, placement and live stroke. */
+    /** One page composited into a frame: its cache, paper, placement, highlighters and live stroke. */
     class PageDraw(
         val left: Double,
         val top: Double,
@@ -38,6 +40,7 @@ class PresentationFrameSource(
         val paper: Rgba,
         val background: RasterSurface?,
         val cache: RasterSurface,
+        val highlights: List<Stroke>,
         val live: Stroke?,
     )
 
@@ -63,7 +66,7 @@ class PresentationFrameSource(
         val h = ceil(page.height * scale).toInt().coerceAtLeast(1)
         val draw = PageDraw(
             0.0, 0.0, page.width, page.height, state.paperColor(page),
-            state.backgroundFor(page)?.surface, state.cacheFor(page).surface, liveSnapshotFor(index),
+            state.backgroundFor(page)?.surface, state.cacheFor(page).surface, highlightsFor(page), liveSnapshotFor(index),
         )
         return FramePlan(w, h, state.paperColor(page), follow = false, outerScale = scale, 0.0, 0.0, 1.0, listOf(draw))
     }
@@ -86,7 +89,7 @@ class PresentationFrameSource(
             draws.add(
                 PageDraw(
                     pr.left, pr.top, page.width, page.height, state.paperColor(page),
-                    state.backgroundFor(page)?.surface, state.cacheFor(page).surface, liveSnapshotFor(i),
+                    state.backgroundFor(page)?.surface, state.cacheFor(page).surface, highlightsFor(page), liveSnapshotFor(i),
                 ),
             )
         }
@@ -109,10 +112,23 @@ class PresentationFrameSource(
                 if (plan.follow) r.fillRect(Rect(0.0, 0.0, d.width, d.height), d.paper)
                 d.background?.let { r.drawRaster(it, Rect(0.0, 0.0, d.width, d.height)) }
                 r.drawRaster(d.cache, Rect(0.0, 0.0, d.width, d.height))
+                for (h in d.highlights) h.paint(r) // composite over the page so they MULTIPLY
                 d.live?.paint(r)
             }
         }
         return surface
+    }
+
+    /** Safe off-thread copies of a page's committed highlighter strokes — composited live
+     *  (MULTIPLY) over the cache rather than baked into it (see [com.xnotes.canvas.isHighlighterInk]). */
+    private fun highlightsFor(page: Page): List<Stroke> {
+        val out = ArrayList<Stroke>()
+        for (item in page.items) {
+            if (item is Stroke && item.tool == Tool.HIGHLIGHTER && !state.isLiftedItem(item)) {
+                out.add(Stroke(item.tool, item.config, ArrayList(item.samples)))
+            }
+        }
+        return out
     }
 
     /** A copy of the live stroke on page [pageIndex] that is safe to paint off-thread, or null. */

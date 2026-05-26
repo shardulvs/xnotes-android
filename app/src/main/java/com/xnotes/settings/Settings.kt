@@ -126,6 +126,9 @@ data class Settings(
             .put("pressure_enabled", c.pressureEnabled)
             .put("pressure_min_factor", c.pressureMinFactor)
             .put("direction_strength", c.directionStrength)
+            .put("speed_strength", c.speedStrength)
+            .put("taper_amount", c.taperAmount)
+            .put("neon", c.neon)
             .put("rgba", rgbaArr(c.rgba))
 
         private fun toolConfig(o: JSONObject, tool: Tool): ToolConfig {
@@ -136,6 +139,9 @@ data class Settings(
                 pressureMinFactor = o.optDouble("pressure_min_factor", d.pressureMinFactor),
                 directionStrength = o.optDouble("direction_strength", d.directionStrength),
                 rgba = Rgba.fromList(o.optJSONArray("rgba")?.let { a -> (0 until a.length()).map { a.optInt(it, 0) } }) ?: d.rgba,
+                speedStrength = o.optDouble("speed_strength", d.speedStrength),
+                taperAmount = o.optDouble("taper_amount", d.taperAmount),
+                neon = o.optBoolean("neon", d.neon),
             )
         }
 

@@ -2,8 +2,12 @@ package com.xnotes.core.stroke
 
 import com.xnotes.core.geometry.Pt
 
-/** One captured stylus point, page-local; `pressure` in `[0, 1]`. */
-data class Sample(val x: Double, val y: Double, val pressure: Double) {
+/**
+ * One captured stylus point, page-local; `pressure` in `[0, 1]`. [t] is the
+ * milliseconds elapsed since the stroke's first sample (0 for that first one),
+ * used only by velocity-aware tools (the speed pen); 0 everywhere else.
+ */
+data class Sample(val x: Double, val y: Double, val pressure: Double, val t: Double = 0.0) {
     val pos: Pt get() = Pt(x, y)
 }
 

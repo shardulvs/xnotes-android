@@ -46,6 +46,8 @@ import com.xnotes.ui.theme.toComposeColor
 private val toolIcons: List<Pair<Tool, ImageVector>> = listOf(
     Tool.PEN to XnotesIcons.pen,
     Tool.CALLIGRAPHY to XnotesIcons.calligraphy,
+    Tool.SPEED to XnotesIcons.speed,
+    Tool.TAPER to XnotesIcons.taper,
     Tool.HIGHLIGHTER to XnotesIcons.highlighter,
     Tool.ERASER to XnotesIcons.eraser,
     Tool.PAN to XnotesIcons.pan,
@@ -112,7 +114,7 @@ fun Toolbar(
                     }
                 }
             }
-            if (i == 3 || i == 6) Separator()
+            if (i == 5 || i == 8) Separator()
         }
         Separator()
 

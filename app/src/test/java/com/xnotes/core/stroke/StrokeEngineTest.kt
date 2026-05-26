@@ -79,4 +79,50 @@ class StrokeEngineTest {
         assertTrue(g.outline.isEmpty())
         assertTrue(g.caps.isEmpty())
     }
+
+    // --- Taper pen (§1.1) ---
+    @Test fun taperPointsTheEnds() {
+        // Pressure off, m=1 ⇒ a flat 2.0 half-width everywhere without taper.
+        val pts = (0..4).map { Sample(it * 10.0, 0.0, 1.0) }
+        val plain = StrokeEngine.build(pts, 4.0, false, 1.0, 0.0)
+        val tapered = StrokeEngine.build(pts, 4.0, false, 1.0, 0.0, taperAmount = 1.0)
+
+        assertEquals(2.0, plain.caps[0].radius, 1e-9)   // plain: full dome
+        assertEquals(0.0, tapered.caps[0].radius, 1e-9) // tapered: collapses to a point
+        assertEquals(0.0, tapered.caps[1].radius, 1e-9)
+
+        val mid = tapered.halfWidths[2]
+        assertTrue(mid > tapered.halfWidths[0])         // middle fatter than the tip
+        assertTrue(mid > 1.5 && mid <= 2.0)             // and near full width
+    }
+
+    @Test fun taperIgnoresVeryShortStrokes() {
+        // Total arc length < 8 px ⇒ left un-tapered (a quick tick shouldn't vanish).
+        val pts = listOf(Sample(0.0, 0.0, 1.0), Sample(3.0, 0.0, 1.0))
+        val g = StrokeEngine.build(pts, 4.0, false, 1.0, 0.0, taperAmount = 1.0)
+        assertEquals(2.0, g.caps[0].radius, 1e-9)
+    }
+
+    // --- Speed pen (§1.1) ---
+    @Test fun speedThinsFastStrokes() {
+        val xs = (0..5).map { it * 10.0 }
+        val slow = xs.mapIndexed { i, x -> Sample(x, 0.0, 1.0, i * 100.0) } // ~0.1 px/ms
+        val fast = xs.mapIndexed { i, x -> Sample(x, 0.0, 1.0, i * 5.0) }   // ~2 px/ms
+        val gSlow = StrokeEngine.build(slow, 4.0, false, 1.0, 0.0, speedStrength = 0.8)
+        val gFast = StrokeEngine.build(fast, 4.0, false, 1.0, 0.0, speedStrength = 0.8)
+
+        assertEquals(2.0, gSlow.halfWidths.maxOrNull()!!, 1e-6)   // slow: full width
+        assertTrue(gFast.halfWidths.maxOrNull()!! < 2.0)          // fast: thinned even at its widest
+        assertTrue(gFast.halfWidths.minOrNull()!! < 1.0)          // and clearly thin where fastest
+    }
+
+    @Test fun speedOffIgnoresTiming() {
+        val xs = (0..5).map { it * 10.0 }
+        val slow = xs.mapIndexed { i, x -> Sample(x, 0.0, 1.0, i * 100.0) }
+        val fast = xs.mapIndexed { i, x -> Sample(x, 0.0, 1.0, i * 5.0) }
+        // speedStrength defaults to 0 ⇒ identical geometry regardless of timing.
+        val a = StrokeEngine.build(slow, 4.0, false, 1.0, 0.0)
+        val b = StrokeEngine.build(fast, 4.0, false, 1.0, 0.0)
+        assertEquals(a.halfWidths, b.halfWidths)
+    }
 }

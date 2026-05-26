@@ -17,6 +17,7 @@ import com.xnotes.core.stroke.Sample
 import com.xnotes.core.tools.ShapeKind
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
+import com.xnotes.core.tools.ToolDefaults
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -149,6 +150,40 @@ class DocumentCodecTest {
         assertNotNull(back.pdfBytes)
         assertEquals(0, back.pages[0].pdfPage)
         assertEquals(4, back.pdfBytes!!.size)
+    }
+
+    @Test fun speedStrokeTimestampsRoundTrip() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        page.items.add(
+            Stroke(
+                Tool.SPEED,
+                ToolDefaults.configFor(Tool.SPEED),
+                mutableListOf(Sample(0.0, 0.0, 1.0, 0.0), Sample(10.0, 0.0, 0.8, 16.0), Sample(20.0, 0.0, 0.6, 33.0)),
+            ),
+        )
+        doc.pages.add(page)
+
+        val s = roundTrip(doc).pages[0].items[0] as Stroke
+        assertEquals(Tool.SPEED, s.tool)
+        assertEquals(0.6, s.config.speedStrength, 1e-9)
+        assertEquals(3, s.samples.size)
+        assertEquals(16.0, s.samples[1].t, 1e-9)   // the 4th sample element survives
+        assertEquals(33.0, s.samples[2].t, 1e-9)
+    }
+
+    @Test fun neonAndTaperFlagsRoundTrip() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        page.items.add(Stroke(Tool.PEN, ToolConfig(neon = true), mutableListOf(Sample(1.0, 2.0, 1.0))))
+        page.items.add(Stroke(Tool.TAPER, ToolConfig(taperAmount = 0.7), mutableListOf(Sample(3.0, 4.0, 1.0), Sample(8.0, 9.0, 1.0))))
+        doc.pages.add(page)
+
+        val items = roundTrip(doc).pages[0].items
+        assertTrue((items[0] as Stroke).config.neon)
+        val taper = items[1] as Stroke
+        assertEquals(0.7, taper.config.taperAmount, 1e-9)
+        assertEquals(0.0, taper.samples[0].t, 1e-9)   // non-speed stroke writes no time
     }
 
     @Test fun strokeMissingFieldsTakeDefaults() {

@@ -2,6 +2,7 @@ package com.xnotes.core.stroke
 
 import com.xnotes.core.geometry.Pt
 import kotlin.math.max
+import kotlin.math.min
 
 /**
  * Turns raw stylus samples into a smooth, variable-width ink ribbon (spec 03).
@@ -16,6 +17,22 @@ object StrokeEngine {
 
     /** Floor on the calligraphic direction term so width stays positive. */
     const val MIN_DIRECTION = 0.1
+
+    /** Speed pen: page-px/ms at/below which the line stays full width, and the
+     *  speed at/above which it reaches its thinnest. Mapped through a smoothstep. */
+    const val SPEED_LO = 0.15
+    const val SPEED_HI = 2.2
+
+    /** Speed pen: minimum per-segment dt (ms) so a duplicate-timestamp pair can't
+     *  divide by ~zero and spike the speed. */
+    const val MIN_DT = 1.0
+
+    /** Taper pen: strokes shorter than this (page px of arc length) are left
+     *  un-tapered, so a quick tick doesn't collapse to nothing. */
+    const val TAPER_MIN_LEN = 8.0
+
+    /** Taper pen: floor on the per-end taper fraction (avoids a zero-width divide). */
+    const val MIN_TAPER_FRAC = 0.02
 
     /** One-pole IIR low-pass (exponential moving average). */
     fun ema(values: List<Double>, alpha: Double = ALPHA): List<Double> {
@@ -47,13 +64,69 @@ object StrokeEngine {
         return wBase * direction / 2.0
     }
 
-    /** Builds [StrokeGeometry] from [samples] and the four style fields. */
+    /** Hermite smoothstep: 0 below [lo], 1 above [hi], an S-curve between. */
+    private fun smoothstep(lo: Double, hi: Double, x: Double): Double {
+        if (hi <= lo) return if (x >= hi) 1.0 else 0.0
+        val t = ((x - lo) / (hi - lo)).coerceIn(0.0, 1.0)
+        return t * t * (3 - 2 * t)
+    }
+
+    /**
+     * Per-point width multipliers in `[1 − speedStrength, 1]` for the **speed pen**:
+     * the faster the nib travels across the page, the thinner the line (ink has less
+     * time to lay down). Speed is `‖Δcenter‖ / Δt` in page-px/ms from the sample
+     * times, EMA-smoothed like the other channels. Returns all-`1.0` when the effect
+     * is off or the samples carry no usable timing.
+     */
+    fun speedFactors(centers: List<Pt>, samples: List<Sample>, speedStrength: Double): List<Double> {
+        val n = centers.size
+        if (speedStrength <= 0.0 || n < 2) return List(n) { 1.0 }
+        if (samples.last().t - samples.first().t <= 0.0) return List(n) { 1.0 }
+        val raw = DoubleArray(n)
+        for (i in 1 until n) {
+            val dist = (centers[i] - centers[i - 1]).length()
+            val dt = max(samples[i].t - samples[i - 1].t, MIN_DT)
+            raw[i] = dist / dt
+        }
+        raw[0] = raw[1]
+        val speed = ema(raw.asList())
+        return speed.map { 1.0 - speedStrength * smoothstep(SPEED_LO, SPEED_HI, it) }
+    }
+
+    /**
+     * Per-point width multipliers in `[0, 1]` for the **taper pen**: the line eases
+     * out of a point at each end and reaches full width in the middle, by arc-length
+     * position. [taperAmount] in `(0, 1]` is the share of the stroke that tapers,
+     * split across the two ends. Returns all-`1.0` when off or the stroke is too short.
+     */
+    fun taperFactors(centers: List<Pt>, taperAmount: Double): List<Double> {
+        val n = centers.size
+        if (taperAmount <= 0.0 || n < 2) return List(n) { 1.0 }
+        val cum = DoubleArray(n)
+        for (i in 1 until n) cum[i] = cum[i - 1] + (centers[i] - centers[i - 1]).length()
+        val total = cum[n - 1]
+        if (total < TAPER_MIN_LEN) return List(n) { 1.0 }
+        val frac = (taperAmount * 0.5).coerceIn(MIN_TAPER_FRAC, 0.5)
+        return (0 until n).map { i ->
+            val u = cum[i] / total
+            val edge = (min(u, 1.0 - u) / frac).coerceIn(0.0, 1.0)
+            edge * edge * (3 - 2 * edge)
+        }
+    }
+
+    /**
+     * Builds [StrokeGeometry] from [samples] and the style fields. [speedStrength]
+     * and [taperAmount] default to off, in which case the output is identical to
+     * the four-field pen/calligraphy pipeline (spec 03 conformance).
+     */
     fun build(
         samples: List<Sample>,
         baseWidth: Double,
         pressureEnabled: Boolean,
         m: Double,
         ds: Double,
+        speedStrength: Double = 0.0,
+        taperAmount: Double = 0.0,
     ): StrokeGeometry {
         val n = samples.size
         if (n == 0) return StrokeGeometry.EMPTY
@@ -86,13 +159,17 @@ object StrokeEngine {
             tangents.add(t)
         }
 
+        // Optional width multipliers: speed thins fast travel, taper points the ends.
+        val sf = speedFactors(centers, samples, speedStrength)
+        val tf = taperFactors(centers, taperAmount)
+
         // 5–7. Half-widths, normals, and the two ribbon edges.
         val left = ArrayList<Pt>(n)
         val right = ArrayList<Pt>(n)
         val halfWidths = ArrayList<Double>(n)
         for (i in 0 until n) {
             val t = tangents[i]
-            val h = hw(i, t.y)
+            val h = hw(i, t.y) * sf[i] * tf[i]
             halfWidths.add(h)
             val normal = Pt(-t.y, t.x) // tangent rotated 90°, already unit length
             left.add(centers[i] - normal * h)
@@ -104,8 +181,12 @@ object StrokeEngine {
         outline.addAll(left)
         for (i in right.indices.reversed()) outline.add(right[i])
 
-        // 9. Caps from the pure-pressure half-width at the first/last points.
-        val caps = listOf(Cap(centers[0], hw(0, 0.0)), Cap(centers[n - 1], hw(n - 1, 0.0)))
+        // 9. Caps from the pure-pressure half-width at the first/last points,
+        //    carrying the same speed/taper multiplier so tapered ends come to a point.
+        val caps = listOf(
+            Cap(centers[0], hw(0, 0.0) * sf[0] * tf[0]),
+            Cap(centers[n - 1], hw(n - 1, 0.0) * sf[n - 1] * tf[n - 1]),
+        )
 
         return StrokeGeometry(
             outline = if (outline.size >= 3) outline else emptyList(),

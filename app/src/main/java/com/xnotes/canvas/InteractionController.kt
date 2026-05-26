@@ -97,6 +97,9 @@ class InteractionController(
     // DRAW
     private var liveStroke: Stroke? = null
     private var strokePageIndex: Int? = null
+
+    /** Event time of the live stroke's first sample; later samples store `eventTime − this` (the speed pen reads it). */
+    private var strokeStartTimeMs = 0L
     private var drawingPointerId = -1
     private var drawingIsStylus = false
 
@@ -244,7 +247,7 @@ class InteractionController(
 
         when {
             effectiveTool == Tool.PAN -> beginPan(vx, vy)
-            effectiveTool.isStroke -> beginDraw(content, resolvePressure(e, 0, toolType), effectiveTool)
+            effectiveTool.isStroke -> beginDraw(content, resolvePressure(e, 0, toolType), effectiveTool, e.eventTime)
             effectiveTool == Tool.ERASER -> { clearSelection(); beginErase(vx, vy) }
             effectiveTool == Tool.SELECT -> beginSelect(content)
             effectiveTool == Tool.LASSO -> beginLasso(content)
@@ -309,11 +312,12 @@ class InteractionController(
 
     // --- DRAW ---
 
-    private fun beginDraw(content: Pt, pressure: Double, drawTool: Tool = tool) {
+    private fun beginDraw(content: Pt, pressure: Double, drawTool: Tool, timeMs: Long) {
         val pageIndex = state.pageIndexAtContent(content) ?: return
         val pr = state.pageRects[pageIndex]
         val stroke = Stroke(drawTool, configFor(drawTool).copy(rgba = inkColor))
-        stroke.addSample(Sample(content.x - pr.left, content.y - pr.top, pressure))
+        strokeStartTimeMs = timeMs
+        stroke.addSample(Sample(content.x - pr.left, content.y - pr.top, pressure)) // first sample: t = 0
         liveStroke = stroke
         strokePageIndex = pageIndex
         mode = PointerMode.DRAW
@@ -328,17 +332,18 @@ class InteractionController(
                 e.getHistoricalX(idx, h).toDouble(),
                 e.getHistoricalY(idx, h).toDouble(),
                 if (drawingIsStylus) e.getHistoricalPressure(idx, h).toDouble() else 1.0,
+                e.getHistoricalEventTime(h),
                 force = false,
             )
         }
         addStrokePoint(
             e.getX(idx).toDouble(), e.getY(idx).toDouble(),
-            if (drawingIsStylus) e.getPressure(idx).toDouble() else 1.0, force = false,
+            if (drawingIsStylus) e.getPressure(idx).toDouble() else 1.0, e.eventTime, force = false,
         )
         requestRender()
     }
 
-    private fun addStrokePoint(vx: Double, vy: Double, pressure: Double, force: Boolean) {
+    private fun addStrokePoint(vx: Double, vy: Double, pressure: Double, timeMs: Long, force: Boolean) {
         val stroke = liveStroke ?: return
         val pi = strokePageIndex ?: return
         val pr = state.pageRects.getOrNull(pi) ?: return
@@ -346,7 +351,7 @@ class InteractionController(
         val local = Pt(content.x - pr.left, content.y - pr.top)
         val last = stroke.samples.lastOrNull()
         if (force || last == null || Pt(last.x, last.y).manhattanTo(local) >= MIN_SAMPLE_DIST) {
-            stroke.addSample(Sample(local.x, local.y, pressure.coerceIn(0.0, 1.0)))
+            stroke.addSample(Sample(local.x, local.y, pressure.coerceIn(0.0, 1.0), (timeMs - strokeStartTimeMs).toDouble()))
         }
     }
 
@@ -354,7 +359,7 @@ class InteractionController(
         val idx = e.findPointerIndex(drawingPointerId).coerceAtLeast(0)
         addStrokePoint(
             e.getX(idx).toDouble(), e.getY(idx).toDouble(),
-            if (drawingIsStylus) e.getPressure(idx).toDouble() else 1.0, force = true,
+            if (drawingIsStylus) e.getPressure(idx).toDouble() else 1.0, e.eventTime, force = true,
         )
         val stroke = liveStroke
         val pi = strokePageIndex

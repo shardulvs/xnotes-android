@@ -17,6 +17,13 @@ data class ToolConfig(
     /** `ds` — calligraphic direction effect (0 = none). */
     val directionStrength: Double = 0.0,
     val rgba: Rgba = InkPalette.DEFAULT,
+    // New fields go *after* `rgba` so the positional constructor stays stable.
+    /** Velocity thinning (the speed pen): 0 = none; up the line thins as it moves faster. */
+    val speedStrength: Double = 0.0,
+    /** Entrance/exit taper (the taper pen): 0 = none; the share of the stroke easing to a point at each end. */
+    val taperAmount: Double = 0.0,
+    /** Neon glow: a soft luminous halo under a bright core. Composable onto any stroke tool. */
+    val neon: Boolean = false,
 )
 
 /** Factory defaults per tool (spec 04 §3). */
@@ -24,6 +31,8 @@ object ToolDefaults {
     fun configFor(tool: Tool): ToolConfig = when (tool) {
         Tool.PEN -> ToolConfig(baseWidth = 3.0, pressureEnabled = true, pressureMinFactor = 0.35, directionStrength = 0.0)
         Tool.CALLIGRAPHY -> ToolConfig(baseWidth = 6.0, pressureEnabled = true, pressureMinFactor = 0.40, directionStrength = 0.60)
+        Tool.SPEED -> ToolConfig(baseWidth = 4.0, pressureEnabled = true, pressureMinFactor = 0.35, directionStrength = 0.0, speedStrength = 0.6)
+        Tool.TAPER -> ToolConfig(baseWidth = 4.0, pressureEnabled = true, pressureMinFactor = 0.45, directionStrength = 0.0, taperAmount = 0.7)
         Tool.HIGHLIGHTER -> ToolConfig(baseWidth = 16.0, pressureEnabled = false, pressureMinFactor = 1.0, directionStrength = 0.0)
         Tool.ERASER -> ToolConfig(baseWidth = 24.0, pressureEnabled = false, pressureMinFactor = 1.0, directionStrength = 0.0)
         Tool.LASSO -> ToolConfig(baseWidth = 2.0, pressureEnabled = false, pressureMinFactor = 1.0, directionStrength = 0.0)
@@ -31,7 +40,7 @@ object ToolDefaults {
     }
 
     /** Tools whose config is persisted in settings (spec 09 §2). */
-    val persistedTools = listOf(Tool.PEN, Tool.CALLIGRAPHY, Tool.HIGHLIGHTER, Tool.ERASER, Tool.LASSO)
+    val persistedTools = listOf(Tool.PEN, Tool.CALLIGRAPHY, Tool.SPEED, Tool.TAPER, Tool.HIGHLIGHTER, Tool.ERASER, Tool.LASSO)
 }
 
 /**
@@ -50,6 +59,16 @@ object ToolConversions {
         ((multiplier - 1.0) / (multiplier + 1.0)).coerceIn(0.0, 0.95)
 
     fun directionStrengthToMultiplier(ds: Double): Double = (1.0 + ds) / (1.0 - ds)
+
+    /** SPEED (0..100, higher = stronger thinning at speed) -> `speedStrength` in [0, 0.85]. */
+    fun speedToStrength(speed: Double): Double = speed.coerceIn(0.0, 100.0) / 100.0 * 0.85
+
+    fun strengthToSpeed(s: Double): Double = (s / 0.85) * 100.0
+
+    /** TAPER (0..100, higher = longer taper) -> `taperAmount` in [0, 1]. */
+    fun taperToAmount(taper: Double): Double = taper.coerceIn(0.0, 100.0) / 100.0
+
+    fun amountToTaper(a: Double): Double = a * 100.0
 
     /** WIDTH slider range per tool (spec 04 §5): 4..40 for the highlighter, else 1..20. */
     fun widthRange(tool: Tool): ClosedFloatingPointRange<Double> =

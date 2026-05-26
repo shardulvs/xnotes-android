@@ -3,6 +3,7 @@ package com.xnotes.core.model
 import com.xnotes.core.geometry.Geometry
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
+import com.xnotes.core.pal.BlendMode
 import com.xnotes.core.pal.FillRule
 import com.xnotes.core.pal.Renderer
 import com.xnotes.core.stroke.Sample
@@ -43,6 +44,8 @@ class Stroke(
             config.pressureEnabled,
             config.pressureMinFactor,
             config.directionStrength,
+            config.speedStrength,
+            config.taperAmount,
         ).also { cachedGeometry = it }
     }
 
@@ -60,22 +63,56 @@ class Stroke(
     override fun paint(r: Renderer) {
         val g = geometry()
         val color = renderColor
-        if (color.a >= 255) {
-            // Opaque ink: draw ribbon + caps directly.
-            paintFills(r, g, color)
-        } else {
-            // Translucent ink (highlighter): accumulate the whole stroke opaquely in
-            // a layer, then composite once at the ink's alpha, so the cap/ribbon and
-            // self-overlaps don't compound into darker patches.
-            r.saveLayerAlpha(bounds().outset(2.0), color.a / 255.0)
-            paintFills(r, g, color.withAlpha(255))
-            r.restore()
+        when {
+            config.neon -> paintNeon(r, g, color)
+            color.a >= 255 -> {
+                // Opaque ink: draw ribbon + caps directly.
+                paintFills(r, g, color)
+            }
+            else -> {
+                // Translucent ink: accumulate the whole stroke opaquely in a layer, then
+                // composite once at the ink's alpha, so the cap/ribbon and self-overlaps
+                // don't compound into darker patches. The highlighter composites with
+                // MULTIPLY so it tints light areas but can't lighten dark ink underneath
+                // (text stays legible); other translucent inks blend normally.
+                val blend = if (tool == Tool.HIGHLIGHTER) BlendMode.MULTIPLY else BlendMode.SRC_OVER
+                r.saveLayerBlended(bounds().outset(2.0), color.a / 255.0, blend)
+                paintFills(r, g, color.withAlpha(255))
+                r.restore()
+            }
         }
     }
 
     private fun paintFills(r: Renderer, g: StrokeGeometry, color: Rgba) {
         if (g.outline.size >= 3) r.fillPolygon(g.outline, color, FillRule.NONZERO)
         for (cap in g.caps) if (cap.radius > 0.0) r.fillCircle(cap.center, cap.radius, color)
+    }
+
+    /**
+     * Neon: a soft luminous halo in the ink colour, composited once at [NEON_GLOW_ALPHA]
+     * (so a self-overlapping scribble doesn't blow out), with a brightened, crisp core
+     * laid on top to read as a glowing tube. Overrides the translucent path, so it works
+     * on any stroke tool.
+     */
+    private fun paintNeon(r: Renderer, g: StrokeGeometry, color: Rgba) {
+        val glowR = (config.baseWidth * NEON_GLOW_FACTOR).coerceAtLeast(NEON_GLOW_MIN)
+        val glow = color.withAlpha(255)
+        r.saveLayerAlpha(bounds().outset(glowR * 2 + 4), NEON_GLOW_ALPHA)
+        if (g.outline.size >= 3) r.fillPolygonGlow(g.outline, glow, FillRule.NONZERO, glowR)
+        for (cap in g.caps) if (cap.radius > 0.0) r.fillCircleGlow(cap.center, cap.radius, glow, glowR)
+        r.restore()
+        paintFills(r, g, neonCore(color))
+    }
+
+    /** The ink colour mixed toward white for the bright neon core (opaque). */
+    private fun neonCore(c: Rgba): Rgba {
+        val k = NEON_CORE_LIGHTEN
+        return Rgba(
+            (c.r + (255 - c.r) * k).toInt(),
+            (c.g + (255 - c.g) * k).toInt(),
+            (c.b + (255 - c.b) * k).toInt(),
+            255,
+        )
     }
 
     override fun bounds(): Rect {
@@ -164,5 +201,13 @@ class Stroke(
 
     companion object {
         const val KIND = "stroke"
+
+        /** Neon glow radius as a multiple of base width, with a page-px floor. */
+        private const val NEON_GLOW_FACTOR = 1.7
+        private const val NEON_GLOW_MIN = 3.5
+
+        /** Halo opacity, and how far the core is mixed toward white. */
+        private const val NEON_GLOW_ALPHA = 0.6
+        private const val NEON_CORE_LIGHTEN = 0.6
     }
 }

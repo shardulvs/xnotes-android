@@ -156,14 +156,26 @@ class DocumentCodec(
     // --- item -> json ---
 
     private fun strokeToJson(s: Stroke): JSONObject {
+        // Per-sample time is only meaningful to the speed pen, so it's written as an
+        // optional 4th element only then — every other stroke serializes unchanged.
+        val withTime = s.config.speedStrength > 0.0
         val samples = JSONArray()
-        for (sm in s.samples) samples.put(JSONArray().put(sm.x).put(sm.y).put(sm.pressure))
+        for (sm in s.samples) {
+            val a = JSONArray().put(sm.x).put(sm.y).put(sm.pressure)
+            if (withTime) a.put(sm.t)
+            samples.put(a)
+        }
         val config = JSONObject()
             .put("base_width", s.config.baseWidth)
             .put("pressure_enabled", s.config.pressureEnabled)
             .put("pressure_min_factor", s.config.pressureMinFactor)
             .put("direction_strength", s.config.directionStrength)
             .put("rgba", rgbaToJson(s.config.rgba))
+        // New style fields are written only when set, so a plain pen/calligraphy
+        // stroke's config is byte-for-byte what older versions wrote.
+        if (s.config.speedStrength != 0.0) config.put("speed_strength", s.config.speedStrength)
+        if (s.config.taperAmount != 0.0) config.put("taper_amount", s.config.taperAmount)
+        if (s.config.neon) config.put("neon", true)
         return JSONObject()
             .put("kind", Stroke.KIND)
             .put("tool", s.tool.id)
@@ -217,12 +229,16 @@ class DocumentCodec(
             pressureMinFactor = c?.optDouble("pressure_min_factor", def.pressureMinFactor) ?: def.pressureMinFactor,
             directionStrength = c?.optDouble("direction_strength", def.directionStrength) ?: def.directionStrength,
             rgba = readRgba(c?.optJSONArray("rgba")) ?: def.rgba,
+            speedStrength = c?.optDouble("speed_strength", def.speedStrength) ?: def.speedStrength,
+            taperAmount = c?.optDouble("taper_amount", def.taperAmount) ?: def.taperAmount,
+            neon = c?.optBoolean("neon", def.neon) ?: def.neon,
         )
         val samples = ArrayList<Sample>()
         o.optJSONArray("samples")?.let { arr ->
             for (i in 0 until arr.length()) {
                 val s = arr.optJSONArray(i) ?: continue
-                samples.add(Sample(s.optDouble(0, 0.0), s.optDouble(1, 0.0), s.optDouble(2, 1.0)))
+                // 4th element (relative ms) is present only for speed-pen strokes; absent ⇒ 0.
+                samples.add(Sample(s.optDouble(0, 0.0), s.optDouble(1, 0.0), s.optDouble(2, 1.0), s.optDouble(3, 0.0)))
             }
         }
         return Stroke(tool, config, samples)

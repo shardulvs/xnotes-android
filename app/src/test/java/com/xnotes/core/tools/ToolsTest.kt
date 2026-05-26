@@ -64,6 +64,6 @@ class ToolsTest {
 
     @Test fun toolIdRoundTrip() {
         for (t in Tool.entries) assertEquals(t, Tool.fromId(t.id))
-        assertEquals(9, Tool.wheelOrder.size)
+        assertEquals(11, Tool.wheelOrder.size)
     }
 }
