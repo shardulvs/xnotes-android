@@ -21,6 +21,9 @@ class Stroke(
     val tool: Tool,
     val config: ToolConfig,
     val samples: MutableList<Sample> = mutableListOf(),
+    /** Content-px → dp scale captured at pen-down (zoom ÷ display density), so the speed
+     *  pen judges gesture speed in zoom- and device-independent units. 1.0 = unscaled. */
+    val speedScale: Double = 1.0,
 ) : CanvasItem {
 
     override val kind = KIND
@@ -46,6 +49,7 @@ class Stroke(
             config.directionStrength,
             config.speedStrength,
             config.taperAmount,
+            speedScale,
         ).also { cachedGeometry = it }
     }
 

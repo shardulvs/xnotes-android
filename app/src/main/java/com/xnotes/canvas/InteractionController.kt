@@ -315,7 +315,10 @@ class InteractionController(
     private fun beginDraw(content: Pt, pressure: Double, drawTool: Tool, timeMs: Long) {
         val pageIndex = state.pageIndexAtContent(content) ?: return
         val pr = state.pageRects[pageIndex]
-        val stroke = Stroke(drawTool, configFor(drawTool).copy(rgba = inkColor))
+        // Capture content-px → dp scale now, so the speed pen judges gesture speed in
+        // zoom- and density-independent dp regardless of how the stroke is later viewed.
+        val speedScale = state.zoom / state.devicePxPerDp
+        val stroke = Stroke(drawTool, configFor(drawTool).copy(rgba = inkColor), speedScale = speedScale)
         strokeStartTimeMs = timeMs
         stroke.addSample(Sample(content.x - pr.left, content.y - pr.top, pressure)) // first sample: t = 0
         liveStroke = stroke
@@ -924,7 +927,7 @@ class InteractionController(
     }
 
     private fun cloneItem(item: CanvasItem): CanvasItem = when (item) {
-        is Stroke -> Stroke(item.tool, item.config, item.samples.toMutableList())
+        is Stroke -> Stroke(item.tool, item.config, item.samples.toMutableList(), item.speedScale)
         is ImageItem -> ImageItem(item.raster, item.rect)
         is TextItem -> TextItem(item.pos, item.width, item.text, item.rgba, item.pointSize, textMeasurer)
         is ShapeItem -> ShapeItem(item.shape, item.start, item.end, item.strokeRgba, item.strokeWidth, item.fillRgba)

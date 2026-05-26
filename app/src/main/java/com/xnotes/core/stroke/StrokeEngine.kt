@@ -18,11 +18,12 @@ object StrokeEngine {
     /** Floor on the calligraphic direction term so width stays positive. */
     const val MIN_DIRECTION = 0.1
 
-    /** Speed pen: page-px/ms at/below which the line stays full width, and the
-     *  speed at/above which it reaches its thinnest. Mapped through a smoothstep.
-     *  The window sits at everyday writing speeds so normal strokes already modulate. */
-    const val SPEED_LO = 0.06
-    const val SPEED_HI = 0.25
+    /** Speed pen: dp/ms at/below which the line stays full width, and the speed
+     *  at/above which it reaches its thinnest (≈1.25 and ≈5 in/s of hand travel).
+     *  Measuring in dp — not page pixels — makes the effect independent of both zoom
+     *  and screen density; see [speedFactors] and the per-stroke speed scale. */
+    const val SPEED_LO = 0.2
+    const val SPEED_HI = 0.8
 
     /** Speed pen: a heavier low-pass on the speed channel than [ALPHA] (position), so the
      *  width glides between thick and thin over ~1/this samples instead of snapping. */
@@ -79,17 +80,19 @@ object StrokeEngine {
     /**
      * Per-point width multipliers in `[1 − speedStrength, 1]` for the **speed pen**:
      * the faster the nib travels across the page, the thinner the line (ink has less
-     * time to lay down). Speed is `‖Δcenter‖ / Δt` in page-px/ms from the sample
-     * times, EMA-smoothed like the other channels. Returns all-`1.0` when the effect
-     * is off or the samples carry no usable timing.
+     * time to lay down). Speed is `‖Δcenter‖ · speedScale / Δt` in dp/ms from the
+     * sample times, where [speedScale] (zoom ÷ density, captured at pen-down) converts
+     * page pixels to dp so the effect is zoom- and device-independent. Smoothed with a
+     * heavier low-pass than position. Returns all-`1.0` when off or the samples carry
+     * no usable timing.
      */
-    fun speedFactors(centers: List<Pt>, samples: List<Sample>, speedStrength: Double): List<Double> {
+    fun speedFactors(centers: List<Pt>, samples: List<Sample>, speedStrength: Double, speedScale: Double): List<Double> {
         val n = centers.size
         if (speedStrength <= 0.0 || n < 2) return List(n) { 1.0 }
         if (samples.last().t - samples.first().t <= 0.0) return List(n) { 1.0 }
         val raw = DoubleArray(n)
         for (i in 1 until n) {
-            val dist = (centers[i] - centers[i - 1]).length()
+            val dist = (centers[i] - centers[i - 1]).length() * speedScale
             val dt = max(samples[i].t - samples[i - 1].t, MIN_DT)
             raw[i] = dist / dt
         }
@@ -132,6 +135,7 @@ object StrokeEngine {
         ds: Double,
         speedStrength: Double = 0.0,
         taperAmount: Double = 0.0,
+        speedScale: Double = 1.0,
     ): StrokeGeometry {
         val n = samples.size
         if (n == 0) return StrokeGeometry.EMPTY
@@ -165,7 +169,7 @@ object StrokeEngine {
         }
 
         // Optional width multipliers: speed thins fast travel, taper points the ends.
-        val sf = speedFactors(centers, samples, speedStrength)
+        val sf = speedFactors(centers, samples, speedStrength, speedScale)
         val tf = taperFactors(centers, taperAmount)
 
         // 5–7. Half-widths, normals, and the two ribbon edges.

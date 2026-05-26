@@ -125,7 +125,7 @@ class PresentationFrameSource(
         val out = ArrayList<Stroke>()
         for (item in page.items) {
             if (item is Stroke && item.tool == Tool.HIGHLIGHTER && !state.isLiftedItem(item)) {
-                out.add(Stroke(item.tool, item.config, ArrayList(item.samples)))
+                out.add(Stroke(item.tool, item.config, ArrayList(item.samples), item.speedScale))
             }
         }
         return out
@@ -136,6 +136,6 @@ class PresentationFrameSource(
         val ls = liveStroke() ?: return null
         if (ls.first != pageIndex) return null
         val src = ls.second
-        return Stroke(src.tool, src.config, ArrayList(src.samples))
+        return Stroke(src.tool, src.config, ArrayList(src.samples), src.speedScale)
     }
 }

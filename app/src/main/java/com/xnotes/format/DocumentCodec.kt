@@ -176,11 +176,15 @@ class DocumentCodec(
         if (s.config.speedStrength != 0.0) config.put("speed_strength", s.config.speedStrength)
         if (s.config.taperAmount != 0.0) config.put("taper_amount", s.config.taperAmount)
         if (s.config.neon) config.put("neon", true)
-        return JSONObject()
+        val obj = JSONObject()
             .put("kind", Stroke.KIND)
             .put("tool", s.tool.id)
             .put("config", config)
             .put("samples", samples)
+        // The speed pen's gesture-speed scale (zoom ÷ density at pen-down) reconstructs its
+        // width on reload; written alongside the per-sample times, only for that tool.
+        if (withTime) obj.put("speed_scale", s.speedScale)
+        return obj
     }
 
     private fun imageToJson(item: ImageItem, assetName: String): JSONObject =
@@ -241,7 +245,7 @@ class DocumentCodec(
                 samples.add(Sample(s.optDouble(0, 0.0), s.optDouble(1, 0.0), s.optDouble(2, 1.0), s.optDouble(3, 0.0)))
             }
         }
-        return Stroke(tool, config, samples)
+        return Stroke(tool, config, samples, o.optDouble("speed_scale", 1.0))
     }
 
     private fun parseImage(o: JSONObject, entries: Map<String, ByteArray>): ImageItem? {

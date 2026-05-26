@@ -160,6 +160,7 @@ class DocumentCodecTest {
                 Tool.SPEED,
                 ToolDefaults.configFor(Tool.SPEED),
                 mutableListOf(Sample(0.0, 0.0, 1.0, 0.0), Sample(10.0, 0.0, 0.8, 16.0), Sample(20.0, 0.0, 0.6, 33.0)),
+                2.5,
             ),
         )
         doc.pages.add(page)
@@ -167,6 +168,7 @@ class DocumentCodecTest {
         val s = roundTrip(doc).pages[0].items[0] as Stroke
         assertEquals(Tool.SPEED, s.tool)
         assertEquals(0.8, s.config.speedStrength, 1e-9)
+        assertEquals(2.5, s.speedScale, 1e-9)       // gesture-speed scale survives
         assertEquals(3, s.samples.size)
         assertEquals(16.0, s.samples[1].t, 1e-9)   // the 4th sample element survives
         assertEquals(33.0, s.samples[2].t, 1e-9)

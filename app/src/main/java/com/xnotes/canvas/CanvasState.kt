@@ -58,6 +58,10 @@ class CanvasState(
     var viewportW: Int = 0
     var viewportH: Int = 0
     var renderScale: Double = 1.0
+
+    /** Device pixels per dp (display density), set by the view. Lets the speed pen
+     *  measure gesture speed in zoom- and device-independent dp (see [InteractionController]). */
+    var devicePxPerDp: Double = 1.0
     var pageColorOverride: Rgba? = null
     var didInitialFit: Boolean = false
 

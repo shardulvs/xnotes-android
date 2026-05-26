@@ -30,6 +30,7 @@ class CanvasView @JvmOverloads constructor(
         set(value) {
             field = value
             value?.let { st ->
+                st.devicePxPerDp = resources.displayMetrics.density.toDouble()
                 // Rasterize newly visible pages off the UI thread so scrolling never
                 // stalls while a page is built; publish the surface back on the main
                 // thread and ask for a repaint.

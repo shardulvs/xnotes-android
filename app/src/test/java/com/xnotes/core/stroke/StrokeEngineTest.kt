@@ -125,4 +125,14 @@ class StrokeEngineTest {
         val b = StrokeEngine.build(fast, 4.0, false, 1.0, 0.0)
         assertEquals(a.halfWidths, b.halfWidths)
     }
+
+    @Test fun speedScaleScalesPerceivedSpeed() {
+        // Same gesture and timing; a larger content->dp scale (e.g. zoomed in) reads as
+        // faster, so the line thins where the unscaled one stays full width.
+        val pts = (0..5).map { Sample(it * 10.0, 0.0, 1.0, it * 100.0) }
+        val unscaled = StrokeEngine.build(pts, 4.0, false, 1.0, 0.0, speedStrength = 0.8, speedScale = 1.0)
+        val scaled = StrokeEngine.build(pts, 4.0, false, 1.0, 0.0, speedStrength = 0.8, speedScale = 5.0)
+        assertEquals(2.0, unscaled.halfWidths.maxOrNull()!!, 1e-6)
+        assertTrue(scaled.halfWidths.maxOrNull()!! < unscaled.halfWidths.maxOrNull()!!)
+    }
 }
