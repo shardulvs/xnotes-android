@@ -62,7 +62,7 @@ class DebugOverlay {
         val res = if (rw > 0) "$rw x $rh" else "-"
         val lines = listOf(
             "%.0f fps   %.1f ms".format(fps, frameMs),
-            "res  $res",
+            "cache res  $res",
             "ink cache  ${snap.inkPages} pg",
             "bg  cache  ${snap.bgPages} pg",
             "cache mem  %.1f MB".format(snap.bytes / MB),
