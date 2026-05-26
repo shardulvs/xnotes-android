@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- XNotes — highlighter stroke. Three "text" rules with a translucent rounded band swept across the middle. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+
+    <!-- text rules -->
+    <path
+        android:strokeColor="#FF000000"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:pathData="M8,24 L72,24"/>
+    <path
+        android:strokeColor="#FF000000"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:pathData="M8,50 L92,50"/>
+    <path
+        android:strokeColor="#FF000000"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:pathData="M8,76 L62,76"/>
+
+    <!-- translucent highlight band, tilted slightly -->
+    <group
+        android:pivotX="50"
+        android:pivotY="50"
+        android:rotation="-3">
+        <path
+            android:fillColor="#FF000000"
+            android:fillAlpha="0.32"
+            android:pathData="M7,36 L97,36 A4,4 0 0 1 101,40 L101,60 A4,4 0 0 1 97,64 L7,64 A4,4 0 0 1 3,60 L3,40 A4,4 0 0 1 7,36 Z"/>
+    </group>
+</vector>

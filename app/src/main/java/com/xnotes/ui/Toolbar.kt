@@ -35,27 +35,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.xnotes.R
 import com.xnotes.core.tools.Tool
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
-
-private val toolIcons: List<Pair<Tool, ImageVector>> = listOf(
-    Tool.PEN to XnotesIcons.pen,
-    Tool.CALLIGRAPHY to XnotesIcons.calligraphy,
-    Tool.SPEED to XnotesIcons.speed,
-    Tool.TAPER to XnotesIcons.taper,
-    Tool.HIGHLIGHTER to XnotesIcons.highlighter,
-    Tool.ERASER to XnotesIcons.eraser,
-    Tool.PAN to XnotesIcons.pan,
-    Tool.SELECT to XnotesIcons.select,
-    Tool.LASSO to XnotesIcons.lasso,
-    Tool.SHAPE to XnotesIcons.shape,
-    Tool.TEXT to XnotesIcons.text,
-)
 
 @Composable
 fun Toolbar(
@@ -67,6 +55,21 @@ fun Toolbar(
     modifier: Modifier = Modifier,
 ) {
     val palette = LocalPalette.current
+    // The five stroke tools use the designed vector drawables (res/drawable/ic_stroke_*),
+    // tinted at the call site like every other icon; the rest use the built-in line set.
+    val toolIcons: List<Pair<Tool, ImageVector>> = listOf(
+        Tool.PEN to ImageVector.vectorResource(R.drawable.ic_stroke_regular),
+        Tool.CALLIGRAPHY to ImageVector.vectorResource(R.drawable.ic_stroke_calligraphy),
+        Tool.SPEED to ImageVector.vectorResource(R.drawable.ic_stroke_speed),
+        Tool.TAPER to ImageVector.vectorResource(R.drawable.ic_stroke_taper),
+        Tool.HIGHLIGHTER to ImageVector.vectorResource(R.drawable.ic_stroke_highlighter),
+        Tool.ERASER to XnotesIcons.eraser,
+        Tool.PAN to XnotesIcons.pan,
+        Tool.SELECT to XnotesIcons.select,
+        Tool.LASSO to XnotesIcons.lasso,
+        Tool.SHAPE to XnotesIcons.shape,
+        Tool.TEXT to XnotesIcons.text,
+    )
     var configForTool by remember { mutableStateOf<Tool?>(null) }
     var switcherIndex by remember { mutableStateOf<Int?>(null) }
     var renaming by remember { mutableStateOf(false) }

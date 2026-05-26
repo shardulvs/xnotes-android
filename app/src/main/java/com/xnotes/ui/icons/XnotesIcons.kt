@@ -39,11 +39,8 @@ object XnotesIcons {
     private fun rect(x: Double, y: Double, w: Double, h: Double): String =
         "M $x $y h $w v $h h ${-w} Z"
 
-    val pen = icon("M12 20h9", "M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z")
-    val calligraphy = icon("M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z", "M15 5l4 4")
-    val speed = icon("M13 2 L4 13 L10 13 L9 22 L18 9 L12 9 Z")
-    val taper = icon("M3 12 C7 8 17 8 21 12 C17 16 7 16 3 12 Z")
-    val highlighter = icon("m9 11-6 6v3h9l3-3", "m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L16 4l6 8Z")
+    // Pen, calligraphy, speed, taper and highlighter use the designed vector drawables
+    // in res/drawable/ic_stroke_* (referenced from the toolbar), not built-in line glyphs.
     val eraser = icon(
         "m7 21-4.3-4.3a1.7 1.7 0 0 1 0-2.4l9.6-9.6a1.7 1.7 0 0 1 2.4 0l5.6 5.6a1.7 1.7 0 0 1 0 2.4L13 21Z",
         "M22 21H7", "m5 11 9 9",
