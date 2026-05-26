@@ -59,10 +59,6 @@ data class Settings(
     fun rememberColor(c: Rgba): Settings =
         copy(recentColors = (listOf(c) + recentColors.filter { it != c }).take(24))
 
-    /** Store an absolute path at the front of recent files, de-duped, capped at 10. */
-    fun rememberFile(path: String): Settings =
-        copy(recentFiles = (listOf(path) + recentFiles.filter { it != path }).take(10))
-
     fun toJson(): JSONObject {
         val toolsObj = JSONObject()
         for (tool in ToolDefaults.persistedTools) {

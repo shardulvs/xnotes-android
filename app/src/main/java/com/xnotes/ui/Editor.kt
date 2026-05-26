@@ -212,6 +212,14 @@ class Editor(context: Context) {
         controller.clipboardHasImage = { clipboardImageUri() != null }
         applySettings()
         rebuildPdfSource()
+        // Clean up legacy duplicate recents (the same note remembered under both a tree
+        // URI and a plain document URI before they were de-duped by document identity).
+        val cleanedRecents = dedupRecents(settings.recentFiles)
+        if (cleanedRecents != settings.recentFiles) {
+            settings = settings.copy(recentFiles = cleanedRecents)
+            recentFiles = cleanedRecents
+            settingsRepo.save(settings)
+        }
     }
 
     // --- selection menu / clipboard ---
@@ -398,7 +406,10 @@ class Editor(context: Context) {
             renderScale = renderScale,
         )
         flushAutosave() // write the current note back to its folder file if it autosaves
-        currentUri?.let { settings = settings.rememberFile(it); recentFiles = settings.recentFiles }
+        currentUri?.let {
+            settings = settings.copy(recentFiles = dedupRecents(listOf(it) + settings.recentFiles))
+            recentFiles = settings.recentFiles
+        }
         settingsRepo.save(settings)
         saveSession()
     }
@@ -538,8 +549,25 @@ class Editor(context: Context) {
 
     // --- recent files (backstage) ---
 
+    /**
+     * Canonical identity of a recent note — provider authority + document id — so the
+     * same file reached as a tree URI (the in-app explorer / a folder note) and as a
+     * plain document URI (the system "Open…" picker) counts once. Falls back to the raw
+     * string for non-document URIs.
+     */
+    private fun recentKey(uri: String): String = runCatching {
+        val u = android.net.Uri.parse(uri)
+        "${u.authority}|${android.provider.DocumentsContract.getDocumentId(u)}"
+    }.getOrDefault(uri)
+
+    /** Most-recent-first, one entry per [recentKey] (keeps the earliest), capped at 10. */
+    private fun dedupRecents(uris: List<String>): List<String> {
+        val seen = HashSet<String>()
+        return uris.filter { seen.add(recentKey(it)) }.take(10)
+    }
+
     private fun rememberRecent(uri: String) {
-        settings = settings.rememberFile(uri)
+        settings = settings.copy(recentFiles = dedupRecents(listOf(uri) + settings.recentFiles))
         recentFiles = settings.recentFiles
         settingsRepo.save(settings)
         thumbCache.prune(settings.recentFiles.toSet()) // drop the file that fell off the capped list
@@ -783,7 +811,7 @@ class Editor(context: Context) {
             title = state.document.title
         }
         if (resultUri != docUri) {
-            settings = settings.copy(recentFiles = settings.recentFiles.map { if (it == docUri) resultUri else it })
+            settings = settings.copy(recentFiles = dedupRecents(settings.recentFiles.map { if (it == docUri) resultUri else it }))
             recentFiles = settings.recentFiles
             settingsRepo.save(settings)
             invalidateRecentThumb(docUri)
