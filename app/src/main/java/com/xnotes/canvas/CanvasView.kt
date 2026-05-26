@@ -184,6 +184,7 @@ class CanvasView @JvmOverloads constructor(
     override fun onDetachedFromWindow() {
         cacheExecutor?.shutdown()
         mainHandler.removeCallbacks(debugTick)
+        mainHandler.removeCallbacks(sharpDebounce)
         super.onDetachedFromWindow()
     }
 
@@ -230,6 +231,29 @@ class CanvasView @JvmOverloads constructor(
         }
         r.restore()
 
+        // Past the resolution cap, cover the (soft, capped) page caches with a razor-sharp,
+        // full-resolution render of just the viewport. While panning we slide the previous sharp
+        // render with the content (so short pans stay sharp) and let the soft cache show only in
+        // the strip panning into view; once the view settles we re-render the sharp viewport for
+        // the new area. A zoom change drops back to the soft caches until the settle re-render.
+        if (st.isPastResolutionCap()) {
+            val blit = st.sharpViewportBlit()
+            if (blit != null) {
+                val vw = st.viewportW.toDouble()
+                val vh = st.viewportH.toDouble()
+                r.drawRaster(blit.surface, Rect(blit.dx, blit.dy, vw, vh))
+                mainHandler.removeCallbacks(sharpDebounce)
+                // Off the exact rendered view (a pan): schedule a fresh render for where we settle.
+                if (blit.dx != 0.0 || blit.dy != 0.0) mainHandler.postDelayed(sharpDebounce, SHARP_SETTLE_MS)
+            } else {
+                mainHandler.removeCallbacks(sharpDebounce)
+                mainHandler.postDelayed(sharpDebounce, SHARP_SETTLE_MS)
+            }
+        } else {
+            mainHandler.removeCallbacks(sharpDebounce)
+            st.clearSharpViewport()
+        }
+
         drawOverlay?.invoke(r, canvas)
 
         st.dropCachesExcept(visiblePages)
@@ -238,6 +262,9 @@ class CanvasView @JvmOverloads constructor(
         debugOverlay.sampleFrame(System.nanoTime())
         debugOverlay.draw(r, st)
     }
+
+    /** Fires once the view has been still for [SHARP_SETTLE_MS], rendering the sharp viewport. */
+    private val sharpDebounce = Runnable { state?.requestSharpViewport() }
 
     private fun drawPageLabel(r: AndroidRenderer, st: CanvasState, index: Int, pr: Rect) {
         val label = "%02d".format(index + 1)
@@ -253,6 +280,9 @@ class CanvasView @JvmOverloads constructor(
 
         /** Max centroid drift (viewport px) the four fingers may wander and still tap. */
         private const val TAP_SLOP = 40.0
+
+        /** How long the view must be still before the sharp viewport is rendered (ms). */
+        private const val SHARP_SETTLE_MS = 90L
 
         /** Idle repaint interval (ms) while the debug HUD is visible, so its FPS falls to 0. */
         private const val DEBUG_TICK_MS = 250L

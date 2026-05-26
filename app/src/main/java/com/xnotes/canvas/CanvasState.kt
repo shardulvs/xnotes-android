@@ -6,7 +6,10 @@ import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.Document
 import com.xnotes.core.model.Page
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.pal.FontSpec
+import com.xnotes.core.pal.Pen
 import com.xnotes.core.pal.RasterSurface
+import com.xnotes.core.pal.Renderer
 import com.xnotes.core.pal.SurfaceFactory
 import com.xnotes.ui.theme.Palette
 import kotlin.math.abs
@@ -53,8 +56,12 @@ class CanvasState(
     /** Items excluded from the cache (lifted for selection/editing); set by the interaction layer. */
     var isLiftedItem: (CanvasItem) -> Boolean = { false }
 
-    /** Optional page-background painter (PDF / template) drawn into the cache before items. */
-    var paintPageBackground: ((page: Page, renderer: com.xnotes.core.pal.Renderer, res: Double) -> Unit)? = null
+    /**
+     * Optional page-background painter (PDF / template). [region] is the page-local content rect
+     * to render — the whole page for the page cache/thumbnails, or just the visible sub-rect for
+     * the sharp viewport — so the painter can rasterize only that slice at full resolution.
+     */
+    var paintPageBackground: ((page: Page, renderer: Renderer, res: Double, region: Rect) -> Unit)? = null
 
     /**
      * Per-page caches, split into two layers so an ink edit never re-rasterizes the
@@ -93,6 +100,24 @@ class CanvasState(
      */
     private var cacheGen = 0
 
+    // --- sharp viewport (past the resolution cap) ---
+
+    private class SharpFrame(val surface: RasterSurface, val sx: Double, val sy: Double, val z: Double, val gen: Int)
+
+    private var sharpFrame: SharpFrame? = null
+    private var pendingSharp = false
+
+    /** Bumped on any content/layout change so a stale sharp viewport is discarded. */
+    private var sharpGen = 0
+
+    private class SharpPageSnap(
+        val page: Page,
+        val pr: Rect,
+        val items: List<CanvasItem>,
+        val region: Rect,
+        val index: Int,
+    )
+
     var pageRects: List<Rect> = emptyList()
         private set
     var contentW: Double = 2 * MARGIN
@@ -103,6 +128,7 @@ class CanvasState(
     // --- layout ---
 
     fun relayout() {
+        sharpGen++ // page layout / viewport size changed: the sharp viewport must re-render
         val pages = document.pages
         if (pages.isEmpty()) {
             pageRects = emptyList()
@@ -344,12 +370,13 @@ class CanvasState(
         surface.fill(TRANSPARENT)
         val r = surface.renderer()
         r.scale(res, res)
-        paintPageBackground?.invoke(page, r, res)
+        paintPageBackground?.invoke(page, r, res, Rect(0.0, 0.0, page.width, page.height))
         return CacheEntry(surface, res)
     }
 
     /** Append a single just-committed stroke into an existing cache (cheap), else rebuild. */
     fun appendToCache(page: Page, item: CanvasItem) {
+        sharpGen++ // the sharp viewport (if any) no longer reflects the page's content
         val res = clampedRes(page)
         val existing = caches[page]
         if (existing == null || abs(existing.res - res) > 1e-6) {
@@ -372,6 +399,7 @@ class CanvasState(
      * [invalidatePage] for a full rebuild.
      */
     fun repairRegion(page: Page, dirtyRect: Rect): Boolean {
+        sharpGen++ // erased content: the sharp viewport must re-render
         val entry = caches[page] ?: return false
         val r = entry.surface.renderer()
         r.save()
@@ -388,12 +416,14 @@ class CanvasState(
     fun invalidatePage(page: Page) {
         caches.remove(page)
         cacheGen++
+        sharpGen++
     }
 
     fun invalidateAllCaches() {
         caches.clear()
         bgCaches.clear()
         cacheGen++
+        sharpGen++
     }
 
     /**
@@ -416,6 +446,141 @@ class CanvasState(
     fun dropCachesExcept(visible: Set<Page>) {
         caches.keys.retainAll(visible)
         bgCaches.keys.retainAll(visible)
+    }
+
+    // --- sharp viewport ---
+
+    /** True when the current zoom pushes a visible page past [MAX_CACHE_PX] (its cache is clamped). */
+    fun isPastResolutionCap(): Boolean {
+        val target = zoom * renderScale
+        val visible = visibleContentRect()
+        for (i in pageRects.indices) {
+            val pr = pageRects.getOrNull(i) ?: continue
+            if (!pr.intersects(visible)) continue
+            if (target * max(document.pages[i].width, document.pages[i].height) > MAX_CACHE_PX) return true
+        }
+        return false
+    }
+
+    /** A ready sharp surface plus the viewport-pixel offset to blit it at (non-zero while panning). */
+    class SharpBlit(val surface: RasterSurface, val dx: Double, val dy: Double)
+
+    /**
+     * The sharp viewport surface to blit, or null when there isn't a usable one. It stays usable
+     * across a *pan* (same zoom, same content): it was rendered for an earlier scroll, so we just
+     * slide it by the scroll delta — the part still on screen stays razor-sharp, and the strip that
+     * panned into view falls back to the soft cache underneath until the settled re-render lands.
+     * A zoom change or content edit makes it unusable (returns null).
+     */
+    fun sharpViewportBlit(): SharpBlit? {
+        val f = sharpFrame ?: return null
+        if (f.gen != sharpGen || f.z != zoom) return null
+        val o = originFor(scrollX, scrollY, zoom)
+        val o0 = originFor(f.sx, f.sy, f.z)
+        return SharpBlit(f.surface, o.x - o0.x, o.y - o0.y)
+    }
+
+    /** Drop the sharp viewport surface (e.g. once the zoom falls back below the cap). */
+    fun clearSharpViewport() {
+        sharpFrame = null
+    }
+
+    /**
+     * Render the current viewport — paper + background + ink for the visible pages — at full zoom
+     * resolution into one viewport-sized surface, off the UI thread, tagged with the exact view it
+     * was rendered for. Used past the resolution cap so a deep zoom stays razor-sharp without
+     * caching whole pages; the result is reused only while the view is unchanged (see
+     * [sharpSurfaceForView]) and re-rendered when the user pans/zooms to a new area.
+     */
+    fun requestSharpViewport() {
+        if (pendingSharp || zoomingInProgress || viewportW <= 0 || viewportH <= 0) return
+        if (!isPastResolutionCap()) return
+        val gen = sharpGen
+        val sx = scrollX
+        val sy = scrollY
+        val z = zoom
+        val vw = viewportW
+        val vh = viewportH
+        val res = z * renderScale
+        val o = originFor(sx, sy, z)
+        val visible = visibleFor(sx, sy, z)
+        val bg = palette.bg
+        // Snapshot the visible pages and their items on the UI thread.
+        val draws = ArrayList<SharpPageSnap>()
+        for (i in document.pages.indices) {
+            val pr = pageRects.getOrNull(i) ?: continue
+            if (!pr.intersects(visible)) continue
+            val page = document.pages[i]
+            val region = Rect.fromPoints(
+                Pt(max(pr.left, visible.left) - pr.left, max(pr.top, visible.top) - pr.top),
+                Pt(min(pr.right, visible.right) - pr.left, min(pr.bottom, visible.bottom) - pr.top),
+            )
+            draws.add(SharpPageSnap(page, pr, page.items.filterNot(isLiftedItem), region, i))
+        }
+        if (draws.isEmpty()) return
+        pendingSharp = true
+        runAsync {
+            val surface = renderSharpSurface(vw, vh, o, z, res, bg, draws)
+            postToMain {
+                pendingSharp = false
+                if (gen == sharpGen && sx == scrollX && sy == scrollY && z == zoom) {
+                    sharpFrame = SharpFrame(surface, sx, sy, z, gen)
+                    onCacheReady?.invoke()
+                }
+            }
+        }
+    }
+
+    private fun renderSharpSurface(
+        vw: Int,
+        vh: Int,
+        o: Pt,
+        z: Double,
+        res: Double,
+        bg: Rgba,
+        draws: List<SharpPageSnap>,
+    ): RasterSurface {
+        val surface = surfaceFactory.create(vw, vh, 1.0)
+        surface.fill(bg)
+        val r = surface.renderer()
+        r.translate(o.x, o.y)
+        r.scale(z, z)
+        val border = Pen(palette.paperBorder, 1.0, cosmetic = true)
+        for (d in draws) {
+            r.fillRect(d.pr, paperColor(d.page))
+            r.strokeRect(d.pr, border)
+            r.save()
+            r.clipRect(d.pr)
+            r.translate(d.pr.left, d.pr.top)
+            if (paintPageBackground != null && d.region.w > 0.0 && d.region.h > 0.0) {
+                paintPageBackground?.invoke(d.page, r, res, d.region)
+            }
+            for (item in d.items) item.paint(r)
+            r.restore()
+            r.drawText(
+                "%02d".format(d.index + 1),
+                Rect(d.pr.left, d.pr.top - PAGE_LABEL_OFFSET, 140.0, 24.0),
+                FontSpec(9.0),
+                palette.textDim,
+            )
+        }
+        return surface
+    }
+
+    private fun originFor(sx: Double, sy: Double, z: Double): Pt {
+        val cw = contentW * z
+        val ch = contentH * z
+        val ox = if (cw < viewportW) (viewportW - cw) / 2.0 else -sx
+        val oy = if (ch < viewportH) (viewportH - ch) / 2.0 else -sy
+        return Pt(ox, oy)
+    }
+
+    private fun visibleFor(sx: Double, sy: Double, z: Double): Rect {
+        val o = originFor(sx, sy, z)
+        return Rect.fromPoints(
+            Pt(-o.x / z, -o.y / z),
+            Pt((viewportW - o.x) / z, (viewportH - o.y) / z),
+        )
     }
 
     /** A read-only count of the live page caches and their bitmap bytes, for the debug overlay. */
@@ -451,7 +616,7 @@ class CanvasState(
         const val MAX_ZOOM = 8.0
         const val ZOOM_STEP = 1.25
         const val CTRL_WHEEL_BASE = 1.01
-        const val MAX_CACHE_PX = 4096.0
+        const val MAX_CACHE_PX = 2048.0
 
         /** The page label sits ~26px above the page top (content space). */
         const val PAGE_LABEL_OFFSET = 26.0

@@ -259,13 +259,20 @@ class Editor(context: Context) {
         state.paintPageBackground = if (src == null) {
             null
         } else {
-            { page, renderer, res ->
+            { page, renderer, res, region ->
                 val pi = page.pdfPage
                 if (pi != null) {
-                    val w = (page.width * res).toInt()
-                    val h = (page.height * res).toInt()
-                    src.renderPage(pi, w, h, settings.prefs.pdfDarkMode)?.let { bg ->
-                        renderer.drawRaster(bg, com.xnotes.core.geometry.Rect(0.0, 0.0, page.width, page.height))
+                    val fullW = (page.width * res).toInt()
+                    val fullH = (page.height * res).toInt()
+                    val rx = (region.left * res).toInt()
+                    val ry = (region.top * res).toInt()
+                    val rw = kotlin.math.ceil(region.w * res).toInt()
+                    val rh = kotlin.math.ceil(region.h * res).toInt()
+                    src.renderRegion(pi, fullW, fullH, rx, ry, rw, rh, settings.prefs.pdfDarkMode)?.let { bg ->
+                        renderer.drawRaster(
+                            bg,
+                            com.xnotes.core.geometry.Rect(region.left, region.top, region.w, region.h),
+                        )
                         bg.recycle()
                     }
                 }
@@ -475,7 +482,7 @@ class Editor(context: Context) {
         surface.fill(state.paperColor(page))
         val r = surface.renderer()
         r.scale(scale, scale)
-        state.paintPageBackground?.invoke(page, r, scale)
+        state.paintPageBackground?.invoke(page, r, scale, com.xnotes.core.geometry.Rect(0.0, 0.0, page.width, page.height))
         for (item in page.items) item.paint(r)
         return surface.bitmap
     }
