@@ -79,10 +79,11 @@ fun Toolbar(
     ) {
         ToolbarIcon(XnotesIcons.file, "File") { onOpenBackstage() }
         EditMenu(editor)
-        // One trailing char is always reserved for the dirty "*" so autosave toggling
-        // it on/off doesn't change the title's width and nudge the toolbar. Tap to rename.
+        // The dirty "*" sits right after the name; a trailing space reserves its slot when
+        // clean so autosave toggling it on/off doesn't change the width and nudge the toolbar.
+        // Tap to rename.
         Label(
-            editor.title + if (editor.dirty) " *" else "  ",
+            editor.title + if (editor.dirty) "*" else " ",
             modifier = Modifier
                 .clip(RoundedCornerShape(4.dp))
                 .clickable { renaming = true },
