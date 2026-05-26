@@ -1045,7 +1045,7 @@ class InteractionController(
     private fun endPinch() {
         mode = PointerMode.IDLE
         state.zoomingInProgress = false
-        state.invalidateAllCaches()
+        state.invalidateCachesForZoom() // keep stale surfaces to blit until the sharp rebuild lands
         onViewChanged()
         requestRender()
         startFling(panVel)
@@ -1062,7 +1062,7 @@ class InteractionController(
         lassoPoints.clear()
         if (mode == PointerMode.PINCH) {
             state.zoomingInProgress = false
-            state.invalidateAllCaches()
+            state.invalidateCachesForZoom()
         }
         mode = PointerMode.IDLE
     }

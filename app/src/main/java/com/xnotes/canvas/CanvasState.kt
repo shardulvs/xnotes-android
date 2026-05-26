@@ -202,7 +202,7 @@ class CanvasState(
         zoom = z
         scrollX = anchor.x * z - focusViewport.x
         scrollY = anchor.y * z - focusViewport.y
-        invalidateAllCaches()
+        invalidateCachesForZoom()
         clampScroll()
     }
 
@@ -215,7 +215,7 @@ class CanvasState(
         if (zoomLocked || contentW <= 0.0 || viewportW == 0) return
         val cur = currentPageIndex()
         zoom = (viewportW / contentW).coerceIn(MIN_ZOOM, MAX_ZOOM)
-        invalidateAllCaches()
+        invalidateCachesForZoom()
         goToPage(cur)
     }
 
@@ -224,7 +224,7 @@ class CanvasState(
         if (zoomLocked || pages.isEmpty() || viewportH == 0) return
         val cur = currentPageIndex()
         zoom = ((viewportH - 60.0) / pages[cur].height).coerceIn(MIN_ZOOM, MAX_ZOOM)
-        invalidateAllCaches()
+        invalidateCachesForZoom()
         goToPage(cur)
     }
 
@@ -234,7 +234,7 @@ class CanvasState(
         val cur = currentPageIndex()
         val page = pages[cur]
         zoom = min((viewportW - 60.0) / page.width, (viewportH - 60.0) / page.height).coerceIn(MIN_ZOOM, MAX_ZOOM)
-        invalidateAllCaches()
+        invalidateCachesForZoom()
         goToPage(cur)
     }
 
@@ -393,6 +393,23 @@ class CanvasState(
     fun invalidateAllCaches() {
         caches.clear()
         bgCaches.clear()
+        cacheGen++
+    }
+
+    /**
+     * Invalidate caches after a *zoom* without dropping the surfaces. The old-resolution
+     * bitmaps stay in the maps, so [cacheForOrSchedule]/[backgroundForOrSchedule] keep
+     * blitting them (scaled) for the new zoom until the sharp rebuild lands — avoiding the
+     * one-frame empty-canvas flash that clearing would cause when a pinch ends. A page whose
+     * clamped resolution is unchanged (already at the [MAX_CACHE_PX] cap) matches on res and
+     * is returned as-is, so it is neither flashed nor needlessly rebuilt.
+     *
+     * Bumping [cacheGen] discards any in-flight build captured at the previous generation, so
+     * a stale-resolution surface can't be published over the maps after the zoom changed. Use
+     * [invalidateAllCaches] instead when page *content* changed — that must rebuild even at the
+     * same resolution.
+     */
+    fun invalidateCachesForZoom() {
         cacheGen++
     }
 
