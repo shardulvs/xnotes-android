@@ -39,7 +39,7 @@ import com.xnotes.ui.theme.toComposeColor
 /**
  * Stroke-tool configuration popup (spec 10 §3): PRESSURE / SENSITIVITY, then the
  * tool's signature control — MULTIPLIER (calligraphy), SPEED (speed pen) or TAPER
- * (taper pen) — then WIDTH, and a GLOW (neon) toggle available on any stroke tool.
+ * (taper pen) — then WIDTH, and a NEON toggle (with INTENSITY) on any stroke tool but the highlighter.
  */
 @Composable
 fun ToolConfigPopup(editor: Editor, tool: Tool, onDismiss: () -> Unit) {
@@ -51,6 +51,7 @@ fun ToolConfigPopup(editor: Editor, tool: Tool, onDismiss: () -> Unit) {
     var taper by remember { mutableStateOf(ToolConversions.amountToTaper(base.taperAmount).toFloat()) }
     var width by remember { mutableStateOf(base.baseWidth.toFloat()) }
     var glow by remember { mutableStateOf(base.neon) }
+    var glowIntensity by remember { mutableStateOf(ToolConversions.neonStrengthToIntensity(base.neonStrength).toFloat()) }
 
     fun emit() {
         val m = ToolConversions.sensitivityToMinFactor(sensitivity.toDouble())
@@ -67,6 +68,7 @@ fun ToolConfigPopup(editor: Editor, tool: Tool, onDismiss: () -> Unit) {
                 speedStrength = sp,
                 taperAmount = tp,
                 neon = glow,
+                neonStrength = ToolConversions.intensityToNeonStrength(glowIntensity.toDouble()),
             ),
         )
     }
@@ -90,8 +92,12 @@ fun ToolConfigPopup(editor: Editor, tool: Tool, onDismiss: () -> Unit) {
             }
             val range = ToolConversions.widthRange(tool)
             SliderRow("WIDTH", width, range.start.toFloat()..range.endInclusive.toFloat()) { width = it; emit() }
-            if (tool.isStroke) {
-                ToggleRow("GLOW", glow) { glow = it; emit() }
+            // Glow is offered on every stroke tool except the highlighter (a translucent marker).
+            if (tool.isStroke && tool != Tool.HIGHLIGHTER) {
+                ToggleRow("NEON", glow) { glow = it; emit() }
+                if (glow) {
+                    SliderRow("INTENSITY", glowIntensity, 0f..100f) { glowIntensity = it; emit() }
+                }
             }
         }
     }
@@ -103,8 +109,12 @@ fun ShapeConfigPopup(editor: Editor, onDismiss: () -> Unit) {
     var kind by remember { mutableStateOf(editor.shapeConfig.shape) }
     var width by remember { mutableStateOf(editor.shapeConfig.strokeWidth.toFloat()) }
     var fill by remember { mutableStateOf(editor.shapeConfig.fill) }
+    var glow by remember { mutableStateOf(editor.shapeConfig.neon) }
+    var glowIntensity by remember { mutableStateOf(ToolConversions.neonStrengthToIntensity(editor.shapeConfig.neonStrength).toFloat()) }
 
-    fun emit() = editor.updateShapeConfig(ShapeConfig(kind, width.toDouble(), fill))
+    fun emit() = editor.updateShapeConfig(
+        ShapeConfig(kind, width.toDouble(), fill, glow, ToolConversions.intensityToNeonStrength(glowIntensity.toDouble())),
+    )
 
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
         Column(Modifier.width(260.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
@@ -116,6 +126,10 @@ fun ShapeConfigPopup(editor: Editor, onDismiss: () -> Unit) {
             }
             SliderRow("WIDTH", width, 1f..20f) { width = it; emit() }
             ToggleRow("FILL", fill) { fill = it; emit() }
+            ToggleRow("GLOW", glow) { glow = it; emit() }
+            if (glow) {
+                SliderRow("INTENSITY", glowIntensity, 0f..100f) { glowIntensity = it; emit() }
+            }
         }
     }
 }

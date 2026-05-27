@@ -618,7 +618,7 @@ class InteractionController(
         val startLocal = Pt(content.x - pr.left, content.y - pr.top)
         val kind = shapeConfig.shape
         val fill = if (shapeConfig.fill && kind.isClosed) inkColor.scaleAlpha(ShapeConfig.FILL_ALPHA) else null
-        pendingShape = ShapeItem(kind, startLocal, startLocal, inkColor, shapeConfig.strokeWidth, fill)
+        pendingShape = ShapeItem(kind, startLocal, startLocal, inkColor, shapeConfig.strokeWidth, fill, shapeConfig.neon, shapeConfig.neonStrength)
         shapePageIndex = pageIndex
         mode = PointerMode.SHAPE
         requestRender()
@@ -930,7 +930,7 @@ class InteractionController(
         is Stroke -> Stroke(item.tool, item.config, item.samples.toMutableList(), item.speedScale)
         is ImageItem -> ImageItem(item.raster, item.rect)
         is TextItem -> TextItem(item.pos, item.width, item.text, item.rgba, item.pointSize, textMeasurer)
-        is ShapeItem -> ShapeItem(item.shape, item.start, item.end, item.strokeRgba, item.strokeWidth, item.fillRgba)
+        is ShapeItem -> ShapeItem(item.shape, item.start, item.end, item.strokeRgba, item.strokeWidth, item.fillRgba, item.neon, item.neonStrength)
         else -> item
     }
 

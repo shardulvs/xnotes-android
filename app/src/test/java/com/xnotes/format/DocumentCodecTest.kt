@@ -177,12 +177,13 @@ class DocumentCodecTest {
     @Test fun neonAndTaperFlagsRoundTrip() {
         val doc = Document(dpi = 150)
         val page = Page(1240.0, 1754.0)
-        page.items.add(Stroke(Tool.PEN, ToolConfig(neon = true), mutableListOf(Sample(1.0, 2.0, 1.0))))
+        page.items.add(Stroke(Tool.PEN, ToolConfig(neon = true, neonStrength = 0.85), mutableListOf(Sample(1.0, 2.0, 1.0))))
         page.items.add(Stroke(Tool.TAPER, ToolConfig(taperAmount = 0.7), mutableListOf(Sample(3.0, 4.0, 1.0), Sample(8.0, 9.0, 1.0))))
         doc.pages.add(page)
 
         val items = roundTrip(doc).pages[0].items
         assertTrue((items[0] as Stroke).config.neon)
+        assertEquals(0.85, (items[0] as Stroke).config.neonStrength, 1e-9)   // intensity survives
         val taper = items[1] as Stroke
         assertEquals(0.7, taper.config.taperAmount, 1e-9)
         assertEquals(0.0, taper.samples[0].t, 1e-9)   // non-speed stroke writes no time

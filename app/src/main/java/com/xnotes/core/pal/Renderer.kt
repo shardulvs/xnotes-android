@@ -26,6 +26,8 @@ data class Pen(
     val width: Double = 1.0,
     val cosmetic: Boolean = true,
     val dashed: Boolean = false,
+    /** Soft outward glow (page-px blur) on the stroke — the neon halo for shapes. 0 = crisp. */
+    val glowRadius: Double = 0.0,
 )
 
 /**
@@ -78,13 +80,16 @@ interface Renderer {
 
     /**
      * Like [fillPolygon]/[fillCircle] but with a soft Gaussian glow of [blurRadius]
-     * page pixels — the neon halo. A renderer with no blur primitive (or export
-     * target) falls back to a crisp fill, so the ink stays visible.
+     * page pixels — the neon halo. When [inner] is true the blur is confined to the
+     * shape's interior (edges fade *inward* to transparent, nothing spills outside) —
+     * used for the white-hot core so the ink colour stays crisp at the tube's rim.
+     * A renderer with no blur primitive (or export target) falls back to a crisp
+     * fill, so the ink stays visible.
      */
-    fun fillPolygonGlow(points: List<Pt>, color: Rgba, rule: FillRule, blurRadius: Double) =
+    fun fillPolygonGlow(points: List<Pt>, color: Rgba, rule: FillRule, blurRadius: Double, inner: Boolean = false) =
         fillPolygon(points, color, rule)
 
-    fun fillCircleGlow(center: Pt, radius: Double, color: Rgba, blurRadius: Double) =
+    fun fillCircleGlow(center: Pt, radius: Double, color: Rgba, blurRadius: Double, inner: Boolean = false) =
         fillCircle(center, radius, color)
 
     // --- outlines (cosmetic for chrome, page-space for shapes) ---

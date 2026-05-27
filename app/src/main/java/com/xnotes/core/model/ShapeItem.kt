@@ -3,6 +3,7 @@ package com.xnotes.core.model
 import com.xnotes.core.geometry.Geometry
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
+import com.xnotes.core.pal.FillRule
 import com.xnotes.core.pal.Pen
 import com.xnotes.core.pal.Renderer
 import com.xnotes.core.tools.ShapeKind
@@ -24,6 +25,10 @@ class ShapeItem(
     var strokeRgba: Rgba,
     var strokeWidth: Double = 3.0,
     var fillRgba: Rgba? = null,
+    /** Render the outline as a glowing neon tube (halo + white-hot core). */
+    var neon: Boolean = false,
+    /** Glow intensity in [0, 1] (halo size + brightness); used only when [neon]. */
+    var neonStrength: Double = 0.6,
 ) : CanvasItem, Resizable {
 
     override val kind = KIND
@@ -63,29 +68,70 @@ class ShapeItem(
     }
 
     override fun paint(r: Renderer) {
-        val fill = fillRgba
+        if (neon) return paintNeon(r)
+        fillRgba?.let { drawFill(r, it) }
+        drawOutline(r, pen())
+        if (shape == ShapeKind.ARROW) drawArrowHead(r, strokeRgba)
+    }
+
+    /** Fill the closed-shape interior (no-op for open line/arrow). */
+    private fun drawFill(r: Renderer, fill: Rgba) {
         val b = box
         when (shape) {
-            ShapeKind.LINE -> r.strokePolyline(listOf(start, end), pen())
-            ShapeKind.ARROW -> {
-                r.strokePolyline(listOf(start, end), pen())
-                val head = arrowHead()
-                if (head.size == 3) r.fillPolygon(head, strokeRgba)
-            }
-            ShapeKind.RECTANGLE -> {
-                if (fill != null) r.fillRect(b, fill)
-                r.strokeRect(b, pen())
-            }
-            ShapeKind.ELLIPSE -> {
-                if (fill != null) r.fillEllipse(b.center, b.w / 2.0, b.h / 2.0, fill)
-                r.strokeEllipse(b.center, b.w / 2.0, b.h / 2.0, pen())
-            }
-            ShapeKind.TRIANGLE -> {
-                val v = triangleVertices()
-                if (fill != null) r.fillPolygon(v, fill)
-                r.strokePolygon(v, pen())
-            }
+            ShapeKind.RECTANGLE -> r.fillRect(b, fill)
+            ShapeKind.ELLIPSE -> r.fillEllipse(b.center, b.w / 2.0, b.h / 2.0, fill)
+            ShapeKind.TRIANGLE -> r.fillPolygon(triangleVertices(), fill)
+            ShapeKind.LINE, ShapeKind.ARROW -> {}
         }
+    }
+
+    /** Stroke the shape's outline (the arrow's shaft for arrows) with [pen]. */
+    private fun drawOutline(r: Renderer, pen: Pen) {
+        val b = box
+        when (shape) {
+            ShapeKind.LINE, ShapeKind.ARROW -> r.strokePolyline(listOf(start, end), pen)
+            ShapeKind.RECTANGLE -> r.strokeRect(b, pen)
+            ShapeKind.ELLIPSE -> r.strokeEllipse(b.center, b.w / 2.0, b.h / 2.0, pen)
+            ShapeKind.TRIANGLE -> r.strokePolygon(triangleVertices(), pen)
+        }
+    }
+
+    /** Fill the arrowhead in [color], optionally with a soft glow of [blur] (0 = crisp). */
+    private fun drawArrowHead(r: Renderer, color: Rgba, blur: Double = 0.0, inner: Boolean = false) {
+        val head = arrowHead()
+        if (head.size != 3) return
+        if (blur > 0.0) r.fillPolygonGlow(head, color, FillRule.NONZERO, blur, inner) else r.fillPolygon(head, color)
+    }
+
+    /**
+     * Neon: the outline as a glowing glass tube — a blurred ink-colour **halo**
+     * (composited once at a glow-intensity alpha so corners don't blow out), the
+     * opaque colour **body**, then a thinner **white-hot core** down the centre so
+     * the colour reads at the tube's edges. [neonStrength] scales the halo only.
+     */
+    private fun paintNeon(r: Renderer) {
+        val s = neonStrength.coerceIn(0.0, 1.0)
+        val color = strokeRgba.withAlpha(255)
+        val white = Rgba(255, 255, 255, 255)
+        val glowR = (strokeWidth * (GLOW_FACTOR_MIN + GLOW_FACTOR_SPAN * s)).coerceAtLeast(GLOW_MIN)
+        val glowAlpha = GLOW_ALPHA_MIN + GLOW_ALPHA_SPAN * s
+        val coreW = (strokeWidth * CORE_WIDTH_FRAC).coerceAtLeast(CORE_WIDTH_MIN)
+
+        fillRgba?.let { drawFill(r, it) }
+
+        // 1) Outer halo (ink colour), bounded in its own glow-alpha layer.
+        r.saveLayerAlpha(bounds().outset(glowR * 2.0 + 4.0), glowAlpha)
+        drawOutline(r, Pen(color = color, width = strokeWidth, cosmetic = false, glowRadius = glowR))
+        if (shape == ShapeKind.ARROW) drawArrowHead(r, color, glowR)
+        r.restore()
+
+        // 2) Tube body — saturated colour shows at the rim.
+        drawOutline(r, pen())
+        if (shape == ShapeKind.ARROW) drawArrowHead(r, strokeRgba)
+
+        // 3) White-hot core — a thinner white line (and an inward-blurred white head).
+        drawOutline(r, Pen(color = white, width = coreW, cosmetic = false))
+        if (shape == ShapeKind.ARROW) drawArrowHead(r, white, strokeWidth * CORE_WIDTH_FRAC + 0.5, inner = true)
     }
 
     override fun bounds(): Rect {
@@ -169,5 +215,18 @@ class ShapeItem(
     companion object {
         const val KIND = "shape"
         const val HIT_TOLERANCE = 6.0
+
+        /** Halo blur = stroke_width × (MIN + SPAN × neonStrength), floored in page px. */
+        private const val GLOW_FACTOR_MIN = 1.2
+        private const val GLOW_FACTOR_SPAN = 2.6
+        private const val GLOW_MIN = 4.0
+
+        /** Halo opacity = MIN + SPAN × neonStrength. */
+        private const val GLOW_ALPHA_MIN = 0.25
+        private const val GLOW_ALPHA_SPAN = 0.55
+
+        /** White-hot core line width as a fraction of the stroke width, with a page-px floor. */
+        private const val CORE_WIDTH_FRAC = 0.4
+        private const val CORE_WIDTH_MIN = 1.0
     }
 }

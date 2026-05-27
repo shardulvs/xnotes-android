@@ -22,6 +22,10 @@ data class ShapeConfig(
     val shape: ShapeKind = ShapeKind.RECTANGLE,
     val strokeWidth: Double = 3.0,
     val fill: Boolean = false,
+    /** Neon glow: a luminous halo + white-hot core on the shape's outline. */
+    val neon: Boolean = false,
+    /** Glow intensity in [0, 1] (halo size + brightness); used only when [neon]. */
+    val neonStrength: Double = 0.6,
 ) {
     companion object {
         /** Reduced opacity applied to the ink colour when a closed shape is filled. */

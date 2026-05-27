@@ -175,7 +175,10 @@ class DocumentCodec(
         // stroke's config is byte-for-byte what older versions wrote.
         if (s.config.speedStrength != 0.0) config.put("speed_strength", s.config.speedStrength)
         if (s.config.taperAmount != 0.0) config.put("taper_amount", s.config.taperAmount)
-        if (s.config.neon) config.put("neon", true)
+        if (s.config.neon) {
+            config.put("neon", true)
+            config.put("neon_strength", s.config.neonStrength)
+        }
         val obj = JSONObject()
             .put("kind", Stroke.KIND)
             .put("tool", s.tool.id)
@@ -202,8 +205,8 @@ class DocumentCodec(
             .put("rgba", rgbaToJson(t.rgba))
             .put("point_size", t.pointSize)
 
-    private fun shapeToJson(s: ShapeItem): JSONObject =
-        JSONObject()
+    private fun shapeToJson(s: ShapeItem): JSONObject {
+        val obj = JSONObject()
             .put("kind", ShapeItem.KIND)
             .put("shape", s.shape.id)
             .put("start", JSONArray().put(s.start.x).put(s.start.y))
@@ -211,6 +214,13 @@ class DocumentCodec(
             .put("stroke_rgba", rgbaToJson(s.strokeRgba))
             .put("stroke_width", s.strokeWidth)
             .put("fill_rgba", s.fillRgba?.let { rgbaToJson(it) } ?: JSONObject.NULL)
+        // Glow is additive: a plain shape serializes exactly as before.
+        if (s.neon) {
+            obj.put("neon", true)
+            obj.put("neon_strength", s.neonStrength)
+        }
+        return obj
+    }
 
     // --- json -> item ---
 
@@ -236,6 +246,7 @@ class DocumentCodec(
             speedStrength = c?.optDouble("speed_strength", def.speedStrength) ?: def.speedStrength,
             taperAmount = c?.optDouble("taper_amount", def.taperAmount) ?: def.taperAmount,
             neon = c?.optBoolean("neon", def.neon) ?: def.neon,
+            neonStrength = c?.optDouble("neon_strength", def.neonStrength) ?: def.neonStrength,
         )
         val samples = ArrayList<Sample>()
         o.optJSONArray("samples")?.let { arr ->
@@ -278,6 +289,8 @@ class DocumentCodec(
             strokeRgba = readRgba(o.optJSONArray("stroke_rgba")) ?: Rgba(0, 230, 118, 255),
             strokeWidth = o.optDouble("stroke_width", 3.0),
             fillRgba = if (o.isNull("fill_rgba")) null else readRgba(o.optJSONArray("fill_rgba")),
+            neon = o.optBoolean("neon", false),
+            neonStrength = o.optDouble("neon_strength", 0.6),
         )
     }
 

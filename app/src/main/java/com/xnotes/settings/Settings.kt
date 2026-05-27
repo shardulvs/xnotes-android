@@ -129,6 +129,7 @@ data class Settings(
             .put("speed_strength", c.speedStrength)
             .put("taper_amount", c.taperAmount)
             .put("neon", c.neon)
+            .put("neon_strength", c.neonStrength)
             .put("rgba", rgbaArr(c.rgba))
 
         private fun toolConfig(o: JSONObject, tool: Tool): ToolConfig {
@@ -142,16 +143,20 @@ data class Settings(
                 speedStrength = o.optDouble("speed_strength", d.speedStrength),
                 taperAmount = o.optDouble("taper_amount", d.taperAmount),
                 neon = o.optBoolean("neon", d.neon),
+                neonStrength = o.optDouble("neon_strength", d.neonStrength),
             )
         }
 
         private fun shapeConfigJson(c: ShapeConfig) = JSONObject()
             .put("shape", c.shape.id).put("stroke_width", c.strokeWidth).put("fill", c.fill)
+            .put("neon", c.neon).put("neon_strength", c.neonStrength)
 
         private fun shapeConfig(o: JSONObject) = ShapeConfig(
             shape = ShapeKind.fromId(o.optString("shape", "rectangle")),
             strokeWidth = o.optDouble("stroke_width", 3.0),
             fill = o.optBoolean("fill", false),
+            neon = o.optBoolean("neon", false),
+            neonStrength = o.optDouble("neon_strength", 0.6),
         )
     }
 }

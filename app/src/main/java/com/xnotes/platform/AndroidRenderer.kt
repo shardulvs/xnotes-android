@@ -123,23 +123,28 @@ class AndroidRenderer(private val canvas: Canvas) : Renderer {
     }
 
     // The blur radius is a page-space length: the canvas scale grows it with zoom,
-    // so the halo tracks the ink (exactly like a non-cosmetic pen width).
-    override fun fillPolygonGlow(points: List<Pt>, color: Rgba, rule: FillRule, blurRadius: Double) {
+    // so the halo tracks the ink (exactly like a non-cosmetic pen width). INNER blur
+    // keeps the soft fill inside the shape (the white core); NORMAL spreads it both
+    // ways (the outer halo).
+    override fun fillPolygonGlow(points: List<Pt>, color: Rgba, rule: FillRule, blurRadius: Double, inner: Boolean) {
         if (points.size < 3) return
         if (blurRadius <= 0.0) return fillPolygon(points, color, rule)
         glowPaint.color = color.toArgb()
-        glowPaint.maskFilter = BlurMaskFilter(blurRadius.toFloat().coerceAtLeast(0.1f), BlurMaskFilter.Blur.NORMAL)
+        glowPaint.maskFilter = BlurMaskFilter(blurRadius.toFloat().coerceAtLeast(0.1f), blurStyle(inner))
         canvas.drawPath(buildPath(points, close = true, rule), glowPaint)
         glowPaint.maskFilter = null
     }
 
-    override fun fillCircleGlow(center: Pt, radius: Double, color: Rgba, blurRadius: Double) {
+    override fun fillCircleGlow(center: Pt, radius: Double, color: Rgba, blurRadius: Double, inner: Boolean) {
         if (blurRadius <= 0.0) return fillCircle(center, radius, color)
         glowPaint.color = color.toArgb()
-        glowPaint.maskFilter = BlurMaskFilter(blurRadius.toFloat().coerceAtLeast(0.1f), BlurMaskFilter.Blur.NORMAL)
+        glowPaint.maskFilter = BlurMaskFilter(blurRadius.toFloat().coerceAtLeast(0.1f), blurStyle(inner))
         canvas.drawCircle(center.x.toFloat(), center.y.toFloat(), radius.toFloat(), glowPaint)
         glowPaint.maskFilter = null
     }
+
+    private fun blurStyle(inner: Boolean) =
+        if (inner) BlurMaskFilter.Blur.INNER else BlurMaskFilter.Blur.NORMAL
 
     override fun fillEllipse(center: Pt, rx: Double, ry: Double, color: Rgba) {
         fillPaint.color = color.toArgb()
@@ -200,6 +205,12 @@ class AndroidRenderer(private val canvas: Canvas) : Renderer {
         strokePaint.color = pen.color.toArgb()
         val width = if (pen.cosmetic) (pen.width / avgScale) else pen.width
         strokePaint.strokeWidth = width.toFloat()
+        // A page-space outward blur for the neon halo on shape outlines (NORMAL = both sides).
+        strokePaint.maskFilter = if (pen.glowRadius > 0.0) {
+            BlurMaskFilter(pen.glowRadius.toFloat().coerceAtLeast(0.1f), BlurMaskFilter.Blur.NORMAL)
+        } else {
+            null
+        }
         strokePaint.pathEffect = if (pen.dashed) {
             val on = (6.0 * (if (pen.cosmetic) 1.0 / avgScale else 1.0)).toFloat()
             val off = (4.0 * (if (pen.cosmetic) 1.0 / avgScale else 1.0)).toFloat()

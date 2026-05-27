@@ -24,6 +24,8 @@ data class ToolConfig(
     val taperAmount: Double = 0.0,
     /** Neon glow: a soft luminous halo under a bright core. Composable onto any stroke tool. */
     val neon: Boolean = false,
+    /** Glow intensity (the neon halo): 0 = faint & tight, 1 = bright & wide. Only used when [neon]. */
+    val neonStrength: Double = 0.6,
 )
 
 /** Factory defaults per tool (spec 04 §3). */
@@ -69,6 +71,11 @@ object ToolConversions {
     fun taperToAmount(taper: Double): Double = taper.coerceIn(0.0, 100.0) / 100.0
 
     fun amountToTaper(a: Double): Double = a * 100.0
+
+    /** INTENSITY (0..100, higher = brighter/wider halo) -> `neonStrength` in [0, 1]. */
+    fun intensityToNeonStrength(intensity: Double): Double = intensity.coerceIn(0.0, 100.0) / 100.0
+
+    fun neonStrengthToIntensity(s: Double): Double = s * 100.0
 
     /** WIDTH slider range per tool (spec 04 §5): 4..40 for the highlighter, else 1..20. */
     fun widthRange(tool: Tool): ClosedFloatingPointRange<Double> =
