@@ -829,12 +829,31 @@ class Editor(context: Context) {
         }
     }
 
-    /** Deletes a document (file or folder). IO, call off-thread. */
+    /** Deletes a document (file or folder); also clears it (and a folder's contents) from recents. IO, call off-thread. */
     fun deleteDocument(docUri: String): Boolean = runCatching {
         val ok = android.provider.DocumentsContract.deleteDocument(appContext.contentResolver, android.net.Uri.parse(docUri))
-        if (ok && state.document.path == docUri) autosaveUri = null // its backing file is gone
+        if (ok) {
+            if (state.document.path == docUri) autosaveUri = null // its backing file is gone
+            pruneRecentsUnder(docUri)
+        }
         ok
     }.getOrDefault(false)
+
+    /** Drop any recent pointing at [docUri] — or, when it's a folder, anything beneath it — plus cached thumbs. */
+    private fun pruneRecentsUnder(docUri: String) {
+        val target = android.net.Uri.parse(docUri)
+        val delId = runCatching { android.provider.DocumentsContract.getDocumentId(target) }.getOrNull() ?: return
+        val removed = settings.recentFiles.filter { r ->
+            val u = android.net.Uri.parse(r)
+            val rid = runCatching { android.provider.DocumentsContract.getDocumentId(u) }.getOrNull()
+            u.authority == target.authority && rid != null && (rid == delId || rid.startsWith("$delId/"))
+        }
+        if (removed.isEmpty()) return
+        settings = settings.copy(recentFiles = settings.recentFiles - removed.toSet())
+        recentFiles = settings.recentFiles
+        settingsRepo.save(settings)
+        removed.forEach { invalidateRecentThumb(it) }
+    }
 
     /** Copies [sourceUri] into the folder [targetParentDocId] within [treeUri]. IO, call off-thread. */
     fun copyDocumentInto(treeUri: String, sourceUri: String, targetParentDocId: String): Boolean = runCatching {
