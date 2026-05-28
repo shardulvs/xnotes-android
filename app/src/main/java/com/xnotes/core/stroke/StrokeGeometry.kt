@@ -25,6 +25,24 @@ data class StrokeGeometry(
     val centerline: List<Pt>,
     val halfWidths: List<Double>,
 ) {
+    /**
+     * A concentric inner ribbon scaled to [frac] of this ribbon's half-widths about
+     * the same centerline (1.0 reproduces [outline]). The neon white-hot core fills
+     * this rather than the full outline, so the outer `1 − frac` of the tube keeps
+     * its saturated ink colour. Empty when there's no ribbon (a single-sample dot)
+     * or [frac] ≤ 0. [outline] is `left[0..n-1] ++ right[n-1..0]` about [centerline],
+     * so each edge point is moved a fraction of the way back toward its centre.
+     */
+    fun coreOutline(frac: Double): List<Pt> {
+        val n = centerline.size
+        if (frac <= 0.0 || n < 2 || outline.size != 2 * n) return emptyList()
+        val f = frac.coerceAtMost(1.0)
+        val core = ArrayList<Pt>(2 * n)
+        for (i in 0 until n) core.add(centerline[i] + (outline[i] - centerline[i]) * f)
+        for (i in n - 1 downTo 0) core.add(centerline[i] + (outline[2 * n - 1 - i] - centerline[i]) * f)
+        return core
+    }
+
     companion object {
         val EMPTY = StrokeGeometry(emptyList(), emptyList(), emptyList(), emptyList())
     }

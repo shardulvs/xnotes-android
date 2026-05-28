@@ -100,8 +100,9 @@ class Stroke(
      *   1. the outer halo — a blurred fill in the ink colour, composited once at a
      *      glow-intensity alpha so a self-overlapping scribble doesn't blow out;
      *   2. the tube body — the opaque, saturated ink colour (what shows at the rim);
-     *   3. the core — a white fill blurred *inward* (INNER), solid along the
-     *      centreline and fading to nothing at the rim, letting the colour show there.
+     *   3. the core — a white fill on a *concentric inner ribbon* (a fraction of the
+     *      tube's width), blurred inward so it's solid white at the centre yet stops
+     *      short of the rim, leaving a band of saturated colour around it.
      * [config.neonStrength] scales the halo's size and brightness. Overrides the
      * translucent path, so it works on any stroke tool.
      */
@@ -129,11 +130,16 @@ class Stroke(
         // 2) Tube body — the saturated colour shows at the rim.
         paintFills(r, g, body)
 
-        // 3) White-hot core, blurred inward so colour survives at the rim.
+        // 3) White-hot core on a concentric inner ribbon, blurred inward: solid white
+        //    at the centre, fading out before the rim so the saturated band survives.
+        val coreOutline = g.coreOutline(NEON_CORE_FRAC)
         val coreR = (config.baseWidth * NEON_CORE_BLUR_FACTOR).coerceAtLeast(NEON_CORE_BLUR_MIN)
         val white = Rgba(255, 255, 255, 255)
-        if (g.outline.size >= 3) r.fillPolygonGlow(g.outline, white, FillRule.NONZERO, coreR, inner = true)
-        for (cap in g.caps) if (cap.radius > 0.0) r.fillCircleGlow(cap.center, cap.radius, white, coreR, inner = true)
+        if (coreOutline.size >= 3) r.fillPolygonGlow(coreOutline, white, FillRule.NONZERO, coreR, inner = true)
+        for (cap in g.caps) {
+            val cr = cap.radius * NEON_CORE_FRAC
+            if (cr > 0.0) r.fillCircleGlow(cap.center, cr, white, coreR, inner = true)
+        }
     }
 
     override fun bounds(): Rect {
@@ -232,8 +238,13 @@ class Stroke(
         private const val NEON_GLOW_ALPHA_MIN = 0.25
         private const val NEON_GLOW_ALPHA_SPAN = 0.55
 
-        /** White core's inward blur as a multiple of base width, with a page-px floor. */
-        private const val NEON_CORE_BLUR_FACTOR = 0.5
-        private const val NEON_CORE_BLUR_MIN = 1.5
+        /** Fraction of the tube's half-width the white-hot core ribbon fills; the
+         *  outer remainder stays saturated ink colour — the neon sheath at the rim. */
+        private const val NEON_CORE_FRAC = 0.55
+
+        /** White core's inward blur as a multiple of base width, with a page-px floor —
+         *  small enough to leave a solid white plateau inside the (narrow) core ribbon. */
+        private const val NEON_CORE_BLUR_FACTOR = 0.14
+        private const val NEON_CORE_BLUR_MIN = 1.0
     }
 }
