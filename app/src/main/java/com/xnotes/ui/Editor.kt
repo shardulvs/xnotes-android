@@ -41,6 +41,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -490,8 +491,20 @@ class Editor(context: Context) {
 
     // --- side panel ---
 
-    /** Renders a page to a thumbnail bitmap (paper + PDF/template background + items). */
-    fun renderThumbnail(pageIndex: Int, widthPx: Int): android.graphics.Bitmap? {
+    /**
+     * A page's height/width ratio. The side panel reserves each thumbnail row's height from this
+     * so rows don't grow when their bitmap finishes loading — that resizing was what made the
+     * scrollbar thumb wobble while scrolling (its size is derived from the visible rows' heights).
+     */
+    fun pageAspectRatio(index: Int): Float? =
+        state.document.pages.getOrNull(index)?.let { (it.height / it.width).toFloat() }
+
+    /**
+     * Renders a page to a thumbnail bitmap (paper + PDF/template background + items). [active] is
+     * polled before the costly steps (PDF background, each item) so a render abandoned mid-flight —
+     * the side-panel row scrolled out of view — bails out instead of burning CPU the scroll needs.
+     */
+    fun renderThumbnail(pageIndex: Int, widthPx: Int, active: () -> Boolean = { true }): android.graphics.Bitmap? {
         val page = state.document.pages.getOrNull(pageIndex) ?: return null
         val scale = widthPx / page.width
         val w = widthPx.coerceAtLeast(1)
@@ -500,8 +513,12 @@ class Editor(context: Context) {
         surface.fill(state.paperColor(page))
         val r = surface.renderer()
         r.scale(scale, scale)
+        if (!active()) return null
         state.paintPageBackground?.invoke(page, r, scale, com.xnotes.core.geometry.Rect(0.0, 0.0, page.width, page.height))
-        for (item in page.items) item.paint(r)
+        for (item in page.items) {
+            if (!active()) return null
+            item.paint(r)
+        }
         return surface.bitmap
     }
 
@@ -524,7 +541,7 @@ class Editor(context: Context) {
         cachedPageThumbnail(index)?.let { return it }
         return withContext(Dispatchers.Default) {
             cachedPageThumbnail(index)?.let { return@withContext it }
-            val bmp = renderThumbnail(index, widthPx)?.asImageBitmap() ?: return@withContext null
+            val bmp = renderThumbnail(index, widthPx, active = { isActive })?.asImageBitmap() ?: return@withContext null
             synchronized(pageThumbs) { pageThumbs.put(index, bmp) }
             bmp
         }
