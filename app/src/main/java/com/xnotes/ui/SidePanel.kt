@@ -31,15 +31,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 @Composable
 fun SidePanel(editor: Editor) {
@@ -89,8 +86,10 @@ private fun PagesTab(editor: Editor) {
     ) {
         items(editor.pageCount) { index ->
             val current = index == editor.pageIndex
-            val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, index, editor.contentVersion, editor.pageCount) {
-                value = withContext(Dispatchers.Default) { editor.renderThumbnail(index, 300)?.asImageBitmap() }
+            val bitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+                editor.cachedPageThumbnail(index), index, editor.contentVersion,
+            ) {
+                value = editor.pageThumbnail(index, 300)
             }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(

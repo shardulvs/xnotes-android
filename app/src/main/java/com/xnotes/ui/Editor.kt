@@ -1,10 +1,13 @@
 package com.xnotes.ui
 
 import android.content.Context
+import android.util.LruCache
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import com.xnotes.canvas.CanvasState
 import com.xnotes.canvas.CanvasView
 import com.xnotes.canvas.EditingField
@@ -37,7 +40,9 @@ import com.xnotes.ui.theme.Palette
 import java.io.InputStream
 import java.io.OutputStream
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * The app-side glue between the imperative canvas (CanvasView + CanvasState +
@@ -101,6 +106,11 @@ class Editor(context: Context) {
     private val recentPages = java.util.concurrent.ConcurrentHashMap<String, Int>()
     /** On-disk thumbnail cache so the backstage opens instantly across launches. */
     private val thumbCache = com.xnotes.platform.RecentThumbnailCache(java.io.File(appContext.filesDir, "recent_thumbs"))
+    /** Side-panel page thumbnails, rendered once and reused so scrolling the panel doesn't re-render. */
+    private val pageThumbs = object : LruCache<Int, ImageBitmap>(24 * 1024 * 1024) {
+        override fun sizeOf(key: Int, value: ImageBitmap) = value.width * value.height * 4
+    }
+    private var pageThumbsVersion = -1
     /** In-memory caches so reopening the backstage paints instantly (seed first, refresh after). */
     private val recentInfoCache = java.util.concurrent.ConcurrentHashMap<String, RecentInfo>()
     private val browseCache = java.util.concurrent.ConcurrentHashMap<String, List<BrowseEntry>>()
@@ -493,6 +503,31 @@ class Editor(context: Context) {
         state.paintPageBackground?.invoke(page, r, scale, com.xnotes.core.geometry.Rect(0.0, 0.0, page.width, page.height))
         for (item in page.items) item.paint(r)
         return surface.bitmap
+    }
+
+    /** An already-rendered side-panel thumbnail for [index] at the current content, or null. */
+    fun cachedPageThumbnail(index: Int): ImageBitmap? = synchronized(pageThumbs) {
+        if (pageThumbsVersion != contentVersion) {
+            pageThumbs.evictAll()
+            pageThumbsVersion = contentVersion
+        }
+        pageThumbs.get(index)
+    }
+
+    /**
+     * The side-panel thumbnail for page [index], rendered off the main thread and cached so
+     * scrolling the panel reuses bitmaps instead of re-rendering each page on every pass — that
+     * re-render churn (heap allocation + GC) was what made the panel scroll janky. Stale entries
+     * are dropped when [contentVersion] moves (see [cachedPageThumbnail]).
+     */
+    suspend fun pageThumbnail(index: Int, widthPx: Int): ImageBitmap? {
+        cachedPageThumbnail(index)?.let { return it }
+        return withContext(Dispatchers.Default) {
+            cachedPageThumbnail(index)?.let { return@withContext it }
+            val bmp = renderThumbnail(index, widthPx)?.asImageBitmap() ?: return@withContext null
+            synchronized(pageThumbs) { pageThumbs.put(index, bmp) }
+            bmp
+        }
     }
 
     fun addBookmark(label: String) {
