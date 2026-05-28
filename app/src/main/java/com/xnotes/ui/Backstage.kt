@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -56,7 +58,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -81,6 +85,14 @@ private enum class CreateMode { NONE, FILE, FOLDER }
 
 /** An entry copied/cut in the explorer; [parentDocId] is the folder it came from (for moves). */
 private data class ClipItem(val uri: String, val name: String, val parentDocId: String, val isCut: Boolean)
+
+/** The next free "untitled_N" stem (no extension) for a fresh note in [entries]. */
+private fun nextUntitled(entries: List<BrowseEntry>?): String {
+    val taken = entries.orEmpty().filter { !it.isDir }.map { it.name.lowercase() }.toSet()
+    var n = 1
+    while ("untitled_$n.xnote" in taken) n++
+    return "untitled_$n"
+}
 
 /**
  * The full-screen "File" area. The rail picks between Home (recent notes + an
@@ -448,6 +460,7 @@ private fun RecentStripCard(editor: Editor, uri: String, onClick: () -> Unit) {
 
 // --- explorer section ---
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ExplorerSection(
     editor: Editor,
@@ -477,7 +490,7 @@ private fun ExplorerSection(
     val stack = remember(root) { mutableStateListOf<Pair<String, String>>() }
     val currentDocId = if (stack.isEmpty()) rootDocId else stack.last().first
     var refreshKey by remember(root) { mutableStateOf(0) }
-    var fieldText by remember(root) { mutableStateOf("") }
+    var fieldValue by remember(root) { mutableStateOf(TextFieldValue("")) }
     var fieldError by remember(root) { mutableStateOf<String?>(null) }
     var renaming by remember(root) { mutableStateOf<String?>(null) }
     var renameText by remember(root) { mutableStateOf("") }
@@ -488,8 +501,19 @@ private fun ExplorerSection(
     var menuOpen by remember(root) { mutableStateOf(false) }
     val rootName by produceState(editor.cachedRootName(root), root) { value = withContext(Dispatchers.IO) { editor.browseRootName(root) } }
     val fieldFocus = remember { FocusRequester() }
+    val fieldBring = remember { BringIntoViewRequester() }
     LaunchedEffect(createMode) {
-        if (createMode != CreateMode.NONE) { fieldText = ""; fieldError = null; runCatching { fieldFocus.requestFocus() } }
+        if (createMode != CreateMode.NONE) {
+            fieldValue = if (createMode == CreateMode.FILE) {
+                val n = nextUntitled(editor.cachedChildren(root, currentDocId))
+                TextFieldValue(n, selection = TextRange(0, n.length)) // select the whole word so typing replaces it
+            } else {
+                TextFieldValue("")
+            }
+            fieldError = null
+            runCatching { fieldFocus.requestFocus() }
+            runCatching { fieldBring.bringIntoView() }
+        }
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -555,16 +579,16 @@ private fun ExplorerSection(
         // Inline create (file or folder).
         if (createMode != CreateMode.NONE) {
             val isFolder = createMode == CreateMode.FOLDER
-            Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(bottom = 4.dp).bringIntoViewRequester(fieldBring), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
-                    value = fieldText,
-                    onValueChange = { fieldText = it; fieldError = null },
+                    value = fieldValue,
+                    onValueChange = { fieldValue = it; fieldError = null },
                     singleLine = true,
-                    placeholder = { Text(if (isFolder) "Folder name" else "Note name (optional)") },
+                    placeholder = if (isFolder) ({ Text("Folder name") }) else null,
                     modifier = Modifier.weight(1f).focusRequester(fieldFocus),
                 )
                 IconButton(onClick = {
-                    val n = fieldText.trim()
+                    val n = fieldValue.text.trim()
                     if (isFolder) {
                         if (n.isEmpty()) fieldError = "Enter a folder name."
                         else scope.launch {
@@ -572,8 +596,9 @@ private fun ExplorerSection(
                             if (ok) { onCreateMode(CreateMode.NONE); refreshKey++ } else fieldError = "Couldn’t create that folder."
                         }
                     } else scope.launch {
+                        // Just create the note in the explorer — it opens only when the user taps it.
                         val uri = withContext(Dispatchers.IO) { editor.createBlankNoteFile(root, currentDocId, n) }
-                        if (uri != null) { editor.adoptFolderNote(uri); onCreateMode(CreateMode.NONE); onDismiss() } else fieldError = "Couldn’t create the note."
+                        if (uri != null) { onCreateMode(CreateMode.NONE); refreshKey++ } else fieldError = "Couldn’t create the note."
                     }
                 }) { Icon(XnotesIcons.check, "Create", tint = palette.accent.toComposeColor(), modifier = Modifier.size(22.dp)) }
                 IconButton(onClick = { onCreateMode(CreateMode.NONE) }) {
@@ -697,8 +722,9 @@ private fun EntryRow(
     val tint = (if (entry.isDir) palette.accent else palette.textDim).toComposeColor()
     if (isRenaming) {
         val fr = remember { FocusRequester() }
-        LaunchedEffect(Unit) { runCatching { fr.requestFocus() } }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        val bring = remember { BringIntoViewRequester() }
+        LaunchedEffect(Unit) { runCatching { fr.requestFocus() }; runCatching { bring.bringIntoView() } }
+        Row(Modifier.fillMaxWidth().bringIntoViewRequester(bring).padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(14.dp))
             OutlinedTextField(renameText, onRenameTextChange, singleLine = true, modifier = Modifier.weight(1f).focusRequester(fr))

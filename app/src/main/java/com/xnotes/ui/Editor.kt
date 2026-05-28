@@ -787,17 +787,6 @@ class Editor(context: Context) {
         uri.toString()
     }.getOrNull()
 
-    /** Adopts a just-created folder note [uri] as the current document (blank, autosaving). Main thread. */
-    fun adoptFolderNote(uri: String) {
-        val doc = Document.blank(Document.DEFAULT_NEW_PAGES, settings.prefs.defaultPageSize, settings.prefs.defaultPageOrientation)
-        doc.path = uri
-        doc.displayName = queryDisplayName(android.net.Uri.parse(uri))
-        doc.dirty = false
-        replaceDocument(doc)   // clears autosaveUri
-        maybeBindAutosave(uri) // it lives in the folder, so it autosaves
-        rememberRecent(uri)
-    }
-
     /** Renames a document (file or folder) to [newName]; follows the open note. IO, call off-thread. */
     fun renameDocument(docUri: String, newName: String): Boolean {
         val result = runCatching {
