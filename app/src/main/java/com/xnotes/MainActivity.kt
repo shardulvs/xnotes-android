@@ -116,7 +116,8 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     var showPresentation by remember { mutableStateOf(false) }
-    var showBackstage by remember { mutableStateOf(false) }
+    // Fresh install / last session on home -> open Home; last session inside a note -> open that note.
+    var showHome by remember { mutableStateOf(editor.startOnHome) }
     var backstageView by remember { mutableStateOf(com.xnotes.ui.BackstageView.RECENT) }
     var showShareChooser by remember { mutableStateOf(false) }
     var guardAction by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -137,7 +138,7 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
                 if (bytes != null) {
                     editor.requestImport(com.xnotes.ui.ImportKind.OPEN, stem, bytes)
                     backstageView = com.xnotes.ui.BackstageView.RECENT
-                    showBackstage = true
+                    showHome = true
                 }
             }.onFailure { editor.message = "Could not open the note." }
         }
@@ -163,7 +164,7 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
                 if (bytes != null) {
                     editor.requestImport(com.xnotes.ui.ImportKind.PDF, stem, bytes)
                     backstageView = com.xnotes.ui.BackstageView.RECENT
-                    showBackstage = true
+                    showHome = true
                 }
             }.onFailure { editor.message = "Could not import the PDF." }
         }
@@ -283,12 +284,12 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
             newNote = { guarded { editor.newNote() } },
             open = {
                 if (editor.browseRoot != null) openLauncher.launch(arrayOf("*/*"))
-                else { backstageView = com.xnotes.ui.BackstageView.RECENT; showBackstage = true }
+                else { backstageView = com.xnotes.ui.BackstageView.RECENT; showHome = true }
             },
             save = { saveOrPrompt() },
             saveAs = { createLauncher.launch("${editor.title}.xnote") },
             exportPdf = { exportPdfLauncher.launch("${editor.title}.pdf") },
-            preferences = { backstageView = com.xnotes.ui.BackstageView.PREFERENCES; showBackstage = true },
+            preferences = { backstageView = com.xnotes.ui.BackstageView.PREFERENCES; showHome = true },
             fullscreen = onToggleFullscreen,
         )
     }
@@ -299,6 +300,9 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
             editor.message = null
         }
     }
+
+    // Remember the current surface so relaunch returns to it (home vs. the open note).
+    LaunchedEffect(showHome) { editor.setStartOnHome(showHome) }
 
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { inner ->
         Column(
@@ -314,7 +318,7 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
             Toolbar(
                 editor,
                 onToggleFullscreen = onToggleFullscreen,
-                onOpenBackstage = { backstageView = com.xnotes.ui.BackstageView.RECENT; showBackstage = true },
+                onOpenBackstage = { backstageView = com.xnotes.ui.BackstageView.RECENT; showHome = true },
                 onInsertImage = { pendingInsertContent = null; insertImageLauncher.launch(arrayOf("image/*")) },
                 onPresent = { showPresentation = true },
             )
@@ -337,20 +341,20 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
         }
     }
 
-    if (showBackstage) {
+    if (showHome) {
         com.xnotes.ui.Backstage(
             editor = editor,
             view = backstageView,
             onSelectView = { backstageView = it },
             onOpenSystem = { openLauncher.launch(arrayOf("*/*")) },
             onImportPdf = { importPdfLauncher.launch(arrayOf("application/pdf")) },
-            onOpenRecent = { uri -> showBackstage = false; guarded { openRecent(uri) } },
-            onOpenFile = { uri -> showBackstage = false; guarded { openTreeFile(uri) } },
+            onOpenRecent = { uri -> showHome = false; guarded { openRecent(uri) } },
+            onOpenFile = { uri -> showHome = false; guarded { openTreeFile(uri) } },
             onPickRoot = { pickRootLauncher.launch(null) },
             onShareFile = { uri -> pendingShareUri = uri; showShareChooser = true },
             onSaveCopyFile = { uri -> pendingSaveCopyUri = uri; saveCopyLauncher.launch("${stemOf(uri)}.xnote") },
             onExportFilePdf = { uri -> pendingExportUri = uri; exportFilePdfLauncher.launch("${stemOf(uri)}.pdf") },
-            onDismiss = { showBackstage = false },
+            onDismiss = { showHome = false },
         )
     }
     if (showShareChooser) {

@@ -714,6 +714,17 @@ class Editor(context: Context) {
         settingsRepo.save(settings)
     }
 
+    /** Whether the next launch should open the home screen (true) or the last-open note (false). */
+    val startOnHome: Boolean get() = settings.startOnHome
+
+    /** Record whether the home screen is the current surface, so relaunch returns to it. */
+    fun setStartOnHome(home: Boolean) {
+        if (settings.startOnHome != home) {
+            settings = settings.copy(startOnHome = home)
+            settingsRepo.save(settings)
+        }
+    }
+
     // --- in-app file explorer (a user-granted SAF tree) ---
 
     fun updateBrowseRoot(treeUri: String) {

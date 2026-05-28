@@ -48,6 +48,8 @@ data class Settings(
     val recentGrid: Boolean = true,
     /** Persisted SAF tree URI for the in-app file explorer's root folder, or null. */
     val browseRoot: String? = null,
+    /** Whether the next launch opens the home screen (true) or the last-open note (false). */
+    val startOnHome: Boolean = true,
     val sidebarVisible: Boolean = false,
     val renderScale: Double = 1.0,
     val presentation: PresentationSettings = PresentationSettings(),
@@ -73,6 +75,7 @@ data class Settings(
             .put("recent_files", JSONArray().apply { recentFiles.forEach { put(it) } })
             .put("recent_grid", recentGrid)
             .apply { browseRoot?.let { put("browse_root", it) } }
+            .put("start_on_home", startOnHome)
             .put("sidebar_visible", sidebarVisible)
             .put("render_scale", renderScale)
             .put("presentation", presentation.toJson())
@@ -104,6 +107,7 @@ data class Settings(
                     .filter { it.isNotEmpty() }.take(10),
                 recentGrid = o.optBoolean("recent_grid", true),
                 browseRoot = o.optString("browse_root", "").ifEmpty { null },
+                startOnHome = o.optBoolean("start_on_home", true),
                 sidebarVisible = o.optBoolean("sidebar_visible", false),
                 renderScale = o.optDouble("render_scale", 1.0),
                 presentation = PresentationSettings.fromJson(o.optJSONObject("presentation")),
