@@ -83,8 +83,8 @@ enum class BackstageView { RECENT, PREFERENCES }
 /** Whether the Home explorer is awaiting a new file/folder name. */
 private enum class CreateMode { NONE, FILE, FOLDER }
 
-/** An entry copied/cut in the explorer; [parentDocId] is the folder it came from (for moves). */
-private data class ClipItem(val uri: String, val name: String, val parentDocId: String, val isCut: Boolean)
+/** Entries copied/cut in the explorer; [sourceParentDocId] is the folder they came from (for moves). */
+private data class ClipItem(val entries: List<BrowseEntry>, val sourceParentDocId: String, val isCut: Boolean)
 
 /** The next free "untitled_N" stem (no extension) for a fresh note in [entries]. */
 private fun nextUntitled(entries: List<BrowseEntry>?): String {
@@ -494,10 +494,14 @@ private fun ExplorerSection(
     var fieldError by remember(root) { mutableStateOf<String?>(null) }
     var renaming by remember(root) { mutableStateOf<String?>(null) }
     var renameText by remember(root) { mutableStateOf("") }
-    var selected by remember(root) { mutableStateOf<BrowseEntry?>(null) }
+    val selection = remember(root) { mutableStateListOf<BrowseEntry>() }
     var clipboard by remember(root) { mutableStateOf<ClipItem?>(null) }
-    var pendingDelete by remember(root) { mutableStateOf<BrowseEntry?>(null) }
+    var pendingDelete by remember(root) { mutableStateOf<List<BrowseEntry>?>(null) }
     var opError by remember(root) { mutableStateOf<String?>(null) }
+    fun toggleSelect(e: BrowseEntry) {
+        val i = selection.indexOfFirst { it.documentUri == e.documentUri }
+        if (i >= 0) selection.removeAt(i) else selection.add(e)
+    }
     var menuOpen by remember(root) { mutableStateOf(false) }
     val rootName by produceState(editor.cachedRootName(root), root) { value = withContext(Dispatchers.IO) { editor.browseRootName(root) } }
     val fieldFocus = remember { FocusRequester() }
@@ -526,41 +530,36 @@ private fun ExplorerSection(
                 Icon(
                     XnotesIcons.home, "Root",
                     tint = (if (stack.isEmpty()) palette.accent else palette.textDim).toComposeColor(),
-                    modifier = Modifier.size(18.dp).clip(RoundedCornerShape(4.dp)).clickable { stack.clear(); selected = null; opError = null },
+                    modifier = Modifier.size(18.dp).clip(RoundedCornerShape(4.dp)).clickable { stack.clear(); selection.clear(); opError = null },
                 )
                 Spacer(Modifier.width(6.dp))
-                Crumb("${rootName ?: "Folder"}/", current = stack.isEmpty()) { stack.clear(); selected = null; opError = null }
+                Crumb("${rootName ?: "Folder"}/", current = stack.isEmpty()) { stack.clear(); selection.clear(); opError = null }
                 stack.forEachIndexed { i, (_, name) ->
                     Crumb("$name/", current = i == stack.lastIndex) {
                         while (stack.size > i + 1) stack.removeAt(stack.lastIndex)
-                        selected = null; opError = null
+                        selection.clear(); opError = null
                     }
                 }
             }
             Spacer(Modifier.width(8.dp))
-            val sel = selected
-            if (sel != null) {
-                IconAction(XnotesIcons.edit, "Rename") {
-                    renaming = sel.documentUri
-                    renameText = if (sel.isDir) sel.name else sel.name.removeSuffix(".xnote").removeSuffix(".XNOTE")
-                    selected = null
-                }
-                IconAction(XnotesIcons.copy, "Copy") { clipboard = ClipItem(sel.documentUri, sel.name, currentDocId, false); selected = null }
-                IconAction(XnotesIcons.cut, "Cut") { clipboard = ClipItem(sel.documentUri, sel.name, currentDocId, true); selected = null }
-                IconAction(XnotesIcons.trash, "Delete") { pendingDelete = sel }
-                IconAction(XnotesIcons.close, "Deselect") { selected = null; clipboard = null }
-            } else {
+            if (selection.isEmpty()) {
                 IconAction(XnotesIcons.plus, "New note") { onCreateMode(CreateMode.FILE) }
                 IconAction(XnotesIcons.newFolder, "New folder") { onCreateMode(CreateMode.FOLDER) }
                 clipboard?.let { clip ->
                     IconAction(XnotesIcons.paste, "Paste") {
                         opError = null
                         scope.launch {
-                            val ok = withContext(Dispatchers.IO) {
-                                if (clip.isCut) editor.moveDocumentInto(root, clip.uri, clip.parentDocId, currentDocId)
-                                else editor.copyDocumentInto(root, clip.uri, currentDocId)
+                            val allOk = withContext(Dispatchers.IO) {
+                                var ok = true
+                                clip.entries.forEach { e ->
+                                    val one = if (clip.isCut) editor.moveDocumentInto(root, e.documentUri, clip.sourceParentDocId, currentDocId)
+                                    else editor.copyDocumentInto(root, e.documentUri, currentDocId)
+                                    if (!one) ok = false
+                                }
+                                ok
                             }
-                            if (ok) { clipboard = null; refreshKey++ } else opError = "Couldn’t paste here."
+                            refreshKey++
+                            if (allOk) clipboard = null else opError = "Couldn’t paste some items here."
                         }
                     }
                     IconAction(XnotesIcons.close, "Clear clipboard") { clipboard = null }
@@ -572,6 +571,20 @@ private fun ExplorerSection(
                         DropdownMenuItem(text = { Text("Forget folder") }, onClick = { menuOpen = false; editor.clearBrowseRoot() })
                     }
                 }
+            } else {
+                // Rename only makes sense for a single item.
+                if (selection.size == 1) {
+                    val sel = selection.first()
+                    IconAction(XnotesIcons.edit, "Rename") {
+                        renaming = sel.documentUri
+                        renameText = if (sel.isDir) sel.name else sel.name.removeSuffix(".xnote").removeSuffix(".XNOTE")
+                        selection.clear()
+                    }
+                }
+                IconAction(XnotesIcons.copy, "Copy") { clipboard = ClipItem(selection.toList(), currentDocId, false); selection.clear() }
+                IconAction(XnotesIcons.cut, "Cut") { clipboard = ClipItem(selection.toList(), currentDocId, true); selection.clear() }
+                IconAction(XnotesIcons.trash, "Delete") { pendingDelete = selection.toList() }
+                IconAction(XnotesIcons.close, "Deselect") { selection.clear() }
             }
         }
         opError?.let { Text(it, color = Color(0xFFE5534B), fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp, top = 4.dp)) }
@@ -619,17 +632,23 @@ private fun ExplorerSection(
                     items(entries!!) { entry ->
                         EntryRow(
                             entry = entry,
-                            selected = selected?.documentUri == entry.documentUri,
-                            dimmed = clipboard?.let { it.isCut && it.uri == entry.documentUri } == true,
+                            selected = selection.any { it.documentUri == entry.documentUri },
+                            dimmed = clipboard?.let { c -> c.isCut && c.entries.any { it.documentUri == entry.documentUri } } == true,
                             isRenaming = renaming == entry.documentUri,
                             renameText = renameText,
                             onRenameTextChange = { renameText = it },
                             onClick = {
-                                selected = null; opError = null
-                                if (entry.isDir) stack.add(editor.browseDocId(entry.documentUri) to entry.name)
-                                else onOpenFile(entry.documentUri)
+                                opError = null
+                                when {
+                                    selection.isNotEmpty() -> toggleSelect(entry) // select mode: tap toggles (files and folders)
+                                    entry.isDir -> stack.add(editor.browseDocId(entry.documentUri) to entry.name)
+                                    else -> onOpenFile(entry.documentUri)
+                                }
                             },
-                            onLongClick = { renaming = null; opError = null; selected = entry },
+                            onLongClick = {
+                                renaming = null; opError = null
+                                if (selection.none { it.documentUri == entry.documentUri }) selection.add(entry)
+                            },
                             onConfirmRename = {
                                 val raw = renameText.trim()
                                 if (raw.isNotEmpty()) {
@@ -648,18 +667,28 @@ private fun ExplorerSection(
         }
     }
 
-    pendingDelete?.let { target ->
+    pendingDelete?.let { targets ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
             title = { Text("Delete?") },
-            text = { Text("Delete “${entryLabel(target)}”? This can’t be undone.") },
+            text = {
+                Text(
+                    if (targets.size == 1) "Delete “${entryLabel(targets.first())}”? This can’t be undone."
+                    else "Delete ${targets.size} items? This can’t be undone.",
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
-                    val uri = target.documentUri
-                    pendingDelete = null; selected = null; opError = null
+                    val uris = targets.map { it.documentUri }
+                    pendingDelete = null; selection.clear(); opError = null
                     scope.launch {
-                        val ok = withContext(Dispatchers.IO) { editor.deleteDocument(uri) }
-                        if (ok) refreshKey++ else opError = "Couldn’t delete that."
+                        val allOk = withContext(Dispatchers.IO) {
+                            var ok = true
+                            uris.forEach { if (!editor.deleteDocument(it)) ok = false }
+                            ok
+                        }
+                        refreshKey++
+                        if (!allOk) opError = "Couldn’t delete some items."
                     }
                 }) { Text("Delete") }
             },
