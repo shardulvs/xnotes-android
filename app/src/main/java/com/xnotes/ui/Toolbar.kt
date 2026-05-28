@@ -82,7 +82,7 @@ fun Toolbar(
             .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ToolbarIcon(XnotesIcons.file, "File") { onOpenBackstage() }
+        ToolbarIcon(XnotesIcons.prev, "Home") { onOpenBackstage() }
         EditMenu(editor)
         // The dirty "*" sits right after the name; a trailing space reserves its slot when
         // clean so autosave toggling it on/off doesn't change the width and nudge the toolbar.

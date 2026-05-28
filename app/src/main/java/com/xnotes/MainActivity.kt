@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -303,6 +304,12 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
 
     // Remember the current surface so relaunch returns to it (home vs. the open note).
     LaunchedEffect(showHome) { editor.setStartOnHome(showHome) }
+
+    // From inside the editor, the back button returns to Home (not out of the app).
+    BackHandler(enabled = !showHome && editor.editingField == null) {
+        backstageView = com.xnotes.ui.BackstageView.RECENT
+        showHome = true
+    }
 
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { inner ->
         Column(

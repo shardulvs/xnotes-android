@@ -1,5 +1,13 @@
 package com.xnotes.ui
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -7,6 +15,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -196,20 +205,35 @@ private fun BackstageContent(
         if (compact) sidebarOpen = false
     }
 
+    // Back closes the drawer (phones) or steps Preferences back to Home before leaving the screen.
+    BackHandler(enabled = (compact && sidebarOpen) || view == BackstageView.PREFERENCES) {
+        if (compact && sidebarOpen) sidebarOpen = false else selectView(BackstageView.RECENT)
+    }
+
     if (compact) {
         Box(Modifier.fillMaxSize().background(palette.menuBg.toComposeColor()).imePadding()) {
             BackstageMain(
                 Modifier.fillMaxSize(), editor, view, sidebarOpen, { sidebarOpen = true },
                 onOpenRecent, onOpenFile, onPickRoot, importPdf, onShareFile, onSaveCopyFile, onExportFilePdf, createMode, { createMode = it },
             )
-            if (sidebarOpen) {
+            AnimatedVisibility(visible = sidebarOpen, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxSize().background(Color(0x99000000)).clickable { sidebarOpen = false })
+            }
+            AnimatedVisibility(
+                visible = sidebarOpen,
+                enter = slideInHorizontally(initialOffsetX = { -it }),
+                exit = slideOutHorizontally(targetOffsetX = { -it }),
+            ) {
                 BackstageSidebar(Modifier.width(296.dp), view, { sidebarOpen = false }, selectView, newNote, importPdf, openSystem)
             }
         }
     } else {
         Row(Modifier.fillMaxSize().background(palette.menuBg.toComposeColor()).imePadding()) {
-            if (sidebarOpen) {
+            AnimatedVisibility(
+                visible = sidebarOpen,
+                enter = expandHorizontally(expandFrom = Alignment.Start) + fadeIn(),
+                exit = shrinkHorizontally(shrinkTowards = Alignment.Start) + fadeOut(),
+            ) {
                 BackstageSidebar(Modifier.width(264.dp), view, { sidebarOpen = false }, selectView, newNote, importPdf, openSystem)
             }
             BackstageMain(
@@ -275,10 +299,11 @@ private fun BackstageMain(
 ) {
     val palette = LocalPalette.current
     Column(modifier) {
-        if (!sidebarOpen) {
+        // Preferences gets its own hamburger bar; on Home the hamburger sits inline with "Recent notes".
+        if (!sidebarOpen && view == BackstageView.PREFERENCES) {
             Row(Modifier.fillMaxWidth().padding(start = 6.dp, top = 8.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onShowSidebar) {
-                    Icon(XnotesIcons.sidebar, "Show sidebar", tint = palette.text.toComposeColor(), modifier = Modifier.size(22.dp))
+                    Icon(XnotesIcons.menu, "Show sidebar", tint = palette.text.toComposeColor(), modifier = Modifier.size(24.dp))
                 }
             }
         }
@@ -286,7 +311,7 @@ private fun BackstageMain(
             when (view) {
                 BackstageView.RECENT -> HomePane(
                     editor, onOpenRecent, onOpenFile, onPickRoot, onImportPdf,
-                    onShareFile, onSaveCopyFile, onExportFilePdf, createMode, onCreateMode,
+                    onShareFile, onSaveCopyFile, onExportFilePdf, createMode, onCreateMode, sidebarOpen, onShowSidebar,
                 )
                 BackstageView.PREFERENCES -> PreferencesPane(editor)
             }
@@ -338,20 +363,33 @@ private fun HomePane(
     onExportFilePdf: (String) -> Unit,
     createMode: CreateMode,
     onCreateMode: (CreateMode) -> Unit,
+    sidebarOpen: Boolean,
+    onShowSidebar: () -> Unit,
 ) {
     val palette = LocalPalette.current
     val recents = editor.recentFiles
     Column(Modifier.fillMaxSize()) {
-        if (recents.isNotEmpty()) {
+        // Header: hamburger (when the sidebar is hidden) on the same line as "Recent notes" + Clear.
+        if (!sidebarOpen || recents.isNotEmpty()) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Recent notes", color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = { editor.clearRecentFiles() }) {
-                    Icon(XnotesIcons.trash, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Clear", color = palette.textDim.toComposeColor())
+                if (!sidebarOpen) {
+                    IconButton(onClick = onShowSidebar) {
+                        Icon(XnotesIcons.menu, "Show sidebar", tint = palette.text.toComposeColor(), modifier = Modifier.size(24.dp))
+                    }
+                    Spacer(Modifier.width(4.dp))
+                }
+                if (recents.isNotEmpty()) {
+                    Text("Recent notes", color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { editor.clearRecentFiles() }) {
+                        Icon(XnotesIcons.trash, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Clear", color = palette.textDim.toComposeColor())
+                    }
                 }
             }
+        }
+        if (recents.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -362,6 +400,8 @@ private fun HomePane(
             Spacer(Modifier.height(18.dp))
             HorizontalDivider(color = palette.border.toComposeColor())
             Spacer(Modifier.height(18.dp))
+        } else if (!sidebarOpen) {
+            Spacer(Modifier.height(8.dp))
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             ExplorerSection(
@@ -472,6 +512,7 @@ private fun ExplorerSection(
     val rootName by produceState(editor.cachedRootName(root), root) { value = withContext(Dispatchers.IO) { editor.browseRootName(root) } }
     val fieldFocus = remember { FocusRequester() }
     val fieldBring = remember { BringIntoViewRequester() }
+    val dismissInteraction = remember { MutableInteractionSource() }
     val pendingImport = editor.pendingImport
     LaunchedEffect(createMode, pendingImport) {
         val active = createMode != CreateMode.NONE || pendingImport != null
@@ -606,7 +647,12 @@ private fun ExplorerSection(
         val entries by produceState(editor.cachedChildren(root, currentDocId), root, currentDocId, refreshKey) {
             value = withContext(Dispatchers.IO) { editor.browseChildren(root, currentDocId) }
         }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        Box(
+            Modifier.weight(1f).fillMaxWidth().then(
+                // In select mode, tapping empty space (not a row) clears the selection.
+                if (selection.isNotEmpty()) Modifier.clickable(interactionSource = dismissInteraction, indication = null) { selection.clear() } else Modifier,
+            ),
+        ) {
             when {
                 entries == null -> EmptyPane("Loading…")
                 entries!!.isEmpty() -> EmptyPane("This folder has no notes.")
