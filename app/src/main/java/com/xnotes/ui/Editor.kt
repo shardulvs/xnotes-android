@@ -1270,9 +1270,11 @@ class Editor(context: Context) {
         return at
     }
 
-    /** Toolbar "Add page": appends a page at the end (Feature 2 changes this to insert after current). */
+    /** Toolbar "Add page": insert a blank page right after the current one (sized from it) and go to it. */
     fun addPage() {
-        insertBlankPageAt(state.document.pages.size, state.document.pages.lastIndex)
+        val current = state.currentPageIndex()
+        val at = insertBlankPageAt(current + 1, current)
+        goToPage(at)
     }
 
     /** Append a blank page at the very end and reveal it — used by the pull-past-the-end gesture. */
