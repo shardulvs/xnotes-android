@@ -59,6 +59,15 @@ class CanvasState(
     var viewportH: Int = 0
     var renderScale: Double = 1.0
 
+    /**
+     * Elastic overscroll past the document's **bottom** end (viewport px, already damped). Positive
+     * lifts the whole content up, opening a gap below the last page where the "pull to add page"
+     * affordance is drawn (see [CanvasView]). Purely visual — it never changes [scrollX]/[scrollY] —
+     * and is sprung back to 0 on release by the interaction layer. The interaction layer owns the
+     * gesture; this field just lets [origin] and the draw loop see the live stretch.
+     */
+    var overscrollY: Double = 0.0
+
     /** Device pixels per dp (display density), set by the view. Lets the speed pen
      *  measure gesture speed in zoom- and device-independent dp (see [InteractionController]). */
     var devicePxPerDp: Double = 1.0
@@ -193,7 +202,7 @@ class CanvasState(
         val cw = contentW * zoom
         val ch = contentH * zoom
         val ox = if (cw < viewportW) (viewportW - cw) / 2.0 else -scrollX
-        val oy = if (ch < viewportH) (viewportH - ch) / 2.0 else -scrollY
+        val oy = (if (ch < viewportH) (viewportH - ch) / 2.0 else -scrollY) - overscrollY
         return Pt(ox, oy)
     }
 

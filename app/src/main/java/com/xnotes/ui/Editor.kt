@@ -205,6 +205,8 @@ class Editor(context: Context) {
         onTextEditEnd = { editingField = null },
         onSelectionMenu = { rect -> selectionMenu = rect },
         onContextMenu = { vp, content -> contextMenu = ContextMenuTarget(vp.x, vp.y, content) },
+        onAddPageAtEnd = { addPageAtEnd() },
+        onHaptic = { runCatching { view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS) } },
     )
 
     val presentation = com.xnotes.presentation.PresentationController(
@@ -1248,21 +1250,35 @@ class Editor(context: Context) {
 
     // --- pages ---
 
-    fun addPage() {
-        val ref = state.document.pages.getOrNull(state.currentPageIndex())
-        val (w, h) = if (ref != null) {
-            ref.width to ref.height
-        } else {
-            PageSize.A4.pixels(Orientation.PORTRAIT, state.document.dpi)
-        }
+    /**
+     * Insert a blank page at [index] (clamped into range), sized from the page at [refIndex] so the
+     * note stays uniform (falling back to A4 portrait). Undoable; relayouts and refreshes. Returns
+     * the new page's final index.
+     */
+    private fun insertBlankPageAt(index: Int, refIndex: Int): Int {
+        val pages = state.document.pages
+        val ref = pages.getOrNull(refIndex) ?: pages.getOrNull(index) ?: pages.lastOrNull()
+        val (w, h) = if (ref != null) ref.width to ref.height else PageSize.A4.pixels(Orientation.PORTRAIT, state.document.dpi)
+        val at = index.coerceIn(0, pages.size)
         val page = Page(w, h)
-        val index = state.document.pages.size
-        state.document.pages.add(index, page)
-        history.push(AddPage(state.document, page, index))
+        pages.add(at, page)
+        history.push(AddPage(state.document, page, at))
         state.document.dirty = true
         state.relayout()
         refreshContent()
         view.requestRender()
+        return at
+    }
+
+    /** Toolbar "Add page": appends a page at the end (Feature 2 changes this to insert after current). */
+    fun addPage() {
+        insertBlankPageAt(state.document.pages.size, state.document.pages.lastIndex)
+    }
+
+    /** Append a blank page at the very end and reveal it — used by the pull-past-the-end gesture. */
+    fun addPageAtEnd() {
+        val at = insertBlankPageAt(state.document.pages.size, state.document.pages.lastIndex)
+        goToPage(at)
     }
 
     fun deleteCurrentPage() {

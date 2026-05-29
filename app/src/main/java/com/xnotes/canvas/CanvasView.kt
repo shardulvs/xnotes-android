@@ -2,6 +2,8 @@ package com.xnotes.canvas
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
 import android.util.AttributeSet
@@ -9,6 +11,7 @@ import android.view.MotionEvent
 import android.view.View
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.Page
 import com.xnotes.core.pal.FontSpec
@@ -63,6 +66,12 @@ class CanvasView @JvmOverloads constructor(
 
     /** Transparent debug HUD (frame rate / cache / heap), toggled by a four-finger tap. */
     val debugOverlay = DebugOverlay()
+
+    // Reused paints for the elastic "pull to add page" badge, so onDraw allocates nothing.
+    private val overscrollStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+    private val overscrollFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val overscrollText = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
+    private val overscrollArc = RectF()
 
     /**
      * Low-rate repaint while the HUD is visible. The canvas only repaints on interaction,
@@ -279,6 +288,9 @@ class CanvasView @JvmOverloads constructor(
 
         drawOverlay?.invoke(r, canvas)
 
+        // Elastic "pull past the end to add a page" affordance, on top of everything (viewport space).
+        if (st.overscrollY > 1.0) drawOverscrollIndicator(canvas, st)
+
         st.dropCachesExcept(visiblePages)
 
         // Debug HUD on top, reading the just-pruned cache state (viewport space).
@@ -288,6 +300,62 @@ class CanvasView @JvmOverloads constructor(
 
     /** Fires once the view has been still for [SHARP_SETTLE_MS], rendering the sharp viewport. */
     private val sharpDebounce = Runnable { state?.requestSharpViewport() }
+
+    /**
+     * Draw the elastic add-page badge in the gap the pull opens below the last page: an accent
+     * progress ring with a "+" that fills solid (with a white "+") once the pull is far enough to
+     * release. Everything fades in with the stretch so a small accidental tug shows almost nothing.
+     */
+    private fun drawOverscrollIndicator(canvas: Canvas, st: CanvasState) {
+        val over = st.overscrollY
+        if (st.pageRects.isEmpty()) return
+        val d = resources.displayMetrics.density
+        val progress = (over / InteractionController.OVERSCROLL_TRIGGER).coerceIn(0.0, 1.0).toFloat()
+        val alpha = (over / (InteractionController.OVERSCROLL_TRIGGER * 0.4)).coerceIn(0.0, 1.0).toFloat()
+        val ready = progress >= 1f
+
+        val last = st.pageRects.last()
+        val anchor = st.contentToViewport(Pt(last.centerX, last.bottom))
+        val cx = anchor.x.toFloat().coerceIn(0f, st.viewportW.toFloat())
+        val cy = ((anchor.y + st.viewportH) / 2.0).toFloat().coerceIn(0f, st.viewportH - 30f * d)
+        val radius = (16f * d) * (0.8f + 0.2f * progress)
+        val accent = st.palette.accent.toArgb()
+        val dim = st.palette.textDim.toArgb()
+
+        // Faint full track behind the progress.
+        overscrollStroke.color = dim
+        overscrollStroke.alpha = (45 * alpha).toInt()
+        overscrollStroke.strokeWidth = 2.5f * d
+        canvas.drawCircle(cx, cy, radius, overscrollStroke)
+
+        if (ready) {
+            overscrollFill.color = accent
+            overscrollFill.alpha = (255 * alpha).toInt()
+            canvas.drawCircle(cx, cy, radius, overscrollFill)
+            drawPlus(canvas, cx, cy, radius * 0.46f, 0xFFFFFFFF.toInt(), (255 * alpha).toInt(), 2.6f * d)
+        } else {
+            overscrollStroke.color = accent
+            overscrollStroke.alpha = (255 * alpha).toInt()
+            overscrollStroke.strokeWidth = 2.8f * d
+            overscrollArc.set(cx - radius, cy - radius, cx + radius, cy + radius)
+            canvas.drawArc(overscrollArc, -90f, 360f * progress, false, overscrollStroke)
+            drawPlus(canvas, cx, cy, radius * 0.46f, accent, (255 * alpha).toInt(), 2.4f * d)
+        }
+
+        overscrollText.color = if (ready) accent else dim
+        overscrollText.alpha = (235 * alpha).toInt()
+        overscrollText.textSize = 11f * d
+        canvas.drawText(if (ready) "Release to add page" else "Pull to add page", cx, cy + radius + 16f * d, overscrollText)
+    }
+
+    /** A centred "+" glyph (two rounded strokes) for the overscroll badge. */
+    private fun drawPlus(canvas: Canvas, cx: Float, cy: Float, half: Float, color: Int, a: Int, w: Float) {
+        overscrollStroke.color = color
+        overscrollStroke.alpha = a
+        overscrollStroke.strokeWidth = w
+        canvas.drawLine(cx - half, cy, cx + half, cy, overscrollStroke)
+        canvas.drawLine(cx, cy - half, cx, cy + half, overscrollStroke)
+    }
 
     private fun drawPageLabel(r: AndroidRenderer, st: CanvasState, index: Int, pr: Rect) {
         val label = "%02d".format(index + 1)

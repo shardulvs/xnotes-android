@@ -74,6 +74,10 @@ class InteractionController(
     private val onSelectionMenu: (Rect?) -> Unit = {},
     /** Long-press on empty space: open a context menu at (viewport, content). */
     private val onContextMenu: (Pt, Pt) -> Unit = { _, _ -> },
+    /** Pulled past the document's bottom end far enough and released: append a new page. */
+    private val onAddPageAtEnd: () -> Unit = {},
+    /** A short haptic tick (e.g. the overscroll pull crossed the add-page threshold). */
+    private val onHaptic: () -> Unit = {},
 ) {
     /** Whether the system clipboard currently holds an image (provided by the host). */
     var clipboardHasImage: () -> Boolean = { false }
@@ -112,6 +116,13 @@ class InteractionController(
     private var flingVel = Pt.ZERO // scroll-space velocity, viewport px/s
     private var lastFlingMs = 0L
     private val flingFrame = Choreographer.FrameCallback { frameTimeNanos -> stepFling(frameTimeNanos) }
+
+    // ELASTIC OVERSCROLL (pull past the bottom end to add a page)
+    /** True once the live stretch has crossed the add-page threshold, so the haptic fires once. */
+    private var overscrollArmed = false
+    private var overscrollSettling = false
+    private var lastOverscrollMs = 0L
+    private val overscrollFrame = Choreographer.FrameCallback { frameTimeNanos -> stepOverscrollSettle(frameTimeNanos) }
 
     // PINCH
     private var pinchInitDist = 1.0
@@ -221,6 +232,7 @@ class InteractionController(
 
     private fun handleDown(e: MotionEvent) {
         stopFling() // a new touch halts any in-progress glide
+        stopOverscrollSettle() // ...and lets a re-grab take over the elastic mid-spring
         val toolType = e.getToolType(0)
         val vx = e.getX(0).toDouble()
         val vy = e.getY(0).toDouble()
@@ -297,7 +309,7 @@ class InteractionController(
             PointerMode.DRAW -> endDraw(e)
             PointerMode.PAN -> {
                 mode = PointerMode.IDLE
-                startFling(panVel)
+                if (state.overscrollY > 0.0) releaseOverscroll() else startFling(panVel)
             }
             PointerMode.PINCH -> endPinch()
             PointerMode.ERASE -> endErase()
@@ -957,10 +969,35 @@ class InteractionController(
 
     private fun extendPan(vx: Double, vy: Double) {
         trackVelocity(vx, vy)
-        state.scrollBy(-(vx - lastPan.x), -(vy - lastPan.y))
+        val dx = -(vx - lastPan.x)
+        var dy = -(vy - lastPan.y)
+        // While the bottom elastic is stretched, finger motion works the elastic first (rubber-band)
+        // rather than the scroll, so pulling back relaxes the stretch before the document scrolls.
+        if (state.overscrollY > 0.0) {
+            val relaxed = (state.overscrollY + dy * OVERSCROLL_RESIST).coerceAtLeast(0.0)
+            val consumed = (relaxed - state.overscrollY) / OVERSCROLL_RESIST
+            state.overscrollY = relaxed.coerceAtMost(OVERSCROLL_MAX)
+            dy -= consumed
+            updateOverscrollArmed()
+        }
+        // Apply the remaining pan to the scroll; whatever the clamp rejects at the bottom feeds the elastic.
+        val beforeY = state.scrollY
+        state.scrollBy(dx, dy)
+        val leftoverY = dy - (state.scrollY - beforeY)
+        if (leftoverY > 0.0) {
+            state.overscrollY = (state.overscrollY + leftoverY * OVERSCROLL_RESIST).coerceAtMost(OVERSCROLL_MAX)
+            updateOverscrollArmed()
+        }
         lastPan = Pt(vx, vy)
         onViewChanged()
         requestRender()
+    }
+
+    /** Fire the threshold haptic once as the live stretch crosses the add-page point. */
+    private fun updateOverscrollArmed() {
+        val past = state.overscrollY >= OVERSCROLL_TRIGGER
+        if (past && !overscrollArmed) onHaptic()
+        overscrollArmed = past
     }
 
     // --- inertial fling ---
@@ -1012,6 +1049,47 @@ class InteractionController(
         }
     }
 
+    // --- elastic overscroll release ---
+
+    /** Finger lifted while the bottom elastic was stretched: add a page if pulled far enough, then spring back. */
+    private fun releaseOverscroll() {
+        stopFling()
+        if (state.overscrollY >= OVERSCROLL_TRIGGER) onAddPageAtEnd()
+        overscrollArmed = false
+        if (!overscrollSettling) {
+            overscrollSettling = true
+            lastOverscrollMs = System.nanoTime() / 1_000_000L
+            choreographer.postFrameCallback(overscrollFrame)
+        }
+    }
+
+    private fun stopOverscrollSettle() {
+        overscrollSettling = false
+    }
+
+    /** Drop the elastic immediately (no spring) — used when a gesture is cancelled or supplanted. */
+    private fun clearOverscroll() {
+        overscrollSettling = false
+        overscrollArmed = false
+        state.overscrollY = 0.0
+    }
+
+    private fun stepOverscrollSettle(frameTimeNanos: Long) {
+        if (!overscrollSettling) return
+        val now = frameTimeNanos / 1_000_000L
+        val dt = ((now - lastOverscrollMs).coerceIn(1L, 40L)) / 1000.0
+        lastOverscrollMs = now
+        state.overscrollY *= exp(-OVERSCROLL_SPRING * dt) // exponential ease toward rest
+        if (state.overscrollY < 0.5) {
+            state.overscrollY = 0.0
+            overscrollSettling = false
+        } else {
+            choreographer.postFrameCallback(overscrollFrame)
+        }
+        onViewChanged()
+        requestRender()
+    }
+
     // --- PINCH ---
 
     private fun beginPinch(e: MotionEvent) {
@@ -1019,6 +1097,7 @@ class InteractionController(
         strokePageIndex = null
         bandRect = null
         lassoPoints.clear()
+        clearOverscroll() // a second finger ends any bottom-pull; the elastic snaps away
         mode = PointerMode.PINCH
         val a = Pt(e.getX(0).toDouble(), e.getY(0).toDouble())
         val b = Pt(e.getX(1).toDouble(), e.getY(1).toDouble())
@@ -1062,6 +1141,7 @@ class InteractionController(
     private fun abortGesture() {
         cancelLongPress()
         stopFling()
+        clearOverscroll()
         liveStroke = null
         strokePageIndex = null
         pendingShape = null
@@ -1160,5 +1240,11 @@ class InteractionController(
         const val FLING_FRICTION = 2.5 // higher = stops sooner; lower = floatier
         const val FLING_MIN_START = 120.0 // minimum flick velocity to start a glide
         const val FLING_MIN_STOP = 24.0 // velocity at which the glide ends
+
+        // Elastic overscroll tuning (pull past the bottom end to add a page).
+        const val OVERSCROLL_RESIST = 0.45 // fraction of past-end finger travel that becomes visible stretch
+        const val OVERSCROLL_MAX = 240.0 // hard cap on the visible stretch (viewport px)
+        const val OVERSCROLL_TRIGGER = 130.0 // stretch at which releasing appends a page
+        const val OVERSCROLL_SPRING = 11.0 // spring-back rate toward rest (1/s; higher = snappier)
     }
 }
