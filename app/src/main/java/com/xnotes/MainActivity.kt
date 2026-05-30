@@ -482,6 +482,7 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
                         insertImageLauncher.launch(arrayOf("image/*"))
                     })
                     ZoomLockHint(editor)
+                    RefiningPdfHint(editor)
                 }
             }
         }
@@ -559,6 +560,43 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
                 }
             },
         )
+    }
+}
+
+/**
+ * Subtle, non-blocking hint shown bottom-right while a dark-mode PDF's embedded-image colours are
+ * still being parsed in the background ([Editor.isRefiningPdf]). The page is already visible
+ * (inverted); this just signals that the images will snap to their true colours shortly.
+ */
+@Composable
+private fun BoxScope.RefiningPdfHint(editor: Editor) {
+    val palette = LocalPalette.current
+    AnimatedVisibility(
+        visible = editor.isRefiningPdf,
+        modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
+        enter = fadeIn(),
+        exit = fadeOut(),
+    ) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(palette.surface.toComposeColor())
+                .border(1.dp, palette.border.toComposeColor(), RoundedCornerShape(6.dp))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            androidx.compose.material3.CircularProgressIndicator(
+                modifier = Modifier.size(14.dp),
+                strokeWidth = 2.dp,
+                color = palette.accent.toComposeColor(),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "Refining PDF colours…",
+                color = palette.textDim.toComposeColor(),
+                fontFamily = FontFamily.Monospace,
+            )
+        }
     }
 }
 

@@ -206,6 +206,11 @@ class Editor(context: Context) {
     var bookmarkVersion by mutableStateOf(0)
         private set
 
+    /** True while a dark-mode PDF's embedded-image colours are still being parsed off-thread (only
+     *  when [Preferences.pdfDarkMode] + [Preferences.pdfKeepImageColors]); drives the canvas hint. */
+    var isRefiningPdf by mutableStateOf(false)
+        private set
+
     /** Pages the side panel has selected, by **identity** so reorder/delete never breaks the set. */
     private val selectedPages = mutableStateListOf<Page>()
 
@@ -315,6 +320,15 @@ class Editor(context: Context) {
     private fun rebuildPdfSource() {
         pdfSource?.close()
         pdfSource = state.document.pdfBytes?.let { com.xnotes.platform.PdfSource.create(appContext, it) }
+        pdfSource?.onImagesReady = { _ ->
+            view.post {
+                state.invalidateBackgrounds() // re-render the page(s) with image colours kept
+                view.requestRender()
+                maybeFinishRefining()
+            }
+        }
+        // Optimistic: assume the first visible page needs colour-correction; cleared once parsed.
+        isRefiningPdf = pdfSource != null && settings.prefs.pdfDarkMode && settings.prefs.pdfKeepImageColors
         installPdfBackground()
         state.invalidateAllCaches()
     }
@@ -343,6 +357,26 @@ class Editor(context: Context) {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Recompute [isRefiningPdf]: true while any *visible* PDF-backed page still lacks parsed image
+     * rects (and the keep-image-colours feature is on). Pages with no images, rotated, or that fail
+     * to parse cache an empty result, so they count as resolved and the hint clears.
+     */
+    private fun maybeFinishRefining() {
+        val src = pdfSource
+        if (src == null || !(settings.prefs.pdfDarkMode && settings.prefs.pdfKeepImageColors)) {
+            isRefiningPdf = false
+            return
+        }
+        val visible = state.visibleContentRect()
+        isRefiningPdf = state.document.pages.withIndex().any { (i, p) ->
+            val pi = p.pdfPage
+            pi != null &&
+                state.pageRects.getOrNull(i)?.intersects(visible) == true &&
+                !src.hasImageRects(pi)
         }
     }
 
@@ -449,6 +483,7 @@ class Editor(context: Context) {
         settings = settings.copy(prefs = p)
         applyPagePrefsToState(p)
         state.invalidateAllCaches()
+        maybeFinishRefining() // feature may have just toggled on/off
         if (marginChanged) {
             state.fitWidth() // re-fit so the new side margin takes effect immediately
             refreshView()
@@ -570,7 +605,18 @@ class Editor(context: Context) {
         val r = surface.renderer()
         r.scale(scale, scale)
         if (!active()) return null
-        state.paintPageBackground?.invoke(page, r, scale, com.xnotes.core.geometry.Rect(0.0, 0.0, page.width, page.height))
+        val src = pdfSource
+        val pi = page.pdfPage
+        if (src != null && pi != null) {
+            // One-shot and off the main thread: parse image colours inline so the thumbnail is correct now.
+            val invert = settings.prefs.pdfDarkMode
+            src.renderPage(pi, w, h, invert, keepImages = invert && settings.prefs.pdfKeepImageColors, blockingImages = true)?.let { bg ->
+                r.drawRaster(bg, com.xnotes.core.geometry.Rect(0.0, 0.0, page.width, page.height))
+                bg.recycle()
+            }
+        } else {
+            state.paintPageBackground?.invoke(page, r, scale, com.xnotes.core.geometry.Rect(0.0, 0.0, page.width, page.height))
+        }
         for (item in itemsSnapshot(page)) {
             if (!active()) return null
             item.paint(r)
@@ -804,7 +850,7 @@ class Editor(context: Context) {
             runCatching {
                 com.xnotes.platform.PdfSource.create(appContext, bytes)?.let { src ->
                     page.pdfPage?.let { pi ->
-                        src.renderPage(pi, w, h, settings.prefs.pdfDarkMode, keepImages = settings.prefs.pdfDarkMode && settings.prefs.pdfKeepImageColors)?.let { bg ->
+                        src.renderPage(pi, w, h, settings.prefs.pdfDarkMode, keepImages = settings.prefs.pdfDarkMode && settings.prefs.pdfKeepImageColors, blockingImages = true)?.let { bg ->
                             r.drawRaster(bg, Rect(0.0, 0.0, page.width, page.height))
                             bg.recycle()
                         }

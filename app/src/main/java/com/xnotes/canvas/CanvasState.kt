@@ -575,6 +575,19 @@ class CanvasState(
     }
 
     /**
+     * Drop only the rendered background layer (PDF/template), keeping the ink caches. Used when a
+     * PDF page's embedded-image colours finish parsing asynchronously, so the background re-renders
+     * with the images stamped while ink is left untouched. Bumping the generation counters discards
+     * any in-flight background/sharp build captured before this, so a provisional (un-stamped)
+     * surface can't land over the refreshed one.
+     */
+    fun invalidateBackgrounds() {
+        bgCaches.clear()
+        cacheGen++
+        sharpGen++
+    }
+
+    /**
      * Invalidate caches after a *zoom* without dropping the surfaces. The old-resolution
      * bitmaps stay in the maps, so [cacheForOrSchedule]/[backgroundForOrSchedule] keep
      * blitting them (scaled) for the new zoom until the sharp rebuild lands — avoiding the

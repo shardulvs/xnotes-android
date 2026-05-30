@@ -21,6 +21,10 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImage
 import java.io.File
+import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
  * Reads and rasterizes a PDF via the framework [PdfRenderer] (PAL §14). Pages
@@ -42,12 +46,38 @@ class PdfSource private constructor(
 ) {
     val pageCount: Int get() = renderer.pageCount
 
-    /** PdfBox model, loaded lazily the first time image boxes are requested. */
-    private var pdfBoxDoc: PDDocument? = null
+    /** PdfBox model, loaded lazily the first time image boxes are requested. Guarded by [pdfBoxLock]. */
+    @Volatile private var pdfBoxDoc: PDDocument? = null
     private var pdfBoxLoadFailed = false
 
+    /**
+     * Monitor for all PdfBox state ([pdfBoxDoc], [pdfBoxLoadFailed], parsing). Deliberately separate
+     * from the instance monitor that serializes the non-thread-safe [PdfRenderer], so a slow first
+     * [PDDocument.load] on the prep worker can never block an on-screen page render.
+     */
+    private val pdfBoxLock = Any()
+
     /** Per-page image boxes as normalized page fractions (top-left origin); parsed once, cached. */
-    private val imageRects = HashMap<Int, List<RectF>>()
+    private val imageRects = ConcurrentHashMap<Int, List<RectF>>()
+
+    /** PDF page indices whose image-rect parse is queued on [imagesExecutor] (dedupes scheduling). */
+    private val scheduledImages = Collections.synchronizedSet(HashSet<Int>())
+
+    /** Single daemon worker for PdfBox parsing; created on first use, shut down in [close]. */
+    private var imagesExecutor: ExecutorService? = null
+
+    /** Guards [imagesExecutor]'s lifecycle. Kept off [pdfBoxLock] so scheduling a parse never waits
+     *  on a load already running on the worker. */
+    private val executorLock = Any()
+
+    @Volatile private var closed = false
+
+    /**
+     * Invoked (on the prep worker thread) once a page's image rects have been parsed and are ready
+     * to stamp. The canvas wires this to refresh the page's background cache and repaint; the
+     * callback must hop to the main thread itself.
+     */
+    @Volatile var onImagesReady: ((index: Int) -> Unit)? = null
 
     /** Page size in points (1 pt = 1/72 inch). */
     @Synchronized
@@ -59,7 +89,7 @@ class PdfSource private constructor(
     }
 
     @Synchronized
-    fun renderPage(index: Int, widthPx: Int, heightPx: Int, invert: Boolean, keepImages: Boolean = false): AndroidRasterSurface? {
+    fun renderPage(index: Int, widthPx: Int, heightPx: Int, invert: Boolean, keepImages: Boolean = false, blockingImages: Boolean = false): AndroidRasterSurface? {
         if (index !in 0 until renderer.pageCount) return null
         val w = widthPx.coerceIn(1, MAX_DIM)
         val h = heightPx.coerceIn(1, MAX_DIM)
@@ -72,7 +102,7 @@ class PdfSource private constructor(
 
         val inverted = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         Canvas(inverted).drawBitmap(bmp, 0f, 0f, Paint().apply { colorFilter = ColorMatrixColorFilter(INVERT) })
-        if (keepImages) stampOriginalImages(inverted, bmp, index, fullWpx = w, fullHpx = h, offsetXpx = 0, offsetYpx = 0)
+        if (keepImages) keepImageColors(index, inverted, bmp, fullWpx = w, fullHpx = h, offsetXpx = 0, offsetYpx = 0, blocking = blockingImages)
         bmp.recycle()
         return AndroidRasterSurface(inverted)
     }
@@ -95,6 +125,7 @@ class PdfSource private constructor(
         regionHpx: Int,
         invert: Boolean,
         keepImages: Boolean = false,
+        blockingImages: Boolean = false,
     ): AndroidRasterSurface? {
         if (index !in 0 until renderer.pageCount) return null
         val w = regionWpx.coerceIn(1, MAX_DIM)
@@ -113,10 +144,36 @@ class PdfSource private constructor(
         val inverted = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         Canvas(inverted).drawBitmap(bmp, 0f, 0f, Paint().apply { colorFilter = ColorMatrixColorFilter(INVERT) })
         if (keepImages) {
-            stampOriginalImages(inverted, bmp, index, fullWpx, fullHpx, offsetXpx = regionLeftPx, offsetYpx = regionTopPx)
+            keepImageColors(index, inverted, bmp, fullWpx, fullHpx, offsetXpx = regionLeftPx, offsetYpx = regionTopPx, blocking = blockingImages)
         }
         bmp.recycle()
         return AndroidRasterSurface(inverted)
+    }
+
+    /**
+     * Keep embedded images in their real colours over the inverted page. Stamps immediately when
+     * [index]'s image rects are already parsed. Otherwise: [blocking] (thumbnail/one-shot) callers
+     * parse inline so the result is correct now; the on-screen canvas instead schedules an async
+     * parse and leaves the images inverted for this frame — they snap to colour on the re-render
+     * once [onImagesReady] fires. This is what keeps a freshly opened PDF from blanking while the
+     * one-time [PDDocument.load] runs.
+     */
+    private fun keepImageColors(
+        index: Int,
+        inverted: Bitmap,
+        original: Bitmap,
+        fullWpx: Int,
+        fullHpx: Int,
+        offsetXpx: Int,
+        offsetYpx: Int,
+        blocking: Boolean,
+    ) {
+        if (blocking && !imageRects.containsKey(index)) imageRectsFor(index)
+        if (imageRects.containsKey(index)) {
+            stampOriginalImages(inverted, original, index, fullWpx, fullHpx, offsetXpx, offsetYpx)
+        } else {
+            scheduleImagePrep(index)
+        }
     }
 
     /**
@@ -134,7 +191,7 @@ class PdfSource private constructor(
         offsetXpx: Int,
         offsetYpx: Int,
     ) {
-        val rects = imageRectsFor(index)
+        val rects = imageRects[index] ?: return // not parsed yet — caller schedules prep; skip stamping
         if (rects.isEmpty()) return
         val w = inverted.width
         val h = inverted.height
@@ -156,8 +213,7 @@ class PdfSource private constructor(
      * parsed once via PdfBox and cached. Empty list ⇒ behave like a plain full-page invert
      * (no PDF, parse failure, no images, or a rotated page we don't try to map).
      */
-    @Synchronized
-    private fun imageRectsFor(index: Int): List<RectF> {
+    private fun imageRectsFor(index: Int): List<RectF> = synchronized(pdfBoxLock) {
         imageRects[index]?.let { return it }
         val result = runCatching {
             val doc = pdfBoxDocument() ?: return@runCatching emptyList()
@@ -170,10 +226,42 @@ class PdfSource private constructor(
                 .rects
         }.getOrDefault(emptyList())
         imageRects[index] = result
-        return result
+        result
     }
 
+    /** True once [index]'s image rects have been parsed (possibly to an empty list). */
+    fun hasImageRects(index: Int): Boolean = imageRects.containsKey(index)
+
+    /**
+     * Parse [index]'s image rects on a dedicated worker (loading the PdfBox model once, on first
+     * call), then notify [onImagesReady]. Never runs on the cache thread, so the slow first
+     * [PDDocument.load] doesn't stall other pages' background builds. Deduped; a no-op when
+     * already parsed or after [close].
+     */
+    private fun scheduleImagePrep(index: Int) {
+        if (closed || imageRects.containsKey(index)) return
+        if (!scheduledImages.add(index)) return
+        val executor = synchronized(executorLock) {
+            if (closed) {
+                scheduledImages.remove(index)
+                return
+            }
+            imagesExecutor ?: Executors.newSingleThreadExecutor { r ->
+                Thread(r, "xnotes-pdfbox").apply { isDaemon = true }
+            }.also { imagesExecutor = it }
+        }
+        runCatching {
+            executor.execute {
+                runCatching { imageRectsFor(index) }
+                scheduledImages.remove(index)
+                if (!closed) onImagesReady?.invoke(index)
+            }
+        }.onFailure { scheduledImages.remove(index) } // executor already shut down
+    }
+
+    /** The lazily-loaded PdfBox model. Always called under [pdfBoxLock]. */
     private fun pdfBoxDocument(): PDDocument? {
+        if (closed) return null
         if (pdfBoxDoc == null && !pdfBoxLoadFailed) {
             pdfBoxDoc = runCatching {
                 PDFBoxResourceLoader.init(appContext)
@@ -184,6 +272,9 @@ class PdfSource private constructor(
     }
 
     fun close() {
+        closed = true
+        onImagesReady = null
+        synchronized(executorLock) { runCatching { imagesExecutor?.shutdownNow() } }
         runCatching { pdfBoxDoc?.close() }
         runCatching { renderer.close() }
         runCatching { pfd.close() }
