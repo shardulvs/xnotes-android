@@ -682,6 +682,8 @@ private fun ExplorerSection(
                     items(entries!!) { entry ->
                         // Per-file actions show only on file rows when not in select mode.
                         val fileActions = !entry.isDir && selection.isEmpty()
+                        // Rename/copy/cut/delete apply to files and folders alike, outside select mode.
+                        val manageActions = selection.isEmpty()
                         EntryRow(
                             entry = entry,
                             selected = selection.any { it.documentUri == entry.documentUri },
@@ -692,6 +694,13 @@ private fun ExplorerSection(
                             onShare = if (fileActions) ({ onShareFile(entry.documentUri) }) else null,
                             onSaveCopy = if (fileActions) ({ onSaveCopyFile(entry.documentUri) }) else null,
                             onExportPdf = if (fileActions) ({ onExportFilePdf(entry.documentUri) }) else null,
+                            onRename = if (manageActions) ({
+                                renaming = entry.documentUri
+                                renameText = entryLabel(entry)
+                            }) else null,
+                            onCopy = if (manageActions) ({ clipboard = ClipItem(listOf(entry), currentDocId, false) }) else null,
+                            onCut = if (manageActions) ({ clipboard = ClipItem(listOf(entry), currentDocId, true) }) else null,
+                            onDelete = if (manageActions) ({ pendingDelete = listOf(entry) }) else null,
                             onClick = {
                                 opError = null
                                 when {
@@ -798,6 +807,10 @@ private fun EntryRow(
     onShare: (() -> Unit)? = null,
     onSaveCopy: (() -> Unit)? = null,
     onExportPdf: (() -> Unit)? = null,
+    onRename: (() -> Unit)? = null,
+    onCopy: (() -> Unit)? = null,
+    onCut: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onConfirmRename: () -> Unit,
@@ -843,15 +856,22 @@ private fun EntryRow(
                 Spacer(Modifier.width(12.dp))
                 Text(details, color = palette.textDim.toComposeColor(), fontSize = 12.sp, maxLines = 1)
             }
-            if (onShare != null) {
+            if (onShare != null || onRename != null) {
                 Box {
                     IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
                         Icon(XnotesIcons.more, "More", tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp))
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(text = { Text("Share") }, onClick = { menuOpen = false; onShare() })
-                        DropdownMenuItem(text = { Text("Save a copy…") }, onClick = { menuOpen = false; onSaveCopy?.invoke() })
-                        DropdownMenuItem(text = { Text("Export to PDF") }, onClick = { menuOpen = false; onExportPdf?.invoke() })
+                        DropdownMenuItem(text = { Text("Rename") }, onClick = { menuOpen = false; onRename?.invoke() })
+                        DropdownMenuItem(text = { Text("Copy") }, onClick = { menuOpen = false; onCopy?.invoke() })
+                        DropdownMenuItem(text = { Text("Cut") }, onClick = { menuOpen = false; onCut?.invoke() })
+                        DropdownMenuItem(text = { Text("Delete") }, onClick = { menuOpen = false; onDelete?.invoke() })
+                        if (onShare != null) {
+                            HorizontalDivider(color = palette.border.toComposeColor())
+                            DropdownMenuItem(text = { Text("Share") }, onClick = { menuOpen = false; onShare() })
+                            DropdownMenuItem(text = { Text("Save a copy…") }, onClick = { menuOpen = false; onSaveCopy?.invoke() })
+                            DropdownMenuItem(text = { Text("Export to PDF") }, onClick = { menuOpen = false; onExportPdf?.invoke() })
+                        }
                     }
                 }
             }
