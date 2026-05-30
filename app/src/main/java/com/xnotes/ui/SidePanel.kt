@@ -263,7 +263,7 @@ private fun PageContextMenu(
                 DropdownMenuItem(text = { Text("Delete") }, leadingIcon = menuIcon(XnotesIcons.trash), onClick = { editor.deletePages(one); onDismiss() })
                 DropdownMenuItem(text = { Text("Erase page") }, leadingIcon = menuIcon(XnotesIcons.eraser), onClick = { editor.erasePage(index); onDismiss() })
                 DropdownMenuItem(text = { Text("Share…") }, leadingIcon = menuIcon(XnotesIcons.share), onClick = { sub = MENU_SHARE })
-                DropdownMenuItem(text = { Text("Save as…") }, leadingIcon = menuIcon(XnotesIcons.exportDoc), onClick = { sub = MENU_SAVE })
+                DropdownMenuItem(text = { Text("Save as…") }, leadingIcon = menuIcon(XnotesIcons.download), onClick = { sub = MENU_SAVE })
             }
         }
     }
@@ -290,7 +290,7 @@ private fun PageSelectionBar(
         BarAction(XnotesIcons.copy, "Copy") { editor.copyPages(editor.selectedPageIndices()) }
         BarAction(XnotesIcons.cut, "Cut") { editor.cutPages(editor.selectedPageIndices()) }
         BarAction(XnotesIcons.trash, "Delete") { editor.deletePages(editor.selectedPageIndices()) }
-        FormatMenu(XnotesIcons.exportDoc, "Save as", { onSavePagesAsImages(editor.selectedPageIndices()) }, { onSavePagesAsPdf(editor.selectedPageIndices()) })
+        FormatMenu(XnotesIcons.download, "Save as", { onSavePagesAsImages(editor.selectedPageIndices()) }, { onSavePagesAsPdf(editor.selectedPageIndices()) })
         FormatMenu(XnotesIcons.share, "Share", { onSharePages(editor.selectedPageIndices(), false) }, { onSharePages(editor.selectedPageIndices(), true) })
     }
 }
