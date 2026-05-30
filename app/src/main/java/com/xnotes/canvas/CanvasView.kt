@@ -2,8 +2,10 @@ package com.xnotes.canvas
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.Shader
 import android.os.Handler
 import android.os.Looper
 import android.util.AttributeSet
@@ -72,6 +74,9 @@ class CanvasView @JvmOverloads constructor(
     private val overscrollFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val overscrollText = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
     private val overscrollArc = RectF()
+
+    /** Reused fill paint for the fit-to-width snap glow's accent side-rails (zero per-frame alloc). */
+    private val fitGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
 
     /**
      * Low-rate repaint while the HUD is visible. The canvas only repaints on interaction,
@@ -290,6 +295,9 @@ class CanvasView @JvmOverloads constructor(
 
         drawOverlay?.invoke(r, canvas)
 
+        // Accent side-rails, flashed the moment a pinch magnetically snaps to fit-width (viewport space).
+        if (st.fitWidthGlow > 0.0) drawFitWidthGlow(canvas, st)
+
         // Elastic "pull past the end to add a page" affordance, on top of everything (viewport space).
         if (st.overscrollY > 1.0) drawOverscrollIndicator(canvas, st)
 
@@ -359,6 +367,62 @@ class CanvasView @JvmOverloads constructor(
         canvas.drawLine(cx, cy - half, cx, cy + half, overscrollStroke)
     }
 
+    /**
+     * Neon accent "tube" over the page column's vertical edges, flashed when a pinch snaps to
+     * fit-to-width and faded out by [InteractionController]. Each edge gets a white-hot core hard
+     * against the page boundary plus a saturated accent halo, both extending **outward into the
+     * margin only** — the fill rects end exactly at the page edge, so the glow never bleeds onto the
+     * page. Drawn in viewport space, tracking the edges as the view pans; intensity = [CanvasState.fitWidthGlow].
+     */
+    private fun drawFitWidthGlow(canvas: Canvas, st: CanvasState) {
+        if (st.pageRects.isEmpty()) return
+        val a = (255 * st.fitWidthGlow).toInt().coerceIn(0, 255)
+        if (a <= 0) return
+        val d = resources.displayMetrics.density
+        val halo = 16f * d // outward saturated spread
+        val coreW = 6f * d // outward white-hot tube
+
+        val acc = st.palette.accent.toArgb()
+        val clear = acc and 0x00FFFFFF // accent rgb, fully transparent
+        val haloC = clear or (FIT_GLOW_HALO_ALPHA shl 24)
+        val coreC = whiteHot(acc, 0.6f, FIT_GLOW_CORE_ALPHA)
+
+        val colLeft = st.pageRects.minOf { it.left } // outermost (widest) page edges fill the width
+        val colRight = st.pageRects.maxOf { it.right }
+        val lx = st.contentToViewport(Pt(colLeft, 0.0)).x.toFloat()
+        val rx = st.contentToViewport(Pt(colRight, 0.0)).x.toFloat()
+        val top = st.contentToViewport(Pt(colLeft, st.pageRects.first().top)).y.toFloat().coerceAtLeast(0f)
+        val bottom = st.contentToViewport(Pt(colLeft, st.pageRects.last().bottom)).y.toFloat()
+            .coerceAtMost(st.viewportH.toFloat())
+        if (bottom <= top) return
+
+        fitGlowPaint.alpha = a // overall fade with the glow (modulates the baked-in peak alphas)
+        // Left edge: glow fans left into the margin; the hot core sits hard against the page edge.
+        neonRail(canvas, lx - halo, lx, top, bottom, clear, haloC)
+        neonRail(canvas, lx - coreW, lx, top, bottom, clear, coreC)
+        // Right edge: mirror — glow fans right into the margin.
+        neonRail(canvas, rx, rx + halo, top, bottom, haloC, clear)
+        neonRail(canvas, rx, rx + coreW, top, bottom, coreC, clear)
+        fitGlowPaint.shader = null
+    }
+
+    /** One outward neon band: a horizontal [c0]→[c1] gradient filling [x0,x1] down [top,bottom]. */
+    private fun neonRail(canvas: Canvas, x0: Float, x1: Float, top: Float, bottom: Float, c0: Int, c1: Int) {
+        fitGlowPaint.shader = LinearGradient(x0, 0f, x1, 0f, c0, c1, Shader.TileMode.CLAMP)
+        canvas.drawRect(x0, top, x1, bottom, fitGlowPaint)
+    }
+
+    /** [argb] blended [t] of the way toward white at the given [alpha] (0–255) — the neon tube's hot core. */
+    private fun whiteHot(argb: Int, t: Float, alpha: Int): Int {
+        val r = (argb ushr 16) and 0xFF
+        val g = (argb ushr 8) and 0xFF
+        val b = argb and 0xFF
+        val hr = (r + (255 - r) * t).toInt()
+        val hg = (g + (255 - g) * t).toInt()
+        val hb = (b + (255 - b) * t).toInt()
+        return (alpha shl 24) or (hr shl 16) or (hg shl 8) or hb
+    }
+
     private fun drawPageLabel(r: AndroidRenderer, st: CanvasState, index: Int, pr: Rect) {
         val label = "%02d".format(index + 1)
         r.drawText(label, Rect(pr.left, pr.top - 26.0, 140.0, 24.0), FontSpec(9.0), st.palette.textDim)
@@ -368,6 +432,12 @@ class CanvasView @JvmOverloads constructor(
     fun requestRender() = postInvalidateOnAnimation()
 
     companion object {
+        /** Peak opacity (0–255) of the fit-to-width neon halo (saturated accent) at full glow. */
+        private const val FIT_GLOW_HALO_ALPHA = 140
+
+        /** Peak opacity (0–255) of the fit-to-width neon core (white-hot tube) at full glow. */
+        private const val FIT_GLOW_CORE_ALPHA = 235
+
         /** Max gesture duration (ms) still counted as a tap. */
         private const val TAP_TIMEOUT_MS = 500L
 

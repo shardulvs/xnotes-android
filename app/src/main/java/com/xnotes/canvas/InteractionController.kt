@@ -129,6 +129,11 @@ class InteractionController(
     private var lastOverscrollMs = 0L
     private val overscrollFrame = Choreographer.FrameCallback { frameTimeNanos -> stepOverscrollSettle(frameTimeNanos) }
 
+    // FIT-WIDTH SNAP GLOW (accent side-rails flashed when a pinch grabs fit-to-width)
+    private var glowFading = false
+    private var glowStartMs = 0L
+    private val glowFrame = Choreographer.FrameCallback { frameTimeNanos -> stepFitWidthGlow(frameTimeNanos) }
+
     // PINCH
     private var pinchInitDist = 1.0
     private var pinchInitZoom = 1.0
@@ -1109,6 +1114,33 @@ class InteractionController(
         requestRender()
     }
 
+    // --- fit-width snap glow ---
+
+    /** Flash the accent side-rails: the instant a pinch grabs fit-to-width. Re-firing mid-fade just
+     *  restarts the fade (the frame loop is already running), so snapping again glows again. */
+    private fun triggerFitWidthGlow() {
+        state.fitWidthGlow = 1.0
+        glowStartMs = System.nanoTime() / 1_000_000L // same time base as the fling/overscroll loops
+        if (!glowFading) {
+            glowFading = true
+            choreographer.postFrameCallback(glowFrame)
+        }
+        requestRender()
+    }
+
+    private fun stepFitWidthGlow(frameTimeNanos: Long) {
+        if (!glowFading) return
+        val t = ((frameTimeNanos / 1_000_000L - glowStartMs).toDouble() / FIT_GLOW_MS).coerceIn(0.0, 1.0)
+        state.fitWidthGlow = (1.0 - t).let { it * it } // ease-out: lingers bright, then drops away
+        if (t >= 1.0) {
+            state.fitWidthGlow = 0.0
+            glowFading = false
+        } else {
+            choreographer.postFrameCallback(glowFrame)
+        }
+        requestRender()
+    }
+
     // --- PINCH ---
 
     private fun beginPinch(e: MotionEvent) {
@@ -1145,7 +1177,7 @@ class InteractionController(
         val z = if (state.zoomLocked) pinchInitZoom else state.snapZoomToFitWidth(raw)
         state.zoom = z
         if (!state.zoomLocked) {
-            if (!wasFit && state.fitWidthActive) onFitWidthSnapped()
+            if (!wasFit && state.fitWidthActive) { onFitWidthSnapped(); triggerFitWidthGlow() }
             else if (wasFit && !state.fitWidthActive) onFitWidthReleased()
         }
         state.scrollX = pinchAnchorContent.x * z - mid.x
@@ -1273,5 +1305,8 @@ class InteractionController(
         const val OVERSCROLL_MAX = 400.0 // hard cap on the visible stretch (viewport px)
         const val OVERSCROLL_TRIGGER = 300.0 // stretch at which releasing appends a page
         const val OVERSCROLL_SPRING = 11.0 // spring-back rate toward rest (1/s; higher = snappier)
+
+        // Fit-to-width snap glow.
+        const val FIT_GLOW_MS = 900.0 // accent side-rails fade-out duration
     }
 }
