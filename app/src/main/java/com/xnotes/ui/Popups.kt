@@ -51,7 +51,7 @@ fun ToolConfigPopup(editor: Editor, tool: Tool, onDismiss: () -> Unit) {
     var sensitivity by remember { mutableStateOf(ToolConversions.minFactorToSensitivity(base.pressureMinFactor).toFloat()) }
     var multiplier by remember { mutableStateOf(ToolConversions.directionStrengthToMultiplier(base.directionStrength).toFloat()) }
     var speed by remember { mutableStateOf(ToolConversions.strengthToSpeed(base.speedStrength).toFloat()) }
-    var taper by remember { mutableStateOf(ToolConversions.amountToTaper(base.taperAmount).toFloat()) }
+    var taper by remember { mutableStateOf(base.taperLength.toFloat()) }
     var width by remember { mutableStateOf(base.baseWidth.toFloat()) }
     var glow by remember { mutableStateOf(base.neon) }
     var glowIntensity by remember { mutableStateOf(ToolConversions.neonStrengthToIntensity(base.neonStrength).toFloat()) }
@@ -62,7 +62,7 @@ fun ToolConfigPopup(editor: Editor, tool: Tool, onDismiss: () -> Unit) {
         val m = ToolConversions.sensitivityToMinFactor(sensitivity.toDouble())
         val ds = if (tool == Tool.CALLIGRAPHY) ToolConversions.multiplierToDirectionStrength(multiplier.toDouble()) else 0.0
         val sp = if (tool == Tool.SPEED) ToolConversions.speedToStrength(speed.toDouble()) else 0.0
-        val tp = if (tool == Tool.TAPER) ToolConversions.taperToAmount(taper.toDouble()) else 0.0
+        val tp = if (tool == Tool.TAPER) taper.toDouble() else 0.0
         editor.updateToolConfig(
             tool,
             base.copy(
@@ -71,7 +71,7 @@ fun ToolConfigPopup(editor: Editor, tool: Tool, onDismiss: () -> Unit) {
                 pressureMinFactor = m,
                 directionStrength = ds,
                 speedStrength = sp,
-                taperAmount = tp,
+                taperLength = tp,
                 neon = glow,
                 neonStrength = ToolConversions.intensityToNeonStrength(glowIntensity.toDouble()),
                 dashLength = dashLen.toDouble(),
@@ -95,7 +95,7 @@ fun ToolConfigPopup(editor: Editor, tool: Tool, onDismiss: () -> Unit) {
                 SliderRow("SPEED", speed, 0f..100f) { speed = it; emit() }
             }
             if (tool == Tool.TAPER) {
-                SliderRow("TAPER", taper, 0f..100f) { taper = it; emit() }
+                SliderRow("TAPER", taper, 0f..150f) { taper = it; emit() }
             }
             val range = ToolConversions.widthRange(tool)
             SliderRow("WIDTH", width, range.start.toFloat()..range.endInclusive.toFloat()) { width = it; emit() }

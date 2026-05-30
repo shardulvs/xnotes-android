@@ -174,7 +174,7 @@ class DocumentCodec(
         // New style fields are written only when set, so a plain pen/calligraphy
         // stroke's config is byte-for-byte what older versions wrote.
         if (s.config.speedStrength != 0.0) config.put("speed_strength", s.config.speedStrength)
-        if (s.config.taperAmount != 0.0) config.put("taper_amount", s.config.taperAmount)
+        if (s.config.taperLength != 0.0) config.put("taper_length", s.config.taperLength)
         if (s.config.neon) {
             config.put("neon", true)
             config.put("neon_strength", s.config.neonStrength)
@@ -249,7 +249,7 @@ class DocumentCodec(
             directionStrength = c?.optDouble("direction_strength", def.directionStrength) ?: def.directionStrength,
             rgba = readRgba(c?.optJSONArray("rgba")) ?: def.rgba,
             speedStrength = c?.optDouble("speed_strength", def.speedStrength) ?: def.speedStrength,
-            taperAmount = c?.optDouble("taper_amount", def.taperAmount) ?: def.taperAmount,
+            taperLength = c?.optDouble("taper_length", def.taperLength) ?: def.taperLength,
             neon = c?.optBoolean("neon", def.neon) ?: def.neon,
             neonStrength = c?.optDouble("neon_strength", def.neonStrength) ?: def.neonStrength,
             dashLength = c?.optDouble("dash_length", def.dashLength) ?: def.dashLength,

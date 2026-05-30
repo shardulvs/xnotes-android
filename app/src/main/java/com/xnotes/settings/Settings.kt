@@ -135,7 +135,7 @@ data class Settings(
             .put("pressure_min_factor", c.pressureMinFactor)
             .put("direction_strength", c.directionStrength)
             .put("speed_strength", c.speedStrength)
-            .put("taper_amount", c.taperAmount)
+            .put("taper_length", c.taperLength)
             .put("neon", c.neon)
             .put("neon_strength", c.neonStrength)
             .put("dash_length", c.dashLength)
@@ -151,7 +151,7 @@ data class Settings(
                 directionStrength = o.optDouble("direction_strength", d.directionStrength),
                 rgba = Rgba.fromList(o.optJSONArray("rgba")?.let { a -> (0 until a.length()).map { a.optInt(it, 0) } }) ?: d.rgba,
                 speedStrength = o.optDouble("speed_strength", d.speedStrength),
-                taperAmount = o.optDouble("taper_amount", d.taperAmount),
+                taperLength = o.optDouble("taper_length", d.taperLength),
                 neon = o.optBoolean("neon", d.neon),
                 neonStrength = o.optDouble("neon_strength", d.neonStrength),
                 dashLength = o.optDouble("dash_length", d.dashLength),

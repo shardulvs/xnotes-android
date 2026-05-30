@@ -49,7 +49,7 @@ class Stroke(
             config.pressureMinFactor,
             config.directionStrength,
             config.speedStrength,
-            config.taperAmount,
+            config.taperLength,
             speedScale,
         ).also { cachedGeometry = it }
     }

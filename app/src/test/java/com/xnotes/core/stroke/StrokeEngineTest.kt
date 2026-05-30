@@ -85,7 +85,7 @@ class StrokeEngineTest {
         // Pressure off, m=1 ⇒ a flat 2.0 half-width everywhere without taper.
         val pts = (0..4).map { Sample(it * 10.0, 0.0, 1.0) }
         val plain = StrokeEngine.build(pts, 4.0, false, 1.0, 0.0)
-        val tapered = StrokeEngine.build(pts, 4.0, false, 1.0, 0.0, taperAmount = 1.0)
+        val tapered = StrokeEngine.build(pts, 4.0, false, 1.0, 0.0, taperLength = 10.0)
 
         assertEquals(2.0, plain.caps[0].radius, 1e-9)   // plain: full dome
         assertEquals(0.0, tapered.caps[0].radius, 1e-9) // tapered: collapses to a point
@@ -99,8 +99,21 @@ class StrokeEngineTest {
     @Test fun taperIgnoresVeryShortStrokes() {
         // Total arc length < 8 px ⇒ left un-tapered (a quick tick shouldn't vanish).
         val pts = listOf(Sample(0.0, 0.0, 1.0), Sample(3.0, 0.0, 1.0))
-        val g = StrokeEngine.build(pts, 4.0, false, 1.0, 0.0, taperAmount = 1.0)
+        val g = StrokeEngine.build(pts, 4.0, false, 1.0, 0.0, taperLength = 40.0)
         assertEquals(2.0, g.caps[0].radius, 1e-9)
+    }
+
+    @Test fun taperLengthIsFixedNotProportional() {
+        // The taper is a fixed arc length per end, so growing the stroke leaves the
+        // entrance ramp unchanged (only the full-width middle gets longer). The leading
+        // half-widths — within the entrance taper on both — must therefore match, and the
+        // longer stroke must still reach full width somewhere in its middle.
+        val short = (0..6).map { Sample(it * 10.0, 0.0, 1.0) }
+        val long = (0..20).map { Sample(it * 10.0, 0.0, 1.0) }
+        val gShort = StrokeEngine.build(short, 4.0, false, 1.0, 0.0, taperLength = 25.0)
+        val gLong = StrokeEngine.build(long, 4.0, false, 1.0, 0.0, taperLength = 25.0)
+        for (i in 1..3) assertEquals(gShort.halfWidths[i], gLong.halfWidths[i], 1e-9)
+        assertEquals(2.0, gLong.halfWidths.maxOrNull()!!, 1e-9)
     }
 
     // --- Speed pen (§1.1) ---

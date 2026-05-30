@@ -20,8 +20,9 @@ data class ToolConfig(
     // New fields go *after* `rgba` so the positional constructor stays stable.
     /** Velocity thinning (the speed pen): 0 = none; up the line thins as it moves faster. */
     val speedStrength: Double = 0.0,
-    /** Entrance/exit taper (the taper pen): 0 = none; the share of the stroke easing to a point at each end. */
-    val taperAmount: Double = 0.0,
+    /** Entrance/exit taper (the taper pen): 0 = none; the fixed arc length (content px)
+     *  over which each end eases to a point, independent of the stroke's total length. */
+    val taperLength: Double = 0.0,
     /** Neon glow: a soft luminous halo under a bright core. Composable onto any stroke tool. */
     val neon: Boolean = false,
     /** Glow intensity (the neon halo): 0 = faint & tight, 1 = bright & wide. Only used when [neon]. */
@@ -40,7 +41,7 @@ object ToolDefaults {
         Tool.DASHED -> ToolConfig(baseWidth = 3.0, pressureEnabled = false, pressureMinFactor = 1.0, directionStrength = 0.0, dashLength = 10.0, dashGap = 8.0)
         Tool.CALLIGRAPHY -> ToolConfig(baseWidth = 6.0, pressureEnabled = true, pressureMinFactor = 0.40, directionStrength = 0.60)
         Tool.SPEED -> ToolConfig(baseWidth = 4.0, pressureEnabled = true, pressureMinFactor = 0.35, directionStrength = 0.0, speedStrength = 0.8)
-        Tool.TAPER -> ToolConfig(baseWidth = 4.0, pressureEnabled = true, pressureMinFactor = 0.45, directionStrength = 0.0, taperAmount = 0.7)
+        Tool.TAPER -> ToolConfig(baseWidth = 4.0, pressureEnabled = true, pressureMinFactor = 0.45, directionStrength = 0.0, taperLength = 40.0)
         Tool.HIGHLIGHTER -> ToolConfig(baseWidth = 16.0, pressureEnabled = false, pressureMinFactor = 1.0, directionStrength = 0.0)
         Tool.ERASER -> ToolConfig(baseWidth = 24.0, pressureEnabled = false, pressureMinFactor = 1.0, directionStrength = 0.0)
         Tool.LASSO -> ToolConfig(baseWidth = 2.0, pressureEnabled = false, pressureMinFactor = 1.0, directionStrength = 0.0)
@@ -72,11 +73,6 @@ object ToolConversions {
     fun speedToStrength(speed: Double): Double = speed.coerceIn(0.0, 100.0) / 100.0 * 0.92
 
     fun strengthToSpeed(s: Double): Double = (s / 0.92) * 100.0
-
-    /** TAPER (0..100, higher = longer taper) -> `taperAmount` in [0, 1]. */
-    fun taperToAmount(taper: Double): Double = taper.coerceIn(0.0, 100.0) / 100.0
-
-    fun amountToTaper(a: Double): Double = a * 100.0
 
     /** INTENSITY (0..100, higher = brighter/wider halo) -> `neonStrength` in [0, 1]. */
     fun intensityToNeonStrength(intensity: Double): Double = intensity.coerceIn(0.0, 100.0) / 100.0

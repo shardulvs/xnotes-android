@@ -37,9 +37,6 @@ object StrokeEngine {
      *  un-tapered, so a quick tick doesn't collapse to nothing. */
     const val TAPER_MIN_LEN = 8.0
 
-    /** Taper pen: floor on the per-end taper fraction (avoids a zero-width divide). */
-    const val MIN_TAPER_FRAC = 0.02
-
     /** One-pole IIR low-pass (exponential moving average). */
     fun ema(values: List<Double>, alpha: Double = ALPHA): List<Double> {
         if (values.isEmpty()) return emptyList()
@@ -103,28 +100,29 @@ object StrokeEngine {
 
     /**
      * Per-point width multipliers in `[0, 1]` for the **taper pen**: the line eases
-     * out of a point at each end and reaches full width in the middle, by arc-length
-     * position. [taperAmount] in `(0, 1]` is the share of the stroke that tapers,
-     * split across the two ends. Returns all-`1.0` when off or the stroke is too short.
+     * out of a point at each end and reaches full width in the middle. [taperLength]
+     * is the **fixed arc length** (content px) over which each end eases in, so the
+     * taper keeps its size as the stroke grows — only the full-width middle lengthens.
+     * On a stroke shorter than `2 × taperLength` the two ramps meet below full width.
+     * Returns all-`1.0` when off or the stroke is too short.
      */
-    fun taperFactors(centers: List<Pt>, taperAmount: Double): List<Double> {
+    fun taperFactors(centers: List<Pt>, taperLength: Double): List<Double> {
         val n = centers.size
-        if (taperAmount <= 0.0 || n < 2) return List(n) { 1.0 }
+        if (taperLength <= 0.0 || n < 2) return List(n) { 1.0 }
         val cum = DoubleArray(n)
         for (i in 1 until n) cum[i] = cum[i - 1] + (centers[i] - centers[i - 1]).length()
         val total = cum[n - 1]
         if (total < TAPER_MIN_LEN) return List(n) { 1.0 }
-        val frac = (taperAmount * 0.5).coerceIn(MIN_TAPER_FRAC, 0.5)
         return (0 until n).map { i ->
-            val u = cum[i] / total
-            val edge = (min(u, 1.0 - u) / frac).coerceIn(0.0, 1.0)
+            // Arc distance to the nearer end, ramped over the fixed taper length.
+            val edge = (min(cum[i], total - cum[i]) / taperLength).coerceIn(0.0, 1.0)
             edge * edge * (3 - 2 * edge)
         }
     }
 
     /**
      * Builds [StrokeGeometry] from [samples] and the style fields. [speedStrength]
-     * and [taperAmount] default to off, in which case the output is identical to
+     * and [taperLength] default to off, in which case the output is identical to
      * the four-field pen/calligraphy pipeline (spec 03 conformance).
      */
     fun build(
@@ -134,7 +132,7 @@ object StrokeEngine {
         m: Double,
         ds: Double,
         speedStrength: Double = 0.0,
-        taperAmount: Double = 0.0,
+        taperLength: Double = 0.0,
         speedScale: Double = 1.0,
     ): StrokeGeometry {
         val n = samples.size
@@ -170,7 +168,7 @@ object StrokeEngine {
 
         // Optional width multipliers: speed thins fast travel, taper points the ends.
         val sf = speedFactors(centers, samples, speedStrength, speedScale)
-        val tf = taperFactors(centers, taperAmount)
+        val tf = taperFactors(centers, taperLength)
 
         // 5–7. Half-widths, normals, and the two ribbon edges.
         val left = ArrayList<Pt>(n)
