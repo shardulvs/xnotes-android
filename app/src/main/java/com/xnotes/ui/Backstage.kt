@@ -874,6 +874,11 @@ private fun EntryRow(
                         }
                     }
                 }
+            } else {
+                // Select mode drops the overflow button (its actions don't apply). Reserve its
+                // footprint so the row keeps the same height — and the trailing details stay put —
+                // instead of collapsing to the icon/label height and shifting the whole list.
+                Spacer(Modifier.size(36.dp))
             }
         }
     }
