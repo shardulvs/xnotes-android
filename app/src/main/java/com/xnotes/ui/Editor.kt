@@ -113,6 +113,9 @@ class Editor(context: Context) {
     private val recentPages = java.util.concurrent.ConcurrentHashMap<String, Int>()
     /** On-disk thumbnail cache so the backstage opens instantly across launches. */
     private val thumbCache = com.xnotes.platform.RecentThumbnailCache(java.io.File(appContext.filesDir, "recent_thumbs"))
+    /** [contentVersion] at which the open note's recent thumbnail was last rendered, so it's
+     *  re-rendered only after a real edit — never on the autosave/write path. */
+    private var openThumbVersion = -1
     /**
      * Side-panel page thumbnails, rendered once and reused so scrolling the panel doesn't re-render.
      * Keyed by [Page] **identity** (not index) so a drag-reorder keeps each page's bitmap instead of
@@ -710,30 +713,49 @@ class Editor(context: Context) {
      * count are cached per URI.
      */
     fun recentInfo(uri: String, widthPx: Int): RecentInfo {
-        val haveThumb = recentThumbs[uri]?.let { !it.isRecycled } ?: false
-        if (!haveThumb || !recentPages.containsKey(uri)) {
-            val cached = thumbCache.load(uri) // L2: on disk, avoids decoding the whole note
-            if (cached != null) {
-                recentThumbs[uri] = cached.first
-                recentPages[uri] = cached.second
-            } else {
-                val doc = runCatching {
-                    appContext.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { codec.read(it) }
-                }.getOrNull()
-                if (doc != null) {
-                    val pages = doc.pages.size
-                    recentPages[uri] = pages
-                    renderDocThumbnail(doc, widthPx)?.let {
-                        recentThumbs[uri] = it
-                        thumbCache.store(uri, it, pages)
+        if (uri == currentUri) {
+            // The open note is the only recent that changes while the app runs, and its file lags
+            // behind the live document (edits autosave on a debounce). Render it from the in-memory
+            // document — but only when its content actually moved since the last render (by
+            // contentVersion), so an unchanged note reuses the cached bitmap. This happens lazily
+            // here (only when the backstage asks), so the edit/autosave path does no thumbnail work.
+            val haveThumb = recentThumbs[uri]?.let { !it.isRecycled } ?: false
+            if (!haveThumb || contentVersion != openThumbVersion) {
+                val doc = state.document
+                runCatching { renderDocThumbnail(doc, widthPx) }.getOrNull()?.let {
+                    recentThumbs[uri] = it
+                    recentPages[uri] = doc.pages.size
+                    // Persist to disk too, or a relaunch (empty memory cache) would load the old PNG.
+                    thumbCache.store(uri, it, doc.pages.size)
+                }
+                openThumbVersion = contentVersion
+            }
+        } else {
+            val haveThumb = recentThumbs[uri]?.let { !it.isRecycled } ?: false
+            if (!haveThumb || !recentPages.containsKey(uri)) {
+                val cached = thumbCache.load(uri) // L2: on disk, avoids decoding the whole note
+                if (cached != null) {
+                    recentThumbs[uri] = cached.first
+                    recentPages[uri] = cached.second
+                } else {
+                    val doc = runCatching {
+                        appContext.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { codec.read(it) }
+                    }.getOrNull()
+                    if (doc != null) {
+                        val pages = doc.pages.size
+                        recentPages[uri] = pages
+                        renderDocThumbnail(doc, widthPx)?.let {
+                            recentThumbs[uri] = it
+                            thumbCache.store(uri, it, pages)
+                        }
                     }
                 }
             }
-            val keep = settings.recentFiles.toSet()
-            recentThumbs.keys.retainAll(keep)
-            recentPages.keys.retainAll(keep)
-            recentInfoCache.keys.retainAll(keep)
         }
+        val keep = settings.recentFiles.toSet()
+        recentThumbs.keys.retainAll(keep)
+        recentPages.keys.retainAll(keep)
+        recentInfoCache.keys.retainAll(keep)
         val (size, modified) = recentStat(uri)
         return RecentInfo(
             thumbnail = recentThumbs[uri]?.takeIf { !it.isRecycled },
