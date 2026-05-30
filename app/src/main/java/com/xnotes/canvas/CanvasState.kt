@@ -588,16 +588,22 @@ class CanvasState(
     }
 
     /**
-     * Drop only the rendered background layer (PDF/template), keeping the ink caches. Used when a
-     * PDF page's embedded-image colours finish parsing asynchronously, so the background re-renders
-     * with the images stamped while ink is left untouched. Bumping the generation counters discards
-     * any in-flight background/sharp build captured before this, so a provisional (un-stamped)
-     * surface can't land over the refreshed one.
+     * Re-render only [page]'s background layer (e.g. a PDF page whose embedded-image colours just
+     * finished parsing), swapping the refreshed surface in when it's ready and leaving the current
+     * one on screen until then so the page never blanks. Unlike a global background flush this
+     * touches *only* [page]: other pages' cached backgrounds and in-flight builds are left intact,
+     * so refining one page never re-rasterizes — or flickers — the rest of the visible pages.
+     *
+     * Skips pages with no live background cache (off-screen now): they render stamped on their own
+     * when next scrolled into view. The rebuild is scheduled at the current generation, so on the
+     * single-threaded cache executor it lands after the (already-published) provisional build and
+     * its stamped surface wins.
      */
-    fun invalidateBackgrounds() {
-        bgCaches.clear()
-        cacheGen++
-        sharpGen++
+    fun refreshBackground(page: Page) {
+        if (paintPageBackground == null) return
+        if (!bgCaches.containsKey(page)) return
+        sharpGen++ // also refine the sharp viewport if it's covering this page (deep zoom)
+        scheduleBg(page, clampedRes(page))
     }
 
     /**

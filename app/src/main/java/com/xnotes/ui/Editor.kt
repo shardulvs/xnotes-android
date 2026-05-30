@@ -320,9 +320,11 @@ class Editor(context: Context) {
     private fun rebuildPdfSource() {
         pdfSource?.close()
         pdfSource = state.document.pdfBytes?.let { com.xnotes.platform.PdfSource.create(appContext, it) }
-        pdfSource?.onImagesReady = { _ ->
+        pdfSource?.onImagesReady = { index ->
             view.post {
-                state.invalidateBackgrounds() // re-render the page(s) with image colours kept
+                // Only the page whose embedded-image colours just parsed needs re-rendering; refresh it
+                // in place and leave every other page's cached background alone (no full flush, no flicker).
+                state.document.pages.forEach { if (it.pdfPage == index) state.refreshBackground(it) }
                 view.requestRender()
                 maybeFinishRefining()
             }
