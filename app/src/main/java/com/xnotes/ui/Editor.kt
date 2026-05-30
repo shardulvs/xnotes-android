@@ -444,7 +444,7 @@ class Editor(context: Context) {
         // crash. A plain note has null bytes and renders identically.
         val src = state.document.pdfBytes?.let { com.xnotes.platform.PdfSource.create(appContext, it) }
         try {
-            com.xnotes.platform.PdfExporter.export(state.document, src, out, state::paperColor, onProgress, isCancelled)
+            com.xnotes.platform.PdfExporter.export(appContext, state.document, src, out, state::paperColor, onProgress, isCancelled)
         } finally {
             src?.close()
         }
@@ -1315,7 +1315,7 @@ class Editor(context: Context) {
         val doc = appContext.contentResolver.openInputStream(android.net.Uri.parse(srcUri))?.use { codec.read(it) } ?: return
         val src = doc.pdfBytes?.let { com.xnotes.platform.PdfSource.create(appContext, it) }
         try {
-            com.xnotes.platform.PdfExporter.export(doc, src, out, { page -> state.paperColor(page) }, onProgress, isCancelled)
+            com.xnotes.platform.PdfExporter.export(appContext, doc, src, out, { page -> state.paperColor(page) }, onProgress, isCancelled)
         } finally {
             src?.close()
         }
@@ -1609,7 +1609,7 @@ class Editor(context: Context) {
         // touching the live [pdfSource], and PdfRenderer can't be shared across threads.
         val src = sub.pdfBytes?.let { com.xnotes.platform.PdfSource.create(appContext, it) }
         try {
-            com.xnotes.platform.PdfExporter.export(sub, src, out, state::paperColor, onProgress, isCancelled)
+            com.xnotes.platform.PdfExporter.export(appContext, sub, src, out, state::paperColor, onProgress, isCancelled)
         } finally {
             src?.close()
         }
