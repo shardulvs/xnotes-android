@@ -88,9 +88,11 @@ fun PreferencesPane(editor: Editor) {
                 accentPresets.forEach { c ->
                     ColorDot(c.toComposeColor(), prefs.accentColor == c) { update(prefs.copy(accentColor = c)) }
                 }
-                AccentColorPickerDot(prefs.accentColor, custom = prefs.accentColor !in accentPresets) {
-                    update(prefs.copy(accentColor = it))
-                }
+                ColorPickerDot(
+                    prefs.accentColor,
+                    custom = prefs.accentColor !in accentPresets,
+                    onPick = { update(prefs.copy(accentColor = it)) },
+                ) { onDismiss, onPick -> AccentColorGridPopup(onDismiss, onPick) }
             }
             Column {
                 CheckRow("Open PDFs in dark mode (invert pages)", prefs.pdfDarkMode) { update(prefs.copy(pdfDarkMode = it)) }
@@ -132,11 +134,17 @@ fun PreferencesPane(editor: Editor) {
             CheckRow("Page colour follows the theme", prefs.pageColor == null) {
                 update(prefs.copy(pageColor = if (it) null else pageColorPresets.first()))
             }
-            if (prefs.pageColor != null) {
+            val pageColor = prefs.pageColor
+            if (pageColor != null) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     pageColorPresets.forEach { c ->
-                        ColorDot(c.toComposeColor(), prefs.pageColor == c) { update(prefs.copy(pageColor = c)) }
+                        ColorDot(c.toComposeColor(), pageColor == c) { update(prefs.copy(pageColor = c)) }
                     }
+                    ColorPickerDot(
+                        pageColor,
+                        custom = pageColor !in pageColorPresets,
+                        onPick = { update(prefs.copy(pageColor = it)) },
+                    ) { onDismiss, onPick -> PageColorGridPopup(onDismiss, onPick) }
                 }
             }
             Spacer(Modifier.size(8.dp))
@@ -193,11 +201,17 @@ private val spectrumBrush = Brush.sweepGradient(
 )
 
 /**
- * Fifth accent swatch: a spectrum dot that opens a grid of bright, saturated hues.
- * Once a custom colour is chosen it fills the dot and reads as selected.
+ * A spectrum dot that opens [grid], a popup of colour swatches — shared by the accent and
+ * page-colour rows. Until a colour outside the row's presets is chosen the dot shows the
+ * spectrum wheel; once one is, it fills with that colour and reads as selected.
  */
 @Composable
-private fun AccentColorPickerDot(current: Rgba, custom: Boolean, onPick: (Rgba) -> Unit) {
+private fun ColorPickerDot(
+    current: Rgba,
+    custom: Boolean,
+    onPick: (Rgba) -> Unit,
+    grid: @Composable (onDismiss: () -> Unit, onPick: (Rgba) -> Unit) -> Unit,
+) {
     val palette = LocalPalette.current
     var open by remember { mutableStateOf(false) }
     Box {
@@ -211,8 +225,21 @@ private fun AccentColorPickerDot(current: Rgba, custom: Boolean, onPick: (Rgba) 
                 .border(1.dp, palette.border.toComposeColor(), CircleShape)
                 .clickable { open = true },
         )
-        if (open) AccentColorGridPopup(onDismiss = { open = false }) { onPick(it); open = false }
+        if (open) grid({ open = false }, { onPick(it); open = false })
     }
+}
+
+/** One tappable colour cell in a picker grid. */
+@Composable
+private fun Swatch(c: Rgba, onPick: (Rgba) -> Unit) {
+    Box(
+        Modifier
+            .size(20.dp)
+            .clip(RoundedCornerShape(2.dp))
+            .background(c.toComposeColor())
+            .border(0.5.dp, LocalPalette.current.border.toComposeColor(), RoundedCornerShape(2.dp))
+            .clickable { onPick(c) },
+    )
 }
 
 /** Picker grid restricted to bright, saturated hues — no greys, no washed-out tints. */
@@ -224,17 +251,32 @@ private fun AccentColorGridPopup(onDismiss: () -> Unit, onPick: (Rgba) -> Unit) 
         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             shades.forEach { (s, v) ->
                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    hues.forEach { h ->
-                        val c = ColorMath.hsvToRgb(h, s, v)
-                        Box(
-                            Modifier
-                                .size(20.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(c.toComposeColor())
-                                .border(0.5.dp, LocalPalette.current.border.toComposeColor(), RoundedCornerShape(2.dp))
-                                .clickable { onPick(c) },
-                        )
-                    }
+                    hues.forEach { h -> Swatch(ColorMath.hsvToRgb(h, s, v), onPick) }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Page-colour picker: the full range rather than only vivid hues. A greyscale row (white
+ * through black) sits above every hue drawn from pale tint to deep shade, so paper-like and
+ * muted page backgrounds are reachable, not just the saturated ones.
+ */
+@Composable
+private fun PageColorGridPopup(onDismiss: () -> Unit, onPick: (Rgba) -> Unit) {
+    val hues = (0 until 12).map { it * 360.0 / 12.0 }
+    val tones = listOf(0.25 to 1.0, 0.5 to 1.0, 0.85 to 1.0, 1.0 to 1.0, 1.0 to 0.7, 1.0 to 0.45)
+    DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                hues.indices.forEach { i ->
+                    Swatch(ColorMath.hsvToRgb(0.0, 0.0, 1.0 - i / (hues.size - 1.0)), onPick)
+                }
+            }
+            tones.forEach { (s, v) ->
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    hues.forEach { h -> Swatch(ColorMath.hsvToRgb(h, s, v), onPick) }
                 }
             }
         }
