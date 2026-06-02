@@ -43,9 +43,6 @@ data class Settings(
     val toolbarColors: List<Rgba> = InkPalette.toolbarDefaults,
     val activeColor: Int = 0,
     val recentColors: List<Rgba> = emptyList(),
-    val recentFiles: List<String> = emptyList(),
-    /** Backstage recent view: true = thumbnail grid, false = list. */
-    val recentGrid: Boolean = true,
     /** Persisted SAF tree URI for the in-app file explorer's root folder, or null. */
     val browseRoot: String? = null,
     /** Whether the next launch opens the home screen (true) or the last-open note (false). */
@@ -74,8 +71,6 @@ data class Settings(
             .put("toolbar_colors", JSONArray().apply { toolbarColors.forEach { put(rgbaArr(it)) } })
             .put("active_color", activeColor)
             .put("recent_colors", JSONArray().apply { recentColors.forEach { put(rgbaArr(it)) } })
-            .put("recent_files", JSONArray().apply { recentFiles.forEach { put(it) } })
-            .put("recent_grid", recentGrid)
             .apply { browseRoot?.let { put("browse_root", it) } }
             .put("start_on_home", startOnHome)
             .put("sidebar_visible", sidebarVisible)
@@ -105,10 +100,6 @@ data class Settings(
                 toolbarColors = colors.take(5),
                 activeColor = o.optInt("active_color", 0).coerceIn(0, 4),
                 recentColors = rgbaList(o.optJSONArray("recent_colors")).take(24),
-                recentFiles = (0 until (o.optJSONArray("recent_files")?.length() ?: 0))
-                    .mapNotNull { o.optJSONArray("recent_files")?.optString(it) }
-                    .filter { it.isNotEmpty() }.take(10),
-                recentGrid = o.optBoolean("recent_grid", true),
                 browseRoot = o.optString("browse_root", "").ifEmpty { null },
                 startOnHome = o.optBoolean("start_on_home", true),
                 sidebarVisible = o.optBoolean("sidebar_visible", false),

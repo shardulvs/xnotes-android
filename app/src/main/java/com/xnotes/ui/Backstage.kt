@@ -18,6 +18,10 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -30,8 +34,11 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -62,7 +69,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -71,7 +78,6 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -87,7 +93,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Which pane the backstage shows on the right. */
-enum class BackstageView { RECENT, PREFERENCES, ABOUT }
+enum class BackstageView { HOME, PREFERENCES, ABOUT }
 
 /** Whether the Home explorer is awaiting a new file/folder name. */
 private enum class CreateMode { NONE, FILE, FOLDER }
@@ -116,7 +122,6 @@ fun Backstage(
     onSelectView: (BackstageView) -> Unit,
     onOpenSystem: () -> Unit,
     onImportPdf: () -> Unit,
-    onOpenRecent: (String) -> Unit,
     onOpenFile: (String) -> Unit,
     onPickRoot: () -> Unit,
     onShareFile: (String) -> Unit,
@@ -131,7 +136,7 @@ fun Backstage(
     // window already runs edge-to-edge with the system bars hidden (MainActivity.applyFullscreen).
     BackstageContent(
         editor, compact, view, onSelectView, onOpenSystem, onImportPdf,
-        onOpenRecent, onOpenFile, onPickRoot, onShareFile, onSaveCopyFile, onExportFilePdf, onExitApp,
+        onOpenFile, onPickRoot, onShareFile, onSaveCopyFile, onExportFilePdf, onExitApp,
     )
 }
 
@@ -151,7 +156,6 @@ private fun BackstageContent(
     onSelectView: (BackstageView) -> Unit,
     onOpenSystem: () -> Unit,
     onImportPdf: () -> Unit,
-    onOpenRecent: (String) -> Unit,
     onOpenFile: (String) -> Unit,
     onPickRoot: () -> Unit,
     onShareFile: (String) -> Unit,
@@ -165,12 +169,12 @@ private fun BackstageContent(
 
     // A folder is required for these actions; without one, send the user to pick a folder first.
     val selectView: (BackstageView) -> Unit = { v ->
-        if (v == BackstageView.RECENT) createMode = CreateMode.NONE
+        if (v == BackstageView.HOME) createMode = CreateMode.NONE
         onSelectView(v)
         if (compact) sidebarOpen = false
     }
     val newNote: () -> Unit = {
-        if (editor.browseRoot != null) { onSelectView(BackstageView.RECENT); createMode = CreateMode.FILE } else onPickRoot()
+        if (editor.browseRoot != null) { onSelectView(BackstageView.HOME); createMode = CreateMode.FILE } else onPickRoot()
         if (compact) sidebarOpen = false
     }
     val importPdf: () -> Unit = {
@@ -192,7 +196,7 @@ private fun BackstageContent(
         when {
             compact && sidebarOpen -> sidebarOpen = false
             // Preferences and About are sub-pages of Home: back lands on Home rather than leaving the app.
-            view == BackstageView.PREFERENCES || view == BackstageView.ABOUT -> selectView(BackstageView.RECENT)
+            view == BackstageView.PREFERENCES || view == BackstageView.ABOUT -> selectView(BackstageView.HOME)
             createMode != CreateMode.NONE -> createMode = CreateMode.NONE
             else -> onExitApp()
         }
@@ -202,7 +206,7 @@ private fun BackstageContent(
         Box(Modifier.fillMaxSize().background(palette.menuBg.toComposeColor()).imePadding()) {
             BackstageMain(
                 Modifier.fillMaxSize(), editor, view, sidebarOpen, { sidebarOpen = true },
-                onOpenRecent, onOpenFile, onPickRoot, importPdf, onShareFile, onSaveCopyFile, onExportFilePdf, createMode, { createMode = it },
+                onOpenFile, onPickRoot, importPdf, onShareFile, onSaveCopyFile, onExportFilePdf, createMode, { createMode = it },
             )
             AnimatedVisibility(visible = sidebarOpen, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxSize().background(Color(0x99000000)).clickable { sidebarOpen = false })
@@ -226,7 +230,7 @@ private fun BackstageContent(
             }
             BackstageMain(
                 Modifier.weight(1f).fillMaxHeight(), editor, view, sidebarOpen, { sidebarOpen = true },
-                onOpenRecent, onOpenFile, onPickRoot, importPdf, onShareFile, onSaveCopyFile, onExportFilePdf, createMode, { createMode = it },
+                onOpenFile, onPickRoot, importPdf, onShareFile, onSaveCopyFile, onExportFilePdf, createMode, { createMode = it },
             )
         }
     }
@@ -259,7 +263,7 @@ private fun BackstageSidebar(
             }
         }
         Spacer(Modifier.height(6.dp))
-        Command(XnotesIcons.home, "Home", selected = view == BackstageView.RECENT) { onSelectView(BackstageView.RECENT) }
+        Command(XnotesIcons.home, "Home", selected = view == BackstageView.HOME) { onSelectView(BackstageView.HOME) }
         Command(XnotesIcons.plus, "New note") { onNewNote() }
         Command(XnotesIcons.importDoc, "Import PDF…") { onImportPdf() }
         Command(XnotesIcons.folder, "Open…") { onOpenSystem() }
@@ -269,7 +273,7 @@ private fun BackstageSidebar(
     }
 }
 
-/** The main pane (recents + explorer, or Preferences); shows a hamburger when the sidebar is hidden. */
+/** The main pane (the explorer, or Preferences); shows a hamburger when the sidebar is hidden. */
 @Composable
 private fun BackstageMain(
     modifier: Modifier,
@@ -277,7 +281,6 @@ private fun BackstageMain(
     view: BackstageView,
     sidebarOpen: Boolean,
     onShowSidebar: () -> Unit,
-    onOpenRecent: (String) -> Unit,
     onOpenFile: (String) -> Unit,
     onPickRoot: () -> Unit,
     onImportPdf: () -> Unit,
@@ -305,8 +308,8 @@ private fun BackstageMain(
         }
         Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
             when (view) {
-                BackstageView.RECENT -> HomePane(
-                    editor, onOpenRecent, onOpenFile, onPickRoot, onImportPdf,
+                BackstageView.HOME -> HomePane(
+                    editor, onOpenFile, onPickRoot, onImportPdf,
                     onShareFile, onSaveCopyFile, onExportFilePdf, createMode, onCreateMode, sidebarOpen, onShowSidebar,
                 )
                 BackstageView.PREFERENCES -> PreferencesPane(editor, sidebarOpen, onShowSidebar)
@@ -346,12 +349,11 @@ private fun RailDivider() {
     HorizontalDivider(color = LocalPalette.current.border.toComposeColor(), modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp))
 }
 
-// --- home pane: recent notes (top strip) + folder explorer (below) ---
+// --- home pane: the folder explorer ---
 
 @Composable
 private fun HomePane(
     editor: Editor,
-    onOpenRecent: (String) -> Unit,
     onOpenFile: (String) -> Unit,
     onPickRoot: () -> Unit,
     onImportPdf: () -> Unit,
@@ -364,46 +366,20 @@ private fun HomePane(
     onShowSidebar: () -> Unit,
 ) {
     val palette = LocalPalette.current
-    val recents = editor.recentFiles
     Column(Modifier.fillMaxSize()) {
-        // Always-present, constant-height header so toggling the sidebar (or clearing recents /
-        // having no folder) never shifts the content below. The hamburger shows only when the
-        // sidebar is hidden; "Recent notes" + Clear show only when there are recents. With no
-        // recents and the sidebar hidden, the wordmark titles the row so the menu button isn't
-        // stranded alone on an empty bar (the persistent sidebar already brands wide layouts).
+        // Constant-height header so toggling the sidebar never shifts the explorer below it. The
+        // hamburger shows only when the sidebar is hidden; the wordmark then titles the row so the
+        // menu button isn't stranded alone (the persistent sidebar already brands wide layouts).
         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
             if (!sidebarOpen) {
                 IconButton(onClick = onShowSidebar) {
                     Icon(XnotesIcons.menu, "Show sidebar", tint = palette.text.toComposeColor(), modifier = Modifier.size(24.dp))
                 }
                 Spacer(Modifier.width(4.dp))
-            }
-            if (recents.isNotEmpty()) {
-                Text("Recent notes", color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = { editor.clearRecentFiles() }) {
-                    Icon(XnotesIcons.trash, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Clear", color = palette.textDim.toComposeColor())
-                }
-            } else if (!sidebarOpen) {
                 Text("xnotes", color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 20.sp)
             }
         }
-        if (recents.isNotEmpty()) {
-            Spacer(Modifier.height(10.dp))
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                recents.forEach { uri -> RecentStripCard(editor, uri) { onOpenRecent(uri) } }
-            }
-            Spacer(Modifier.height(18.dp))
-            HorizontalDivider(color = palette.border.toComposeColor())
-            Spacer(Modifier.height(18.dp))
-        } else {
-            Spacer(Modifier.height(8.dp))
-        }
+        Spacer(Modifier.height(8.dp))
         Box(Modifier.weight(1f).fillMaxWidth()) {
             ExplorerSection(
                 editor, onOpenFile, onPickRoot, onImportPdf,
@@ -413,58 +389,9 @@ private fun HomePane(
     }
 }
 
-/** Loads (off-thread, cached) a recent note's thumbnail + details. */
-@Composable
-private fun recentInfoState(editor: Editor, uri: String, widthPx: Int) =
-    produceState(editor.cachedRecentInfo(uri), uri, editor.contentVersion) {
-        value = withContext(Dispatchers.IO) { editor.recentInfo(uri, widthPx) }
-    }
-
-/** "Folder · 3 pages · 2 days ago · 540 kB" — empty parts dropped. */
-private fun recentDetails(ctx: android.content.Context, info: RecentInfo): String = listOfNotNull(
-    if (info.pageCount > 0) "${info.pageCount} ${if (info.pageCount == 1) "page" else "pages"}" else null,
-    if (info.modified > 0)
-        android.text.format.DateUtils.getRelativeTimeSpanString(
-            info.modified, System.currentTimeMillis(), android.text.format.DateUtils.DAY_IN_MILLIS,
-        ).toString() else null,
-    if (info.sizeBytes > 0) android.text.format.Formatter.formatShortFileSize(ctx, info.sizeBytes) else null,
-).joinToString("  ·  ")
-
-@Composable
-private fun RecentStripCard(editor: Editor, uri: String, onClick: () -> Unit) {
-    val palette = LocalPalette.current
-    val ctx = LocalContext.current
-    val info by recentInfoState(editor, uri, 300)
-    Column(Modifier.width(150.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick)) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(110.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(palette.paper.toComposeColor())
-                .border(1.dp, palette.paperBorder.toComposeColor(), RoundedCornerShape(8.dp)),
-            contentAlignment = Alignment.Center,
-        ) {
-            val bmp = info?.thumbnail?.asImageBitmap()
-            if (bmp != null) {
-                // Fit to width (page top showing); the card clips the overflowing height.
-                Image(bmp, info?.label, contentScale = ContentScale.FillWidth, alignment = Alignment.TopCenter, modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter))
-            } else {
-                Icon(XnotesIcons.file, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(28.dp))
-            }
-        }
-        Spacer(Modifier.height(6.dp))
-        Text(info?.label ?: "…", color = palette.text.toComposeColor(), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 2.dp))
-        val details = info?.let { recentDetails(ctx, it) }.orEmpty()
-        if (details.isNotEmpty()) {
-            Text(details, color = palette.textDim.toComposeColor(), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 2.dp))
-        }
-    }
-}
-
 // --- explorer section ---
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 private fun ExplorerSection(
     editor: Editor,
@@ -596,43 +523,81 @@ private fun ExplorerSection(
         }
         opError?.let { Text(it, color = Color(0xFFE5534B), fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp, top = 4.dp)) }
         Spacer(Modifier.height(10.dp))
-        // Listing.
-        val entries by produceState(editor.cachedChildren(root, currentDocId), root, currentDocId, refreshKey) {
+        // Listing. Re-keyed on noteOpen so returning from the editor re-queries the folder, picking up
+        // the just-closed note's new mtime (its tile refreshes) and any newly created/discovered items.
+        val entries by produceState(editor.cachedChildren(root, currentDocId), root, currentDocId, refreshKey, editor.noteOpen) {
             value = withContext(Dispatchers.IO) { editor.browseChildren(root, currentDocId) }
         }
+        // browseChildren returns grid order: folders (ascending by creation), then files (descending).
+        val folders = entries?.filter { it.isDir }.orEmpty()
+        val files = entries?.filterNot { it.isDir }.orEmpty()
         Box(
             Modifier.weight(1f).fillMaxWidth().then(
-                // In select mode, tapping empty space (not a row) clears the selection.
+                // In select mode, tapping empty space (not a tile) clears the selection.
                 if (selection.isNotEmpty()) Modifier.clickable(interactionSource = dismissInteraction, indication = null) { selection.clear() } else Modifier,
             ),
         ) {
             when {
                 entries == null -> EmptyPane("Loading…")
                 entries!!.isEmpty() -> EmptyPane("This folder has no notes.")
-                else -> LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    items(entries!!) { entry ->
-                        // Per-file actions show only on file rows when not in select mode.
-                        val fileActions = !entry.isDir && selection.isEmpty()
-                        // Rename/copy/cut/delete apply to files and folders alike, outside select mode.
-                        val manageActions = selection.isEmpty()
-                        EntryRow(
+                else -> LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 132.dp),
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(bottom = 24.dp),
+                ) {
+                    // Folders: a full-width wrapping row of compact chips above the file tiles.
+                    if (folders.isNotEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            FlowRow(
+                                Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                folders.forEach { entry ->
+                                    FolderChip(
+                                        entry = entry,
+                                        selected = selection.any { it.documentUri == entry.documentUri },
+                                        dimmed = clipboard?.let { c -> c.isCut && c.entries.any { it.documentUri == entry.documentUri } } == true,
+                                        inSelectMode = selection.isNotEmpty(),
+                                        onRename = if (selection.isEmpty()) ({ renaming = entry }) else null,
+                                        onCopy = if (selection.isEmpty()) ({ clipboard = ClipItem(listOf(entry), currentDocId, false) }) else null,
+                                        onCut = if (selection.isEmpty()) ({ clipboard = ClipItem(listOf(entry), currentDocId, true) }) else null,
+                                        onDelete = if (selection.isEmpty()) ({ pendingDelete = listOf(entry) }) else null,
+                                        onClick = {
+                                            opError = null
+                                            if (selection.isNotEmpty()) toggleSelect(entry)
+                                            else stack.add(editor.browseDocId(entry.documentUri) to entry.name)
+                                        },
+                                        onLongClick = {
+                                            renaming = null; opError = null
+                                            if (selection.none { it.documentUri == entry.documentUri }) selection.add(entry)
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    // Files: big square thumbnail tiles, captioned with the name and date.
+                    items(files, key = { it.documentUri }) { entry ->
+                        val fileActions = selection.isEmpty()
+                        FileTile(
+                            editor = editor,
                             entry = entry,
                             selected = selection.any { it.documentUri == entry.documentUri },
                             dimmed = clipboard?.let { c -> c.isCut && c.entries.any { it.documentUri == entry.documentUri } } == true,
+                            inSelectMode = selection.isNotEmpty(),
                             onShare = if (fileActions) ({ onShareFile(entry.documentUri) }) else null,
                             onSaveCopy = if (fileActions) ({ onSaveCopyFile(entry.documentUri) }) else null,
                             onExportPdf = if (fileActions) ({ onExportFilePdf(entry.documentUri) }) else null,
-                            onRename = if (manageActions) ({ renaming = entry }) else null,
-                            onCopy = if (manageActions) ({ clipboard = ClipItem(listOf(entry), currentDocId, false) }) else null,
-                            onCut = if (manageActions) ({ clipboard = ClipItem(listOf(entry), currentDocId, true) }) else null,
-                            onDelete = if (manageActions) ({ pendingDelete = listOf(entry) }) else null,
+                            onRename = if (fileActions) ({ renaming = entry }) else null,
+                            onCopy = if (fileActions) ({ clipboard = ClipItem(listOf(entry), currentDocId, false) }) else null,
+                            onCut = if (fileActions) ({ clipboard = ClipItem(listOf(entry), currentDocId, true) }) else null,
+                            onDelete = if (fileActions) ({ pendingDelete = listOf(entry) }) else null,
                             onClick = {
                                 opError = null
-                                when {
-                                    selection.isNotEmpty() -> toggleSelect(entry) // select mode: tap toggles (files and folders)
-                                    entry.isDir -> stack.add(editor.browseDocId(entry.documentUri) to entry.name)
-                                    else -> onOpenFile(entry.documentUri)
-                                }
+                                if (selection.isNotEmpty()) toggleSelect(entry) else onOpenFile(entry.documentUri)
                             },
                             onLongClick = {
                                 renaming = null; opError = null
@@ -757,83 +722,155 @@ private fun IconAction(icon: ImageVector, desc: String, onClick: () -> Unit) {
 private fun entryLabel(entry: BrowseEntry): String =
     if (entry.isDir) entry.name else entry.name.removeSuffix(".xnote").removeSuffix(".XNOTE")
 
-private fun entryDetails(ctx: android.content.Context, entry: BrowseEntry): String {
-    if (entry.isDir) return ""
-    return listOfNotNull(
-        if (entry.modified > 0)
-            android.text.format.DateUtils.getRelativeTimeSpanString(entry.modified, System.currentTimeMillis(), android.text.format.DateUtils.DAY_IN_MILLIS).toString()
-        else null,
-        if (entry.size > 0) android.text.format.Formatter.formatShortFileSize(ctx, entry.size) else null,
-    ).joinToString("  ·  ")
-}
+/** A file's last-edited date for the line beneath its tile (relative, e.g. "2 days ago"). */
+private fun entryDate(entry: BrowseEntry): String =
+    if (entry.modified > 0)
+        android.text.format.DateUtils.getRelativeTimeSpanString(
+            entry.modified, System.currentTimeMillis(), android.text.format.DateUtils.DAY_IN_MILLIS,
+        ).toString()
+    else ""
 
-@OptIn(ExperimentalFoundationApi::class)
+/** The per-entry overflow menu. Files get the extra Share/Save-a-copy/Export block (pass [onShare]); folders don't. */
 @Composable
-private fun EntryRow(
-    entry: BrowseEntry,
-    selected: Boolean,
-    dimmed: Boolean,
+private fun EntryMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    onRename: (() -> Unit)?,
+    onCopy: (() -> Unit)?,
+    onCut: (() -> Unit)?,
+    onDelete: (() -> Unit)?,
     onShare: (() -> Unit)? = null,
     onSaveCopy: (() -> Unit)? = null,
     onExportPdf: (() -> Unit)? = null,
-    onRename: (() -> Unit)? = null,
-    onCopy: (() -> Unit)? = null,
-    onCut: (() -> Unit)? = null,
-    onDelete: (() -> Unit)? = null,
+) {
+    val palette = LocalPalette.current
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        DropdownMenuItem(text = { Text("Rename") }, onClick = { onDismiss(); onRename?.invoke() })
+        DropdownMenuItem(text = { Text("Copy") }, onClick = { onDismiss(); onCopy?.invoke() })
+        DropdownMenuItem(text = { Text("Cut") }, onClick = { onDismiss(); onCut?.invoke() })
+        DropdownMenuItem(text = { Text("Delete") }, onClick = { onDismiss(); onDelete?.invoke() })
+        if (onShare != null) {
+            HorizontalDivider(color = palette.border.toComposeColor())
+            DropdownMenuItem(text = { Text("Share") }, onClick = { onDismiss(); onShare() })
+            DropdownMenuItem(text = { Text("Save a copy…") }, onClick = { onDismiss(); onSaveCopy?.invoke() })
+            DropdownMenuItem(text = { Text("Export to PDF") }, onClick = { onDismiss(); onExportPdf?.invoke() })
+        }
+    }
+}
+
+/** A compact folder chip (small icon + name) for the wrapping row above the file tiles. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun FolderChip(
+    entry: BrowseEntry,
+    selected: Boolean,
+    dimmed: Boolean,
+    inSelectMode: Boolean,
+    onRename: (() -> Unit)?,
+    onCopy: (() -> Unit)?,
+    onCut: (() -> Unit)?,
+    onDelete: (() -> Unit)?,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
     val palette = LocalPalette.current
-    val ctx = LocalContext.current
     var menuOpen by remember { mutableStateOf(false) }
-    val icon = if (entry.isDir) XnotesIcons.folder else XnotesIcons.file
-    val tint = (if (entry.isDir) palette.accent else palette.textDim).toComposeColor()
     Row(
         Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(6.dp))
-            .then(if (selected) Modifier.background(palette.accentAlpha(38).toComposeColor()) else Modifier)
+            .widthIn(max = 220.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background((if (selected) palette.accentAlpha(38) else palette.panel).toComposeColor())
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .alpha(if (dimmed) 0.4f else 1f)
-            .padding(horizontal = 10.dp, vertical = 12.dp),
+            .padding(start = 10.dp, end = if (inSelectMode) 12.dp else 2.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(14.dp))
+        Icon(XnotesIcons.folder, null, tint = palette.accent.toComposeColor(), modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(8.dp))
         Text(
-            entryLabel(entry),
-            color = palette.text.toComposeColor(),
-            fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
+            entryLabel(entry), color = palette.text.toComposeColor(), fontSize = 14.sp,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
         )
-        val details = entryDetails(ctx, entry)
-        if (details.isNotEmpty()) {
-            Spacer(Modifier.width(12.dp))
-            Text(details, color = palette.textDim.toComposeColor(), fontSize = 12.sp, maxLines = 1)
-        }
-        if (onShare != null || onRename != null) {
+        if (!inSelectMode && onRename != null) {
             Box {
-                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(36.dp)) {
-                    Icon(XnotesIcons.more, "More", tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp))
+                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
+                    Icon(XnotesIcons.more, "More", tint = palette.textDim.toComposeColor(), modifier = Modifier.size(16.dp))
                 }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(text = { Text("Rename") }, onClick = { menuOpen = false; onRename?.invoke() })
-                    DropdownMenuItem(text = { Text("Copy") }, onClick = { menuOpen = false; onCopy?.invoke() })
-                    DropdownMenuItem(text = { Text("Cut") }, onClick = { menuOpen = false; onCut?.invoke() })
-                    DropdownMenuItem(text = { Text("Delete") }, onClick = { menuOpen = false; onDelete?.invoke() })
-                    if (onShare != null) {
-                        HorizontalDivider(color = palette.border.toComposeColor())
-                        DropdownMenuItem(text = { Text("Share") }, onClick = { menuOpen = false; onShare() })
-                        DropdownMenuItem(text = { Text("Save a copy…") }, onClick = { menuOpen = false; onSaveCopy?.invoke() })
-                        DropdownMenuItem(text = { Text("Export to PDF") }, onClick = { menuOpen = false; onExportPdf?.invoke() })
+                EntryMenu(menuOpen, { menuOpen = false }, onRename, onCopy, onCut, onDelete)
+            }
+        }
+    }
+}
+
+/** A big square note tile: first-page thumbnail (cropped to the page top) + name + date. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun FileTile(
+    editor: Editor,
+    entry: BrowseEntry,
+    selected: Boolean,
+    dimmed: Boolean,
+    inSelectMode: Boolean,
+    onShare: (() -> Unit)?,
+    onSaveCopy: (() -> Unit)?,
+    onExportPdf: (() -> Unit)?,
+    onRename: (() -> Unit)?,
+    onCopy: (() -> Unit)?,
+    onCut: (() -> Unit)?,
+    onDelete: (() -> Unit)?,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    val palette = LocalPalette.current
+    var menuOpen by remember { mutableStateOf(false) }
+    // Seed from the in-memory cache for an instant paint, then load/render off-thread; re-keying on
+    // the file's mtime re-renders the tile after the note is edited.
+    val thumb by produceState<ImageBitmap?>(editor.cachedNoteTile(entry.documentUri), entry.documentUri, entry.modified) {
+        value = editor.noteTileThumbnail(entry.documentUri, entry.modified)
+    }
+    Column(
+        Modifier
+            .alpha(if (dimmed) 0.4f else 1f)
+            .clip(RoundedCornerShape(10.dp))
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(10.dp))
+                .background(palette.paper.toComposeColor())
+                .then(
+                    if (selected) Modifier.border(2.dp, palette.accent.toComposeColor(), RoundedCornerShape(10.dp))
+                    else Modifier.border(1.dp, palette.paperBorder.toComposeColor(), RoundedCornerShape(10.dp)),
+                ),
+        ) {
+            val img = thumb
+            if (img != null) {
+                Image(img, entryLabel(entry), contentScale = ContentScale.Crop, alignment = Alignment.TopCenter, modifier = Modifier.matchParentSize())
+            } else {
+                Icon(XnotesIcons.file, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(32.dp).align(Alignment.Center))
+            }
+            if (!inSelectMode && onRename != null) {
+                Box(Modifier.align(Alignment.TopEnd)) {
+                    IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
+                        Icon(XnotesIcons.more, "More", tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp))
                     }
+                    EntryMenu(menuOpen, { menuOpen = false }, onRename, onCopy, onCut, onDelete, onShare, onSaveCopy, onExportPdf)
                 }
             }
-        } else {
-            // Select mode drops the overflow button (its actions don't apply). Reserve its
-            // footprint so the row keeps the same height — and the trailing details stay put —
-            // instead of collapsing to the icon/label height and shifting the whole list.
-            Spacer(Modifier.size(36.dp))
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            entryLabel(entry), color = palette.text.toComposeColor(), fontSize = 13.sp,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 2.dp),
+        )
+        val date = entryDate(entry)
+        if (date.isNotEmpty()) {
+            Text(
+                date, color = palette.textDim.toComposeColor(), fontSize = 11.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 2.dp),
+            )
         }
     }
 }

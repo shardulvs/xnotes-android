@@ -49,6 +49,8 @@ import java.io.InputStream
 import java.io.OutputStream
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -61,13 +63,18 @@ import kotlinx.coroutines.withContext
 /** Target of the long-press paste context menu (viewport position + paste point). */
 data class ContextMenuTarget(val viewportX: Double, val viewportY: Double, val content: com.xnotes.core.geometry.Pt)
 
-/** One entry (folder or .xnote file) in the in-app explorer. [documentUri] is a SAF document URI. */
+/**
+ * One entry (folder or .xnote file) in the in-app explorer. [documentUri] is a SAF document URI.
+ * [modified] is SAF's last-modified time; [created] is the app-tracked creation time used for grid
+ * ordering (SAF exposes no creation time — see [CreationTimeStore]).
+ */
 data class BrowseEntry(
     val name: String,
     val documentUri: String,
     val isDir: Boolean,
     val size: Long = 0,
     val modified: Long = 0,
+    val created: Long = 0,
 )
 
 /** Whether a pending import came from the PDF picker or the system "Open…" file picker. */
@@ -75,16 +82,6 @@ enum class ImportKind { PDF, OPEN }
 
 /** A picked file awaiting a name before it's saved into the explorer's current folder. */
 data class PendingImport(val kind: ImportKind, val defaultName: String, val bytes: ByteArray)
-
-/** A recent note's thumbnail plus the details shown in the backstage list view. */
-data class RecentInfo(
-    val thumbnail: android.graphics.Bitmap?,
-    val label: String,
-    val pageCount: Int,
-    val location: String?,
-    val modified: Long,
-    val sizeBytes: Long,
-)
 
 @Stable
 class Editor(context: Context) {
@@ -109,15 +106,22 @@ class Editor(context: Context) {
     private var lastSessionContentVersion = -1
     private var sessionLoaded = false
 
-    /** In-memory cache of recent-file thumbnails, keyed by SAF URI (pruned to the recent list). */
-    private val recentThumbs = java.util.concurrent.ConcurrentHashMap<String, android.graphics.Bitmap>()
-    /** Cached page counts per recent URI (filled alongside the thumbnail's doc load). */
-    private val recentPages = java.util.concurrent.ConcurrentHashMap<String, Int>()
-    /** On-disk thumbnail cache so the backstage opens instantly across launches. */
-    private val thumbCache = com.xnotes.platform.RecentThumbnailCache(java.io.File(appContext.filesDir, "recent_thumbs"))
-    /** [contentVersion] at which the open note's recent thumbnail was last rendered, so it's
-     *  re-rendered only after a real edit — never on the autosave/write path. */
-    private var openThumbVersion = -1
+    /** On-disk note-thumbnail cache (png + source mtime) so the grid paints instantly across launches. */
+    private val thumbCache = com.xnotes.platform.NoteThumbnailCache(java.io.File(appContext.filesDir, "note_thumbs"))
+    /** In-memory note-tile thumbnails keyed by SAF URI, bounded by bytes (Compose owns the pixels —
+     *  no manual recycle). */
+    private val noteThumbs = object : LruCache<String, ImageBitmap>(32 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: ImageBitmap) = value.width * value.height * 4
+    }
+    /** The source mtime each in-memory tile was rendered from, so an edited note's tile re-renders. */
+    private val tileMtimes = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    /** App-tracked creation times for explorer ordering (SAF exposes only last-modified). */
+    private val createdStore = com.xnotes.platform.CreationTimeStore(com.xnotes.platform.JsonStore.createdTimes(appContext))
+    /** A single lowest-priority background thread renders explorer thumbnails one at a time, so a
+     *  folder of many notes fills in gradually without ever competing with the UI/render threads. */
+    private val thumbDispatcher = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "note-thumbs").apply { priority = Thread.MIN_PRIORITY }
+    }.asCoroutineDispatcher()
     /**
      * Side-panel page thumbnails, rendered once and reused so scrolling the panel doesn't re-render.
      * Keyed by [Page] **identity** (not index) so a drag-reorder keeps each page's bitmap instead of
@@ -128,7 +132,6 @@ class Editor(context: Context) {
     }
     private var pageThumbsVersion = -1
     /** In-memory caches so reopening the backstage paints instantly (seed first, refresh after). */
-    private val recentInfoCache = java.util.concurrent.ConcurrentHashMap<String, RecentInfo>()
     private val browseCache = java.util.concurrent.ConcurrentHashMap<String, List<BrowseEntry>>()
     private val rootNameCache = java.util.concurrent.ConcurrentHashMap<String, String>()
 
@@ -169,9 +172,6 @@ class Editor(context: Context) {
     var renderScale by mutableStateOf(1.0)
         private set
     var sidebarVisible by mutableStateOf(false)
-    /** Backstage recent view mode: true = thumbnail grid, false = list. */
-    var recentGrid by mutableStateOf(settings.recentGrid)
-        private set
     /** Granted explorer root (a SAF tree URI), or null until the user picks a folder. */
     var browseRoot by mutableStateOf(settings.browseRoot)
         private set
@@ -232,10 +232,6 @@ class Editor(context: Context) {
     /** The current document's storage location (a SAF content URI string), or null. */
     val currentUri: String? get() = state.document.path
 
-    /** Most-recent-first SAF URIs of recently opened/saved notes (capped at 10); observable. */
-    var recentFiles by mutableStateOf(settings.recentFiles)
-        private set
-
     val bookmarks: List<Bookmark> get() = state.document.bookmarks.toList()
 
     val controller = InteractionController(
@@ -285,14 +281,6 @@ class Editor(context: Context) {
         maybeAutoEnableFingerDraw()
         applySettings()
         rebuildPdfSource()
-        // Clean up legacy duplicate recents (the same note remembered under both a tree
-        // URI and a plain document URI before they were de-duped by document identity).
-        val cleanedRecents = dedupRecents(settings.recentFiles)
-        if (cleanedRecents != settings.recentFiles) {
-            settings = settings.copy(recentFiles = cleanedRecents)
-            recentFiles = cleanedRecents
-            settingsRepo.save(settings)
-        }
     }
 
     // --- selection menu / clipboard ---
@@ -531,13 +519,7 @@ class Editor(context: Context) {
             renderScale = renderScale,
         )
         flushAutosave() // write the current note back to its folder file if it autosaves
-        if (noteOpen) {
-            saveViewState() // remember this folder note's view for next time
-            currentUri?.let {
-                settings = settings.copy(recentFiles = dedupRecents(listOf(it) + settings.recentFiles))
-                recentFiles = settings.recentFiles
-            }
-        }
+        if (noteOpen) saveViewState() // remember this folder note's view for next time
         settingsRepo.save(settings)
         saveSession()
     }
@@ -741,7 +723,6 @@ class Editor(context: Context) {
             doc.dirty = false
             replaceDocument(doc)
             maybeBindAutosave(uri) // resume autosaving if this note lives in the granted folder
-            rememberRecent(uri)
             noteOpen = true // push the editor on top of backstage (only on a successful open)
         } catch (e: XNoteFormatException) {
             message = e.message ?: "Not an xnotes document."
@@ -758,46 +739,24 @@ class Editor(context: Context) {
             state.document.dirty = false
             maybeBindAutosave(uri) // saving into the folder makes it autosave thereafter
             refreshContent()
-            rememberRecent(uri)
-            invalidateRecentThumb(uri) // content changed; re-render its thumbnail next time
+            invalidateThumb(uri) // content changed; re-render its tile next time it's shown
         } catch (e: Exception) {
             message = "Could not save the note."
         }
     }
 
-    // --- recent files (backstage) ---
+    // --- explorer thumbnails & document identity ---
 
     /**
-     * Canonical identity of a recent note — provider authority + document id — so the
-     * same file reached as a tree URI (the in-app explorer / a folder note) and as a
-     * plain document URI (the system "Open…" picker) counts once. Falls back to the raw
-     * string for non-document URIs.
+     * Canonical identity of a document — provider authority + document id — so the same file
+     * reached as a tree URI (the in-app explorer / a folder note) and as a plain document URI
+     * (the system "Open…" picker) maps to one key. Shared by the per-note view state ([viewKey])
+     * and the creation-time store. Falls back to the raw string for non-document URIs.
      */
-    private fun recentKey(uri: String): String = runCatching {
+    private fun documentKey(uri: String): String = runCatching {
         val u = android.net.Uri.parse(uri)
         "${u.authority}|${android.provider.DocumentsContract.getDocumentId(u)}"
     }.getOrDefault(uri)
-
-    /** Most-recent-first, one entry per [recentKey] (keeps the earliest), capped at 10. */
-    private fun dedupRecents(uris: List<String>): List<String> {
-        val seen = HashSet<String>()
-        return uris.filter { seen.add(recentKey(it)) }.take(10)
-    }
-
-    private fun rememberRecent(uri: String) {
-        settings = settings.copy(recentFiles = dedupRecents(listOf(uri) + settings.recentFiles))
-        recentFiles = settings.recentFiles
-        settingsRepo.save(settings)
-        thumbCache.prune(settings.recentFiles.toSet()) // drop the file that fell off the capped list
-    }
-
-    /** Drop a recent entry (e.g., the file was moved or deleted) and its cached thumbnail. */
-    fun removeRecentFile(uri: String) {
-        settings = settings.copy(recentFiles = settings.recentFiles.filter { it != uri })
-        recentFiles = settings.recentFiles
-        settingsRepo.save(settings)
-        invalidateRecentThumb(uri)
-    }
 
     /** The storage display name for a document/tree URI (no extension stripped), or null. */
     private fun queryDisplayName(uri: android.net.Uri): String? = runCatching {
@@ -809,90 +768,14 @@ class Editor(context: Context) {
         }
     }.getOrNull()
 
-    /** A short, user-visible label for a recent file (storage display name, sans extension). */
-    fun recentLabel(uri: String): String {
-        val u = android.net.Uri.parse(uri)
-        return com.xnotes.core.util.Paths.stem(queryDisplayName(u) ?: u.lastPathSegment ?: "Note")
-    }
-
-    /**
-     * A recent note's thumbnail ([widthPx] wide) plus list-view details. Heavy — loads
-     * and decodes the whole note — so call off the main thread; thumbnail and page
-     * count are cached per URI.
-     */
-    fun recentInfo(uri: String, widthPx: Int): RecentInfo {
-        if (uri == currentUri) {
-            // The open note is the only recent that changes while the app runs, and its file lags
-            // behind the live document (edits autosave on a debounce). Render it from the in-memory
-            // document — but only when its content actually moved since the last render (by
-            // contentVersion), so an unchanged note reuses the cached bitmap. This happens lazily
-            // here (only when the backstage asks), so the edit/autosave path does no thumbnail work.
-            val haveThumb = recentThumbs[uri]?.let { !it.isRecycled } ?: false
-            if (!haveThumb || contentVersion != openThumbVersion) {
-                val doc = state.document
-                runCatching { renderDocThumbnail(doc, widthPx) }.getOrNull()?.let {
-                    recentThumbs[uri] = it
-                    recentPages[uri] = doc.pages.size
-                    // Persist to disk too, or a relaunch (empty memory cache) would load the old PNG.
-                    thumbCache.store(uri, it, doc.pages.size)
-                }
-                openThumbVersion = contentVersion
-            }
-        } else {
-            val haveThumb = recentThumbs[uri]?.let { !it.isRecycled } ?: false
-            if (!haveThumb || !recentPages.containsKey(uri)) {
-                val cached = thumbCache.load(uri) // L2: on disk, avoids decoding the whole note
-                if (cached != null) {
-                    recentThumbs[uri] = cached.first
-                    recentPages[uri] = cached.second
-                } else {
-                    val doc = runCatching {
-                        appContext.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { codec.read(it) }
-                    }.getOrNull()
-                    if (doc != null) {
-                        val pages = doc.pages.size
-                        recentPages[uri] = pages
-                        renderDocThumbnail(doc, widthPx)?.let {
-                            recentThumbs[uri] = it
-                            thumbCache.store(uri, it, pages)
-                        }
-                    }
-                }
-            }
-        }
-        val keep = settings.recentFiles.toSet()
-        recentThumbs.keys.retainAll(keep)
-        recentPages.keys.retainAll(keep)
-        recentInfoCache.keys.retainAll(keep)
-        val (size, modified) = recentStat(uri)
-        return RecentInfo(
-            thumbnail = recentThumbs[uri]?.takeIf { !it.isRecycled },
-            label = recentLabel(uri),
-            pageCount = recentPages[uri] ?: 0,
-            location = recentLocation(uri),
-            modified = modified,
-            sizeBytes = size,
-        ).also { recentInfoCache[uri] = it }
-    }
-
-    /** Drop a recent note's cached thumbnail (memory + disk) so it re-renders with fresh content. */
-    private fun invalidateRecentThumb(uri: String) {
-        recentThumbs.remove(uri)
-        recentPages.remove(uri)
-        recentInfoCache.remove(uri)
-        thumbCache.remove(uri)
-    }
-
-    /** Last-computed details for a recent URI, to seed the UI instantly before the refresh. */
-    fun cachedRecentInfo(uri: String): RecentInfo? = recentInfoCache[uri]
-
-    /** Renders a loaded document's first page to a [widthPx]-wide thumbnail bitmap. */
-    private fun renderDocThumbnail(doc: Document, widthPx: Int): android.graphics.Bitmap? {
+    /** The first page of a loaded document rendered to a [sidePx]×[sidePx] tile, cropped to the page
+     *  top (the square surface clips the overflow). Uses [itemsSnapshot] because the close-hook renders
+     *  the live document off-thread, which a main-thread edit can mutate underneath it. */
+    private fun renderDocThumbnailSquare(doc: Document, sidePx: Int): android.graphics.Bitmap? {
         val page = doc.pages.firstOrNull() ?: return null
-        val scale = widthPx.toDouble() / page.width
-        val w = widthPx.coerceAtLeast(1)
-        val h = (page.height * scale).toInt().coerceAtLeast(1)
-        val surface = com.xnotes.platform.AndroidRasterSurface.create(w, h)
+        val side = sidePx.coerceAtLeast(1)
+        val scale = side.toDouble() / page.width
+        val surface = com.xnotes.platform.AndroidRasterSurface.create(side, side)
         surface.fill(state.paperColor(page))
         val r = surface.renderer()
         r.scale(scale, scale)
@@ -900,7 +783,7 @@ class Editor(context: Context) {
             runCatching {
                 com.xnotes.platform.PdfSource.create(appContext, bytes)?.let { src ->
                     page.pdfPage?.let { pi ->
-                        src.renderPage(pi, w, h, settings.prefs.pdfDarkMode, keepImages = settings.prefs.pdfDarkMode && settings.prefs.pdfKeepImageColors, blockingImages = true)?.let { bg ->
+                        src.renderPage(pi, side, side, settings.prefs.pdfDarkMode, keepImages = settings.prefs.pdfDarkMode && settings.prefs.pdfKeepImageColors, blockingImages = true)?.let { bg ->
                             r.drawRaster(bg, Rect(0.0, 0.0, page.width, page.height))
                             bg.recycle()
                         }
@@ -909,49 +792,74 @@ class Editor(context: Context) {
                 }
             }
         }
-        for (item in page.items) item.paint(r)
+        for (item in itemsSnapshot(page)) item.paint(r)
         return surface.bitmap
     }
 
-    /** (sizeBytes, lastModifiedMillis) for a recent URI, each 0 when unknown. */
-    private fun recentStat(uri: String): Pair<Long, Long> = runCatching {
-        appContext.contentResolver.query(
-            android.net.Uri.parse(uri),
-            arrayOf(android.provider.OpenableColumns.SIZE, android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED),
-            null, null, null,
-        )?.use { c ->
-            if (c.moveToFirst()) {
-                val si = c.getColumnIndex(android.provider.OpenableColumns.SIZE)
-                val mi = c.getColumnIndex(android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED)
-                val size = if (si >= 0 && !c.isNull(si)) c.getLong(si) else 0L
-                val mod = if (mi >= 0 && !c.isNull(mi)) c.getLong(mi) else 0L
-                size to mod
-            } else 0L to 0L
-        } ?: (0L to 0L)
-    }.getOrDefault(0L to 0L)
+    /** The square side (px) explorer tiles render at — fixed so rotation/column changes don't re-render. */
+    private val tilePx = 600
 
-    /** The parent folder name of a recent URI (best-effort from its document id), or null. */
-    private fun recentLocation(uri: String): String? = runCatching {
-        val id = android.provider.DocumentsContract.getDocumentId(android.net.Uri.parse(uri))
-        val path = id.substringAfter(':', "")
-        if ('/' !in path) null else path.substringBeforeLast('/').substringAfterLast('/').ifEmpty { null }
-    }.getOrNull()
+    /** An already-loaded tile for [uri] at its current content, to seed the grid instantly. */
+    fun cachedNoteTile(uri: String): ImageBitmap? = synchronized(noteThumbs) { noteThumbs.get(uri) }
 
-    /** Empty the recent-notes list (and its caches). */
-    fun clearRecentFiles() {
-        settings = settings.copy(recentFiles = emptyList())
-        recentFiles = settings.recentFiles
-        settingsRepo.save(settings)
-        recentThumbs.clear()
-        recentPages.clear()
-        recentInfoCache.clear()
-        thumbCache.prune(emptySet())
+    /**
+     * The square thumbnail for the note at [uri], for the explorer grid. Returns a fresh memory hit
+     * instantly; otherwise renders off the main thread on the single low-priority [thumbDispatcher]
+     * (one note at a time) so a folder of many notes fills in gradually without stalling the UI.
+     * [modified] is the file's current mtime: a cached tile (memory or disk) rendered from a
+     * different mtime is stale and re-rendered, so editing a note refreshes its tile automatically.
+     */
+    suspend fun noteTileThumbnail(uri: String, modified: Long): ImageBitmap? {
+        synchronized(noteThumbs) { if (tileMtimes[uri] == modified) noteThumbs.get(uri)?.let { return it } }
+        return withContext(thumbDispatcher) {
+            delay(150) // let a quick scroll-past cancel this before any heavy work begins
+            if (!isActive) return@withContext null
+            synchronized(noteThumbs) { if (tileMtimes[uri] == modified) noteThumbs.get(uri)?.let { return@withContext it } }
+            val disk = thumbCache.load(uri)
+            val bmp = if (disk != null && disk.second == modified) disk.first else {
+                val doc = runCatching {
+                    appContext.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { codec.read(it) }
+                }.getOrNull() ?: return@withContext null
+                renderDocThumbnailSquare(doc, tilePx)?.also { thumbCache.store(uri, it, modified) } ?: return@withContext null
+            }
+            val img = bmp.asImageBitmap()
+            synchronized(noteThumbs) { noteThumbs.put(uri, img); tileMtimes[uri] = modified }
+            img
+        }
     }
 
-    fun updateRecentGrid(grid: Boolean) {
-        recentGrid = grid
-        settings = settings.copy(recentGrid = grid)
-        settingsRepo.save(settings)
+    /** Drop a note's cached tile (memory + disk) so it re-renders with fresh content next time it's shown. */
+    private fun invalidateThumb(uri: String) {
+        synchronized(noteThumbs) { noteThumbs.remove(uri) }
+        tileMtimes.remove(uri)
+        thumbCache.remove(uri)
+    }
+
+    /** The last-modified time SAF reports for a document URI, or 0 when unknown. */
+    private fun queryModified(uri: String): Long = runCatching {
+        appContext.contentResolver.query(
+            android.net.Uri.parse(uri),
+            arrayOf(android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED),
+            null, null, null,
+        )?.use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else 0L } ?: 0L
+    }.getOrDefault(0L)
+
+    /**
+     * Render the just-closed note's tile from the in-memory document and cache it (memory + disk), so
+     * the grid shows it instantly and current. Runs on the low-priority [thumbDispatcher]; identity-
+     * guarded so that if the user has already opened another note (state.document changed) it bails
+     * rather than caching the wrong pixels. Called from [goHome] — never during editing.
+     */
+    private suspend fun regenerateClosedNoteThumb(uri: String) {
+        val doc = state.document
+        withContext(thumbDispatcher) {
+            if (state.document !== doc) return@withContext // a new note was opened; don't cache stale pixels
+            val bmp = runCatching { renderDocThumbnailSquare(doc, tilePx) }.getOrNull() ?: return@withContext
+            val modified = queryModified(uri) // the mtime flushAutosave just wrote
+            thumbCache.store(uri, bmp, modified)
+            val img = bmp.asImageBitmap()
+            synchronized(noteThumbs) { noteThumbs.put(uri, img); tileMtimes[uri] = modified }
+        }
     }
 
     /** Whether the next launch should open the home screen (true) or the last-open note (false). */
@@ -991,7 +899,10 @@ class Editor(context: Context) {
         browseCache.clear()
         rootNameCache.clear()
         viewStates.clear() // forget every remembered per-note view for the released folder
-        clearRecentFiles() // every recent lived in the folder we just released, so clear them too
+        createdStore.clear() // and every tracked creation time — the keys only meant anything for that folder
+        synchronized(noteThumbs) { noteThumbs.evictAll() }
+        tileMtimes.clear()
+        thumbCache.prune(emptySet()) // every cached tile belonged to the released folder
     }
 
     /** The granted root folder's display name (e.g. "Documents"), or null. */
@@ -1095,10 +1006,10 @@ class Editor(context: Context) {
             title = state.document.title
         }
         if (resultUri != docUri) {
-            settings = settings.copy(recentFiles = dedupRecents(settings.recentFiles.map { if (it == docUri) resultUri else it }))
-            recentFiles = settings.recentFiles
-            settingsRepo.save(settings)
-            invalidateRecentThumb(docUri)
+            // The id (hence the key) changed, but it's the same logical note — carry its created time
+            // across so a rename keeps its place in the grid instead of looking newly created.
+            createdStore.rekey(documentKey(docUri), documentKey(resultUri))
+            invalidateThumb(docUri)
         }
         return true
     }
@@ -1149,8 +1060,8 @@ class Editor(context: Context) {
         }
 
         // Forget the deleted note's remembered zoom/scroll — and every note's under a deleted folder.
-        // View-state keys are document identities ("$auth|$id", see recentKey), so match them the same
-        // way as recents. This runs whether or not the note is on screen, so a same-named file later
+        // View-state and creation-time keys are document identities ("$auth|$id", see documentKey), so
+        // match them by prefix. This runs whether or not the note is on screen, so a same-named file later
         // created in this folder (the local provider reuses the path-derived id) starts at fit-width
         // instead of inheriting the dead note's view.
         val keyPrefix = "$auth|$delId"
@@ -1172,13 +1083,10 @@ class Editor(context: Context) {
             autosaveScope.launch { if (state.document === deleted && noteOpen) newNote() }
         }
 
-        val removed = settings.recentFiles.filter { matches(it) }
-        if (removed.isNotEmpty()) {
-            settings = settings.copy(recentFiles = settings.recentFiles - removed.toSet())
-            recentFiles = settings.recentFiles
-            removed.forEach { invalidateRecentThumb(it) }
-        }
-        settingsRepo.save(settings)
+        // Forget the deleted item's tracked creation time (and the whole subtree's, for a folder),
+        // matched the same way as the view state, and drop its cached tile.
+        createdStore.removeMatching { it == keyPrefix || it.startsWith("$keyPrefix/") }
+        invalidateThumb(docUri)
     }
 
     /** Copies [sourceUri] into the folder [targetParentDocId] within [treeUri]. IO, call off-thread. */
@@ -1237,19 +1145,19 @@ class Editor(context: Context) {
         val ok = runCatching {
             appContext.contentResolver.openOutputStream(android.net.Uri.parse(uri), "wt")?.use { codec.write(state.document, it) } != null
         }.getOrDefault(false)
-        if (ok) { state.document.dirty = false; dirty = false; invalidateRecentThumb(uri) }
+        if (ok) { state.document.dirty = false; dirty = false; invalidateThumb(uri) }
     }
 
     // --- per-document view state (folder notes remember their own zoom + scroll) ---
 
     /**
      * The view-state key for a note in the granted folder — its document identity, shared with
-     * [recentKey] — or null when it isn't a folder document, so only folder notes remember a view.
+     * [documentKey] — or null when it isn't a folder document, so only folder notes remember a view.
      */
     private fun viewKey(uri: String?): String? {
         val u = uri ?: return null
         val root = browseRoot ?: return null
-        return if (isUnderTree(u, root)) recentKey(u) else null
+        return if (isUnderTree(u, root)) documentKey(u) else null
     }
 
     /** Remember the current note's view (zoom + scroll); a no-op unless it's a laid-out folder note. */
@@ -1310,7 +1218,13 @@ class Editor(context: Context) {
                 }
             }
         }
-        val result = out.sortedWith(compareBy({ !it.isDir }, { it.name.lowercase() }))
+        // Stamp any item we haven't seen before with the moment we discovered it, so the grid can
+        // order by creation even though SAF reports only last-modified: items the app created are
+        // discovered on the listing right after, and an externally-added file is "created" when found.
+        val now = System.currentTimeMillis()
+        createdStore.stampMissing(out.map { documentKey(it.documentUri) }, now)
+        val withCreated = out.map { it.copy(created = createdStore.get(documentKey(it.documentUri)) ?: now) }
+        val result = withCreated.sortedWith(explorerComparator { it.created })
         browseCache["$treeUri|$parentDocId"] = result
         return result
     }
@@ -1327,7 +1241,6 @@ class Editor(context: Context) {
                         browseRootName(root)
                         browseChildren(root, browseRootDocId(root))
                     }
-                    settings.recentFiles.forEach { recentInfo(it, 300) }
                 }
             }
         }
@@ -1792,6 +1705,9 @@ class Editor(context: Context) {
         if (!noteOpen) return
         saveViewState() // remember this folder note's view before leaving
         flushAutosave() // write the note back to its folder file if it autosaves
+        // Regenerate this folder note's grid tile now that editing is done (off-thread, low priority) —
+        // a non-folder note (no autosave binding) isn't shown in the explorer, so there's nothing to do.
+        autosaveUri?.let { uri -> autosaveScope.launch { regenerateClosedNoteThumb(uri) } }
         autosaveUri = null
         noteOpen = false
     }

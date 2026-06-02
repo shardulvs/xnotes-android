@@ -145,7 +145,7 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
     var showPresentation by remember { mutableStateOf(false) }
     // Backstage is the root of the stack; the editor is pushed on top only when a note is open
     // (editor.noteOpen). Every launch starts on backstage.
-    var backstageView by remember { mutableStateOf(com.xnotes.ui.BackstageView.RECENT) }
+    var backstageView by remember { mutableStateOf(com.xnotes.ui.BackstageView.HOME) }
     var showShareChooser by remember { mutableStateOf(false) }
     var guardAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var pendingAfterSave by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -172,7 +172,7 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
                 val bytes = resolver.openInputStream(it)?.use { s -> s.readBytes() }
                 if (bytes != null) {
                     editor.requestImport(com.xnotes.ui.ImportKind.OPEN, stem, bytes)
-                    backstageView = com.xnotes.ui.BackstageView.RECENT
+                    backstageView = com.xnotes.ui.BackstageView.HOME
                     editor.goHome() // land on backstage to name/place the pending import
                 }
             }.onFailure { editor.message = "Could not open the note." }
@@ -198,7 +198,7 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
                 val bytes = resolver.openInputStream(it)?.use { s -> s.readBytes() }
                 if (bytes != null) {
                     editor.requestImport(com.xnotes.ui.ImportKind.PDF, stem, bytes)
-                    backstageView = com.xnotes.ui.BackstageView.RECENT
+                    backstageView = com.xnotes.ui.BackstageView.HOME
                     editor.goHome() // land on backstage to name/place the pending import
                 }
             }.onFailure { editor.message = "Could not import the PDF." }
@@ -307,18 +307,6 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
             editor.autosaveUri != null -> action() // autosaved notes are flushed on doc-swap; no prompt
             editor.dirty -> guardAction = action
             else -> action()
-        }
-    }
-
-    fun openRecent(uriStr: String) {
-        val uri = Uri.parse(uriStr)
-        val name = displayNameOf(resolver, uri)
-        val opened = runCatching {
-            resolver.openInputStream(uri)?.use { s -> editor.open(s, uriStr, name) } != null
-        }.getOrDefault(false)
-        if (!opened) {
-            editor.message = "Couldn’t open that note — it may have been moved or deleted."
-            editor.removeRecentFile(uriStr)
         }
     }
 
@@ -454,7 +442,7 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
             newNote = { guarded { editor.newNote() } },
             open = {
                 if (editor.browseRoot != null) openLauncher.launch(arrayOf("*/*"))
-                else { backstageView = com.xnotes.ui.BackstageView.RECENT; guarded { editor.goHome() } }
+                else { backstageView = com.xnotes.ui.BackstageView.HOME; guarded { editor.goHome() } }
             },
             save = { saveOrPrompt() },
             saveAs = { createLauncher.launch("${editor.title}.xnote") },
@@ -485,7 +473,6 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
                 onExitApp = { (context as? android.app.Activity)?.finish() },
                 onOpenSystem = { openLauncher.launch(arrayOf("*/*")) },
                 onImportPdf = { importPdfLauncher.launch(arrayOf("application/pdf")) },
-                onOpenRecent = { uri -> guarded { openRecent(uri) } },
                 onOpenFile = { uri -> guarded { openTreeFile(uri) } },
                 onPickRoot = { pickRootLauncher.launch(null) },
                 onShareFile = { uri -> pendingShareUri = uri; showShareChooser = true },
@@ -518,7 +505,7 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
                     Toolbar(
                         editor,
                         onToggleFullscreen = onToggleFullscreen,
-                        onOpenBackstage = { backstageView = com.xnotes.ui.BackstageView.RECENT; guarded { editor.goHome() } },
+                        onOpenBackstage = { backstageView = com.xnotes.ui.BackstageView.HOME; guarded { editor.goHome() } },
                         onInsertImage = { pendingInsertContent = null; insertImageLauncher.launch(arrayOf("image/*")) },
                         onPresent = { showPresentation = true },
                     )
