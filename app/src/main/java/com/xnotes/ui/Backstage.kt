@@ -362,7 +362,9 @@ private fun HomePane(
     Column(Modifier.fillMaxSize()) {
         // Always-present, constant-height header so toggling the sidebar (or clearing recents /
         // having no folder) never shifts the content below. The hamburger shows only when the
-        // sidebar is hidden; "Recent notes" + Clear show only when there are recents.
+        // sidebar is hidden; "Recent notes" + Clear show only when there are recents. With no
+        // recents and the sidebar hidden, the wordmark titles the row so the menu button isn't
+        // stranded alone on an empty bar (the persistent sidebar already brands wide layouts).
         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
             if (!sidebarOpen) {
                 IconButton(onClick = onShowSidebar) {
@@ -378,6 +380,8 @@ private fun HomePane(
                     Spacer(Modifier.width(6.dp))
                     Text("Clear", color = palette.textDim.toComposeColor())
                 }
+            } else if (!sidebarOpen) {
+                Text("xnotes", color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 20.sp)
             }
         }
         if (recents.isNotEmpty()) {
