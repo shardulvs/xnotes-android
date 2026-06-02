@@ -23,7 +23,7 @@ data class Preferences(
     val defaultPageOrientation: Orientation = Orientation.PORTRAIT,
     /** Whether a finger draws (true) or pans (false, default). The stylus always draws. */
     val fingerDraws: Boolean = false,
-    /** Tool the S Pen side button activates while held; "none" disables it. */
+    /** Tool the stylus side button activates while held; "none" disables it. */
     val penButtonTool: String = "eraser",
     /** Horizontal margin (px) on each side of the page column; 0 ⇒ fit-width fills the screen. */
     val sideMargin: Double = 16.0,

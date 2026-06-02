@@ -104,7 +104,7 @@ fun PreferencesPane(editor: Editor) {
             HorizontalDivider(color = palette.border.toComposeColor())
             SectionTitle("Input")
             CheckRow("Draw with finger (off = finger pans)", prefs.fingerDraws) { update(prefs.copy(fingerDraws = it)) }
-            FieldLabel("S Pen side button (hold)")
+            FieldLabel("Stylus/Pen side button (hold)")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 penButtonOptions.forEach { (id, label) ->
                     Chip(label, prefs.penButtonTool == id) { update(prefs.copy(penButtonTool = id)) }

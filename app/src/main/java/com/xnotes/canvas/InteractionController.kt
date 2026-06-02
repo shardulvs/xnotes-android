@@ -95,7 +95,7 @@ class InteractionController(
     /** Whether a finger draws (true) or pans (false). The stylus always uses the armed tool. */
     var fingerDraws: Boolean = false
 
-    /** Tool the S Pen side button activates while held, or null to ignore the button. */
+    /** Tool the stylus side button activates while held, or null to ignore the button. */
     var penButtonTool: Tool? = Tool.ERASER
 
     private val toolConfigs: MutableMap<Tool, ToolConfig> =
