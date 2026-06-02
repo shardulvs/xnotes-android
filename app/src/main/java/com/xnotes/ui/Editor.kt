@@ -204,6 +204,11 @@ class Editor(context: Context) {
     var dirty by mutableStateOf(false)
         private set
 
+    /** True when a note is open (the editor is pushed on top of backstage); false = backstage is the
+     *  bare root of the stack. Starts false so every launch lands on home with no phantom note. */
+    var noteOpen by mutableStateOf(false)
+        private set
+
     /** Bumped whenever page content changes, to refresh thumbnails. */
     var contentVersion by mutableStateOf(0)
         private set
@@ -526,10 +531,12 @@ class Editor(context: Context) {
             renderScale = renderScale,
         )
         flushAutosave() // write the current note back to its folder file if it autosaves
-        saveViewState() // remember this folder note's view for next time
-        currentUri?.let {
-            settings = settings.copy(recentFiles = dedupRecents(listOf(it) + settings.recentFiles))
-            recentFiles = settings.recentFiles
+        if (noteOpen) {
+            saveViewState() // remember this folder note's view for next time
+            currentUri?.let {
+                settings = settings.copy(recentFiles = dedupRecents(listOf(it) + settings.recentFiles))
+                recentFiles = settings.recentFiles
+            }
         }
         settingsRepo.save(settings)
         saveSession()
@@ -539,6 +546,7 @@ class Editor(context: Context) {
      *  reopens this note where the user left off, unsaved edits included. */
     private fun saveSession() {
         if (!sessionLoaded) return // don't overwrite the saved note before restore has applied
+        if (!noteOpen) { session.clear(); return } // on backstage: nothing open -> wipe any stale session
         val contentChanged = contentVersion != lastSessionContentVersion
         session.save(state.document, state.zoom, state.scrollX, state.scrollY, zoomLocked, writeDocument = contentChanged)
         lastSessionContentVersion = contentVersion
@@ -734,6 +742,7 @@ class Editor(context: Context) {
             replaceDocument(doc)
             maybeBindAutosave(uri) // resume autosaving if this note lives in the granted folder
             rememberRecent(uri)
+            noteOpen = true // push the editor on top of backstage (only on a successful open)
         } catch (e: XNoteFormatException) {
             message = e.message ?: "Not an xnotes document."
         } catch (e: Exception) {
@@ -1158,7 +1167,9 @@ class Editor(context: Context) {
             deleted.path = null
             deleted.dirty = false
             dirty = false
-            autosaveScope.launch { if (state.document === deleted) newNote() }
+            // Only reset to a fresh page if the deleted note is actually on screen; while on backstage
+            // (noteOpen == false) the detached buffer is left as-is so we don't pop into a blank editor.
+            autosaveScope.launch { if (state.document === deleted && noteOpen) newNote() }
         }
 
         val removed = settings.recentFiles.filter { matches(it) }
@@ -1772,5 +1783,16 @@ class Editor(context: Context) {
         installInitialView(null) // a fresh in-memory note: fit width
         refreshContent()
         view.requestRender()
+        noteOpen = true // push the editor on top of backstage
+    }
+
+    /** Pop back to backstage: detach the current note (flush autosave, drop the binding) and clear
+     *  [noteOpen] so the editor is removed from the stack. The document stays as an inert buffer. */
+    fun goHome() {
+        if (!noteOpen) return
+        saveViewState() // remember this folder note's view before leaving
+        flushAutosave() // write the note back to its folder file if it autosaves
+        autosaveUri = null
+        noteOpen = false
     }
 }

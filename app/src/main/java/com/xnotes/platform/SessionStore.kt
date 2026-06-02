@@ -67,6 +67,15 @@ class SessionStore(private val dir: File, private val codec: DocumentCodec) {
         }
     }
 
+    /** Discard any saved session (document + sidecar), so the next launch restores nothing.
+     *  Used when the app is left with no note open, so a closed note isn't kept on disk. */
+    fun clear() {
+        runCatching {
+            docFile.delete()
+            File(dir, "session.json").delete()
+        }
+    }
+
     /** Load the saved session, or null when there is none or it can't be read. */
     fun load(): Snapshot? {
         if (!docFile.exists()) return null

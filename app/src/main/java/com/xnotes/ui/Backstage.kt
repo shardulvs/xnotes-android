@@ -67,19 +67,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
@@ -123,47 +116,21 @@ fun Backstage(
     onShareFile: (String) -> Unit,
     onSaveCopyFile: (String) -> Unit,
     onExportFilePdf: (String) -> Unit,
-    onDismiss: () -> Unit,
     /** Home is the app's root: back from here leaves the app rather than dropping into the editor. */
     onExitApp: () -> Unit,
 ) {
     // Below this width the sidebar becomes a slide-over drawer instead of a persistent pane.
     val compact = LocalConfiguration.current.screenWidthDp < COMPACT_WIDTH_DP
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        FullscreenDialogWindow()
-        BackstageContent(
-            editor, compact, view, onSelectView, onOpenSystem, onImportPdf,
-            onOpenRecent, onOpenFile, onPickRoot, onShareFile, onSaveCopyFile, onExportFilePdf, onExitApp,
-        )
-    }
+    // The backstage is the root of the stack — ordinary base content, not a dialog. The activity
+    // window already runs edge-to-edge with the system bars hidden (MainActivity.applyFullscreen).
+    BackstageContent(
+        editor, compact, view, onSelectView, onOpenSystem, onImportPdf,
+        onOpenRecent, onOpenFile, onPickRoot, onShareFile, onSaveCopyFile, onExportFilePdf, onExitApp,
+    )
 }
 
 /** Width at or above which the sidebar is a persistent pane rather than a drawer. */
 private const val COMPACT_WIDTH_DP = 600
-
-/**
- * Stretch the backstage's own dialog window edge-to-edge — into the display cutout and
- * behind the (hidden) system bars — so it fills the screen like the editor instead of
- * leaving the camera-cutout band the default dialog window reserves at the top.
- */
-@Composable
-private fun FullscreenDialogWindow() {
-    val view = LocalView.current
-    LaunchedEffect(view) {
-        val window = (view.parent as? DialogWindowProvider)?.window ?: return@LaunchedEffect
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-            window.attributes = window.attributes.apply {
-                layoutInDisplayCutoutMode =
-                    android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-            }
-        }
-        WindowInsetsControllerCompat(window, view).apply {
-            hide(WindowInsetsCompat.Type.systemBars())
-            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
-    }
-}
 
 /**
  * The home-first layout: the recents + explorer (or Preferences) fill the screen, with a

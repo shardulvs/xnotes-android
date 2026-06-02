@@ -143,8 +143,8 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     var showPresentation by remember { mutableStateOf(false) }
-    // Fresh install / last session on home -> open Home; last session inside a note -> open that note.
-    var showHome by remember { mutableStateOf(editor.startOnHome) }
+    // Backstage is the root of the stack; the editor is pushed on top only when a note is open
+    // (editor.noteOpen). Every launch starts on backstage.
     var backstageView by remember { mutableStateOf(com.xnotes.ui.BackstageView.RECENT) }
     var showShareChooser by remember { mutableStateOf(false) }
     var guardAction by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -173,7 +173,7 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
                 if (bytes != null) {
                     editor.requestImport(com.xnotes.ui.ImportKind.OPEN, stem, bytes)
                     backstageView = com.xnotes.ui.BackstageView.RECENT
-                    showHome = true
+                    editor.goHome() // land on backstage to name/place the pending import
                 }
             }.onFailure { editor.message = "Could not open the note." }
         }
@@ -199,7 +199,7 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
                 if (bytes != null) {
                     editor.requestImport(com.xnotes.ui.ImportKind.PDF, stem, bytes)
                     backstageView = com.xnotes.ui.BackstageView.RECENT
-                    showHome = true
+                    editor.goHome() // land on backstage to name/place the pending import
                 }
             }.onFailure { editor.message = "Could not import the PDF." }
         }
@@ -447,13 +447,14 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
     }
 
     val focusRequester = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
+    // The editor owns keyboard focus while it's on top; (re)grab it each time a note is pushed.
+    LaunchedEffect(editor.noteOpen) { if (editor.noteOpen) runCatching { focusRequester.requestFocus() } }
     editor.keyActions = remember {
         Editor.KeyActions(
             newNote = { guarded { editor.newNote() } },
             open = {
                 if (editor.browseRoot != null) openLauncher.launch(arrayOf("*/*"))
-                else { backstageView = com.xnotes.ui.BackstageView.RECENT; showHome = true }
+                else { backstageView = com.xnotes.ui.BackstageView.RECENT; guarded { editor.goHome() } }
             },
             save = { saveOrPrompt() },
             saveAs = { createLauncher.launch("${editor.title}.xnote") },
@@ -462,7 +463,7 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
                     render = { o, prog, cancel -> editor.exportPdf(o, prog, cancel) },
                     onReady = { temp -> pendingExportTemp = temp; savePdfLauncher.launch("${editor.title}.pdf") })
             },
-            preferences = { backstageView = com.xnotes.ui.BackstageView.PREFERENCES; showHome = true },
+            preferences = { backstageView = com.xnotes.ui.BackstageView.PREFERENCES; guarded { editor.goHome() } },
             fullscreen = onToggleFullscreen,
         )
     }
@@ -474,83 +475,84 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
         }
     }
 
-    // Remember the current surface so relaunch returns to it (home vs. the open note).
-    LaunchedEffect(showHome) { editor.setStartOnHome(showHome) }
-
-    // While a text box is open, Back commits-or-dismisses it (and hides the keyboard).
-    BackHandler(enabled = editor.editingField != null) { editor.commitText() }
-
-    // From inside the editor, the back button returns to Home (not out of the app).
-    BackHandler(enabled = !showHome && editor.editingField == null) {
-        backstageView = com.xnotes.ui.BackstageView.RECENT
-        showHome = true
-    }
-
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { inner ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(inner)
-                .focusRequester(focusRequester)
-                .focusable()
-                .onPreviewKeyEvent { ke ->
-                    ke.type == KeyEventType.KeyDown && editor.handleKeyDown(ke.nativeKeyEvent)
+        Box(modifier = Modifier.fillMaxSize().padding(inner)) {
+            // BASE LAYER: backstage is the root of the stack — always present underneath.
+            com.xnotes.ui.Backstage(
+                editor = editor,
+                view = backstageView,
+                onSelectView = { backstageView = it },
+                onExitApp = { (context as? android.app.Activity)?.finish() },
+                onOpenSystem = { openLauncher.launch(arrayOf("*/*")) },
+                onImportPdf = { importPdfLauncher.launch(arrayOf("application/pdf")) },
+                onOpenRecent = { uri -> guarded { openRecent(uri) } },
+                onOpenFile = { uri -> guarded { openTreeFile(uri) } },
+                onPickRoot = { pickRootLauncher.launch(null) },
+                onShareFile = { uri -> pendingShareUri = uri; showShareChooser = true },
+                onSaveCopyFile = { uri -> pendingSaveCopyUri = uri; saveCopyLauncher.launch("${stemOf(uri)}.xnote") },
+                onExportFilePdf = { uri ->
+                    runPdfExport(stemOf(uri), shareDir = false,
+                        render = { o, prog, cancel -> editor.exportFileToPdf(uri, o, prog, cancel) },
+                        onReady = { temp -> pendingExportTemp = temp; savePdfLauncher.launch("${stemOf(uri)}.pdf") })
                 },
-        ) {
-            Toolbar(
-                editor,
-                onToggleFullscreen = onToggleFullscreen,
-                onOpenBackstage = { backstageView = com.xnotes.ui.BackstageView.RECENT; showHome = true },
-                onInsertImage = { pendingInsertContent = null; insertImageLauncher.launch(arrayOf("image/*")) },
-                onPresent = { showPresentation = true },
             )
-            Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                if (editor.sidebarVisible) {
-                    com.xnotes.ui.SidePanel(
+
+            // TOP LAYER: the editor (toolbar + canvas), pushed only when a note is open. Its
+            // BackHandlers live here so — composed after backstage — they take priority while open.
+            if (editor.noteOpen) {
+                // While a text box is open, Back commits-or-dismisses it (and hides the keyboard).
+                BackHandler(enabled = editor.editingField != null) { editor.commitText() }
+                // Otherwise Back closes the note and pops to backstage (guarded for unsaved edits).
+                BackHandler(enabled = editor.editingField == null) { guarded { editor.goHome() } }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(LocalPalette.current.bg.toComposeColor())
+                        .focusRequester(focusRequester)
+                        .focusable()
+                        .onPreviewKeyEvent { ke ->
+                            ke.type == KeyEventType.KeyDown && editor.handleKeyDown(ke.nativeKeyEvent)
+                        },
+                ) {
+                    Toolbar(
                         editor,
-                        onSharePages = { pages, asPdf -> sharePages(pages, asPdf) },
-                        onSavePagesAsPdf = { pages -> savePagesAsPdf(pages) },
-                        onSavePagesAsImages = { pages -> savePagesAsImages(pages) },
+                        onToggleFullscreen = onToggleFullscreen,
+                        onOpenBackstage = { backstageView = com.xnotes.ui.BackstageView.RECENT; guarded { editor.goHome() } },
+                        onInsertImage = { pendingInsertContent = null; insertImageLauncher.launch(arrayOf("image/*")) },
+                        onPresent = { showPresentation = true },
                     )
-                }
-                Box(modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
-                    AndroidView(factory = { editor.view }, modifier = Modifier.fillMaxSize())
-                    editor.editingField?.let { field ->
-                        com.xnotes.ui.TextEditorOverlay(editor, field)
+                    Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        if (editor.sidebarVisible) {
+                            com.xnotes.ui.SidePanel(
+                                editor,
+                                onSharePages = { pages, asPdf -> sharePages(pages, asPdf) },
+                                onSavePagesAsPdf = { pages -> savePagesAsPdf(pages) },
+                                onSavePagesAsImages = { pages -> savePagesAsImages(pages) },
+                            )
+                        }
+                        Box(modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
+                            AndroidView(
+                                factory = { editor.view },
+                                modifier = Modifier.fillMaxSize(),
+                                update = { it.requestRender() }, // repaint on (re)attach so a push never flashes blank
+                            )
+                            editor.editingField?.let { field ->
+                                com.xnotes.ui.TextEditorOverlay(editor, field)
+                            }
+                            com.xnotes.ui.SelectionMenu(editor)
+                            com.xnotes.ui.TextStyleBar(editor)
+                            com.xnotes.ui.LongPressMenu(editor, onInsertImageAt = { c ->
+                                pendingInsertContent = c
+                                insertImageLauncher.launch(arrayOf("image/*"))
+                            })
+                            ZoomLockHint(editor)
+                            RefiningPdfHint(editor)
+                        }
                     }
-                    com.xnotes.ui.SelectionMenu(editor)
-                    com.xnotes.ui.TextStyleBar(editor)
-                    com.xnotes.ui.LongPressMenu(editor, onInsertImageAt = { c ->
-                        pendingInsertContent = c
-                        insertImageLauncher.launch(arrayOf("image/*"))
-                    })
-                    ZoomLockHint(editor)
-                    RefiningPdfHint(editor)
                 }
             }
         }
-    }
-
-    if (showHome) {
-        com.xnotes.ui.Backstage(
-            editor = editor,
-            view = backstageView,
-            onSelectView = { backstageView = it },
-            onExitApp = { (context as? android.app.Activity)?.finish() },
-            onOpenSystem = { openLauncher.launch(arrayOf("*/*")) },
-            onImportPdf = { importPdfLauncher.launch(arrayOf("application/pdf")) },
-            onOpenRecent = { uri -> showHome = false; guarded { openRecent(uri) } },
-            onOpenFile = { uri -> showHome = false; guarded { openTreeFile(uri) } },
-            onPickRoot = { pickRootLauncher.launch(null) },
-            onShareFile = { uri -> pendingShareUri = uri; showShareChooser = true },
-            onSaveCopyFile = { uri -> pendingSaveCopyUri = uri; saveCopyLauncher.launch("${stemOf(uri)}.xnote") },
-            onExportFilePdf = { uri ->
-                runPdfExport(stemOf(uri), shareDir = false,
-                    render = { o, prog, cancel -> editor.exportFileToPdf(uri, o, prog, cancel) },
-                    onReady = { temp -> pendingExportTemp = temp; savePdfLauncher.launch("${stemOf(uri)}.pdf") })
-            },
-            onDismiss = { showHome = false },
-        )
     }
     if (showShareChooser) {
         val shareUri = pendingShareUri
