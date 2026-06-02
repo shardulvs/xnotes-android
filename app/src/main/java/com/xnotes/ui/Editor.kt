@@ -14,6 +14,7 @@ import com.xnotes.canvas.CanvasView
 import com.xnotes.canvas.EditingField
 import com.xnotes.canvas.InitialView
 import com.xnotes.canvas.InteractionController
+import com.xnotes.canvas.TextBar
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.history.AddItem
 import com.xnotes.core.history.AddPage
@@ -30,6 +31,7 @@ import com.xnotes.core.model.Orientation
 import com.xnotes.core.model.Page
 import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.pal.FontFace
 import com.xnotes.core.model.deepCopy
 import com.xnotes.core.tools.InkPalette
 import com.xnotes.core.tools.ShapeConfig
@@ -186,6 +188,10 @@ class Editor(context: Context) {
     var editingField by mutableStateOf<EditingField?>(null)
         private set
 
+    /** The floating text style bar's target (active box rect + style), or null when no box is active. */
+    var textBar by mutableStateOf<TextBar?>(null)
+        private set
+
     /** Viewport rect to anchor the on-selection menu, or null when hidden. */
     var selectionMenu by mutableStateOf<com.xnotes.core.geometry.Rect?>(null)
         private set
@@ -236,10 +242,10 @@ class Editor(context: Context) {
         onViewChanged = { refreshView() },
         onFitWidthSnapped = { showZoomLockHint() },
         onFitWidthReleased = { hideZoomLockHint() },
-        onSelectionChanged = { selected -> hasSelection = selected },
+        onSelectionChanged = { selected -> hasSelection = selected; refreshTextBar() },
         onToolChanged = { t -> tool = t },
-        onTextEditStart = { field -> editingField = field },
-        onTextEditEnd = { editingField = null },
+        onTextEditStart = { field -> editingField = field; refreshTextBar() },
+        onTextEditEnd = { editingField = null; refreshTextBar() },
         onSelectionMenu = { rect -> selectionMenu = rect },
         onContextMenu = { vp, content -> contextMenu = ContextMenuTarget(vp.x, vp.y, content) },
         onAddPageAtEnd = { addPageAtEnd() },
@@ -573,6 +579,24 @@ class Editor(context: Context) {
         zoomPercent = (state.zoom * 100).roundToInt()
         pageIndex = state.currentPageIndex()
         if (controller.editingItem != null) editingField = controller.editingField()
+        refreshTextBar()
+    }
+
+    /** Recompute the floating text style bar's anchor + values (it follows pan/zoom/selection). */
+    private fun refreshTextBar() {
+        textBar = controller.computeTextBar()
+    }
+
+    /** Set the active text box's font family (and the family new boxes are created with). */
+    fun setTextFace(face: FontFace) {
+        controller.setTextFace(face)
+        refreshTextBar()
+    }
+
+    /** Set the active text box's point size (and the size new boxes are created with). */
+    fun setTextPointSize(size: Double) {
+        controller.setTextPointSize(size)
+        refreshTextBar()
     }
 
     fun updateEditingText(text: String) {
@@ -1349,7 +1373,10 @@ class Editor(context: Context) {
 
     fun pickColor(index: Int) {
         activeColorIndex = index
-        controller.inkColor = toolbarColors[index.coerceIn(0, toolbarColors.lastIndex)]
+        // pickInk also recolours the active text box (editing or selected), so the 5 toolbar
+        // swatches double as the text colour control.
+        controller.pickInk(toolbarColors[index.coerceIn(0, toolbarColors.lastIndex)])
+        refreshTextBar()
     }
 
     fun setSwatchColor(index: Int, color: Rgba) {

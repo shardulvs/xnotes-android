@@ -477,6 +477,9 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
     // Remember the current surface so relaunch returns to it (home vs. the open note).
     LaunchedEffect(showHome) { editor.setStartOnHome(showHome) }
 
+    // While a text box is open, Back commits-or-dismisses it (and hides the keyboard).
+    BackHandler(enabled = editor.editingField != null) { editor.commitText() }
+
     // From inside the editor, the back button returns to Home (not out of the app).
     BackHandler(enabled = !showHome && editor.editingField == null) {
         backstageView = com.xnotes.ui.BackstageView.RECENT
@@ -516,6 +519,7 @@ private fun EditorScreen(editor: Editor, onToggleFullscreen: () -> Unit) {
                         com.xnotes.ui.TextEditorOverlay(editor, field)
                     }
                     com.xnotes.ui.SelectionMenu(editor)
+                    com.xnotes.ui.TextStyleBar(editor)
                     com.xnotes.ui.LongPressMenu(editor, onInsertImageAt = { c ->
                         pendingInsertContent = c
                         insertImageLauncher.launch(arrayOf("image/*"))
