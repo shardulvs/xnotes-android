@@ -8,10 +8,9 @@ import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.TextItem
 import kotlin.math.abs
 import kotlin.math.max
-import kotlin.math.min
 
-/** Which resize handle is being dragged (spec 06 §8). */
-enum class HandleId { TL, TR, BL, BR, L, R, START, END }
+/** Which resize handle is being dragged (spec 06 §8). T/B are the top/bottom side mid-handles. */
+enum class HandleId { TL, TR, BL, BR, L, R, T, B, START, END }
 
 data class ResizeHandle(val id: HandleId, val content: Pt)
 
@@ -24,9 +23,22 @@ object ResizeMath {
         is ImageItem -> rectCorners(item.rect, pageTopLeft)
         is TextItem -> {
             val b = item.bounds()
+            val l = b.left + pageTopLeft.x
+            val r = b.right + pageTopLeft.x
+            val t = b.top + pageTopLeft.y
+            val bot = b.bottom + pageTopLeft.y
+            val cx = b.centerX + pageTopLeft.x
+            val cy = b.centerY + pageTopLeft.y
+            // Eight handles: four corners + four side midpoints.
             listOf(
-                ResizeHandle(HandleId.L, Pt(b.left + pageTopLeft.x, b.centerY + pageTopLeft.y)),
-                ResizeHandle(HandleId.R, Pt(b.right + pageTopLeft.x, b.centerY + pageTopLeft.y)),
+                ResizeHandle(HandleId.TL, Pt(l, t)),
+                ResizeHandle(HandleId.T, Pt(cx, t)),
+                ResizeHandle(HandleId.TR, Pt(r, t)),
+                ResizeHandle(HandleId.R, Pt(r, cy)),
+                ResizeHandle(HandleId.BR, Pt(r, bot)),
+                ResizeHandle(HandleId.B, Pt(cx, bot)),
+                ResizeHandle(HandleId.BL, Pt(l, bot)),
+                ResizeHandle(HandleId.L, Pt(l, cy)),
             )
         }
         is ShapeItem ->
@@ -86,13 +98,27 @@ object ResizeMath {
     fun resizeOpenShape(start: Pt, end: Pt, handle: HandleId, pointer: Pt): Pair<Pt, Pt> =
         if (handle == HandleId.START) pointer to end else start to pointer
 
-    /** Text box: width only (height follows the text); returns new (pos, width). */
-    fun resizeText(pos: Pt, width: Double, handle: HandleId, pointerX: Double): Pair<Pt, Double> =
-        if (handle == HandleId.R) {
-            pos to max(MIN_SIZE, pointerX - pos.x)
-        } else {
-            val right = pos.x + width
-            val newX = min(pointerX, right - MIN_SIZE)
-            Pt(newX, pos.y) to (right - newX)
-        }
+    /**
+     * Text box rect resize via any of the 8 handles (page-local pointer). [width] is
+     * the wrap width; [height] is the reserved minimum (the box still grows to fit its
+     * text). The dragged edge follows the pointer, the opposite edge stays fixed, and
+     * both axes clamp to [MIN_SIZE]. Returns new (pos, width, height).
+     */
+    fun resizeText(pos: Pt, width: Double, height: Double, handle: HandleId, pointer: Pt): Triple<Pt, Double, Double> {
+        var left = pos.x
+        var top = pos.y
+        var right = pos.x + width
+        var bottom = pos.y + height
+        val movesLeft = handle == HandleId.TL || handle == HandleId.BL || handle == HandleId.L
+        val movesRight = handle == HandleId.TR || handle == HandleId.BR || handle == HandleId.R
+        val movesTop = handle == HandleId.TL || handle == HandleId.TR || handle == HandleId.T
+        val movesBottom = handle == HandleId.BL || handle == HandleId.BR || handle == HandleId.B
+        if (movesLeft) left = pointer.x
+        if (movesRight) right = pointer.x
+        if (movesTop) top = pointer.y
+        if (movesBottom) bottom = pointer.y
+        if (right - left < MIN_SIZE) { if (movesLeft) left = right - MIN_SIZE else right = left + MIN_SIZE }
+        if (bottom - top < MIN_SIZE) { if (movesTop) top = bottom - MIN_SIZE else bottom = top + MIN_SIZE }
+        return Triple(Pt(left, top), right - left, bottom - top)
+    }
 }

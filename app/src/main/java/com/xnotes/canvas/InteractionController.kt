@@ -15,6 +15,7 @@ import com.xnotes.core.history.EditText
 import com.xnotes.core.history.MoveItems
 import com.xnotes.core.history.ReorderItems
 import com.xnotes.core.history.ResizeItem
+import com.xnotes.core.history.RestyleText
 import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.Document
 import com.xnotes.core.model.deepCopy
@@ -29,6 +30,8 @@ import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.Stroke
 import com.xnotes.core.model.TextHandle
 import com.xnotes.core.model.TextItem
+import com.xnotes.core.model.TextStyle
+import com.xnotes.core.pal.FontFace
 import com.xnotes.core.pal.Pen
 import com.xnotes.core.pal.Renderer
 import com.xnotes.core.pal.TextMeasurer
@@ -43,16 +46,27 @@ import kotlin.math.abs
 import kotlin.math.exp
 
 /** The pointer state machine modes (spec 06 §1). */
-enum class PointerMode { IDLE, DRAW, ERASE, BAND, LASSO_DRAW, SHAPE, MOVE, RESIZE, PAN, PINCH }
+enum class PointerMode { IDLE, DRAW, ERASE, BAND, LASSO_DRAW, SHAPE, MOVE, RESIZE, PAN, PINCH, TEXT_DRAG }
 
 /** On-screen geometry of the live text editor field (viewport pixels). */
 data class EditingField(
     val x: Double,
     val y: Double,
     val width: Double,
+    val heightPx: Double,
     val fontPx: Double,
+    val face: FontFace,
     val rgba: Rgba,
     val text: String,
+)
+
+/** The floating text style bar's target: the active box's viewport rect + its style. */
+data class TextBar(
+    val rect: Rect,
+    val face: FontFace,
+    val pointSize: Double,
+    /** True while the keyboard field is up (vs the box merely being selected). */
+    val editing: Boolean,
 )
 
 /**
@@ -186,6 +200,17 @@ class InteractionController(
     val editingItem: TextItem? get() = editingText
     val editingPage: Int get() = editingPageIndex
 
+    /** The style new text boxes are created with; mirrors the active box while one is open. */
+    var textFace: FontFace = TextItem.DEFAULT_FACE
+        private set
+    var textPointSize: Double = TextItem.DEFAULT_POINT_SIZE
+        private set
+
+    // TEXT DRAG-CREATE (drag a rectangle to size a new box; a tap makes a default one)
+    private var textDragStart = Pt.ZERO // content space
+    private var textDragRect: Rect? = null // content space, for the live preview
+    private var textDragPageIndex = -1
+
     init {
         state.isLiftedItem = { item -> item === editingText || selection.any { it.item === item } }
     }
@@ -255,9 +280,6 @@ class InteractionController(
         drawingPointerId = e.getPointerId(0)
         drawingIsStylus = toolType == MotionEvent.TOOL_TYPE_STYLUS
 
-        // A press elsewhere commits an open text edit (the field's focus-out also fires).
-        if (tool != Tool.TEXT) commitTextEdit()
-
         // Resolve which tool this pointer drives:
         //  - the stylus eraser end, or the held side button, force the eraser/side-button tool;
         //  - a finger pans unless finger-draw is enabled;
@@ -272,6 +294,18 @@ class InteractionController(
             else -> tool
         }
 
+        // An open text edit is committed-or-dismissed by any press before that press does
+        // anything else: an empty box is deleted, a box with content is kept. With the Text
+        // tool a tap outside ONLY dismisses — it must not also spawn a new box on the same
+        // gesture (that double-create was the duplication bug). Other tools then act normally.
+        if (editingText != null) {
+            commitTextEdit()
+            if (effectiveTool == Tool.TEXT) {
+                mode = PointerMode.IDLE
+                return
+            }
+        }
+
         when {
             effectiveTool == Tool.PAN -> beginPan(vx, vy)
             effectiveTool.isStroke -> beginDraw(content, resolvePressure(e, 0, toolType), effectiveTool, e.eventTime)
@@ -279,10 +313,11 @@ class InteractionController(
             effectiveTool == Tool.SELECT -> beginSelect(content)
             effectiveTool == Tool.LASSO -> beginLasso(content)
             effectiveTool == Tool.SHAPE -> beginShape(content)
-            effectiveTool == Tool.TEXT -> beginText(content)
+            effectiveTool == Tool.TEXT -> beginTextGesture(content)
             else -> Unit
         }
-        armLongPress(Pt(vx, vy), content, toolType == MotionEvent.TOOL_TYPE_FINGER)
+        // Long-press grab/paste-menu is suppressed mid text-drag so a hold-then-drag still sizes a box.
+        if (mode != PointerMode.TEXT_DRAG) armLongPress(Pt(vx, vy), content, toolType == MotionEvent.TOOL_TYPE_FINGER)
     }
 
     private fun handlePointerDown(e: MotionEvent) {
@@ -308,6 +343,7 @@ class InteractionController(
             PointerMode.MOVE -> extendMove(content)
             PointerMode.RESIZE -> extendResize(content)
             PointerMode.SHAPE -> extendShape(content)
+            PointerMode.TEXT_DRAG -> extendTextDrag(content)
             else -> Unit
         }
     }
@@ -341,6 +377,7 @@ class InteractionController(
             PointerMode.MOVE -> endMove(content)
             PointerMode.RESIZE -> endResize()
             PointerMode.SHAPE -> endShape()
+            PointerMode.TEXT_DRAG -> endTextDrag(content)
             else -> Unit
         }
     }
@@ -612,8 +649,9 @@ class InteractionController(
         when (item) {
             is ImageItem -> item.setGeometry(RectHandle(ResizeMath.resizeImage(item.rect, handle, local)))
             is TextItem -> {
-                val (pos, w) = ResizeMath.resizeText(item.pos, item.width, handle, local.x)
-                item.setGeometry(TextHandle(pos, w, item.height))
+                // Resize against the displayed bounds (grown-to-fit height) so handles track the box.
+                val (pos, w, h) = ResizeMath.resizeText(item.pos, item.width, item.bounds().h, handle, local)
+                item.setGeometry(TextHandle(pos, w, h))
             }
             is ShapeItem -> {
                 val (s, en) = if (item.shape.isClosed) {
@@ -688,31 +726,79 @@ class InteractionController(
 
     // --- TEXT ---
 
-    private fun beginText(content: Pt) {
-        commitTextEdit()
+    /**
+     * A press with the Text tool (and no edit already open). Tapping an existing box edits it;
+     * otherwise this begins a tap-or-drag to create a new one ([endTextDrag] decides which).
+     */
+    private fun beginTextGesture(content: Pt) {
         val pi = state.pageIndexAtContent(content) ?: return
         val pr = state.pageRects[pi]
         val local = Pt(content.x - pr.left, content.y - pr.top)
         val page = state.document.pages[pi]
         val existing = page.items.lastOrNull { it is TextItem && it.contains(local) } as? TextItem
         if (existing != null) {
-            editingText = existing
-            editingIsNew = false
-            editingOldText = existing.text
-            editingPageIndex = pi
-            state.invalidatePage(page)
-        } else {
-            val width = (page.width - local.x - 14.0).coerceIn(80.0, 300.0)
-            editingText = TextItem(local, width, text = "", measurer = textMeasurer)
-            editingIsNew = true
-            editingOldText = ""
-            editingPageIndex = pi
+            startEditing(existing, pi, isNew = false)
+            return
         }
+        clearSelection()
+        mode = PointerMode.TEXT_DRAG
+        textDragPageIndex = pi
+        textDragStart = content
+        textDragRect = null
+        requestRender()
+    }
+
+    private fun extendTextDrag(content: Pt) {
+        textDragRect = Rect.fromPoints(textDragStart, content)
+        requestRender()
+    }
+
+    /** Finish a tap-or-drag: a real drag (either axis) sizes the box; a tap makes a default one. */
+    private fun endTextDrag(content: Pt) {
+        val pi = textDragPageIndex
+        textDragRect = null
+        mode = PointerMode.IDLE
+        val pr = state.pageRects.getOrNull(pi) ?: return
+        val page = state.document.pages[pi]
+        val startLocal = Pt(textDragStart.x - pr.left, textDragStart.y - pr.top)
+        val rect = Rect.fromPoints(startLocal, Pt(content.x - pr.left, content.y - pr.top))
+        val draggedX = rect.w * state.zoom >= TEXT_DRAG_SLOP
+        val draggedY = rect.h * state.zoom >= TEXT_DRAG_SLOP
+        val item = if (draggedX || draggedY) {
+            // Use the drawn rectangle for whichever axis was actually dragged.
+            val left = if (draggedX) rect.left else startLocal.x
+            val maxW = (page.width - left - 8.0).coerceAtLeast(40.0)
+            val w = if (draggedX) rect.w.coerceIn(40.0, maxW) else defaultTextWidth(page.width, left)
+            val h = if (draggedY) rect.h else 0.0
+            newTextItem(Pt(left, rect.top), w, h)
+        } else {
+            newTextItem(startLocal, defaultTextWidth(page.width, startLocal.x), 0.0)
+        }
+        startEditing(item, pi, isNew = true)
+    }
+
+    private fun defaultTextWidth(pageWidth: Double, left: Double): Double =
+        (pageWidth - left - 14.0).coerceIn(80.0, 300.0)
+
+    private fun newTextItem(pos: Pt, width: Double, height: Double): TextItem =
+        TextItem(pos, width, height, "", inkColor, textPointSize, textFace, textMeasurer)
+
+    /** Open the in-place editor on [item] (a new draft, or an existing box being re-edited). */
+    private fun startEditing(item: TextItem, pi: Int, isNew: Boolean) {
+        editingText = item
+        editingIsNew = isNew
+        editingOldText = item.text
+        editingPageIndex = pi
+        // The style bar / next new box follow the box being edited.
+        textFace = item.face
+        textPointSize = item.pointSize
+        // An existing box is lifted out of the cache (isLiftedItem) while edited, so only the field shows it.
+        if (!isNew) state.invalidatePage(state.document.pages[pi])
         onTextEditStart(editingField())
         requestRender()
     }
 
-    /** Keep the model in sync with the live editor field (for auto-resize/commit). */
+    /** Keep the model in sync with the live editor field (for auto-grow / commit). */
     fun updateEditingText(text: String) {
         editingText?.text = text
     }
@@ -726,36 +812,109 @@ class InteractionController(
             x = topLeft.x,
             y = topLeft.y,
             width = item.width * state.zoom,
+            heightPx = item.bounds().h * state.zoom,
             fontPx = item.pointSize * com.xnotes.platform.AndroidText.POINTS_TO_PX * state.zoom,
+            face = item.face,
             rgba = item.rgba,
             text = item.text,
         )
     }
 
-    /** Commit (Escape / done / focus-out / tool switch). Uses the model's current text. */
+    /**
+     * Commit (tap outside / Escape / done / tool switch) using the model's current text.
+     * An empty box is *deleted* (a new draft is simply dropped; an existing box is removed);
+     * a box with content is kept and its change recorded. The single source of truth for
+     * ending an edit — the field no longer commits itself, so there is no double-commit.
+     */
     fun commitTextEdit(finalText: String? = null) {
         val item = editingText ?: return
         finalText?.let { item.text = it }
         val pi = editingPageIndex
+        val page = state.document.pages.getOrNull(pi)
+        val empty = item.text.trim().isEmpty()
         if (editingIsNew) {
-            if (item.text.trim().isNotEmpty()) {
-                val page = state.document.pages[pi]
+            if (!empty && page != null) {
                 page.items.add(item)
                 history.push(AddItem(page, item))
                 state.document.dirty = true
                 onContentChanged()
             }
-        } else if (item.text != editingOldText) {
-            history.push(EditText(item, editingOldText, item.text))
-            state.document.dirty = true
-            onContentChanged()
+        } else if (page != null) {
+            if (empty) {
+                page.items.remove(item)
+                history.push(EraseItems(listOf(page to item)))
+                state.document.dirty = true
+                onContentChanged()
+            } else if (item.text != editingOldText) {
+                history.push(EditText(item, editingOldText, item.text))
+                state.document.dirty = true
+                onContentChanged()
+            }
         }
         editingText = null
         editingIsNew = false
         editingPageIndex = -1
         editingOldText = ""
-        state.document.pages.getOrNull(pi)?.let(state::invalidatePage)
+        page?.let(state::invalidatePage)
         onTextEditEnd()
+        requestRender()
+    }
+
+    // --- text styling (driven by the floating style bar + the toolbar colour swatches) ---
+
+    /** The text box currently being edited, or the lone selected one — what the style bar targets. */
+    fun activeTextItem(): TextItem? = editingText ?: (selection.singleOrNull()?.item as? TextItem)
+
+    /** Where to anchor the style bar and the box's current style, or null when no box is active. */
+    fun computeTextBar(): TextBar? {
+        val editing = editingText
+        if (editing != null) {
+            val f = editingField() ?: return null
+            return TextBar(Rect(f.x, f.y, f.width, f.heightPx), editing.face, editing.pointSize, editing = true)
+        }
+        if (mode != PointerMode.IDLE) return null
+        val sel = selection.singleOrNull()?.item as? TextItem ?: return null
+        val rect = selectionBoundsViewport() ?: return null
+        return TextBar(rect, sel.face, sel.pointSize, editing = false)
+    }
+
+    fun setTextFace(face: FontFace) {
+        textFace = face
+        restyleActive { it.face = face }
+    }
+
+    fun setTextPointSize(size: Double) {
+        val s = size.coerceIn(TEXT_MIN_PT, TEXT_MAX_PT)
+        textPointSize = s
+        restyleActive { it.pointSize = s }
+    }
+
+    /** Set the ink colour (for new strokes/boxes) and recolour the active text box, if any. */
+    fun pickInk(c: Rgba) {
+        inkColor = c
+        restyleActive { it.rgba = c }
+    }
+
+    /**
+     * Apply a style change to the active text box. A *new draft* mutates directly (its final
+     * style is captured by the AddItem on commit); a committed/selected box records a [RestyleText]
+     * so it is undoable. Both editing and selected boxes are lifted, so a render shows the change.
+     */
+    private inline fun restyleActive(mutate: (TextItem) -> Unit) {
+        val item = activeTextItem() ?: return
+        val isDraft = item === editingText && editingIsNew
+        val old = TextStyle.of(item)
+        mutate(item)
+        if (!isDraft && TextStyle.of(item) != old) {
+            history.push(RestyleText(item, old, TextStyle.of(item)))
+            state.document.dirty = true
+            onContentChanged()
+        }
+        if (item === editingText) {
+            onTextEditStart(editingField()) // refresh the live field's metrics/colour
+        } else {
+            refreshSelectionMenu() // a size change moved the box; re-anchor its menu
+        }
         requestRender()
     }
 
@@ -1255,6 +1414,7 @@ class InteractionController(
         shapePageIndex = null
         bandRect = null
         lassoPoints.clear()
+        textDragRect = null
         if (mode == PointerMode.PINCH) {
             state.zoomingInProgress = false
             state.invalidateCachesForZoom()
@@ -1290,6 +1450,7 @@ class InteractionController(
             val accent = Pen(state.palette.accent, 1.3, cosmetic = true, dashed = true)
             when {
                 mode == PointerMode.BAND -> bandRect?.let { r.strokeRect(it, accent) }
+                mode == PointerMode.TEXT_DRAG -> textDragRect?.let { r.strokeRect(it, accent) }
                 mode == PointerMode.LASSO_DRAW && lassoPoints.size >= 2 ->
                     r.strokePolyline(lassoPoints, Pen(state.palette.accent, 1.3, cosmetic = true))
                 lassoPolygon != null && selection.isNotEmpty() ->
@@ -1342,6 +1503,13 @@ class InteractionController(
         const val REPAIR_PAD = 2.0
         const val HANDLE_HIT = 9.0
         const val SHAPE_MIN_DRAG = 3.0
+
+        /** Min drag (viewport px, either axis) for a Text-tool gesture to size a box rather than tap-create. */
+        const val TEXT_DRAG_SLOP = 14.0
+
+        /** Text point-size clamp for the style bar. */
+        const val TEXT_MIN_PT = 6.0
+        const val TEXT_MAX_PT = 96.0
         const val LONG_PRESS_MS = 450L
         const val LONG_PRESS_SLOP = 6.0
 

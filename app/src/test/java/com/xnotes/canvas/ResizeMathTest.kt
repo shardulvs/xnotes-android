@@ -1,9 +1,11 @@
 package com.xnotes.canvas
 
 import com.xnotes.core.FakeRasterSurface
+import com.xnotes.core.FakeTextMeasurer
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.ImageItem
+import com.xnotes.core.model.TextItem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -41,14 +43,36 @@ class ResizeMathTest {
         assertEquals(Pt(50.0, 50.0), e)
     }
 
-    @Test fun textResizeWidthOnly() {
-        val (pos1, w1) = ResizeMath.resizeText(Pt(0.0, 0.0), 100.0, HandleId.R, 150.0)
-        assertEquals(Pt(0.0, 0.0), pos1)
-        assertEquals(150.0, w1, 1e-9)
+    @Test fun textResizeRightWidensWidthOnly() {
+        val (pos, w, h) = ResizeMath.resizeText(Pt(0.0, 0.0), 100.0, 40.0, HandleId.R, Pt(150.0, 20.0))
+        assertEquals(Pt(0.0, 0.0), pos)
+        assertEquals(150.0, w, 1e-9)
+        assertEquals(40.0, h, 1e-9) // a side handle leaves the other axis untouched
+    }
 
-        val (pos2, w2) = ResizeMath.resizeText(Pt(0.0, 0.0), 100.0, HandleId.L, 20.0)
-        assertEquals(20.0, pos2.x, 1e-9) // left moved, right edge (100) fixed
-        assertEquals(80.0, w2, 1e-9)
+    @Test fun textResizeLeftMovesLeftEdge() {
+        val (pos, w, _) = ResizeMath.resizeText(Pt(0.0, 0.0), 100.0, 40.0, HandleId.L, Pt(20.0, 0.0))
+        assertEquals(20.0, pos.x, 1e-9) // left moved, right edge (100) fixed
+        assertEquals(80.0, w, 1e-9)
+    }
+
+    @Test fun textResizeBottomGrowsHeight() {
+        val (pos, w, h) = ResizeMath.resizeText(Pt(0.0, 0.0), 100.0, 40.0, HandleId.B, Pt(50.0, 120.0))
+        assertEquals(Pt(0.0, 0.0), pos)
+        assertEquals(100.0, w, 1e-9)
+        assertEquals(120.0, h, 1e-9)
+    }
+
+    @Test fun textResizeCornerChangesBothAxes() {
+        val (pos, w, h) = ResizeMath.resizeText(Pt(10.0, 10.0), 100.0, 40.0, HandleId.TL, Pt(-90.0, -40.0))
+        assertEquals(Pt(-90.0, -40.0), pos) // top-left follows the pointer; bottom-right (110,50) fixed
+        assertEquals(200.0, w, 1e-9)
+        assertEquals(90.0, h, 1e-9)
+    }
+
+    @Test fun textResizeEnforcesMinSize() {
+        val (_, w, h) = ResizeMath.resizeText(Pt(0.0, 0.0), 100.0, 100.0, HandleId.BR, Pt(5.0, 5.0))
+        assertTrue(w >= ResizeMath.MIN_SIZE && h >= ResizeMath.MIN_SIZE)
     }
 
     @Test fun imageHandlesAreFourCorners() {
@@ -57,5 +81,13 @@ class ResizeMathTest {
         assertEquals(4, handles.size)
         assertTrue(handles.any { it.id == HandleId.TL && it.content == Pt(48.0, 48.0) })
         assertTrue(handles.any { it.id == HandleId.BR && it.content == Pt(148.0, 98.0) })
+    }
+
+    @Test fun textHandlesAreEightAroundTheBox() {
+        val t = TextItem(Pt(0.0, 0.0), width = 100.0, height = 50.0, text = "x", measurer = FakeTextMeasurer())
+        val handles = ResizeMath.handles(t, Pt(0.0, 0.0))
+        assertEquals(8, handles.size)
+        val ids = handles.map { it.id }.toSet()
+        assertEquals(setOf(HandleId.TL, HandleId.T, HandleId.TR, HandleId.R, HandleId.BR, HandleId.B, HandleId.BL, HandleId.L), ids)
     }
 }
