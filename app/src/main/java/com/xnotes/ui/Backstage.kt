@@ -803,7 +803,13 @@ private fun FolderChip(
             // Selected: accent border AND accent transparent fill (matching the file tiles).
             .background((if (selected) palette.accentAlpha(38) else palette.panel).toComposeColor())
             .then(if (selected) Modifier.border(1.5.dp, palette.accent.toComposeColor(), RoundedCornerShape(8.dp)) else Modifier)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            // No tap ripple — the accent border + fill is the only selection cue.
+            .combinedClickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+                onLongClick = onLongClick,
+            )
             .alpha(if (dimmed) 0.4f else 1f)
             .padding(start = 10.dp, end = 2.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -858,7 +864,13 @@ private fun FileTile(
         Modifier
             .alpha(if (dimmed) 0.4f else 1f)
             .clip(RoundedCornerShape(10.dp))
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+            // No tap ripple — the accent border + fill is the only selection cue.
+            .combinedClickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+                onLongClick = onLongClick,
+            ),
     ) {
         Box(
             Modifier
