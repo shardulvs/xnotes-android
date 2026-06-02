@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,6 +23,8 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -41,6 +45,7 @@ import com.xnotes.core.model.Orientation
 import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.Rgba
 import com.xnotes.settings.Preferences
+import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.ColorMath
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
@@ -59,7 +64,7 @@ private val penButtonOptions = listOf("eraser" to "Eraser", "pan" to "Pan", "sel
  * immediately, including in the surrounding backstage.
  */
 @Composable
-fun PreferencesPane(editor: Editor) {
+fun PreferencesPane(editor: Editor, sidebarOpen: Boolean, onShowSidebar: () -> Unit) {
     val palette = LocalPalette.current
     var prefs by remember { mutableStateOf(editor.preferences) }
     fun update(p: Preferences) {
@@ -68,11 +73,20 @@ fun PreferencesPane(editor: Editor) {
     }
 
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        // Hamburger sits inline with the title (shown only when the sidebar is hidden); the row keeps
+        // a constant height either way so toggling the sidebar never shifts the settings below.
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (!sidebarOpen) {
+                IconButton(onClick = onShowSidebar) {
+                    Icon(XnotesIcons.menu, "Show sidebar", tint = palette.text.toComposeColor(), modifier = Modifier.size(24.dp))
+                }
+                Spacer(Modifier.width(4.dp))
+            }
             Text("Preferences", color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 20.sp)
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { update(Preferences()) }) { Text("Reset to defaults", fontSize = 13.sp) }
         }
+        Spacer(Modifier.height(12.dp))
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(14.dp),

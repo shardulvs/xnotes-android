@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -315,11 +316,17 @@ private fun BackstageMain(
 ) {
     val palette = LocalPalette.current
     Column(modifier) {
-        // Preferences and About get their own hamburger bar; on Home the hamburger sits inline with "Recent notes".
-        if (!sidebarOpen && (view == BackstageView.PREFERENCES || view == BackstageView.ABOUT)) {
-            Row(Modifier.fillMaxWidth().padding(start = 6.dp, top = 8.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onShowSidebar) {
-                    Icon(XnotesIcons.menu, "Show sidebar", tint = palette.text.toComposeColor(), modifier = Modifier.size(24.dp))
+        // About keeps a slim top bar for the hamburger, reserved at a constant height so toggling
+        // the sidebar never shifts it. Home and Preferences host the hamburger inline with their headers.
+        if (view == BackstageView.ABOUT) {
+            Box(
+                Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 6.dp, end = 12.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                if (!sidebarOpen) {
+                    IconButton(onClick = onShowSidebar) {
+                        Icon(XnotesIcons.menu, "Show sidebar", tint = palette.text.toComposeColor(), modifier = Modifier.size(24.dp))
+                    }
                 }
             }
         }
@@ -329,7 +336,7 @@ private fun BackstageMain(
                     editor, onOpenRecent, onOpenFile, onPickRoot, onImportPdf,
                     onShareFile, onSaveCopyFile, onExportFilePdf, createMode, onCreateMode, sidebarOpen, onShowSidebar,
                 )
-                BackstageView.PREFERENCES -> PreferencesPane(editor)
+                BackstageView.PREFERENCES -> PreferencesPane(editor, sidebarOpen, onShowSidebar)
                 BackstageView.ABOUT -> AboutPane()
             }
         }
@@ -386,23 +393,23 @@ private fun HomePane(
     val palette = LocalPalette.current
     val recents = editor.recentFiles
     Column(Modifier.fillMaxSize()) {
-        // Header: hamburger (when the sidebar is hidden) on the same line as "Recent notes" + Clear.
-        if (!sidebarOpen || recents.isNotEmpty()) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                if (!sidebarOpen) {
-                    IconButton(onClick = onShowSidebar) {
-                        Icon(XnotesIcons.menu, "Show sidebar", tint = palette.text.toComposeColor(), modifier = Modifier.size(24.dp))
-                    }
-                    Spacer(Modifier.width(4.dp))
+        // Always-present, constant-height header so toggling the sidebar (or clearing recents /
+        // having no folder) never shifts the content below. The hamburger shows only when the
+        // sidebar is hidden; "Recent notes" + Clear show only when there are recents.
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (!sidebarOpen) {
+                IconButton(onClick = onShowSidebar) {
+                    Icon(XnotesIcons.menu, "Show sidebar", tint = palette.text.toComposeColor(), modifier = Modifier.size(24.dp))
                 }
-                if (recents.isNotEmpty()) {
-                    Text("Recent notes", color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                    Spacer(Modifier.weight(1f))
-                    TextButton(onClick = { editor.clearRecentFiles() }) {
-                        Icon(XnotesIcons.trash, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Clear", color = palette.textDim.toComposeColor())
-                    }
+                Spacer(Modifier.width(4.dp))
+            }
+            if (recents.isNotEmpty()) {
+                Text("Recent notes", color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { editor.clearRecentFiles() }) {
+                    Icon(XnotesIcons.trash, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Clear", color = palette.textDim.toComposeColor())
                 }
             }
         }
@@ -417,7 +424,7 @@ private fun HomePane(
             Spacer(Modifier.height(18.dp))
             HorizontalDivider(color = palette.border.toComposeColor())
             Spacer(Modifier.height(18.dp))
-        } else if (!sidebarOpen) {
+        } else {
             Spacer(Modifier.height(8.dp))
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
