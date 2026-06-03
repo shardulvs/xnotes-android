@@ -841,7 +841,7 @@ class CanvasState(
         const val MARGIN = 48.0
         const val GAP = 38.0
         const val MIN_ZOOM = 0.12
-        const val MAX_ZOOM = 8.0
+        const val MAX_ZOOM = 16.0
         const val ZOOM_STEP = 1.25
 
         /** While a pinch's zoom is within this fraction of [fitWidthZoom] it sticks to fit-to-width. */
