@@ -787,34 +787,32 @@ private fun BoxScope.RefiningPdfHint(editor: Editor) {
 }
 
 /**
- * Transient "lock zoom" affordance, centred just below the toolbar. Appears when a pinch snaps to
- * fit-to-width ([Editor.zoomLockHint] bumps), auto-dismisses after a moment, and locks the zoom on
- * tap. Only ever shown while unlocked, since a locked pinch can't reach fit-width to trigger it.
+ * Transient zoom-lock affordance, centred just below the toolbar. Appears when a pinch snaps to
+ * fit-to-width ([Editor.zoomLockHint] bumps) and auto-dismisses after a moment. Tapping toggles the
+ * zoom lock, so the same chip both locks and unlocks; each tap re-arms the dismiss timer so it
+ * lingers long enough to tap again.
  */
 @Composable
 private fun BoxScope.ZoomLockHint(editor: Editor) {
     val palette = LocalPalette.current
     var visible by remember { mutableStateOf(false) }
-    var justLocked by remember { mutableStateOf(false) }
+    // Bumped on the initial fit-width snap and on every tap; (re)starts the auto-dismiss timer below.
+    var armToken by remember { mutableStateOf(0) }
     LaunchedEffect(editor.zoomLockHint) {
         if (editor.zoomLockHint > 0) {
-            justLocked = false // a fresh snap shows the open "tap to lock" affordance again
             visible = true
+            armToken++
+        }
+    }
+    LaunchedEffect(armToken) {
+        if (armToken > 0) {
             delay(2500)
             visible = false
         }
     }
-    // After tapping, briefly hold the closed+accent padlock as confirmation, then dismiss.
-    LaunchedEffect(justLocked) {
-        if (justLocked) {
-            delay(700)
-            visible = false
-            justLocked = false
-        }
-    }
-    // Breaking past the magnet dismisses the hint at once (unless mid lock-confirmation).
+    // Breaking past the fit-width magnet dismisses the hint at once.
     LaunchedEffect(editor.zoomLockHintDismiss) {
-        if (editor.zoomLockHintDismiss > 0 && !justLocked) visible = false
+        if (editor.zoomLockHintDismiss > 0) visible = false
     }
     val locked = editor.zoomLocked
     AnimatedVisibility(
@@ -828,21 +826,20 @@ private fun BoxScope.ZoomLockHint(editor: Editor) {
                 .clip(RoundedCornerShape(6.dp))
                 .background(palette.surface.toComposeColor())
                 .border(1.dp, palette.border.toComposeColor(), RoundedCornerShape(6.dp))
-                .clickable(enabled = !locked) { editor.toggleZoomLock(); justLocked = true }
+                .clickable { editor.toggleZoomLock(); armToken++ }
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
                 if (locked) XnotesIcons.lock else XnotesIcons.unlock,
-                contentDescription = "Lock zoom at fit width",
+                contentDescription = if (locked) "Unlock zoom" else "Lock zoom at fit width",
                 tint = (if (locked) palette.accent else palette.textDim).toComposeColor(),
                 modifier = Modifier.size(18.dp),
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                "Lock zoom",
+                if (locked) "Unlock zoom" else "Lock zoom",
                 color = palette.text.toComposeColor(),
-                fontFamily = FontFamily.Monospace,
                 fontSize = 13.sp,
             )
         }

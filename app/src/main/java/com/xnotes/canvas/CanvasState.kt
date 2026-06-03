@@ -97,13 +97,6 @@ class CanvasState(
      */
     var fitWidthActive: Boolean = false
 
-    /**
-     * Fit-to-width snap glow: 0..1 intensity, written by [InteractionController]'s fade loop the
-     * instant a pinch snaps to fit-width and decayed to 0 over ~½s. [CanvasView] reads it to paint
-     * accent side-rails over the page column's vertical edges while > 0. Purely visual feedback.
-     */
-    var fitWidthGlow: Double = 0.0
-
     /** Items excluded from the cache (lifted for selection/editing); set by the interaction layer. */
     var isLiftedItem: (CanvasItem) -> Boolean = { false }
 
