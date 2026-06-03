@@ -8,7 +8,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,6 +43,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,6 +62,8 @@ import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 /**
@@ -128,6 +130,21 @@ private fun PagesTab(
     // contentVersion drives a fresh read of the order whenever the page list changes.
     val pages = remember(editor.contentVersion) { editor.pagesSnapshot() }
     val selecting = editor.inPageSelectionMode
+    // One panel-wide "the list has stopped moving" flag. The custom scrollbar amplifies a slow
+    // finger scrub into large page-space jumps, so the old per-row 150ms debounce still fired ~8
+    // renders per window it swept past and stormed the CPU / the single-threaded PDF render lock.
+    // Gating every row on this flag means a scrub renders nothing until it settles, then the
+    // resting window renders once. drop(1) ignores snapshotFlow's initial emission so first-open
+    // paints immediately. Keyed on listState only — not contentVersion — so edits don't reset it.
+    val settled by produceState(initialValue = true, listState) {
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .drop(1)
+            .collectLatest {
+                value = false
+                delay(150)
+                value = true
+            }
+    }
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
             Modifier.fillMaxSize().padding(8.dp),
@@ -136,7 +153,7 @@ private fun PagesTab(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             itemsIndexed(pages, key = { _, page -> page.uid }) { index, page ->
-                PageThumb(editor, index, page, selecting, Modifier.animateItem(), onSharePages, onSavePagesAsPdf, onSavePagesAsImages)
+                PageThumb(editor, index, page, selecting, settled, Modifier.animateItem(), onSharePages, onSavePagesAsPdf, onSavePagesAsImages)
             }
         }
         VerticalScrollbar(listState, Modifier.align(Alignment.CenterEnd))
@@ -150,6 +167,7 @@ private fun PageThumb(
     index: Int,
     page: Page,
     selecting: Boolean,
+    settled: Boolean,
     rowModifier: Modifier,
     onSharePages: (List<Int>, Boolean) -> Unit,
     onSavePagesAsPdf: (List<Int>) -> Unit,
@@ -159,16 +177,17 @@ private fun PageThumb(
     val current = index == editor.pageIndex
     val selected = editor.isPageSelected(index)
     var menuOpen by remember { mutableStateOf(false) }
-    val bitmap by produceState<ImageBitmap?>(editor.cachedPageThumbnail(page), page, editor.contentVersion) {
+    val bitmap by produceState<ImageBitmap?>(editor.cachedPageThumbnail(page), page, editor.contentVersion, settled) {
         val cached = editor.cachedPageThumbnail(page)
         if (cached != null) {
             value = cached
-        } else {
-            // Don't render pages flicked past: this settle delay is cancelled (the row leaves
-            // composition) before it elapses unless the page lingers long enough to be seen.
-            delay(150)
+        } else if (settled) {
+            // Render only once the panel has stopped moving (see the panel-wide `settled` flag in
+            // PagesTab): a scroll keeps `settled` false, so rows swept past never render — the
+            // producer relaunches and renders this row when motion settles.
             value = editor.pageThumbnail(page, 300)
         }
+        // not cached and not settled: leave value as-is (placeholder); relaunch on settle renders it.
     }
     // Reserve the row's height from the aspect ratio so it stays put before the bitmap loads.
     val aspect = editor.pageAspectRatio(page)
@@ -317,7 +336,13 @@ private fun FormatMenu(icon: ImageVector, desc: String, onImage: () -> Unit, onP
     }
 }
 
-private class ScrollbarMetrics(val viewport: Float, val contentHeight: Float, val fraction: Float)
+private class ScrollbarMetrics(
+    val viewport: Float,
+    val contentHeight: Float,
+    val fraction: Float,
+    val avgItem: Float,
+    val totalItems: Int,
+)
 
 /**
  * A draggable scrollbar for [listState], shown only while the list overflows. Square thumb
@@ -345,7 +370,7 @@ private fun VerticalScrollbar(listState: LazyListState, modifier: Modifier = Mod
             val contentHeight = avgItem * total
             if (contentHeight <= viewport) return@derivedStateOf null // everything fits: no scrollbar
             val scrolled = avgItem * listState.firstVisibleItemIndex + listState.firstVisibleItemScrollOffset
-            ScrollbarMetrics(viewport, contentHeight, (scrolled / (contentHeight - viewport)).coerceIn(0f, 1f))
+            ScrollbarMetrics(viewport, contentHeight, (scrolled / (contentHeight - viewport)).coerceIn(0f, 1f), avgItem, total)
         }
     }
 
@@ -361,6 +386,9 @@ private fun VerticalScrollbar(listState: LazyListState, modifier: Modifier = Mod
                     down.consume()
                     dragging = true
                     var lastY = down.position.y
+                    // Track the thumb position locally (seeded from the current scroll) and accumulate
+                    // drag deltas, so rapid moves don't fight the derived state's recomposition lag.
+                    var frac = metrics.value?.fraction ?: 0f
                     while (true) {
                         val event = awaitPointerEvent()
                         val change = event.changes.firstOrNull { it.id == down.id }
@@ -372,8 +400,18 @@ private fun VerticalScrollbar(listState: LazyListState, modifier: Modifier = Mod
                             val track = size.height.toFloat()
                             val thumb = (m.viewport / m.contentHeight * track).coerceAtLeast(minThumbPx)
                             val travel = track - thumb
-                            val factor = if (travel > 0f) (m.contentHeight - m.viewport) / travel else 0f
-                            scope.launch { listState.scrollBy(dy * factor) }
+                            if (travel > 0f && m.avgItem > 0f) {
+                                // Map the thumb's new track position to an absolute page index + offset
+                                // and jump straight there. scrollBy(dy * factor) instead made
+                                // LazyColumn measure/compose *every* page it scrolled past on the UI
+                                // thread — pegging it for a 497-page PDF. scrollToItem jumps directly
+                                // to the destination and only composes the landing window.
+                                frac = (frac + dy / travel).coerceIn(0f, 1f)
+                                val targetPx = frac * (m.contentHeight - m.viewport)
+                                val index = (targetPx / m.avgItem).toInt().coerceIn(0, m.totalItems - 1)
+                                val offset = (targetPx - index * m.avgItem).toInt().coerceAtLeast(0)
+                                scope.launch { listState.scrollToItem(index, offset) }
+                            }
                             change.consume()
                         }
                     }
