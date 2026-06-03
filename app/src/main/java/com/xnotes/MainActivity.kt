@@ -687,7 +687,6 @@ private fun PdfExportDialog(done: Int, total: Int, onCancel: () -> Unit) {
                     Text(
                         "${(fraction * 100).roundToInt()}%",
                         color = palette.text.toComposeColor(),
-                        fontFamily = FontFamily.Monospace,
                         fontSize = 15.sp,
                     )
                 } else {
@@ -702,7 +701,6 @@ private fun PdfExportDialog(done: Int, total: Int, onCancel: () -> Unit) {
             Text(
                 "Exporting to PDF…",
                 color = palette.text.toComposeColor(),
-                fontFamily = FontFamily.Monospace,
                 fontSize = 15.sp,
             )
             Spacer(Modifier.height(4.dp))
@@ -714,12 +712,11 @@ private fun PdfExportDialog(done: Int, total: Int, onCancel: () -> Unit) {
                     else -> "Writing $total page${if (total == 1) "" else "s"}…"
                 },
                 color = palette.textDim.toComposeColor(),
-                fontFamily = FontFamily.Monospace,
                 fontSize = 13.sp,
             )
             Spacer(Modifier.height(14.dp))
             androidx.compose.material3.TextButton(onClick = onCancel) {
-                Text("Cancel", color = palette.accent.toComposeColor(), fontFamily = FontFamily.Monospace)
+                Text("Cancel", color = palette.accent.toComposeColor())
             }
         }
     }
@@ -755,19 +752,17 @@ private fun PdfImportDialog(isPdf: Boolean, onCancel: () -> Unit) {
             Text(
                 if (isPdf) "Importing PDF…" else "Importing note…",
                 color = palette.text.toComposeColor(),
-                fontFamily = FontFamily.Monospace,
                 fontSize = 15.sp,
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "This can take a moment for a large file.",
+                "This may take a moment.",
                 color = palette.textDim.toComposeColor(),
-                fontFamily = FontFamily.Monospace,
                 fontSize = 13.sp,
             )
             Spacer(Modifier.height(14.dp))
             androidx.compose.material3.TextButton(onClick = onCancel) {
-                Text("Cancel", color = palette.accent.toComposeColor(), fontFamily = FontFamily.Monospace)
+                Text("Cancel", color = palette.accent.toComposeColor())
             }
         }
     }
