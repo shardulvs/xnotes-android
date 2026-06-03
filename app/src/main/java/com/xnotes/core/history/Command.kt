@@ -51,6 +51,20 @@ class EraseItems(private val removals: List<Pair<Page, CanvasItem>>) : Command {
     }
 }
 
+/**
+ * Replace a page's whole item list via before/after snapshots. Used by the area eraser, which
+ * splits strokes into fragments in place: the snapshots capture the net result of a drag (robust
+ * to a fragment being re-split later in the same gesture) and restore exact z-order on undo/redo.
+ */
+class ReplacePageItems(
+    private val page: Page,
+    private val before: List<CanvasItem>,
+    private val after: List<CanvasItem>,
+) : Command {
+    override fun redo() = page.items.replaceWith(after)
+    override fun undo() = page.items.replaceWith(before)
+}
+
 /** Translate a selection by a fixed delta. */
 class MoveItems(
     private val items: List<CanvasItem>,

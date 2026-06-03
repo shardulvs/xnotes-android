@@ -255,6 +255,46 @@ class Stroke(
         return false
     }
 
+    /**
+     * AREA-erase: the surviving fragments after an eraser circle (page-local [cx], [cy], [radius])
+     * passes over this stroke. A sample is erased when within [radius] of the centre — the same
+     * point test as [intersectsCircle], so a stroke this splits is exactly one [intersectsCircle]
+     * reports as hit. Surviving samples are partitioned into maximal contiguous runs; each run
+     * becomes a new stroke sharing this stroke's tool/config/speedScale.
+     *  - `null`      — no sample erased (keep the original untouched)
+     *  - empty list  — every sample erased (remove the whole stroke)
+     *  - one stroke  — an end was trimmed, or a hole left a single run
+     *  - two or more — a mid-stroke hole split it
+     */
+    fun erasedBy(cx: Double, cy: Double, radius: Double): List<Stroke>? {
+        if (samples.isEmpty()) return null
+        if (rawBounds().distanceTo(Pt(cx, cy)) > radius) return null
+        val r2 = radius * radius
+        var anyErased = false
+        var runStart = -1
+        val fragments = mutableListOf<Stroke>()
+        for (i in samples.indices) {
+            val s = samples[i]
+            val dx = s.x - cx
+            val dy = s.y - cy
+            if (dx * dx + dy * dy <= r2) {
+                anyErased = true
+                if (runStart >= 0) {
+                    fragments.add(fragment(runStart, i))
+                    runStart = -1
+                }
+            } else if (runStart < 0) {
+                runStart = i
+            }
+        }
+        if (runStart >= 0) fragments.add(fragment(runStart, samples.size))
+        return if (anyErased) fragments else null
+    }
+
+    /** A new stroke from samples `[from, to)`, copied so it shares no backing storage. */
+    private fun fragment(from: Int, to: Int): Stroke =
+        Stroke(tool, config, samples.subList(from, to).toMutableList(), speedScale)
+
     companion object {
         const val KIND = "stroke"
 

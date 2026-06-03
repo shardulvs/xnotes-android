@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.tools.EraseMode
 import com.xnotes.core.tools.ShapeConfig
 import com.xnotes.core.tools.ShapeKind
 import com.xnotes.core.tools.Tool
@@ -120,6 +121,31 @@ fun ToolConfigPopup(editor: Editor, tool: Tool, onDismiss: () -> Unit) {
                     SliderRow("INTENSITY", glowIntensity, 0f..100f) { glowIntensity = it; emit() }
                 }
             }
+        }
+    }
+}
+
+/** Eraser configuration popup: a STROKE/AREA mode picker and a SIZE slider (the eraser radius). */
+@Composable
+fun EraserConfigPopup(editor: Editor, onDismiss: () -> Unit) {
+    val base = remember { editor.toolConfig(Tool.ERASER) }
+    var area by remember { mutableStateOf(base.eraseMode == EraseMode.AREA) }
+    var size by remember { mutableStateOf(base.baseWidth.toFloat()) }
+
+    fun emit() = editor.updateToolConfig(
+        Tool.ERASER,
+        base.copy(baseWidth = size.toDouble(), eraseMode = if (area) EraseMode.AREA else EraseMode.STROKE),
+    )
+
+    DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
+        Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
+            PopupTitle("ERASER")
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ModeChip("STROKE", selected = !area) { area = false; emit() }
+                ModeChip("AREA", selected = area) { area = true; emit() }
+            }
+            val r = ToolConversions.widthRange(Tool.ERASER)
+            SliderRow("SIZE", size, r.start.toFloat()..r.endInclusive.toFloat()) { size = it; emit() }
         }
     }
 }
@@ -262,6 +288,28 @@ private fun KindChip(icon: ImageVector, label: String, selected: Boolean, onClic
             contentDescription = label,
             tint = if (selected) palette.accent.toComposeColor() else palette.text.toComposeColor(),
             modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+/** A text-label chip for a segmented picker (e.g. the eraser's STROKE/AREA modes). */
+@Composable
+private fun ModeChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    val palette = LocalPalette.current
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(5.dp))
+            .background(if (selected) palette.accentAlpha(48).toComposeColor() else palette.surface.toComposeColor())
+            .border(1.dp, if (selected) palette.accent.toComposeColor() else palette.border.toComposeColor(), RoundedCornerShape(5.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+    ) {
+        Text(
+            label,
+            color = if (selected) palette.accent.toComposeColor() else palette.text.toComposeColor(),
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            fontSize = 12.sp,
         )
     }
 }

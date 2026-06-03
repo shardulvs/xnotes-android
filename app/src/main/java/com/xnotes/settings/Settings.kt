@@ -1,6 +1,7 @@
 package com.xnotes.settings
 
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.tools.EraseMode
 import com.xnotes.core.tools.InkPalette
 import com.xnotes.core.tools.ShapeConfig
 import com.xnotes.core.tools.ShapeKind
@@ -132,6 +133,7 @@ data class Settings(
             .put("dash_length", c.dashLength)
             .put("dash_gap", c.dashGap)
             .put("smoothing_alpha", c.smoothingAlpha)
+            .put("erase_mode", c.eraseMode.id)
             .put("rgba", rgbaArr(c.rgba))
 
         private fun toolConfig(o: JSONObject, tool: Tool): ToolConfig {
@@ -149,6 +151,7 @@ data class Settings(
                 dashLength = o.optDouble("dash_length", d.dashLength),
                 dashGap = o.optDouble("dash_gap", d.dashGap),
                 smoothingAlpha = o.optDouble("smoothing_alpha", d.smoothingAlpha),
+                eraseMode = EraseMode.fromId(o.optString("erase_mode", d.eraseMode.id)),
             )
         }
 

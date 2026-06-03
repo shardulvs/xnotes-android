@@ -105,7 +105,7 @@ fun Toolbar(
         toolIcons.forEachIndexed { i, (tool, icon) ->
             Box {
                 ToolbarIcon(icon, tool.name, active = editor.tool == tool) {
-                    if (editor.tool == tool && (tool.isStroke || tool == Tool.SHAPE)) {
+                    if (editor.tool == tool && (tool.isStroke || tool == Tool.SHAPE || tool == Tool.ERASER)) {
                         configForTool = tool
                     } else {
                         editor.selectTool(tool)
@@ -113,10 +113,10 @@ fun Toolbar(
                     }
                 }
                 if (configForTool == tool) {
-                    if (tool == Tool.SHAPE) {
-                        ShapeConfigPopup(editor) { configForTool = null }
-                    } else {
-                        ToolConfigPopup(editor, tool) { configForTool = null }
+                    when {
+                        tool == Tool.SHAPE -> ShapeConfigPopup(editor) { configForTool = null }
+                        tool == Tool.ERASER -> EraserConfigPopup(editor) { configForTool = null }
+                        else -> ToolConfigPopup(editor, tool) { configForTool = null }
                     }
                 }
             }

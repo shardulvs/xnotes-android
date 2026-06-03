@@ -3,6 +3,19 @@ package com.xnotes.core.tools
 import com.xnotes.core.model.Rgba
 
 /**
+ * Eraser behaviour (spec 04 §2): STROKE removes a whole stroke on contact; AREA removes only the
+ * portion of a stroke the eraser passes over, splitting it into fragments. Persisted as [id].
+ */
+enum class EraseMode(val id: String) {
+    STROKE("stroke"),
+    AREA("area");
+
+    companion object {
+        fun fromId(id: String?): EraseMode = entries.firstOrNull { it.id == id } ?: STROKE
+    }
+}
+
+/**
  * The style record carried by stroke tools and used as the eraser/lasso size
  * carrier (spec 04 §2). A [com.xnotes.core.model.Stroke] stores a **copy** at
  * pen-down so re-tuning a tool never restyles existing strokes.
@@ -35,6 +48,8 @@ data class ToolConfig(
      *  lower = smoother but laggier. Default matches StrokeEngine.ALPHA, so a tool that
      *  never sets it renders exactly as before. */
     val smoothingAlpha: Double = 0.5,
+    /** Eraser behaviour: whole-stroke (STROKE) or partial (AREA). Only used by [Tool.ERASER]. */
+    val eraseMode: EraseMode = EraseMode.STROKE,
 )
 
 /** Factory defaults per tool (spec 04 §3). */
@@ -89,7 +104,11 @@ object ToolConversions {
 
     fun neonStrengthToIntensity(s: Double): Double = s * 100.0
 
-    /** WIDTH slider range per tool (spec 04 §5): 4..40 for the highlighter, else 1..20. */
-    fun widthRange(tool: Tool): ClosedFloatingPointRange<Double> =
-        if (tool == Tool.HIGHLIGHTER) 4.0..40.0 else 1.0..20.0
+    /** WIDTH slider range per tool (spec 04 §5): 4..40 for the highlighter, 8..80 for the eraser
+     *  (its radius, default 24), else 1..20. */
+    fun widthRange(tool: Tool): ClosedFloatingPointRange<Double> = when (tool) {
+        Tool.HIGHLIGHTER -> 4.0..40.0
+        Tool.ERASER -> 8.0..80.0
+        else -> 1.0..20.0
+    }
 }
