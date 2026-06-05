@@ -16,6 +16,10 @@ import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.contentstream.PDFGraphicsStreamEngine
+import com.tom_roush.pdfbox.contentstream.operator.Operator
+import com.tom_roush.pdfbox.contentstream.operator.OperatorName
+import com.tom_roush.pdfbox.contentstream.operator.OperatorProcessor
+import com.tom_roush.pdfbox.cos.COSBase
 import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -51,6 +55,10 @@ class PdfSource private constructor(
     /** PdfBox model, loaded lazily the first time image boxes are requested. Guarded by [pdfBoxLock]. */
     @Volatile private var pdfBoxDoc: PDDocument? = null
     private var pdfBoxLoadFailed = false
+
+    /** Set once the up-front sweep finishes and [releasePdfBoxModel] closes [pdfBoxDoc] to reclaim its
+     *  heap. [pdfBoxDocument] won't reload it afterwards, since every page's rects are already cached. */
+    private var pdfBoxReleased = false
 
     /**
      * Monitor for all PdfBox state ([pdfBoxDoc], [pdfBoxLoadFailed], parsing). Deliberately separate
@@ -286,6 +294,10 @@ class PdfSource private constructor(
                 }
             }
         }
+        // After the last page is parsed (single FIFO worker, so this runs last), the live source no
+        // longer needs the PdfBox model: every rect is cached and the render path / ensureImageRects
+        // read straight from there. Close it to reclaim the heap it held across all pages.
+        runCatching { executor.execute { if (!closed) releasePdfBoxModel() } }
     }
 
     /** Pages whose image rects are parsed (cached) — the "done" count for the [prepAllImages] sweep. */
@@ -294,7 +306,7 @@ class PdfSource private constructor(
     /** The lazily-loaded PdfBox model. Always called under [pdfBoxLock]. */
     private fun pdfBoxDocument(): PDDocument? {
         if (closed) return null
-        if (pdfBoxDoc == null && !pdfBoxLoadFailed) {
+        if (pdfBoxDoc == null && !pdfBoxLoadFailed && !pdfBoxReleased) {
             pdfBoxDoc = runCatching {
                 PDFBoxResourceLoader.init(appContext)
                 // Cap PdfBox's in-RAM scratch (used while decoding page content streams to locate image
@@ -303,6 +315,16 @@ class PdfSource private constructor(
             }.getOrElse { pdfBoxLoadFailed = true; null }
         }
         return pdfBoxDoc
+    }
+
+    /** Close the PdfBox model once the sweep has cached every page's rects, reclaiming its heap (the
+     *  parsed object model and any cached resources). The framework [renderer] is independent and stays
+     *  open for rasterizing. Runs on the prep worker after the last parse; serialized with parsing on
+     *  [pdfBoxLock], and safe because post-sweep every render / [ensureImageRects] reads from the cache. */
+    private fun releasePdfBoxModel() = synchronized(pdfBoxLock) {
+        runCatching { pdfBoxDoc?.close() }
+        pdfBoxDoc = null
+        pdfBoxReleased = true
     }
 
     fun close() {
@@ -329,6 +351,27 @@ class PdfSource private constructor(
         private val cropH: Float,
     ) : PDFGraphicsStreamEngine(page) {
         val rects = ArrayList<RectF>()
+
+        init {
+            // We only need image placements. PDFGraphicsStreamEngine registers the text operators, and
+            // "Tf" (set-font) resolves the font via PDResources.getFont, which parses the embedded font
+            // program — done for every font on every page, that is what ballooned the heap. Replace the
+            // font/text operators with no-ops; image CTMs come from cm/q/Q, never text, so the bounding
+            // boxes are unaffected.
+            for (op in arrayOf(
+                OperatorName.SET_FONT_AND_SIZE,        // Tf — triggers the font parse
+                OperatorName.SHOW_TEXT,                // Tj
+                OperatorName.SHOW_TEXT_ADJUSTED,       // TJ
+                OperatorName.SHOW_TEXT_LINE,           // '
+                OperatorName.SHOW_TEXT_LINE_AND_SPACE, // "
+            )) addOperator(NoOpOperator(op))
+        }
+
+        /** Replacement operator that does nothing, so a registered operator can be neutralised. */
+        private class NoOpOperator(private val op: String) : OperatorProcessor() {
+            override fun process(operator: Operator, operands: List<COSBase>) {}
+            override fun getName(): String = op
+        }
 
         override fun drawImage(pdImage: PDImage) {
             if (cropW <= 0f || cropH <= 0f) return
