@@ -221,6 +221,8 @@ class DocumentCodec(
         // The speed pen's gesture-speed scale (zoom ÷ density at pen-down) reconstructs its
         // width on reload; written alongside the per-sample times, only for that tool.
         if (withTime) obj.put("speed_scale", s.speedScale)
+        // Straight-line strokes must reload un-smoothed, else the EMA pulls their far end inward.
+        if (s.straight) obj.put("straight", true)
         return obj
     }
 
@@ -298,7 +300,7 @@ class DocumentCodec(
                 samples.add(Sample(s.optDouble(0, 0.0), s.optDouble(1, 0.0), s.optDouble(2, 1.0), s.optDouble(3, 0.0)))
             }
         }
-        return Stroke(tool, config, samples, o.optDouble("speed_scale", 1.0))
+        return Stroke(tool, config, samples, o.optDouble("speed_scale", 1.0), o.optBoolean("straight", false))
     }
 
     private fun parseImage(o: JSONObject, entries: Map<String, ByteArray>): ImageItem? {

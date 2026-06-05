@@ -169,6 +169,8 @@ class InteractionController(
      *  whole split-and-trim drag undoes/redoes as one [ReplacePageItems] step. */
     private val eraseSnapshots = linkedMapOf<Page, List<CanvasItem>>()
     private var eraserCursor: Pt? = null // viewport pixels
+    /** Tool armed just before the eraser was selected, for the "switch back after erasing" option. */
+    private var toolBeforeEraser: Tool? = null
     /** Whether the live erase is finger-driven (vs the stylus eraser tip / side button): a finger
      *  erase yields to a two-finger pinch, a stylus erase ignores incidental finger/palm contact. */
     private var erasingWithFinger = false
@@ -235,6 +237,8 @@ class InteractionController(
         if (t == tool) {
             return
         }
+        // Remember what to re-arm if the eraser later switches back (only the tool it replaced).
+        if (t == Tool.ERASER) toolBeforeEraser = tool
         commitTextEdit()
         abortGesture()
         clearSelection()
@@ -385,7 +389,7 @@ class InteractionController(
                 }
             }
             PointerMode.PINCH -> endPinch()
-            PointerMode.ERASE -> endErase()
+            PointerMode.ERASE -> { endErase(); maybeSwitchBackAfterErase() }
             PointerMode.BAND -> endBand()
             PointerMode.LASSO_DRAW -> endLasso()
             PointerMode.MOVE -> endMove(content)
@@ -404,7 +408,9 @@ class InteractionController(
         // Capture content-px → dp scale now, so the speed pen judges gesture speed in
         // zoom- and density-independent dp regardless of how the stroke is later viewed.
         val speedScale = state.zoom / state.devicePxPerDp
-        val stroke = Stroke(drawTool, configFor(drawTool).copy(rgba = inkColor), speedScale = speedScale)
+        val cfg = configFor(drawTool)
+        val straight = drawTool == Tool.HIGHLIGHTER && cfg.straightLine
+        val stroke = Stroke(drawTool, cfg.copy(rgba = inkColor), speedScale = speedScale, straight = straight)
         strokeStartTimeMs = timeMs
         stroke.addSample(Sample(content.x - pr.left, content.y - pr.top, pressure)) // first sample: t = 0
         liveStroke = stroke
@@ -438,6 +444,12 @@ class InteractionController(
         val pr = state.pageRects.getOrNull(pi) ?: return
         val content = state.viewportToContent(Pt(vx, vy))
         val local = Pt(content.x - pr.left, content.y - pr.top)
+        if (stroke.straight) {
+            // Straight-line mode: the stroke is always pen-down → current point, so the moving
+            // endpoint just tracks the pointer (decimation/spacing gates don't apply).
+            stroke.setStraightEnd(Sample(local.x, local.y, pressure.coerceIn(0.0, 1.0), (timeMs - strokeStartTimeMs).toDouble()))
+            return
+        }
         val last = stroke.samples.lastOrNull()
         // Decimate by on-screen spacing, not content spacing: the gate is MIN_SAMPLE_DIST
         // viewport px (content px ÷ zoom), capped so it never coarsens past the old 1-content-px
@@ -573,6 +585,18 @@ class InteractionController(
         eraserCursor = null
         mode = PointerMode.IDLE
         requestRender()
+    }
+
+    /**
+     * "Switch back after erasing": once a toolbar-eraser drag lifts, re-arm the pen/highlighter
+     * that was active before the eraser. Only when the armed tool is the eraser (so a stylus-tip or
+     * side-button erase, which never changed the armed tool, is left alone) and the remembered tool
+     * is a stroke tool (a pen or the highlighter).
+     */
+    private fun maybeSwitchBackAfterErase() {
+        if (tool != Tool.ERASER || !configFor(Tool.ERASER).switchBackAfterErase) return
+        val back = toolBeforeEraser ?: return
+        if (back.isStroke) setTool(back)
     }
 
     // --- SELECT / BAND ---

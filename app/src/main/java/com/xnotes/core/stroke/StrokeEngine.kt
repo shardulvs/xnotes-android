@@ -140,13 +140,16 @@ object StrokeEngine {
         speedStrength: Double = 0.0,
         taperLength: Double = 0.0,
         speedScale: Double = 1.0,
+        smooth: Boolean = true,
     ): StrokeGeometry {
         val n = samples.size
         if (n == 0) return StrokeGeometry.EMPTY
 
-        // 2. Smooth each channel independently.
-        val sx = ema(samples.map { it.x })
-        val sy = ema(samples.map { it.y })
+        // 2. Smooth each channel independently. Straight-line strokes skip the position low-pass
+        //    so the ribbon spans the raw samples exactly (EMA would pull a 2-point line's far end
+        //    toward the midpoint, leaving it short of the pointer).
+        val sx = if (smooth) ema(samples.map { it.x }) else samples.map { it.x }
+        val sy = if (smooth) ema(samples.map { it.y }) else samples.map { it.y }
         val sp = ema(samples.map { it.pressure })
         val centers = (0 until n).map { Pt(sx[it], sy[it]) }
 

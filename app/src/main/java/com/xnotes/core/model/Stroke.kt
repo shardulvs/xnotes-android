@@ -25,6 +25,10 @@ class Stroke(
     /** Content-px → dp scale captured at pen-down (zoom ÷ display density), so the speed
      *  pen judges gesture speed in zoom- and device-independent units. 1.0 = unscaled. */
     val speedScale: Double = 1.0,
+    /** Straight-line mode: render as a raw segment (no position smoothing) so the line reaches
+     *  exactly from the first sample to the last — the EMA low-pass otherwise pulls a 2-point
+     *  stroke's far end to the midpoint, lagging it behind the stylus. */
+    val straight: Boolean = false,
 ) : CanvasItem {
 
     override val kind = KIND
@@ -51,6 +55,7 @@ class Stroke(
             config.speedStrength,
             config.taperLength,
             speedScale,
+            smooth = !straight,
         ).also { cachedGeometry = it }
     }
 
@@ -62,6 +67,17 @@ class Stroke(
 
     fun addSample(s: Sample) {
         samples.add(s)
+        invalidate()
+    }
+
+    /**
+     * Straight-line tools: collapse to a single segment from the pen-down sample to [end],
+     * replacing any prior moving endpoint. The first sample's origin stays fixed while the far
+     * end tracks the pointer, so the live preview and committed stroke are one straight ribbon.
+     */
+    fun setStraightEnd(end: Sample) {
+        while (samples.size > 1) samples.removeAt(samples.size - 1)
+        samples.add(end)
         invalidate()
     }
 
@@ -245,6 +261,18 @@ class Stroke(
         if (samples.isEmpty()) return false
         // Reject against the *raw* sample box (the smoothed geometry lags inward).
         if (rawBounds().distanceTo(Pt(cx, cy)) > radius) return false
+        // A straight stroke carries only its two endpoints, so a mid-line tap falls between
+        // samples; test the segments they span (point-to-line) instead of the sample points.
+        if (straight) {
+            val c = Pt(cx, cy)
+            if (samples.size == 1) return c.distanceTo(Pt(samples[0].x, samples[0].y)) <= radius
+            for (i in 1 until samples.size) {
+                val a = Pt(samples[i - 1].x, samples[i - 1].y)
+                val b = Pt(samples[i].x, samples[i].y)
+                if (Geometry.distancePointToSegment(c, a, b) <= radius) return true
+            }
+            return false
+        }
         val r2 = radius * radius
         for (s in samples) {
             val dx = s.x - cx
@@ -268,6 +296,9 @@ class Stroke(
     fun erasedBy(cx: Double, cy: Double, radius: Double): List<Stroke>? {
         if (samples.isEmpty()) return null
         if (rawBounds().distanceTo(Pt(cx, cy)) > radius) return null
+        // A straight stroke is just two endpoints — it has no mid-line samples to split on, so any
+        // contact erases the whole segment (consistent with how the eraser hit-tests it).
+        if (straight) return if (intersectsCircle(cx, cy, radius)) emptyList() else null
         val r2 = radius * radius
         var anyErased = false
         var runStart = -1
@@ -292,7 +323,7 @@ class Stroke(
 
     /** A new stroke from samples `[from, to)`, copied so it shares no backing storage. */
     private fun fragment(from: Int, to: Int): Stroke =
-        Stroke(tool, config, samples.subList(from, to).toMutableList(), speedScale)
+        Stroke(tool, config, samples.subList(from, to).toMutableList(), speedScale, straight)
 
     companion object {
         const val KIND = "stroke"

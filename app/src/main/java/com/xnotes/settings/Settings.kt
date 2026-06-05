@@ -133,6 +133,8 @@ data class Settings(
             .put("dash_length", c.dashLength)
             .put("dash_gap", c.dashGap)
             .put("erase_mode", c.eraseMode.id)
+            .put("switch_back_after_erase", c.switchBackAfterErase)
+            .put("straight_line", c.straightLine)
             .put("rgba", rgbaArr(c.rgba))
 
         private fun toolConfig(o: JSONObject, tool: Tool): ToolConfig {
@@ -150,6 +152,8 @@ data class Settings(
                 dashLength = o.optDouble("dash_length", d.dashLength),
                 dashGap = o.optDouble("dash_gap", d.dashGap),
                 eraseMode = EraseMode.fromId(o.optString("erase_mode", d.eraseMode.id)),
+                switchBackAfterErase = o.optBoolean("switch_back_after_erase", d.switchBackAfterErase),
+                straightLine = o.optBoolean("straight_line", d.straightLine),
             )
         }
 

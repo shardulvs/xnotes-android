@@ -46,6 +46,10 @@ data class ToolConfig(
     val dashGap: Double = 8.0,
     /** Eraser behaviour: whole-stroke (STROKE) or partial (AREA). Only used by [Tool.ERASER]. */
     val eraseMode: EraseMode = EraseMode.STROKE,
+    /** Eraser: re-arm the pen/highlighter used before the eraser once an erase lifts. Only [Tool.ERASER]. */
+    val switchBackAfterErase: Boolean = false,
+    /** Highlighter: commit each drag as a single straight segment (start → release). Only [Tool.HIGHLIGHTER]. */
+    val straightLine: Boolean = false,
 )
 
 /** Factory defaults per tool (spec 04 §3). */

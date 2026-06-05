@@ -58,6 +58,7 @@ fun ToolConfigPopup(editor: Editor, tool: Tool, onDismiss: () -> Unit) {
     var glowIntensity by remember { mutableStateOf(ToolConversions.neonStrengthToIntensity(base.neonStrength).toFloat()) }
     var dashLen by remember { mutableStateOf(base.dashLength.toFloat()) }
     var gapLen by remember { mutableStateOf(base.dashGap.toFloat()) }
+    var straight by remember { mutableStateOf(base.straightLine) }
 
     fun emit() {
         val m = ToolConversions.sensitivityToMinFactor(sensitivity.toDouble())
@@ -77,6 +78,7 @@ fun ToolConfigPopup(editor: Editor, tool: Tool, onDismiss: () -> Unit) {
                 neonStrength = ToolConversions.intensityToNeonStrength(glowIntensity.toDouble()),
                 dashLength = dashLen.toDouble(),
                 dashGap = gapLen.toDouble(),
+                straightLine = straight,
             ),
         )
     }
@@ -104,6 +106,10 @@ fun ToolConfigPopup(editor: Editor, tool: Tool, onDismiss: () -> Unit) {
                 SliderRow("DASH", dashLen, 2f..40f) { dashLen = it; emit() }
                 SliderRow("GAP", gapLen, 2f..40f) { gapLen = it; emit() }
             }
+            // The highlighter can lock each drag to a single straight segment (for ruling/underlining).
+            if (tool == Tool.HIGHLIGHTER) {
+                ToggleRow("STRAIGHT LINE", straight) { straight = it; emit() }
+            }
             // Glow is offered on every stroke tool except the highlighter (translucent) and the
             // dashed pen (it draws a line, not a fillable ribbon, so a halo has nothing to hug).
             if (tool.isStroke && tool != Tool.HIGHLIGHTER && tool != Tool.DASHED) {
@@ -122,10 +128,15 @@ fun EraserConfigPopup(editor: Editor, onDismiss: () -> Unit) {
     val base = remember { editor.toolConfig(Tool.ERASER) }
     var area by remember { mutableStateOf(base.eraseMode == EraseMode.AREA) }
     var size by remember { mutableStateOf(base.baseWidth.toFloat()) }
+    var switchBack by remember { mutableStateOf(base.switchBackAfterErase) }
 
     fun emit() = editor.updateToolConfig(
         Tool.ERASER,
-        base.copy(baseWidth = size.toDouble(), eraseMode = if (area) EraseMode.AREA else EraseMode.STROKE),
+        base.copy(
+            baseWidth = size.toDouble(),
+            eraseMode = if (area) EraseMode.AREA else EraseMode.STROKE,
+            switchBackAfterErase = switchBack,
+        ),
     )
 
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
@@ -137,6 +148,9 @@ fun EraserConfigPopup(editor: Editor, onDismiss: () -> Unit) {
             }
             val r = ToolConversions.widthRange(Tool.ERASER)
             SliderRow("SIZE", size, r.start.toFloat()..r.endInclusive.toFloat()) { size = it; emit() }
+            // Re-arm the previous pen/highlighter once an erase lifts, so a quick fix doesn't strand
+            // you in the eraser.
+            ToggleRow("SWITCH BACK", switchBack) { switchBack = it; emit() }
         }
     }
 }
