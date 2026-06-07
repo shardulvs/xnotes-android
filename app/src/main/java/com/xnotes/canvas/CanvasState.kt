@@ -667,6 +667,28 @@ class CanvasState(
     }
 
     /**
+     * Repaint every live page ink cache in place — the whole page — instead of dropping it: the
+     * undo/redo path. Keeps each surface in [caches]/[presCaches] so [cacheForOrSchedule] never
+     * returns null and the draw loop never blanks the page for a frame (the flicker that
+     * [invalidateAllCaches] caused). The (PDF/template) background layer is left untouched — undo/
+     * redo never edits it, so it must not flash either. The sharp viewport is patched in place by
+     * [repairRegion] (via [repairSharpInk]), so it stays valid without a [sharpGen] bump.
+     *
+     * Bumps [cacheGen] so an ink build scheduled before the edit (e.g. a page mid scroll-in) is
+     * discarded on publish instead of overwriting the page with its pre-edit snapshot; because the
+     * surfaces are kept (not cleared), this costs no blank frame — [cacheForOrSchedule] keeps
+     * returning the repaired surface (its resolution is unchanged by an edit). The [repairRegion]
+     * result is ignored on purpose: a presentation-only page repairs its pres/sharp layers and
+     * returns false, but must not fall back to [invalidatePage] (that would drop a cache and blank).
+     */
+    fun repairAllInkInPlace() {
+        for (page in (caches.keys + presCaches.keys).toSet()) {
+            repairRegion(page, Rect(0.0, 0.0, page.width, page.height))
+        }
+        cacheGen++
+    }
+
+    /**
      * Re-render only [page]'s background layer (e.g. a PDF page whose embedded-image colours just
      * finished parsing), swapping the refreshed surface in when it's ready and leaving the current
      * one on screen until then so the page never blanks. Unlike a global background flush this

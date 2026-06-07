@@ -1637,19 +1637,24 @@ class Editor(context: Context) {
     // --- history ---
 
     fun undo() {
+        val pagesBefore = state.document.pages.size
         history.undo()
-        afterHistory()
+        afterHistory(structural = state.document.pages.size != pagesBefore)
     }
 
     fun redo() {
+        val pagesBefore = state.document.pages.size
         history.redo()
-        afterHistory()
+        afterHistory(structural = state.document.pages.size != pagesBefore)
     }
 
-    private fun afterHistory() {
+    private fun afterHistory(structural: Boolean) {
         controller.clearSelection()
-        state.relayout()
-        state.invalidateAllCaches()
+        if (structural) state.relayout() // page add/remove shifts layout; page-keyed caches survive
+        // Repair the ink caches in place rather than dropping them — dropping blanked every visible
+        // page to bare paper for a frame (the undo/redo flicker). Only AddPage/DeletePage change the
+        // page set, so relayout (which re-renders the sharp viewport) is gated on that.
+        state.repairAllInkInPlace()
         state.document.dirty = true
         state.clampScroll()
         refreshContent()
