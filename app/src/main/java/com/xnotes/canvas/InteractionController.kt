@@ -351,7 +351,11 @@ class InteractionController(
         val effectiveTool: Tool = when {
             toolType == MotionEvent.TOOL_TYPE_ERASER -> Tool.ERASER
             buttonHeld && penButtonTool != null -> penButtonTool!!
-            // A finger pans instead of drawing/selecting/shaping/erasing (text stays usable by finger).
+            // A finger may grab/resize the ACTIVE selection even when finger-draw is off;
+            // off the selection it still pans.
+            toolType == MotionEvent.TOOL_TYPE_FINGER && !fingerDraws && tool.fingerPansWhenOff &&
+                fingerHitsSelection(content) -> Tool.SELECT
+            // A finger otherwise pans instead of drawing/selecting/shaping/erasing (text stays usable by finger).
             toolType == MotionEvent.TOOL_TYPE_FINGER && !fingerDraws && tool.fingerPansWhenOff -> Tool.PAN
             else -> tool
         }
@@ -833,6 +837,21 @@ class InteractionController(
     }
 
     // --- SELECT / BAND ---
+
+    /** True when [content] lands on the active selection — a resize handle of a single
+     *  resizable item, or inside the selection bounds. Lets a finger grab the selection
+     *  even when finger-draw is off (off the selection the finger still pans). */
+    private fun fingerHitsSelection(content: Pt): Boolean {
+        if (selection.isEmpty()) return false
+        if (selection.size == 1 && selection[0].item is Resizable) {
+            val sel = selection[0]
+            state.pageRects.getOrNull(sel.pageIndex)?.let { pr ->
+                val handles = ResizeMath.handles(sel.item, pr.topLeft)
+                if (ResizeMath.hitHandle(handles, content, HANDLE_HIT / state.zoom) != null) return true
+            }
+        }
+        return selectionBoundsContent()?.contains(content) == true
+    }
 
     private fun beginSelect(content: Pt) {
         // 1. Resize handle under the point (single resizable item selected)?
@@ -1785,7 +1804,7 @@ class InteractionController(
                 val sel = selection[0]
                 val pr = state.pageRects.getOrNull(sel.pageIndex)
                 if (pr != null) {
-                    val side = HANDLE_HIT / state.zoom
+                    val side = HANDLE_SIZE / state.zoom
                     for (h in ResizeMath.handles(sel.item, pr.topLeft)) {
                         val c = Pt(h.content.x + moveOffset.x, h.content.y + moveOffset.y)
                         r.fillRect(Rect(c.x - side / 2, c.y - side / 2, side, side), state.palette.accent)
@@ -2070,7 +2089,13 @@ class InteractionController(
         /** Padding (content px) added around erased items' bounds when repairing
          *  the cache, to cover stroke anti-aliasing at the dirty-rect edge. */
         const val REPAIR_PAD = 2.0
-        const val HANDLE_HIT = 9.0
+
+        /** Drawn side length (viewport px) of a resize-handle square. */
+        const val HANDLE_SIZE = 16.0
+
+        /** Touch radius (viewport px) around a handle centre — larger than the drawn
+         *  square so a fingertip can grab it without the squares obscuring content. */
+        const val HANDLE_HIT = 24.0
         const val SHAPE_MIN_DRAG = 3.0
 
         /** Min drag (viewport px, either axis) for a Text-tool gesture to size a box rather than tap-create. */
