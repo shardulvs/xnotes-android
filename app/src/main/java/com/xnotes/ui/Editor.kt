@@ -122,8 +122,6 @@ class Editor(context: Context) {
     private val noteThumbs = object : LruCache<String, ImageBitmap>(32 * 1024 * 1024) {
         override fun sizeOf(key: String, value: ImageBitmap) = value.width * value.height * 4
     }
-    /** The source mtime each in-memory tile was rendered from, so an edited note's tile re-renders. */
-    private val tileMtimes = java.util.concurrent.ConcurrentHashMap<String, Long>()
     /** App-tracked creation times for explorer ordering (SAF exposes only last-modified). */
     private val createdStore = com.xnotes.platform.CreationTimeStore(com.xnotes.platform.JsonStore.createdTimes(appContext))
     /** A single lowest-priority background thread renders explorer thumbnails one at a time, so a
@@ -920,31 +918,30 @@ class Editor(context: Context) {
     fun cachedNoteTile(uri: String): ImageBitmap? = synchronized(noteThumbs) { noteThumbs.get(uri) }
 
     /**
-     * The square thumbnail for the note at [uri], for the explorer grid. Returns a fresh memory hit
-     * instantly; otherwise renders off the main thread on the single low-priority [thumbDispatcher]
-     * (one note at a time) so a folder of many notes fills in gradually without stalling the UI.
-     * [modified] is the file's current mtime: a cached tile (memory or disk) rendered from a
-     * different mtime is stale and re-rendered, so editing a note refreshes its tile automatically.
+     * The square thumbnail for the note at [uri], for the explorer grid. Returns a cached hit
+     * (memory, then disk) as-is; otherwise renders off the main thread on the single low-priority
+     * [thumbDispatcher] (one note at a time) so a folder of many notes fills in gradually without
+     * stalling the UI. The cache is authoritative — a cached tile is shown unconditionally; a content
+     * change drops it ([invalidateThumb]) so it re-renders, and closing a note regenerates it.
      */
-    suspend fun noteTileThumbnail(uri: String, modified: Long): ImageBitmap? {
-        synchronized(noteThumbs) { if (tileMtimes[uri] == modified) noteThumbs.get(uri)?.let { return it } }
+    suspend fun noteTileThumbnail(uri: String): ImageBitmap? {
+        synchronized(noteThumbs) { noteThumbs.get(uri)?.let { return it } }
         return withContext(thumbDispatcher) {
             delay(150) // let a quick scroll-past cancel this before any heavy work begins
             if (!isActive) return@withContext null
-            synchronized(noteThumbs) { if (tileMtimes[uri] == modified) noteThumbs.get(uri)?.let { return@withContext it } }
-            val disk = thumbCache.load(uri)
-            val bmp = if (disk != null && disk.second == modified) disk.first else {
+            synchronized(noteThumbs) { noteThumbs.get(uri)?.let { return@withContext it } }
+            val bmp = thumbCache.load(uri) ?: run {
                 val doc = runCatching {
                     appContext.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { codec.read(it, pdfDir) }
                 }.getOrNull() ?: return@withContext null
                 try {
-                    renderDocThumbnailSquare(doc, tilePx)?.also { thumbCache.store(uri, it, modified) } ?: return@withContext null
+                    renderDocThumbnailSquare(doc, tilePx)?.also { thumbCache.store(uri, it) } ?: return@withContext null
                 } finally {
                     doc.pdfFile?.delete() // transient doc loaded just for a thumbnail — drop its extracted PDF
                 }
             }
             val img = bmp.asImageBitmap()
-            synchronized(noteThumbs) { noteThumbs.put(uri, img); tileMtimes[uri] = modified }
+            synchronized(noteThumbs) { noteThumbs.put(uri, img) }
             img
         }
     }
@@ -952,18 +949,8 @@ class Editor(context: Context) {
     /** Drop a note's cached tile (memory + disk) so it re-renders with fresh content next time it's shown. */
     private fun invalidateThumb(uri: String) {
         synchronized(noteThumbs) { noteThumbs.remove(uri) }
-        tileMtimes.remove(uri)
         thumbCache.remove(uri)
     }
-
-    /** The last-modified time SAF reports for a document URI, or 0 when unknown. */
-    private fun queryModified(uri: String): Long = runCatching {
-        appContext.contentResolver.query(
-            android.net.Uri.parse(uri),
-            arrayOf(android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED),
-            null, null, null,
-        )?.use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else 0L } ?: 0L
-    }.getOrDefault(0L)
 
     /**
      * Render the just-closed note's tile from the in-memory document and cache it (memory + disk), so
@@ -976,10 +963,9 @@ class Editor(context: Context) {
         withContext(thumbDispatcher) {
             if (state.document !== doc) return@withContext // a new note was opened; don't cache stale pixels
             val bmp = runCatching { renderDocThumbnailSquare(doc, tilePx) }.getOrNull() ?: return@withContext
-            val modified = queryModified(uri) // the mtime flushAutosave just wrote
-            thumbCache.store(uri, bmp, modified)
+            thumbCache.store(uri, bmp)
             val img = bmp.asImageBitmap()
-            synchronized(noteThumbs) { noteThumbs.put(uri, img); tileMtimes[uri] = modified }
+            synchronized(noteThumbs) { noteThumbs.put(uri, img) }
         }
     }
 
@@ -1022,7 +1008,6 @@ class Editor(context: Context) {
         viewStates.clear() // forget every remembered per-note view for the released folder
         createdStore.clear() // and every tracked creation time — the keys only meant anything for that folder
         synchronized(noteThumbs) { noteThumbs.evictAll() }
-        tileMtimes.clear()
         thumbCache.prune(emptySet()) // every cached tile belonged to the released folder
     }
 
@@ -1408,7 +1393,10 @@ class Editor(context: Context) {
                     appContext.contentResolver.openOutputStream(android.net.Uri.parse(uri), "wt")?.use { codec.write(state.document, it) } != null
                 }.getOrDefault(false)
             }
-            if (ok) { state.document.dirty = false; dirty = false }
+            if (ok) {
+                state.document.dirty = false; dirty = false
+                invalidateThumb(uri) // file changed on disk; drop the stale tile so the grid re-renders it
+            }
         }
     }
 

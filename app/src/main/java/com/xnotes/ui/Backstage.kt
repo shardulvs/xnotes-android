@@ -985,7 +985,7 @@ private fun FileTile(
     // Seed from the in-memory cache for an instant paint, then load/render off-thread; re-keying on
     // the file's mtime re-renders the tile after the note is edited.
     val thumb by produceState<ImageBitmap?>(editor.cachedNoteTile(entry.documentUri), entry.documentUri, entry.modified) {
-        value = editor.noteTileThumbnail(entry.documentUri, entry.modified)
+        value = editor.noteTileThumbnail(entry.documentUri)
     }
     Column(
         Modifier
