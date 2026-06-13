@@ -1,0 +1,8 @@
+- Ruler: a movable, rotatable straightedge with live angle readouts
+- Page styles: set the paper colour and add line, dot, or grid rulings
+- Shape snapping: hold the pen still snap freehand into a clean shape
+- Per-pen colour: pin any pen to its own ink colour, independent of the toolbar
+- Highlighter intensity slider for stronger or softer marks
+- Per-pen Scale option to keep a constant on-screen stroke width at any zoom
+- Smoother thumbnail scrolling in the file browser
+- Added a Sponsor link in About
