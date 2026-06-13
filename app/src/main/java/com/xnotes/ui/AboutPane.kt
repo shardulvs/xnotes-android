@@ -51,6 +51,7 @@ import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
 
 private const val REPO_URL = "https://github.com/shardulvs/xnotes-android"
+private const val SPONSOR_URL = "https://github.com/sponsors/shardulvs"
 private const val ISSUES_URL = "https://github.com/shardulvs/xnotes-android/issues/new"
 private const val FDROID_URL = "https://f-droid.org/en/packages/com.xnotes"
 private const val LICENSE_URL = "https://github.com/shardulvs/xnotes-android/blob/master/LICENSE"
@@ -125,7 +126,7 @@ fun AboutPane() {
             ) {
                 AboutButton(XnotesIcons.bug, "Report a bug") { open(bugReportUrl(version)) }
                 AboutButton(XnotesIcons.idea, "Request a feature") { open(featureRequestUrl()) }
-                AboutButton(XnotesIcons.github, "View source") { open(REPO_URL) }
+                AboutButton(XnotesIcons.heart, "Sponsor") { open(SPONSOR_URL) }
             }
 
             Spacer(Modifier.height(26.dp))
