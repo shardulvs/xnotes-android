@@ -202,6 +202,8 @@ class Editor(context: Context) {
 
     /** On-disk note-thumbnail cache (png + source mtime) so the grid paints instantly across launches. */
     private val thumbCache = com.xnotes.platform.NoteThumbnailCache(java.io.File(appContext.filesDir, "note_thumbs"))
+    /** Maps file names in the recycle bin to their original parent doc ID, for the restore action. */
+    private val restoreStore = com.xnotes.platform.JsonStore(java.io.File(appContext.filesDir, "config/restore_map.json"))
     /** In-memory note-tile thumbnails keyed by SAF URI, bounded by bytes (Compose owns the pixels —
      *  no manual recycle). */
     private val noteThumbs = object : LruCache<String, ImageBitmap>(32 * 1024 * 1024) {
@@ -2030,10 +2032,27 @@ class Editor(context: Context) {
 
     /** Moves a document (file or folder) to recycle bin under [treeUri] instead of deleting it.
      *  IO, call off-thread. Returns false if the recycle bin couldn't be created or found, or if a
-     *  name clash prevents the move (not handled in this version). */
+     *  name clash prevents the move (not handled in this version). Saves the original parent for
+     *  later restore. */
     fun recycleDocument(docUri: String, treeUri: String, parentDocId: String): Boolean {
         val recycleDocId = ensureRecycleBin(treeUri) ?: return false
-        return moveDocumentInto(treeUri, docUri, parentDocId, recycleDocId)
+        val srcName = queryDisplayName(android.net.Uri.parse(docUri)) ?: return false
+        if (!moveDocumentInto(treeUri, docUri, parentDocId, recycleDocId)) return false
+        val map = restoreStore.read()
+        map.put(srcName, parentDocId)
+        restoreStore.write(map)
+        return true
+    }
+
+    /** Moves a document from the recycle bin back to its original parent. IO, call off-thread. */
+    fun restoreDocument(docUri: String, treeUri: String, name: String): Boolean {
+        val recycleDocId = ensureRecycleBin(treeUri) ?: return false
+        val map = restoreStore.read()
+        val originalParent = map.optString(name, null) ?: return false
+        if (!moveDocumentInto(treeUri, docUri, recycleDocId, originalParent)) return false
+        map.remove(name)
+        restoreStore.write(map)
+        return true
     }
 
     /** Returns the doc ID of the recycle bin under [treeUri], creating it if needed, or null. IO. */

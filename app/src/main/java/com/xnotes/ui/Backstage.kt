@@ -464,6 +464,15 @@ private fun RecycleBinPane(
         // Multi-select toolbar
         if (selection.isNotEmpty()) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                IconAction(XnotesIcons.undo, "Restore") {
+                    val items = selection.toList(); selection.clear()
+                    scope.launch {
+                        val allOk = withContext(Dispatchers.IO) {
+                            items.all { e -> editor.restoreDocument(e.documentUri, root, e.name) }
+                        }
+                        refreshKey++; if (!allOk) opError = "Couldn’t restore some items."
+                    }
+                }
                 IconAction(XnotesIcons.trash, "Delete permanently") { pendingDelete = selection.toList() }
                 IconAction(XnotesIcons.close, "Deselect") { selection.clear() }
             }
@@ -531,7 +540,11 @@ private fun RecycleBinPane(
                                         }
                                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                                             DropdownMenuItem(text = { Text("Restore") }, onClick = {
-                                                menuOpen = false; opError = "Not implemented yet."
+                                                menuOpen = false
+                                                scope.launch {
+                                                    val ok = withContext(Dispatchers.IO) { editor.restoreDocument(entry.documentUri, root, entry.name) }
+                                                    if (ok) refreshKey++ else opError = "Couldn’t restore item."
+                                                }
                                             })
                                             DropdownMenuItem(text = { Text("Delete permanently") }, onClick = {
                                                 menuOpen = false; pendingDelete = listOf(entry)
@@ -570,7 +583,11 @@ private fun RecycleBinPane(
                                         }
                                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                                             DropdownMenuItem(text = { Text("Restore") }, onClick = {
-                                                menuOpen = false; opError = "Not implemented yet."
+                                                menuOpen = false
+                                                scope.launch {
+                                                    val ok = withContext(Dispatchers.IO) { editor.restoreDocument(entry.documentUri, root, entry.name) }
+                                                    if (ok) refreshKey++ else opError = "Couldn’t restore item."
+                                                }
                                             })
                                             DropdownMenuItem(text = { Text("Delete permanently") }, onClick = {
                                                 menuOpen = false; pendingDelete = listOf(entry)
