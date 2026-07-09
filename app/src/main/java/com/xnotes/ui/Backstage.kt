@@ -139,7 +139,7 @@ import kotlinx.coroutines.withTimeout
 import kotlin.math.roundToInt
 
 /** Which pane the backstage shows on the right. */
-enum class BackstageView { HOME, PREFERENCES, ABOUT }
+enum class BackstageView { HOME, PREFERENCES, ABOUT, RECYCLE_BIN }
 
 /** Whether the Home explorer is awaiting a new file/folder name. */
 private enum class CreateMode { NONE, FILE, FOLDER }
@@ -244,14 +244,6 @@ private fun BackstageContent(
         if (editor.browseRoot != null) onOpenSystem() else onPickRoot()
         if (compact) { animateClose = false; sidebarOpen = false }
     }
-    var recycleBinNavRev by remember { mutableStateOf(0) }
-    val openRecycleBin: () -> Unit = {
-        if (editor.browseRoot != null) {
-            selectView(BackstageView.HOME)
-            sidebarOpen = false
-            recycleBinNavRev++
-        }
-    }
 
     // Home is the app's root, so it owns every back press while it's up (the editor sits
     // underneath in the same activity — letting the dialog dismiss would just bounce back to
@@ -262,8 +254,8 @@ private fun BackstageContent(
     BackHandler {
         when {
             compact && sidebarOpen -> dismissSidebar()
-            // Preferences and About are sub-pages of Home: back lands on Home rather than leaving the app.
-            view == BackstageView.PREFERENCES || view == BackstageView.ABOUT -> selectView(BackstageView.HOME)
+            // Preferences, About, and Recycle Bin are sub-pages of Home: back lands on Home.
+            view == BackstageView.PREFERENCES || view == BackstageView.ABOUT || view == BackstageView.RECYCLE_BIN -> selectView(BackstageView.HOME)
             createMode != CreateMode.NONE -> createMode = CreateMode.NONE
             else -> onExitApp()
         }
@@ -274,7 +266,6 @@ private fun BackstageContent(
             BackstageMain(
                 Modifier.fillMaxSize(), editor, view, compact, sidebarOpen, { animateClose = true; sidebarOpen = true }, { selectView(BackstageView.HOME) },
                 onOpenFile, onPickRoot, importPdf, onShareFile, onSaveCopyFile, onExportFilePdf, createMode, { createMode = it }, onImportCodeTheme, onImportFont,
-                recycleBinNavRev = recycleBinNavRev,
             )
             AnimatedVisibility(
                 visible = sidebarOpen,
@@ -289,7 +280,7 @@ private fun BackstageContent(
                 enter = slideInHorizontally(animationSpec = tween(SIDEBAR_ANIM_MS), initialOffsetX = { -it }),
                 exit = if (animateClose) slideOutHorizontally(animationSpec = tween(SIDEBAR_ANIM_MS), targetOffsetX = { -it }) else ExitTransition.None,
             ) {
-                BackstageSidebar(Modifier.width(296.dp), view, dismissSidebar, selectView, newNote, importPdf, openSystem, openRecycleBin)
+                BackstageSidebar(Modifier.width(296.dp), view, dismissSidebar, selectView, newNote, importPdf, openSystem)
             }
         }
     } else {
@@ -299,12 +290,11 @@ private fun BackstageContent(
                 enter = expandHorizontally(animationSpec = tween(SIDEBAR_ANIM_MS), expandFrom = Alignment.Start) + fadeIn(animationSpec = tween(SIDEBAR_ANIM_MS)),
                 exit = shrinkHorizontally(animationSpec = tween(SIDEBAR_ANIM_MS), shrinkTowards = Alignment.Start) + fadeOut(animationSpec = tween(SIDEBAR_ANIM_MS)),
             ) {
-                BackstageSidebar(Modifier.width(264.dp), view, { sidebarOpen = false }, selectView, newNote, importPdf, openSystem, openRecycleBin)
+                BackstageSidebar(Modifier.width(264.dp), view, { sidebarOpen = false }, selectView, newNote, importPdf, openSystem)
             }
             BackstageMain(
                 Modifier.weight(1f).fillMaxHeight(), editor, view, compact, sidebarOpen, { sidebarOpen = true }, { selectView(BackstageView.HOME) },
                 onOpenFile, onPickRoot, importPdf, onShareFile, onSaveCopyFile, onExportFilePdf, createMode, { createMode = it }, onImportCodeTheme, onImportFont,
-                recycleBinNavRev = recycleBinNavRev,
             )
         }
     }
@@ -320,7 +310,6 @@ private fun BackstageSidebar(
     onNewNote: () -> Unit,
     onImportPdf: () -> Unit,
     onOpenSystem: () -> Unit,
-    onOpenRecycleBin: () -> Unit,
 ) {
     val palette = LocalPalette.current
     Column(
@@ -342,7 +331,7 @@ private fun BackstageSidebar(
         Command(XnotesIcons.plus, "New note") { onNewNote() }
         Command(XnotesIcons.importDoc, "Import PDF…") { onImportPdf() }
         Command(XnotesIcons.folder, "Open…") { onOpenSystem() }
-        Command(XnotesIcons.trash, "Recycle Bin") { onOpenRecycleBin() }
+        Command(XnotesIcons.trash, "Recycle Bin", selected = view == BackstageView.RECYCLE_BIN) { onSelectView(BackstageView.RECYCLE_BIN) }
         RailDivider()
         Command(XnotesIcons.sliders, "Preferences", selected = view == BackstageView.PREFERENCES) { onSelectView(BackstageView.PREFERENCES) }
         Command(XnotesIcons.info, "About", selected = view == BackstageView.ABOUT) { onSelectView(BackstageView.ABOUT) }
@@ -369,7 +358,6 @@ private fun BackstageMain(
     onCreateMode: (CreateMode) -> Unit,
     onImportCodeTheme: () -> Unit,
     onImportFont: () -> Unit,
-    recycleBinNavRev: Int,
 ) {
     val palette = LocalPalette.current
     Column(modifier) {
@@ -396,12 +384,234 @@ private fun BackstageMain(
                 BackstageView.HOME -> HomePane(
                     editor, onOpenFile, onPickRoot, onImportPdf,
                     onShareFile, onSaveCopyFile, onExportFilePdf, createMode, onCreateMode, sidebarOpen, onShowSidebar,
-                    recycleBinNavRev = recycleBinNavRev,
+                )
+                BackstageView.RECYCLE_BIN -> RecycleBinPane(
+                    editor = editor,
+                    onShowSidebar = onShowSidebar,
+                    onBackToHome = onBackToHome,
+                    sidebarOpen = sidebarOpen,
+                    compact = compact,
                 )
                 BackstageView.PREFERENCES -> PreferencesPane(editor, compact, sidebarOpen, onShowSidebar, onBackToHome, onImportCodeTheme, onImportFont)
                 BackstageView.ABOUT -> AboutPane()
             }
         }
+    }
+}
+
+// --- recycle bin pane ---
+
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
+@Composable
+private fun RecycleBinPane(
+    editor: Editor,
+    onShowSidebar: () -> Unit,
+    onBackToHome: () -> Unit,
+    sidebarOpen: Boolean,
+    compact: Boolean,
+) {
+    val palette = LocalPalette.current
+    val root = editor.browseRoot
+    if (root == null) {
+        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Spacer(Modifier.weight(1f))
+            Text("No folder selected.", color = palette.textDim.toComposeColor(), fontSize = 14.sp)
+            Spacer(Modifier.weight(1f))
+        }
+        return
+    }
+
+    val scope = rememberCoroutineScope()
+    var refreshKey by remember(root) { mutableStateOf(0) }
+    val selection = remember(root) { mutableStateListOf<BrowseEntry>() }
+    var pendingDelete by remember(root) { mutableStateOf<List<BrowseEntry>?>(null) }
+    var opError by remember(root) { mutableStateOf<String?>(null) }
+    val dismissInteraction = remember { MutableInteractionSource() }
+    val gridState = rememberLazyGridState()
+    val currentDocId by produceState<String?>(root) { value = withContext(Dispatchers.IO) { editor.recycleBinDocId(root) } }
+    val recycleDocId = currentDocId
+
+    fun toggleSelect(e: BrowseEntry) {
+        val i = selection.indexOfFirst { it.documentUri == e.documentUri }
+        if (i >= 0) selection.removeAt(i) else selection.add(e)
+    }
+
+    BackHandler { onBackToHome() }
+
+    Column(Modifier.fillMaxSize()) {
+        // Top bar
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (!sidebarOpen) {
+                IconButton(onClick = onShowSidebar) {
+                    Icon(XnotesIcons.menu, "Show sidebar", tint = palette.text.toComposeColor(), modifier = Modifier.size(24.dp))
+                }
+            }
+            Text("Recycle Bin", color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Spacer(Modifier.weight(1f))
+            if (selection.isEmpty()) {
+                TextButton(onClick = {
+                    recycleDocId?.let { docId ->
+                        scope.launch {
+                            val entries = withContext(Dispatchers.IO) { editor.browseChildren(root, docId) }
+                            if (entries.isNotEmpty()) pendingDelete = entries
+                        }
+                    }
+                }) {
+                    Text("Empty Trash", color = palette.accent.toComposeColor())
+                }
+            }
+        }
+        // Multi-select toolbar
+        if (selection.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                IconAction(XnotesIcons.trash, "Delete permanently") { pendingDelete = selection.toList() }
+                IconAction(XnotesIcons.close, "Deselect") { selection.clear() }
+            }
+        }
+        opError?.let { Text(it, color = Color(0xFFE5534B), fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp, top = 4.dp)) }
+        Spacer(Modifier.height(10.dp))
+
+        // Listing
+        val entries by produceState<List<BrowseEntry>?>(emptyList(), root, recycleDocId, refreshKey) {
+            value = recycleDocId?.let { withContext(Dispatchers.IO) { editor.browseChildren(root, it) } }.orEmpty()
+        }
+        val folders = entries?.filter { it.isDir }.orEmpty()
+        val files = entries?.filterNot { it.isDir }.orEmpty()
+        val gridColumns = (LocalConfiguration.current.screenWidthDp / 240).coerceIn(2, 8)
+
+        Box(Modifier.weight(1f).fillMaxWidth().then(
+            if (selection.isNotEmpty()) Modifier.clickable(interactionSource = dismissInteraction, indication = null) { selection.clear() } else Modifier,
+        )) {
+            when {
+                entries == null -> EmptyPane("Loading…")
+                entries!!.isEmpty() -> EmptyPane("The recycle bin is empty.")
+                else -> LazyVerticalGrid(
+                    columns = GridCells.Fixed(gridColumns),
+                    state = gridState,
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(bottom = 16.dp),
+                ) {
+                    items(entries!!, key = { it.documentUri }) { entry ->
+                        if (entry.isDir) {
+                            var menuOpen by remember { mutableStateOf(false) }
+                            val selected = selection.any { it.documentUri == entry.documentUri }
+                            val accent = palette.accent.toComposeColor()
+                            val onAccent = palette.bg.toComposeColor()
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .border(1.dp, if (selected) accent else palette.border.toComposeColor(), RectangleShape)
+                                    .background(if (selected) accent else Color.Transparent)
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = { if (selection.isEmpty()) selection.add(entry) else toggleSelect(entry) },
+                                    )
+                                    .padding(start = 10.dp, end = 2.dp, top = 8.dp, bottom = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    XnotesIcons.folder, null,
+                                    tint = if (selected) onAccent else palette.textDim.toComposeColor(),
+                                    modifier = Modifier.size(20.dp),
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    entryLabel(entry),
+                                    color = if (selected) onAccent else palette.text.toComposeColor(),
+                                    fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                if (selection.isEmpty()) {
+                                    Box {
+                                        IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
+                                            Icon(XnotesIcons.more, "More", tint = palette.textDim.toComposeColor(), modifier = Modifier.size(16.dp))
+                                        }
+                                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                            DropdownMenuItem(text = { Text("Restore") }, onClick = {
+                                                menuOpen = false; opError = "Not implemented yet."
+                                            })
+                                            DropdownMenuItem(text = { Text("Delete permanently") }, onClick = {
+                                                menuOpen = false; pendingDelete = listOf(entry)
+                                            })
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            var menuOpen by remember { mutableStateOf(false) }
+                            Box {
+                                FileTile(
+                                    editor = editor,
+                                    entry = entry,
+                                    selected = selection.any { it.documentUri == entry.documentUri },
+                                    dimmed = false,
+                                    inSelectMode = selection.isNotEmpty(),
+                                    onShare = null,
+                                    onSaveCopy = null,
+                                    onExportPdf = null,
+                                    onRename = null,
+                                    onCopy = null,
+                                    onCut = null,
+                                    onDelete = null,
+                                    onTrash = null,
+                                    onColor = null,
+                                    onClick = {
+                                        if (selection.isEmpty()) selection.add(entry) else toggleSelect(entry)
+                                    },
+                                    onBounds = {},
+                                )
+                                if (selection.isEmpty()) {
+                                    Box(Modifier.align(Alignment.TopEnd).padding(4.dp)) {
+                                        IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
+                                            Icon(XnotesIcons.more, "More", tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp))
+                                        }
+                                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                            DropdownMenuItem(text = { Text("Restore") }, onClick = {
+                                                menuOpen = false; opError = "Not implemented yet."
+                                            })
+                                            DropdownMenuItem(text = { Text("Delete permanently") }, onClick = {
+                                                menuOpen = false; pendingDelete = listOf(entry)
+                                            })
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pendingDelete?.let { targets ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Delete permanently?") },
+            text = {
+                Text(
+                    if (targets.size == 1) "Permanently delete “${entryLabel(targets.first())}”? This can't be undone."
+                    else "Permanently delete ${targets.size} items? This can't be undone.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val items = targets.toList()
+                    pendingDelete = null; selection.clear(); opError = null
+                    scope.launch {
+                        val allOk = withContext(Dispatchers.IO) {
+                            items.all { e -> editor.deleteDocument(e.documentUri) }
+                        }
+                        refreshKey++
+                        if (!allOk) opError = "Couldn’t delete some items."
+                    }
+                }) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Cancel") } },
+            containerColor = palette.menuBg.toComposeColor(),
+        )
     }
 }
 
@@ -482,7 +692,6 @@ private fun HomePane(
     onCreateMode: (CreateMode) -> Unit,
     sidebarOpen: Boolean,
     onShowSidebar: () -> Unit,
-    recycleBinNavRev: Int,
 ) {
     val palette = LocalPalette.current
     val focusManager = LocalFocusManager.current
@@ -490,7 +699,6 @@ private fun HomePane(
     // that would otherwise sit empty on wide layouts (where the sidebar, not a hamburger, occupies
     // this row). Cleared when the user changes folders (see ExplorerSection).
     var query by remember { mutableStateOf("") }
-    LaunchedEffect(recycleBinNavRev) { if (recycleBinNavRev != 0) query = "" }
     // A tap on empty space anywhere in the pane drops focus from the search field, dismissing it
     // (children like tiles and buttons consume their own taps, so this only fires "outside").
     Column(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { focusManager.clearFocus() } }) {
@@ -522,7 +730,6 @@ private fun HomePane(
                 editor, onOpenFile, onPickRoot, onImportPdf,
                 onShareFile, onSaveCopyFile, onExportFilePdf, createMode, onCreateMode,
                 searchQuery = query, onSearchChange = { query = it },
-                recycleBinNavRev = recycleBinNavRev,
             )
             // A round quick-create button for a new note in the current folder. Only when a folder is
             // granted — otherwise the explorer shows the folder-picker prompt and there's nowhere to create.
@@ -557,7 +764,6 @@ private fun ExplorerSection(
     onCreateMode: (CreateMode) -> Unit,
     searchQuery: String = "",
     onSearchChange: (String) -> Unit = {},
-    recycleBinNavRev: Int,
 ) {
     val palette = LocalPalette.current
     val root = editor.browseRoot
@@ -586,13 +792,6 @@ private fun ExplorerSection(
     var clipboard by remember(root) { mutableStateOf<ClipItem?>(null) }
     var pendingDelete by remember(root) { mutableStateOf<List<BrowseEntry>?>(null) }
     var opError by remember(root) { mutableStateOf<String?>(null) }
-    LaunchedEffect(recycleBinNavRev) {
-        if (recycleBinNavRev == 0) return@LaunchedEffect
-        val target = editor.recycleBinDocId(root) ?: return@LaunchedEffect
-        stack.clear()
-        selection.clear()
-        stack.add(target to "Recycle Bin")
-    }
     // Drag-to-move state. While a selection is being dragged onto a folder, [dragPos] is the finger
     // position in window coords, [folderBounds] maps each visible folder to its window rect for
     // hit-testing, [dropTargetUri] is the folder under the finger, and [pulseUri] flashes the folder a
