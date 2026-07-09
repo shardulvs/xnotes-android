@@ -724,6 +724,15 @@ private fun ExplorerSection(
                 IconAction(XnotesIcons.copy, "Copy") { clipboard = ClipItem(selection.toList(), currentDocId, false); selection.clear() }
                 IconAction(XnotesIcons.cut, "Cut") { clipboard = ClipItem(selection.toList(), currentDocId, true); selection.clear() }
                 IconAction(XnotesIcons.trash, "Delete") { pendingDelete = selection.toList() }
+                IconAction(XnotesIcons.trash, "Move to Trash") {
+                    val items = selection.toList(); selection.clear()
+                    scope.launch {
+                        val allOk = withContext(Dispatchers.IO) {
+                            items.all { e -> editor.recycleDocument(e.documentUri, root, e.parentDocId) }
+                        }
+                        refreshKey++; if (!allOk) opError = "Couldn’t trash some items."
+                    }
+                }
                 IconAction(XnotesIcons.close, "Deselect") { selection.clear() }
             }
         }
@@ -880,6 +889,12 @@ private fun ExplorerSection(
                             onCopy = if (selection.isEmpty()) ({ clipboard = ClipItem(listOf(entry), currentDocId, false) }) else null,
                             onCut = if (selection.isEmpty()) ({ clipboard = ClipItem(listOf(entry), currentDocId, true) }) else null,
                             onDelete = if (selection.isEmpty()) ({ pendingDelete = listOf(entry) }) else null,
+                            onTrash = if (selection.isEmpty()) ({
+                                scope.launch {
+                                    withContext(Dispatchers.IO) { editor.recycleDocument(entry.documentUri, root, entry.parentDocId) }
+                                    refreshKey++
+                                }
+                            }) else null,
                             onColor = if (selection.isEmpty()) ({ c ->
                                 scope.launch { withContext(Dispatchers.IO) { editor.setItemColor(root, entry.parentDocId, entry.name, c) }; refreshKey++ }
                             }) else null,
@@ -919,6 +934,12 @@ private fun ExplorerSection(
                             onCopy = if (fileActions) ({ clipboard = ClipItem(listOf(entry), currentDocId, false) }) else null,
                             onCut = if (fileActions) ({ clipboard = ClipItem(listOf(entry), currentDocId, true) }) else null,
                             onDelete = if (fileActions) ({ pendingDelete = listOf(entry) }) else null,
+                            onTrash = if (fileActions) ({
+                                scope.launch {
+                                    withContext(Dispatchers.IO) { editor.recycleDocument(entry.documentUri, root, entry.parentDocId) }
+                                    refreshKey++
+                                }
+                            }) else null,
                             onColor = if (fileActions) ({ c ->
                                 scope.launch { withContext(Dispatchers.IO) { editor.setItemColor(root, entry.parentDocId, entry.name, c) }; refreshKey++ }
                             }) else null,
@@ -1175,6 +1196,7 @@ private fun EntryMenu(
     onCopy: (() -> Unit)?,
     onCut: (() -> Unit)?,
     onDelete: (() -> Unit)?,
+    onTrash: (() -> Unit)?,
     onShare: (() -> Unit)? = null,
     onSaveCopy: (() -> Unit)? = null,
     onExportPdf: (() -> Unit)? = null,
@@ -1194,6 +1216,7 @@ private fun EntryMenu(
             DropdownMenuItem(text = { Text("Cut") }, onClick = { onDismiss(); onCut?.invoke() })
             if (onColor != null) DropdownMenuItem(text = { Text("Color code") }, onClick = { showColors = true })
             DropdownMenuItem(text = { Text("Delete") }, onClick = { onDismiss(); onDelete?.invoke() })
+            DropdownMenuItem(text = { Text("Move to Trash") }, onClick = { onDismiss(); onTrash?.invoke() })
             if (onShare != null) {
                 HorizontalDivider(color = palette.border.toComposeColor())
                 DropdownMenuItem(text = { Text("Share") }, onClick = { onDismiss(); onShare() })
@@ -1265,6 +1288,7 @@ private fun FolderChip(
     onCopy: (() -> Unit)?,
     onCut: (() -> Unit)?,
     onDelete: (() -> Unit)?,
+    onTrash: (() -> Unit)?,
     onColor: ((Rgba?) -> Unit)?,
     onDismissSelection: () -> Unit,
     onClick: () -> Unit,
@@ -1325,7 +1349,7 @@ private fun FolderChip(
             ) {
                 Icon(XnotesIcons.more, "More", tint = if (active) onAccent else palette.textDim.toComposeColor(), modifier = Modifier.size(16.dp))
             }
-            if (!inSelectMode) EntryMenu(menuOpen, { menuOpen = false }, onRename, onCopy, onCut, onDelete, onColor = onColor)
+            if (!inSelectMode) EntryMenu(menuOpen, { menuOpen = false }, onRename, onCopy, onCut, onDelete, onTrash, onColor = onColor)
         }
     }
 }
@@ -1346,6 +1370,7 @@ private fun FileTile(
     onCopy: (() -> Unit)?,
     onCut: (() -> Unit)?,
     onDelete: (() -> Unit)?,
+    onTrash: (() -> Unit)?,
     onColor: ((Rgba?) -> Unit)?,
     onClick: () -> Unit,
     onBounds: (Rect?) -> Unit,
@@ -1398,7 +1423,7 @@ private fun FileTile(
                     IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
                         Icon(XnotesIcons.more, "More", tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp))
                     }
-                    EntryMenu(menuOpen, { menuOpen = false }, onRename, onCopy, onCut, onDelete, onShare, onSaveCopy, onExportPdf, onColor = onColor)
+                    EntryMenu(menuOpen, { menuOpen = false }, onRename, onCopy, onCut, onDelete, onTrash, onShare, onSaveCopy, onExportPdf, onColor = onColor)
                 }
             }
         }

@@ -1,6 +1,8 @@
 # --- Planning / spec / AI artifacts (never commit) ---
 CLAUDE.md
 .claude/
+AGENTS.md
+.opencode/
 
 # --- Gradle ---
 .gradle/

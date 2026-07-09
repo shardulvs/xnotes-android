@@ -116,6 +116,9 @@ data class PendingImport(val kind: ImportKind, val defaultName: String, val uri:
 private const val SIDECAR_DIR = ".xnote"
 private const val SIDECAR_FILE = "colors.json"
 
+/** Name of the recycle bin folder created at the tree root. Change this to rename it. */
+private const val RECYCLE_BIN_NAME = "recycle_bin"
+
 @Stable
 class Editor(context: Context) {
 
@@ -2025,6 +2028,14 @@ class Editor(context: Context) {
         }
     }
 
+    /** Moves a document (file or folder) to recycle bin under [treeUri] instead of deleting it.
+     *  IO, call off-thread. Returns false if the recycle bin couldn't be created or found, or if a
+     *  name clash prevents the move (not handled in this version). */
+    fun recycleDocument(docUri: String, treeUri: String, parentDocId: String): Boolean {
+        val recycleDocId = ensureRecycleBin(treeUri) ?: return false
+        return moveDocumentInto(treeUri, docUri, parentDocId, recycleDocId)
+    }
+
     /** Deletes a document (file or folder), then erases every trace of it. IO, call off-thread. */
     fun deleteDocument(docUri: String): Boolean = runCatching {
         val ok = android.provider.DocumentsContract.deleteDocument(appContext.contentResolver, android.net.Uri.parse(docUri))
@@ -2361,6 +2372,21 @@ class Editor(context: Context) {
         val result = withCreated.sortedWith(explorerComparator(settings.explorerSortKey, settings.explorerSortDescending) { it.created })
         browseCache["$treeUri|$parentDocId"] = result
         return result
+    }
+
+    // --- recycle bin (a [RECYCLE_BIN_NAME] folder at the tree root, created on first use) ---
+
+    /** Ensures a [RECYCLE_BIN_NAME] folder exists under the root of [treeUri], returning its doc ID, or null. */
+    private fun ensureRecycleBin(treeUri: String): String? {
+        val tree = android.net.Uri.parse(treeUri)
+        val rootId = android.provider.DocumentsContract.getTreeDocumentId(tree)
+        val existing = findChildDocId(tree, rootId, RECYCLE_BIN_NAME, dir = true)
+        if (existing != null) return existing
+        val parent = android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, rootId)
+        val created = android.provider.DocumentsContract.createDocument(
+            appContext.contentResolver, parent, android.provider.DocumentsContract.Document.MIME_TYPE_DIR, RECYCLE_BIN_NAME,
+        ) ?: return null
+        return android.provider.DocumentsContract.getDocumentId(created)
     }
 
     // --- per-folder colour sidecar (a hidden ".xnote/colors.json" beside the items it colours) ---

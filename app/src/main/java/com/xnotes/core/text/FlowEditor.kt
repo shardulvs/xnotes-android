@@ -12,7 +12,8 @@ import com.xnotes.core.history.ParaSnapshot
  * edit was a no-op), which the caller pushes onto the history. Runs are kept
  * normalized (no empty runs, adjacent equal styles merged) after every op.
  */
-class FlowEditor(private val flow: TextFlow) {
+class
+FlowEditor(private val flow: TextFlow) {
 
     /** Insert [text] at [pos]; '\n' splits paragraphs. Returns the command and the caret after it. */
     fun insertText(pos: FlowPos, text: String, style: CharStyle? = null): Pair<Command?, FlowPos> =
