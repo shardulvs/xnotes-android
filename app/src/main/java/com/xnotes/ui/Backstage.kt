@@ -244,6 +244,14 @@ private fun BackstageContent(
         if (editor.browseRoot != null) onOpenSystem() else onPickRoot()
         if (compact) { animateClose = false; sidebarOpen = false }
     }
+    var recycleBinNavRev by remember { mutableStateOf(0) }
+    val openRecycleBin: () -> Unit = {
+        if (editor.browseRoot != null) {
+            selectView(BackstageView.HOME)
+            sidebarOpen = false
+            recycleBinNavRev++
+        }
+    }
 
     // Home is the app's root, so it owns every back press while it's up (the editor sits
     // underneath in the same activity — letting the dialog dismiss would just bounce back to
@@ -266,6 +274,7 @@ private fun BackstageContent(
             BackstageMain(
                 Modifier.fillMaxSize(), editor, view, compact, sidebarOpen, { animateClose = true; sidebarOpen = true }, { selectView(BackstageView.HOME) },
                 onOpenFile, onPickRoot, importPdf, onShareFile, onSaveCopyFile, onExportFilePdf, createMode, { createMode = it }, onImportCodeTheme, onImportFont,
+                recycleBinNavRev = recycleBinNavRev,
             )
             AnimatedVisibility(
                 visible = sidebarOpen,
@@ -280,7 +289,7 @@ private fun BackstageContent(
                 enter = slideInHorizontally(animationSpec = tween(SIDEBAR_ANIM_MS), initialOffsetX = { -it }),
                 exit = if (animateClose) slideOutHorizontally(animationSpec = tween(SIDEBAR_ANIM_MS), targetOffsetX = { -it }) else ExitTransition.None,
             ) {
-                BackstageSidebar(Modifier.width(296.dp), view, dismissSidebar, selectView, newNote, importPdf, openSystem)
+                BackstageSidebar(Modifier.width(296.dp), view, dismissSidebar, selectView, newNote, importPdf, openSystem, openRecycleBin)
             }
         }
     } else {
@@ -290,11 +299,12 @@ private fun BackstageContent(
                 enter = expandHorizontally(animationSpec = tween(SIDEBAR_ANIM_MS), expandFrom = Alignment.Start) + fadeIn(animationSpec = tween(SIDEBAR_ANIM_MS)),
                 exit = shrinkHorizontally(animationSpec = tween(SIDEBAR_ANIM_MS), shrinkTowards = Alignment.Start) + fadeOut(animationSpec = tween(SIDEBAR_ANIM_MS)),
             ) {
-                BackstageSidebar(Modifier.width(264.dp), view, { sidebarOpen = false }, selectView, newNote, importPdf, openSystem)
+                BackstageSidebar(Modifier.width(264.dp), view, { sidebarOpen = false }, selectView, newNote, importPdf, openSystem, openRecycleBin)
             }
             BackstageMain(
                 Modifier.weight(1f).fillMaxHeight(), editor, view, compact, sidebarOpen, { sidebarOpen = true }, { selectView(BackstageView.HOME) },
                 onOpenFile, onPickRoot, importPdf, onShareFile, onSaveCopyFile, onExportFilePdf, createMode, { createMode = it }, onImportCodeTheme, onImportFont,
+                recycleBinNavRev = recycleBinNavRev,
             )
         }
     }
@@ -310,6 +320,7 @@ private fun BackstageSidebar(
     onNewNote: () -> Unit,
     onImportPdf: () -> Unit,
     onOpenSystem: () -> Unit,
+    onOpenRecycleBin: () -> Unit,
 ) {
     val palette = LocalPalette.current
     Column(
@@ -331,6 +342,7 @@ private fun BackstageSidebar(
         Command(XnotesIcons.plus, "New note") { onNewNote() }
         Command(XnotesIcons.importDoc, "Import PDF…") { onImportPdf() }
         Command(XnotesIcons.folder, "Open…") { onOpenSystem() }
+        Command(XnotesIcons.trash, "Recycle Bin") { onOpenRecycleBin() }
         RailDivider()
         Command(XnotesIcons.sliders, "Preferences", selected = view == BackstageView.PREFERENCES) { onSelectView(BackstageView.PREFERENCES) }
         Command(XnotesIcons.info, "About", selected = view == BackstageView.ABOUT) { onSelectView(BackstageView.ABOUT) }
@@ -357,6 +369,7 @@ private fun BackstageMain(
     onCreateMode: (CreateMode) -> Unit,
     onImportCodeTheme: () -> Unit,
     onImportFont: () -> Unit,
+    recycleBinNavRev: Int,
 ) {
     val palette = LocalPalette.current
     Column(modifier) {
@@ -383,6 +396,7 @@ private fun BackstageMain(
                 BackstageView.HOME -> HomePane(
                     editor, onOpenFile, onPickRoot, onImportPdf,
                     onShareFile, onSaveCopyFile, onExportFilePdf, createMode, onCreateMode, sidebarOpen, onShowSidebar,
+                    recycleBinNavRev = recycleBinNavRev,
                 )
                 BackstageView.PREFERENCES -> PreferencesPane(editor, compact, sidebarOpen, onShowSidebar, onBackToHome, onImportCodeTheme, onImportFont)
                 BackstageView.ABOUT -> AboutPane()
@@ -468,6 +482,7 @@ private fun HomePane(
     onCreateMode: (CreateMode) -> Unit,
     sidebarOpen: Boolean,
     onShowSidebar: () -> Unit,
+    recycleBinNavRev: Int,
 ) {
     val palette = LocalPalette.current
     val focusManager = LocalFocusManager.current
@@ -475,6 +490,7 @@ private fun HomePane(
     // that would otherwise sit empty on wide layouts (where the sidebar, not a hamburger, occupies
     // this row). Cleared when the user changes folders (see ExplorerSection).
     var query by remember { mutableStateOf("") }
+    LaunchedEffect(recycleBinNavRev) { if (recycleBinNavRev != 0) query = "" }
     // A tap on empty space anywhere in the pane drops focus from the search field, dismissing it
     // (children like tiles and buttons consume their own taps, so this only fires "outside").
     Column(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { focusManager.clearFocus() } }) {
@@ -506,6 +522,7 @@ private fun HomePane(
                 editor, onOpenFile, onPickRoot, onImportPdf,
                 onShareFile, onSaveCopyFile, onExportFilePdf, createMode, onCreateMode,
                 searchQuery = query, onSearchChange = { query = it },
+                recycleBinNavRev = recycleBinNavRev,
             )
             // A round quick-create button for a new note in the current folder. Only when a folder is
             // granted — otherwise the explorer shows the folder-picker prompt and there's nowhere to create.
@@ -540,6 +557,7 @@ private fun ExplorerSection(
     onCreateMode: (CreateMode) -> Unit,
     searchQuery: String = "",
     onSearchChange: (String) -> Unit = {},
+    recycleBinNavRev: Int,
 ) {
     val palette = LocalPalette.current
     val root = editor.browseRoot
@@ -568,6 +586,13 @@ private fun ExplorerSection(
     var clipboard by remember(root) { mutableStateOf<ClipItem?>(null) }
     var pendingDelete by remember(root) { mutableStateOf<List<BrowseEntry>?>(null) }
     var opError by remember(root) { mutableStateOf<String?>(null) }
+    LaunchedEffect(recycleBinNavRev) {
+        if (recycleBinNavRev == 0) return@LaunchedEffect
+        val target = editor.recycleBinDocId(root) ?: return@LaunchedEffect
+        stack.clear()
+        selection.clear()
+        stack.add(target to "Recycle Bin")
+    }
     // Drag-to-move state. While a selection is being dragged onto a folder, [dragPos] is the finger
     // position in window coords, [folderBounds] maps each visible folder to its window rect for
     // hit-testing, [dropTargetUri] is the folder under the finger, and [pulseUri] flashes the folder a

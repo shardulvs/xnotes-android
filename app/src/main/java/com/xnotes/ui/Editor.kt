@@ -117,7 +117,7 @@ private const val SIDECAR_DIR = ".xnote"
 private const val SIDECAR_FILE = "colors.json"
 
 /** Name of the recycle bin folder created at the tree root. Change this to rename it. */
-private const val RECYCLE_BIN_NAME = "recycle_bin"
+private const val RECYCLE_BIN_NAME = ".recycle_bin"
 
 @Stable
 class Editor(context: Context) {
@@ -2035,6 +2035,9 @@ class Editor(context: Context) {
         val recycleDocId = ensureRecycleBin(treeUri) ?: return false
         return moveDocumentInto(treeUri, docUri, parentDocId, recycleDocId)
     }
+
+    /** Returns the doc ID of the recycle bin under [treeUri], creating it if needed, or null. IO. */
+    fun recycleBinDocId(treeUri: String): String? = ensureRecycleBin(treeUri)
 
     /** Deletes a document (file or folder), then erases every trace of it. IO, call off-thread. */
     fun deleteDocument(docUri: String): Boolean = runCatching {
