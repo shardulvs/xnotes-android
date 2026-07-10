@@ -425,6 +425,7 @@ private fun RecycleBinPane(
     var refreshKey by remember(root) { mutableStateOf(0) }
     val selection = remember(root) { mutableStateListOf<BrowseEntry>() }
     var pendingDelete by remember(root) { mutableStateOf<List<BrowseEntry>?>(null) }
+    var pendingRestore by remember(root) { mutableStateOf<List<BrowseEntry>?>(null) }
     var opError by remember(root) { mutableStateOf<String?>(null) }
     val dismissInteraction = remember { MutableInteractionSource() }
     val gridState = rememberLazyGridState()
@@ -464,15 +465,7 @@ private fun RecycleBinPane(
         // Multi-select toolbar
         if (selection.isNotEmpty()) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                IconAction(XnotesIcons.undo, "Restore") {
-                    val items = selection.toList(); selection.clear()
-                    scope.launch {
-                        val allOk = withContext(Dispatchers.IO) {
-                            items.all { e -> editor.restoreDocument(e.documentUri, root, e.name) }
-                        }
-                        refreshKey++; if (!allOk) opError = "Couldn’t restore some items."
-                    }
-                }
+                IconAction(XnotesIcons.undo, "Restore") { pendingRestore = selection.toList() }
                 IconAction(XnotesIcons.trash, "Delete permanently") { pendingDelete = selection.toList() }
                 IconAction(XnotesIcons.close, "Deselect") { selection.clear() }
             }
@@ -540,11 +533,7 @@ private fun RecycleBinPane(
                                         }
                                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                                             DropdownMenuItem(text = { Text("Restore") }, onClick = {
-                                                menuOpen = false
-                                                scope.launch {
-                                                    val ok = withContext(Dispatchers.IO) { editor.restoreDocument(entry.documentUri, root, entry.name) }
-                                                    if (ok) refreshKey++ else opError = "Couldn’t restore item."
-                                                }
+                                                menuOpen = false; pendingRestore = listOf(entry)
                                             })
                                             DropdownMenuItem(text = { Text("Delete permanently") }, onClick = {
                                                 menuOpen = false; pendingDelete = listOf(entry)
@@ -582,11 +571,7 @@ private fun RecycleBinPane(
                                         }
                                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                                             DropdownMenuItem(text = { Text("Restore") }, onClick = {
-                                                menuOpen = false
-                                                scope.launch {
-                                                    val ok = withContext(Dispatchers.IO) { editor.restoreDocument(entry.documentUri, root, entry.name) }
-                                                    if (ok) refreshKey++ else opError = "Couldn’t restore item."
-                                                }
+                                                menuOpen = false; pendingRestore = listOf(entry)
                                             })
                                             DropdownMenuItem(text = { Text("Delete permanently") }, onClick = {
                                                 menuOpen = false; pendingDelete = listOf(entry)
@@ -618,7 +603,11 @@ private fun RecycleBinPane(
                     pendingDelete = null; selection.clear(); opError = null
                     scope.launch {
                         val allOk = withContext(Dispatchers.IO) {
-                            items.all { e -> editor.deleteDocument(e.documentUri) }
+                            items.all { e ->
+                                val ok = editor.deleteDocument(e.documentUri)
+                                if (ok) editor.clearRestoreMapEntry(e.name)
+                                ok
+                            }
                         }
                         refreshKey++
                         if (!allOk) opError = "Couldn’t delete some items."
@@ -626,6 +615,34 @@ private fun RecycleBinPane(
                 }) { Text("Delete") }
             },
             dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Cancel") } },
+            containerColor = palette.menuBg.toComposeColor(),
+        )
+    }
+
+    pendingRestore?.let { targets ->
+        AlertDialog(
+            onDismissRequest = { pendingRestore = null },
+            title = { Text("Restore?") },
+            text = {
+                Text(
+                    if (targets.size == 1) "Restore “${entryLabel(targets.first())}” to its original location?"
+                    else "Restore ${targets.size} items to their original locations?",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val items = targets.toList()
+                    pendingRestore = null; selection.clear(); opError = null
+                    scope.launch {
+                        val allOk = withContext(Dispatchers.IO) {
+                            items.all { e -> editor.restoreDocument(e.documentUri, root, e.name) }
+                        }
+                        refreshKey++
+                        if (!allOk) opError = "Couldn’t restore some items."
+                    }
+                }) { Text("Restore") }
+            },
+            dismissButton = { TextButton(onClick = { pendingRestore = null }) { Text("Cancel") } },
             containerColor = palette.menuBg.toComposeColor(),
         )
     }

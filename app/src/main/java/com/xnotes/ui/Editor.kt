@@ -2058,6 +2058,12 @@ class Editor(context: Context) {
     /** Returns the doc ID of the recycle bin under [treeUri], creating it if needed, or null. IO. */
     fun recycleBinDocId(treeUri: String): String? = ensureRecycleBin(treeUri)
 
+    /** Removes the restore-map entry for [name] so permanently deleted trash items don't leave stale data. */
+    fun clearRestoreMapEntry(name: String) {
+        val map = restoreStore.read()
+        if (map.has(name)) { map.remove(name); restoreStore.write(map) }
+    }
+
     /** Deletes a document (file or folder), then erases every trace of it. IO, call off-thread. */
     fun deleteDocument(docUri: String): Boolean = runCatching {
         val ok = android.provider.DocumentsContract.deleteDocument(appContext.contentResolver, android.net.Uri.parse(docUri))
