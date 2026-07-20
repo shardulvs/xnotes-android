@@ -364,6 +364,11 @@ fun ViewMenuPopup(editor: Editor, onDismiss: () -> Unit) {
             )
 
             ToggleRow("SCROLLBAR", vs.scrollbar) { setScrollbar(it) }
+
+            Spacer(Modifier.size(10.dp))
+            ToggleRow("SPLIT SCREEN", editor.splitScreenActive) {
+                editor.toggleSplitScreen()
+            }
         }
     }
 }

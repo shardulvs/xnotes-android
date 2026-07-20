@@ -256,6 +256,30 @@ private fun EditorScreen(
             editor.goHome() // land on backstage to name/place the pending import
         }
     }
+
+    val openSplitPdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { u ->
+            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                val name = displayNameOf(resolver, u) ?: "Document"
+                val stem = com.xnotes.core.util.Paths.stem(name)
+                val tempFile = java.io.File(context.cacheDir, "split_temp.pdf")
+                val copied = runCatching {
+                    resolver.openInputStream(u)?.use { input ->
+                        tempFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                }.isSuccess
+                if (copied) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        editor.openSplitPdf(tempFile, stem)
+                    }
+                } else {
+                    editor.message = "Could not open PDF."
+                }
+            }
+        }
+    }
     // A PDF "Save as" destination. The note is already rendered into [pendingExportTemp]
     // (off-thread, behind the progress dialog), so the picker just chooses where to copy it —
     // shared by the open-note export, the explorer-file export, and side-panel page saves.
@@ -514,6 +538,11 @@ private fun EditorScreen(
     val focusRequester = remember { FocusRequester() }
     // The editor owns keyboard focus while it's on top; (re)grab it each time a note is pushed.
     LaunchedEffect(editor.noteOpen) { if (editor.noteOpen) runCatching { focusRequester.requestFocus() } }
+    LaunchedEffect(editor) {
+        editor.onRequestOpenSplitPdf = {
+            openSplitPdfLauncher.launch(arrayOf("application/pdf"))
+        }
+    }
     editor.keyActions = remember {
         Editor.KeyActions(
             newNote = { guarded { editor.newNote() } },
@@ -642,6 +671,17 @@ private fun EditorScreen(
                             com.xnotes.ui.FlowEditMenu(editor)
                             ZoomLockHint(editor)
                             RefiningPdfHint(editor)
+                        }
+                        if (editor.splitScreenActive) {
+                            Box(
+                                modifier = Modifier
+                                    .width(4.dp)
+                                    .fillMaxHeight()
+                                    .background(LocalPalette.current.border.toComposeColor())
+                            )
+                            Box(modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
+                                com.xnotes.ui.SplitPdfView(editor = editor)
+                            }
                         }
                     }
                     // Last child of the resized column: rides directly above the soft keyboard.

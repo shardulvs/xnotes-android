@@ -394,6 +394,22 @@ class Editor(context: Context) {
 
     val bookmarks: List<Bookmark> get() = state.document.bookmarks.toList()
 
+    // --- Split Screen State ---
+    var splitScreenActive by mutableStateOf(false)
+        private set
+    var splitPdfSource by mutableStateOf<com.xnotes.platform.PdfSource?>(null)
+        private set
+    var splitPdfTitle by mutableStateOf("")
+        private set
+    var splitPdfPageIndex by mutableStateOf(0)
+    var splitPdfPageCount by mutableStateOf(0)
+        private set
+    var splitPdfToc by mutableStateOf<List<com.xnotes.platform.PdfOutlineEntry>>(emptyList())
+        private set
+    var splitPdfFile: java.io.File? = null
+        private set
+    var onRequestOpenSplitPdf: (() -> Unit)? = null
+
     val controller: InteractionController = InteractionController(
         state,
         history,
@@ -3652,10 +3668,56 @@ class Editor(context: Context) {
         noteOpen = true // push the editor on top of backstage
     }
 
+    fun openSplitPdf(file: java.io.File, title: String) {
+        splitPdfSource?.close()
+        splitPdfFile?.delete()
+
+        splitPdfFile = file
+        splitPdfTitle = title
+        val src = com.xnotes.platform.PdfSource.create(appContext, file)
+        splitPdfSource = src
+        splitPdfPageIndex = 0
+        splitPdfPageCount = src?.pageCount ?: 0
+        splitScreenActive = src != null
+
+        // Extract outline in background
+        if (src != null) {
+            autosaveScope.launch {
+                val entries = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.xnotes.platform.PdfOutline.extract(appContext, file)
+                }
+                if (splitPdfSource === src) {
+                    splitPdfToc = entries
+                }
+            }
+        }
+    }
+
+    fun toggleSplitScreen() {
+        if (splitScreenActive) {
+            closeSplitScreen()
+        } else {
+            splitScreenActive = true
+        }
+    }
+
+    fun closeSplitScreen() {
+        splitScreenActive = false
+        splitPdfSource?.close()
+        splitPdfSource = null
+        splitPdfFile?.delete()
+        splitPdfFile = null
+        splitPdfTitle = ""
+        splitPdfPageIndex = 0
+        splitPdfPageCount = 0
+        splitPdfToc = emptyList()
+    }
+
     /** Pop back to backstage: detach the current note (flush autosave, drop the binding) and clear
      *  [noteOpen] so the editor is removed from the stack. The document stays as an inert buffer. */
     fun goHome() {
         if (!noteOpen) return
+        closeSplitScreen()
         commitText() // commit an open text box before leaving (also hides its keyboard)
         flowText.endSession() // end any live flow caret (flushes typing, hides the keyboard)
         saveViewState() // remember this folder note's view before leaving

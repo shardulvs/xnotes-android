@@ -25,3 +25,4 @@ keystore.properties
 # --- Misc ---
 .DS_Store
 *.log
+PROJECT_ARCHITECTURE.md
