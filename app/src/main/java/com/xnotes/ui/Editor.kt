@@ -117,7 +117,7 @@ private const val SIDECAR_DIR = ".xnote"
 private const val SIDECAR_FILE = "colors.json"
 
 @Stable
-class Editor(context: Context) {
+class Editor(context: Context, val instanceName: String = "main") {
 
     private val appContext = context.applicationContext
     private val settingsRepo = SettingsRepository(context)
@@ -137,17 +137,17 @@ class Editor(context: Context) {
      *  evict a cacheDir copy mid-session, and the next autosave would then fail to re-embed the PDF.
      *  Purged on launch to drop temps orphaned by a crash — safe here because no real note is open
      *  yet at construction. */
-    private val pdfDir = java.io.File(appContext.filesDir, "pdfsrc").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
+    private val pdfDir = java.io.File(appContext.filesDir, "pdfsrc_$instanceName").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
 
     /** Encoded inserted images, streamed to disk so a note full of large images never loads all their
      *  bytes into the heap; the renderer decodes from these files on demand. Under filesDir (not the
      *  reclaimable cacheDir) and purged on launch to drop temps orphaned by a crash. */
-    private val imageDir = java.io.File(appContext.filesDir, "noteimg").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
+    private val imageDir = java.io.File(appContext.filesDir, "noteimg_$instanceName").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
 
     /** Scratch dir for [writeNoteSafely]: a note is encoded here in full before any SAF file is
      *  touched, so a failed encode can never truncate a good note. Lives under filesDir (not the
      *  reclaimable cacheDir) and is purged on launch to drop temps orphaned by a crash. */
-    private val saveTmpDir = java.io.File(appContext.filesDir, "savetmp").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
+    private val saveTmpDir = java.io.File(appContext.filesDir, "savetmp_$instanceName").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
 
     /** The temp PDF file backing the currently open document, tracked so it's deleted when the note
      *  is swapped out (transient docs used for export/thumbnails manage their own files locally). */
@@ -192,7 +192,7 @@ class Editor(context: Context) {
     @Volatile private var publishedFlow: PublishedFlow? = null
     private var publishedFlowStamp = -1L
     private var publishedPageList: List<Page> = emptyList()
-    private val session = com.xnotes.platform.SessionStore(java.io.File(appContext.filesDir, "session"), codec, pdfDir, imageDir)
+    private val session = com.xnotes.platform.SessionStore(java.io.File(appContext.filesDir, "session_$instanceName"), codec, pdfDir, imageDir)
     private val viewStates = com.xnotes.platform.ViewStateStore(com.xnotes.platform.JsonStore.viewStates(appContext))
     private var lastSessionContentVersion = -1
     private var sessionLoaded = false
@@ -397,18 +397,6 @@ class Editor(context: Context) {
     // --- Split Screen State ---
     var splitScreenActive by mutableStateOf(false)
         private set
-    var splitPdfSource by mutableStateOf<com.xnotes.platform.PdfSource?>(null)
-        private set
-    var splitPdfTitle by mutableStateOf("")
-        private set
-    var splitPdfPageIndex by mutableStateOf(0)
-    var splitPdfPageCount by mutableStateOf(0)
-        private set
-    var splitPdfToc by mutableStateOf<List<com.xnotes.platform.PdfOutlineEntry>>(emptyList())
-        private set
-    var splitPdfFile: java.io.File? = null
-        private set
-    var onRequestOpenSplitPdf: (() -> Unit)? = null
 
     val controller: InteractionController = InteractionController(
         state,
@@ -3668,49 +3656,12 @@ class Editor(context: Context) {
         noteOpen = true // push the editor on top of backstage
     }
 
-    fun openSplitPdf(file: java.io.File, title: String) {
-        splitPdfSource?.close()
-        splitPdfFile?.delete()
-
-        splitPdfFile = file
-        splitPdfTitle = title
-        val src = com.xnotes.platform.PdfSource.create(appContext, file)
-        splitPdfSource = src
-        splitPdfPageIndex = 0
-        splitPdfPageCount = src?.pageCount ?: 0
-        splitScreenActive = src != null
-
-        // Extract outline in background
-        if (src != null) {
-            autosaveScope.launch {
-                val entries = withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    com.xnotes.platform.PdfOutline.extract(appContext, file)
-                }
-                if (splitPdfSource === src) {
-                    splitPdfToc = entries
-                }
-            }
-        }
-    }
-
     fun toggleSplitScreen() {
-        if (splitScreenActive) {
-            closeSplitScreen()
-        } else {
-            splitScreenActive = true
-        }
+        splitScreenActive = !splitScreenActive
     }
 
     fun closeSplitScreen() {
         splitScreenActive = false
-        splitPdfSource?.close()
-        splitPdfSource = null
-        splitPdfFile?.delete()
-        splitPdfFile = null
-        splitPdfTitle = ""
-        splitPdfPageIndex = 0
-        splitPdfPageCount = 0
-        splitPdfToc = emptyList()
     }
 
     /** Pop back to backstage: detach the current note (flush autosave, drop the binding) and clear

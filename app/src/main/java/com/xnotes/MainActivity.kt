@@ -13,6 +13,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -95,6 +97,8 @@ class MainActivity : ComponentActivity() {
     // The editor owns the fullscreen state (persisted preference, default depends on the display
     // cutout); this activity just applies it to the window. Fullscreen draws edge to edge and lets
     // the swipe-in transient bars overlay (no resize), non-fullscreen insets under the bars.
+    private var editorLeft: Editor? = null
+    private var editorRight: Editor? = null
     private var editor: Editor? = null
     // A PDF handed to us by another app ("Open with" / Share); consumed once the editor is ready.
     private var pendingPdfImport by mutableStateOf<Uri?>(null)
@@ -107,23 +111,34 @@ class MainActivity : ComponentActivity() {
         pendingPdfImport = pdfImportUri(intent)
         setContent {
             val context = LocalContext.current
-            val ed = remember { Editor(context).also { editor = it } }
-            LaunchedEffect(ed.fullscreen) { applyFullscreen(ed.fullscreen) }
+            val edLeft = remember { Editor(context, "left").also { editorLeft = it } }
+            val edRight = remember { Editor(context, "right").also { editorRight = it } }
+            var activeEditor by remember { mutableStateOf(edLeft) }
+            editor = activeEditor
+
+            LaunchedEffect(activeEditor.fullscreen) { applyFullscreen(activeEditor.fullscreen) }
             var ready by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) {
                 val start = android.os.SystemClock.uptimeMillis()
-                ed.restoreSession() // heavy load off-thread; loader animates meanwhile
+                kotlinx.coroutines.coroutineScope {
+                    launch { edLeft.restoreSession() }
+                    launch { edRight.restoreSession() }
+                }
                 val elapsed = android.os.SystemClock.uptimeMillis() - start
                 if (elapsed < MIN_LOADER_MS) kotlinx.coroutines.delay(MIN_LOADER_MS - elapsed)
                 ready = true
-                ed.prewarmBackstage() // warm recents/explorer caches so the first backstage open is instant
+                edLeft.prewarmBackstage() // warm recents/explorer caches so the first backstage open is instant
+                edRight.prewarmBackstage()
             }
-            XnotesTheme(ed.palette) {
+            XnotesTheme(activeEditor.palette) {
                 Box(modifier = Modifier.fillMaxSize()) {
                     if (ready) EditorScreen(
-                        ed,
-                        fullscreen = ed.fullscreen,
-                        onToggleFullscreen = ed::toggleFullscreen,
+                        editorLeft = edLeft,
+                        editorRight = edRight,
+                        activeEditor = activeEditor,
+                        onSetActiveEditor = { activeEditor = it },
+                        fullscreen = activeEditor.fullscreen,
+                        onToggleFullscreen = { activeEditor.toggleFullscreen() },
                         importPdfUri = pendingPdfImport,
                         onImportConsumed = { pendingPdfImport = null },
                     )
@@ -171,12 +186,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
-        editor?.persist()
+        editorLeft?.persist()
+        editorRight?.persist()
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        editor?.stopPresentation()
+        editorLeft?.stopPresentation()
+        editorRight?.stopPresentation()
     }
 
     private fun applyFullscreen(fullscreen: Boolean) {
@@ -193,12 +210,16 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun EditorScreen(
-    editor: Editor,
+    editorLeft: Editor,
+    editorRight: Editor,
+    activeEditor: Editor,
+    onSetActiveEditor: (Editor) -> Unit,
     fullscreen: Boolean,
     onToggleFullscreen: () -> Unit,
     importPdfUri: Uri? = null,
     onImportConsumed: () -> Unit = {},
 ) {
+    val editor = activeEditor
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     var showPresentation by remember { mutableStateOf(false) }
@@ -254,30 +275,6 @@ private fun EditorScreen(
             editor.requestImport(com.xnotes.ui.ImportKind.PDF, stem, u.toString())
             backstageView = com.xnotes.ui.BackstageView.HOME
             editor.goHome() // land on backstage to name/place the pending import
-        }
-    }
-
-    val openSplitPdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { u ->
-            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                val name = displayNameOf(resolver, u) ?: "Document"
-                val stem = com.xnotes.core.util.Paths.stem(name)
-                val tempFile = java.io.File(context.cacheDir, "split_temp.pdf")
-                val copied = runCatching {
-                    resolver.openInputStream(u)?.use { input ->
-                        tempFile.outputStream().use { output ->
-                            input.copyTo(output)
-                        }
-                    }
-                }.isSuccess
-                if (copied) {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                        editor.openSplitPdf(tempFile, stem)
-                    }
-                } else {
-                    editor.message = "Could not open PDF."
-                }
-            }
         }
     }
     // A PDF "Save as" destination. The note is already rendered into [pendingExportTemp]
@@ -537,12 +534,7 @@ private fun EditorScreen(
 
     val focusRequester = remember { FocusRequester() }
     // The editor owns keyboard focus while it's on top; (re)grab it each time a note is pushed.
-    LaunchedEffect(editor.noteOpen) { if (editor.noteOpen) runCatching { focusRequester.requestFocus() } }
-    LaunchedEffect(editor) {
-        editor.onRequestOpenSplitPdf = {
-            openSplitPdfLauncher.launch(arrayOf("application/pdf"))
-        }
-    }
+    LaunchedEffect(editorLeft.noteOpen) { if (editorLeft.noteOpen) runCatching { focusRequester.requestFocus() } }
     editor.keyActions = remember {
         Editor.KeyActions(
             newNote = { guarded { editor.newNote() } },
@@ -562,10 +554,16 @@ private fun EditorScreen(
         )
     }
 
-    LaunchedEffect(editor.message) {
-        editor.message?.let {
+    LaunchedEffect(editorLeft.message) {
+        editorLeft.message?.let {
             snackbar.showSnackbar(it)
-            editor.message = null
+            editorLeft.message = null
+        }
+    }
+    LaunchedEffect(editorRight.message) {
+        editorRight.message?.let {
+            snackbar.showSnackbar(it)
+            editorRight.message = null
         }
     }
 
@@ -595,7 +593,7 @@ private fun EditorScreen(
         Box(modifier = Modifier.fillMaxSize().padding(inner).consumeWindowInsets(contentInsets)) {
             // BASE LAYER: backstage is the root of the stack — always present underneath.
             com.xnotes.ui.Backstage(
-                editor = editor,
+                editor = editorLeft,
                 view = backstageView,
                 onSelectView = { backstageView = it },
                 onExitApp = { (context as? android.app.Activity)?.finish() },
@@ -609,83 +607,169 @@ private fun EditorScreen(
                 onSaveCopyFile = { uri -> pendingSaveCopyUri = uri; saveCopyLauncher.launch("${stemOf(uri)}.xnote") },
                 onExportFilePdf = { uri ->
                     runPdfExport(stemOf(uri), shareDir = false,
-                        render = { o, prog, cancel -> editor.exportFileToPdf(uri, o, prog, cancel) },
+                        render = { o, prog, cancel -> editorLeft.exportFileToPdf(uri, o, prog, cancel) },
                         onReady = { temp -> pendingExportTemp = temp; savePdfLauncher.launch("${stemOf(uri)}.pdf") })
                 },
             )
 
             // TOP LAYER: the editor (toolbar + canvas), pushed only when a note is open. Its
             // BackHandlers live here so — composed after backstage — they take priority while open.
-            if (editor.noteOpen) {
+            if (editorLeft.noteOpen) {
                 // While a text box is open, Back commits-or-dismisses it (and hides the keyboard).
-                BackHandler(enabled = editor.editingField != null) { editor.commitText() }
+                BackHandler(enabled = editorLeft.editingField != null) { editorLeft.commitText() }
                 // A live flow caret session ends first (flushing its typing burst).
-                BackHandler(enabled = editor.flowEditingActive) { editor.flowText.endSession() }
+                BackHandler(enabled = editorLeft.flowEditingActive) { editorLeft.flowText.endSession() }
                 // Otherwise Back closes the note and pops to backstage (guarded for unsaved edits).
-                BackHandler(enabled = editor.editingField == null && !editor.flowEditingActive) {
-                    guarded { editor.goHome() }
+                BackHandler(enabled = editorLeft.editingField == null && !editorLeft.flowEditingActive && (!editorLeft.splitScreenActive || !editorRight.noteOpen)) {
+                    guarded { editorLeft.goHome() }
                 }
 
-                Column(
+                if (editorLeft.splitScreenActive && editorRight.noteOpen) {
+                    BackHandler(enabled = editorRight.editingField != null) { editorRight.commitText() }
+                    BackHandler(enabled = editorRight.flowEditingActive) { editorRight.flowText.endSession() }
+                    BackHandler(enabled = editorRight.editingField == null && !editorRight.flowEditingActive) {
+                        editorRight.goHome()
+                    }
+                }
+
+                Row(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(LocalPalette.current.bg.toComposeColor())
-                        .focusRequester(focusRequester)
-                        .focusable()
-                        .onPreviewKeyEvent { ke ->
-                            ke.type == KeyEventType.KeyDown && editor.handleKeyDown(ke.nativeKeyEvent)
-                        },
                 ) {
-                    Toolbar(
-                        editor,
-                        onToggleFullscreen = onToggleFullscreen,
-                        onOpenBackstage = { backstageView = com.xnotes.ui.BackstageView.HOME; guarded { editor.goHome() } },
-                        onInsertImage = { pendingInsertContent = null; insertImageLauncher.launch(arrayOf("image/*")) },
-                        onPresent = { showPresentation = true },
-                    )
-                    Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                        if (editor.sidebarVisible) {
-                            com.xnotes.ui.SidePanel(
-                                editor,
-                                onSharePages = { pages, asPdf -> sharePages(pages, asPdf) },
-                                onSavePagesAsPdf = { pages -> savePagesAsPdf(pages) },
-                                onSavePagesAsImages = { pages -> savePagesAsImages(pages) },
-                            )
-                        }
-                        Box(modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
-                            AndroidView(
-                                factory = { editor.view },
-                                modifier = Modifier.fillMaxSize(),
-                                update = { it.requestRender() }, // repaint on (re)attach so a push never flashes blank
-                            )
-                            editor.editingField?.let { field ->
-                                com.xnotes.ui.TextEditorOverlay(editor, field)
+                    // LEFT COLUMN
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .focusRequester(focusRequester)
+                            .focusable()
+                            .pointerInput(Unit) {
+                                detectTapGestures(onPress = { onSetActiveEditor(editorLeft) })
                             }
-                            com.xnotes.ui.SelectionMenu(editor)
-                            com.xnotes.ui.ScreenshotMenu(editor)
-                            com.xnotes.ui.TextStyleBar(editor)
-                            com.xnotes.ui.LongPressMenu(editor, onInsertImageAt = { c ->
-                                pendingInsertContent = c
-                                insertImageLauncher.launch(arrayOf("image/*"))
-                            })
-                            com.xnotes.ui.FlowEditMenu(editor)
-                            ZoomLockHint(editor)
-                            RefiningPdfHint(editor)
-                        }
-                        if (editor.splitScreenActive) {
-                            Box(
-                                modifier = Modifier
-                                    .width(4.dp)
-                                    .fillMaxHeight()
-                                    .background(LocalPalette.current.border.toComposeColor())
-                            )
+                            .onPreviewKeyEvent { ke ->
+                                ke.type == KeyEventType.KeyDown && editorLeft.handleKeyDown(ke.nativeKeyEvent)
+                            },
+                    ) {
+                        Toolbar(
+                            editorLeft,
+                            onToggleFullscreen = onToggleFullscreen,
+                            onOpenBackstage = { backstageView = com.xnotes.ui.BackstageView.HOME; guarded { editorLeft.goHome() } },
+                            onInsertImage = { pendingInsertContent = null; insertImageLauncher.launch(arrayOf("image/*")) },
+                            onPresent = { showPresentation = true },
+                        )
+                        Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                            if (editorLeft.sidebarVisible) {
+                                com.xnotes.ui.SidePanel(
+                                    editorLeft,
+                                    onSharePages = { pages, asPdf -> sharePages(pages, asPdf) },
+                                    onSavePagesAsPdf = { pages -> savePagesAsPdf(pages) },
+                                    onSavePagesAsImages = { pages -> savePagesAsImages(pages) },
+                                )
+                            }
                             Box(modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
-                                com.xnotes.ui.SplitPdfView(editor = editor)
+                                AndroidView(
+                                    factory = { editorLeft.view },
+                                    modifier = Modifier.fillMaxSize(),
+                                    update = { it.requestRender() }, // repaint on (re)attach so a push never flashes blank
+                                )
+                                editorLeft.editingField?.let { field ->
+                                    com.xnotes.ui.TextEditorOverlay(editorLeft, field)
+                                }
+                                com.xnotes.ui.SelectionMenu(editorLeft)
+                                com.xnotes.ui.ScreenshotMenu(editorLeft)
+                                com.xnotes.ui.TextStyleBar(editorLeft)
+                                com.xnotes.ui.LongPressMenu(editorLeft, onInsertImageAt = { c ->
+                                    pendingInsertContent = c
+                                    insertImageLauncher.launch(arrayOf("image/*"))
+                                })
+                                com.xnotes.ui.FlowEditMenu(editorLeft)
+                                ZoomLockHint(editorLeft)
+                                RefiningPdfHint(editorLeft)
+                            }
+                        }
+                        com.xnotes.ui.TextFormatBar(editorLeft)
+                    }
+
+                    if (editorLeft.splitScreenActive) {
+                        Box(
+                            modifier = Modifier
+                                .width(4.dp)
+                                .fillMaxHeight()
+                                .background(LocalPalette.current.border.toComposeColor())
+                        )
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .pointerInput(Unit) {
+                                    detectTapGestures(onPress = { onSetActiveEditor(editorRight) })
+                                }
+                                .onPreviewKeyEvent { ke ->
+                                    ke.type == KeyEventType.KeyDown && editorRight.handleKeyDown(ke.nativeKeyEvent)
+                                }
+                        ) {
+                            if (!editorRight.noteOpen) {
+                                com.xnotes.ui.Backstage(
+                                    editor = editorRight,
+                                    view = com.xnotes.ui.BackstageView.HOME,
+                                    onSelectView = {},
+                                    onExitApp = {},
+                                    onImportCodeTheme = {},
+                                    onImportFont = {},
+                                    onOpenSystem = {},
+                                    onImportPdf = {},
+                                    onOpenFile = { uri ->
+                                        val name = displayNameOf(resolver, Uri.parse(uri))
+                                        scope.launch { editorRight.openAsync(uri, name) }
+                                    },
+                                    onPickRoot = {},
+                                    onShareFile = {},
+                                    onSaveCopyFile = {},
+                                    onExportFilePdf = {}
+                                )
+                            } else {
+                                Toolbar(
+                                    editorRight,
+                                    onToggleFullscreen = onToggleFullscreen,
+                                    onOpenBackstage = { editorRight.goHome() },
+                                    onInsertImage = { pendingInsertContent = null; insertImageLauncher.launch(arrayOf("image/*")) },
+                                    onPresent = { showPresentation = true },
+                                )
+                                Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                    if (editorRight.sidebarVisible) {
+                                        com.xnotes.ui.SidePanel(
+                                            editorRight,
+                                            onSharePages = { pages, asPdf -> sharePages(pages, asPdf) },
+                                            onSavePagesAsPdf = { pages -> savePagesAsPdf(pages) },
+                                            onSavePagesAsImages = { pages -> savePagesAsImages(pages) },
+                                        )
+                                    }
+                                    Box(modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
+                                        AndroidView(
+                                            factory = { editorRight.view },
+                                            modifier = Modifier.fillMaxSize(),
+                                            update = { it.requestRender() }, // repaint on (re)attach so a push never flashes blank
+                                        )
+                                        editorRight.editingField?.let { field ->
+                                            com.xnotes.ui.TextEditorOverlay(editorRight, field)
+                                        }
+                                        com.xnotes.ui.SelectionMenu(editorRight)
+                                        com.xnotes.ui.ScreenshotMenu(editorRight)
+                                        com.xnotes.ui.TextStyleBar(editorRight)
+                                        com.xnotes.ui.LongPressMenu(editorRight, onInsertImageAt = { c ->
+                                            pendingInsertContent = c
+                                            insertImageLauncher.launch(arrayOf("image/*"))
+                                        })
+                                        com.xnotes.ui.FlowEditMenu(editorRight)
+                                        ZoomLockHint(editorRight)
+                                        RefiningPdfHint(editorRight)
+                                    }
+                                }
+                                com.xnotes.ui.TextFormatBar(editorRight)
                             }
                         }
                     }
-                    // Last child of the resized column: rides directly above the soft keyboard.
-                    com.xnotes.ui.TextFormatBar(editor)
                 }
             }
         }
