@@ -40,6 +40,18 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupProperties
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.window.DialogProperties
+import com.hrm.latex.renderer.Latex
+import com.hrm.latex.renderer.model.LatexConfig
+import com.hrm.latex.renderer.model.LatexTheme
 import com.xnotes.R
 import com.xnotes.core.model.DrawStyle
 import com.xnotes.core.model.FunctionCurve
@@ -346,28 +358,119 @@ private fun FunctionDialog(initial: FunctionSpec, onConfirm: (FunctionSpec) -> U
     )
 }
 
+/**
+ * Keys under the LaTeX field, like a maths keyboard. `#` marks where the cursor lands (and where a
+ * selection is wrapped); the empty slots show as boxes on the key.
+ */
+private val LATEX_STRUCTURE_KEYS = listOf(
+    "\\frac{#}{}", "^{#}", "_{#}", "\\sqrt{#}", "\\sqrt[3]{#}", "\\sqrt[#]{}",
+    "\\left(#\\right)'", "\\frac{d}{d#}", "\\frac{d^{2}}{d#^{2}}", "\\int # \\, dx", "\\int_{#}^{} \\, dx",
+    "\\sum_{#}^{}", "\\lim_{# \\to }", "\\left(#\\right)", "\\left|#\\right|", "\\log_{#}", "\\ln #",
+    "\\sin #", "\\cos #", "\\tan #",
+)
+
+private val LATEX_SYMBOL_KEYS = listOf(
+    "+", "-", "\\cdot", "\\div", "=", "\\neq", "<", ">", "\\le", "\\ge", "\\pm", "\\infty",
+    "\\pi", "e", "\\alpha", "\\beta", "\\theta", "\\lambda", "\\Delta", "\\to",
+)
+
+private fun latexKeyLabel(template: String): String =
+    template.replace("#", "\\square").replace("{}", "{\\square}")
+
+/** Put [template] at the cursor, wrapping the selection at its `#`, and leave the cursor there. */
+private fun insertLatex(value: TextFieldValue, template: String): TextFieldValue {
+    val sel = value.selection
+    val selected = value.text.substring(sel.min, sel.max)
+    val mark = template.indexOf('#').takeIf { it >= 0 } ?: template.length
+    val body = template.replace("#", "")
+    // A letter right after a command would run into its name: \pi then e must not read \pie.
+    val afterCommand = Regex("\\\\[a-zA-Z]+$").containsMatchIn(value.text.substring(0, sel.min))
+    val spaced = if (body.first().isLetter() && afterCommand) " " else ""
+    val inserted = spaced + body.substring(0, mark) + selected + body.substring(mark)
+    val text = value.text.substring(0, sel.min) + inserted + value.text.substring(sel.max)
+    val cursor = sel.min + spaced.length + mark + selected.length
+    return TextFieldValue(text, TextRange(cursor))
+}
+
+/** Move the cursor into the next empty `{}` after it, wrapping to the start. */
+private fun nextLatexSlot(value: TextFieldValue): TextFieldValue {
+    val from = value.selection.max
+    val i = value.text.indexOf("{}", from).takeIf { it >= 0 } ?: value.text.indexOf("{}")
+    return if (i < 0) value else value.copy(selection = TextRange(i + 1))
+}
+
 /** Edit a formula box's LaTeX. Save stays on the dialog when the renderer cannot set the result. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun LatexDialog(initial: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
-    var text by remember { mutableStateOf(initial) }
+    var value by remember { mutableStateOf(TextFieldValue(initial, TextRange(initial.length))) }
+    val keyConfig = LatexConfig(fontSize = 14.sp, theme = LatexTheme.material3())
     AlertDialog(
         onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier.widthIn(max = 720.dp).padding(horizontal = 16.dp),
         title = { Text("Formula") },
         text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                label = { Text("LaTeX") },
-                textStyle = androidx.compose.ui.text.TextStyle(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
-            )
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 72.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .horizontalScroll(rememberScrollState())
+                        .padding(12.dp),
+                ) {
+                    Latex(
+                        latex = "\\displaystyle " + value.text,
+                        config = LatexConfig(fontSize = 22.sp, theme = LatexTheme.material3()),
+                    )
+                }
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = { value = it },
+                    label = { Text("LaTeX") },
+                    minLines = 3,
+                    maxLines = 6,
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = androidx.compose.ui.text.TextStyle(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    (LATEX_STRUCTURE_KEYS + LATEX_SYMBOL_KEYS).forEach { key ->
+                        LatexKey(onClick = { value = insertLatex(value, key) }) {
+                            Latex(latex = latexKeyLabel(key), config = keyConfig)
+                        }
+                    }
+                    LatexKey(onClick = { value = nextLatexSlot(value) }) { Text("Next") }
+                }
+            }
         },
         confirmButton = {
-            TextButton(enabled = text.isNotBlank(), onClick = { onConfirm(text.trim()) }) { Text("Save") }
+            TextButton(enabled = value.text.isNotBlank(), onClick = { onConfirm(value.text.trim()) }) { Text("Save") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
         },
     )
+}
+
+@Composable
+private fun LatexKey(onClick: () -> Unit, content: @Composable () -> Unit) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(width = 56.dp, height = 48.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(MaterialTheme.colorScheme.secondaryContainer)
+            .clickable(onClick = onClick),
+    ) { content() }
 }
 
 /** A range bound as the user would type it: multiples of pi as "2pi", the rest trimmed. */

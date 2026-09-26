@@ -37,7 +37,7 @@ n-notes is a fork of [xnotes](https://github.com/shardulvs/xnotes-android). On t
 - **Finger tap to select**: with the select tool, a finger tap picks the item under it while a finger drag still pans.
 - **Whole or partial selection**: the select and lasso tools can take only fully enclosed items or anything they touch.
 - **Handwriting to text**: convert selected handwriting into an editable text box (Czech and English) from the selection three-dots menu; reopen it later with Edit in the same menu, with font, size, and colour controls docked at the bottom.
-- **Handwriting to math**: an optional on-device add-on (downloaded and deleted in Preferences, under OCR) adds Convert to math to the selection three-dots menu, which turns handwritten formulas, fractions, exponents and integrals included, into a typeset formula; Edit in the same menu opens its LaTeX.
+- **Handwriting to math**: an optional on-device add-on (downloaded and deleted in Preferences, under OCR) adds Convert to math to the selection three-dots menu, which turns handwritten formulas, fractions, exponents and integrals included, into a typeset formula; Edit in the same menu opens its LaTeX in a dialog with a live preview and a maths keyboard (fractions, powers, roots, derivatives, definite and indefinite integrals, sums, limits, functions and symbols).
 - **Pen shape snapping toggle**: turn "snap held strokes to shapes" on or off directly from the pen settings popup.
 
 ## Versioning
