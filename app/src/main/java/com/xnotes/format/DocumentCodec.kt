@@ -765,6 +765,13 @@ class DocumentCodec(
                 }
             }
             p.endObject()
+            if (!(width > 0.0 && width.isFinite() && height > 0.0 && height.isFinite())) {
+                // a page with no area (a broken PDF page from an older import) takes its neighbour's size
+                val prev = m.pages.lastOrNull()
+                width = prev?.width ?: fallbackW
+                height = prev?.height ?: fallbackH
+                pdfPage = null
+            }
             val page = Page(width = width, height = height, items = items, pdfPage = pdfPage, style = style, margins = margins)
             m.pages.add(page)
             if (pending.isNotEmpty()) m.pageImages.add(page to pending)

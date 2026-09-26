@@ -82,10 +82,16 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
 
         class Remove(val item: CanvasItem) : Edit()
         class Order(val items: List<CanvasItem>) : Edit()
+
+        /** Room for the batch queued right behind it, so the buffers grow once for all of it. */
+        class Reserve(val vertices: Long, val indices: Long) : Edit()
         object Reset : Edit()
     }
 
     private val pending = ConcurrentLinkedQueue<Edit>()
+
+    /** Edits held back by [batch], to be queued behind one reservation for the lot. */
+    private var staged: ArrayList<Edit>? = null
 
     /**
      * The stroke under the pen lives in its own buffers, kept apart from the committed geometry so
@@ -148,6 +154,11 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
 
     /** Runs a decode off the render thread; installed by the host. */
     var decodeOn: (Runnable) -> Unit = { it.run() }
+
+    /** Told on the render thread when committed items start or stop being left out for memory. */
+    var onOutOfMemory: ((Boolean) -> Unit)? = null
+    private var reportedOutOfMemory = false
+
     private var contextGen = -1
 
     /** Reused per frame so drawing allocates nothing. */
@@ -187,26 +198,26 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
     // --- main-thread API ---
 
     fun upsert(item: CanvasItem, parts: List<MeshPart>, bounds: Rect, clearsWet: Boolean = false) {
-        pending.add(Edit.Upsert(item, parts, bounds, null, clearsWet))
+        post(Edit.Upsert(item, parts, bounds, null, clearsWet))
     }
 
     /** File a placed image. It carries no geometry: the renderer draws it as a textured quad. */
     fun upsertImage(item: ImageItem, bounds: Rect) {
-        pending.add(Edit.Upsert(item, emptyList(), bounds, item, false))
+        post(Edit.Upsert(item, emptyList(), bounds, item, false))
     }
 
     fun remove(item: CanvasItem) {
-        pending.add(Edit.Remove(item))
+        post(Edit.Remove(item))
     }
 
     /** Publish the document's z order; the scene draws back to front by it. */
     fun setOrder(items: List<CanvasItem>) {
-        pending.add(Edit.Order(ArrayList(items)))
+        post(Edit.Order(ArrayList(items)))
     }
 
     /** Publish the in-progress stroke's triangles, or clear it when [mesh] is null. */
     fun setWet(mesh: MeshData?, color: Rgba, pass: InkPass, bounds: Rect) {
-        pending.add(
+        post(
             Edit.Wet(
                 if (mesh == null) emptyList() else listOf(MeshPart(mesh, color, pass)),
                 bounds,
@@ -218,26 +229,54 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
     /** Publish an in-progress item made of several runs, which is what a filled shape is. An empty
      *  list clears the whole wet buffer, settled runs included. */
     fun setWetParts(parts: List<MeshPart>, bounds: Rect) {
-        pending.add(Edit.Wet(parts, bounds, WetKind.WHOLE))
+        post(Edit.Wet(parts, bounds, WetKind.WHOLE))
     }
 
     /** Add a run of the stroke under the pen that has stopped moving; it is never rewritten. */
     fun appendWetRun(parts: List<MeshPart>, bounds: Rect) {
-        pending.add(Edit.Wet(parts, bounds, WetKind.SETTLED))
+        post(Edit.Wet(parts, bounds, WetKind.SETTLED))
     }
 
     /** Replace the run still moving under the nib, leaving the settled ones where they are. */
     fun setWetTail(parts: List<MeshPart>, bounds: Rect) {
-        pending.add(Edit.Wet(parts, bounds, WetKind.TAIL))
+        post(Edit.Wet(parts, bounds, WetKind.TAIL))
     }
 
     /** Draw [items] displaced by [at] until this is called again with an empty list. */
     fun setLift(items: List<CanvasItem>, at: LiftTransform) {
-        pending.add(Edit.Lift(ArrayList(items), at))
+        post(Edit.Lift(ArrayList(items), at))
     }
 
     fun reset() {
-        pending.add(Edit.Reset)
+        post(Edit.Reset)
+    }
+
+    /** Queue what [block] publishes behind one reservation, so a whole load grows the buffers once. */
+    fun batch(block: () -> Unit) {
+        if (staged != null) return block()
+        val edits = ArrayList<Edit>()
+        staged = edits
+        try {
+            block()
+        } finally {
+            staged = null
+            var vertices = 0L
+            var indices = 0L
+            for (edit in edits) {
+                if (edit !is Edit.Upsert) continue
+                for (part in edit.parts) {
+                    vertices += part.mesh.vertexCount
+                    indices += part.mesh.indices.size
+                }
+            }
+            pending.add(Edit.Reserve(vertices, indices))
+            pending.addAll(edits)
+        }
+    }
+
+    private fun post(edit: Edit) {
+        val batch = staged
+        if (batch != null) batch.add(edit) else pending.add(edit)
     }
 
     // --- GL thread ---
@@ -954,15 +993,25 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
 
     private fun drainEdits() {
         while (true) {
-            when (val edit = pending.poll() ?: return) {
+            when (val edit = pending.poll() ?: break) {
                 is Edit.Upsert -> applyUpsert(edit)
                 is Edit.Wet -> applyWet(edit)
                 is Edit.Lift -> applyLift(edit)
                 is Edit.Remove -> applyRemove(edit.item)
                 is Edit.Order -> applyOrder(edit.items)
+                is Edit.Reserve -> store.reserve(edit.vertices, edit.indices)
                 Edit.Reset -> applyReset()
             }
         }
+        reportMemory()
+    }
+
+    private fun reportMemory() {
+        val short = store.outOfMemory
+        if (short == reportedOutOfMemory) return
+        reportedOutOfMemory = short
+        if (short) Log.w(TAG, "geometry buffers could not grow; some items are not drawn")
+        onOutOfMemory?.invoke(short)
     }
 
     private fun applyUpsert(edit: Edit.Upsert) {

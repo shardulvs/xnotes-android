@@ -442,7 +442,6 @@ class CanvasView @JvmOverloads constructor(
 
         val visible = st.visibleContentRect()
         val border = Pen(st.palette.paperBorder, 1.0, cosmetic = true)
-        val cachedPages = HashSet<Page>()
         // Paginated mode shows only the current row; neighbours never draw.
         val drawable = st.drawablePageRange()
 
@@ -451,7 +450,6 @@ class CanvasView @JvmOverloads constructor(
             val pr = st.pageRects.getOrNull(i) ?: continue
             if (!pr.intersects(visible)) continue
             val page = st.document.pages[i]
-            cachedPages.add(page)
 
             r.fillRect(pr, st.paperColor(page))
             if (st.pageBorders) r.strokeRect(pr, border)
@@ -470,22 +468,6 @@ class CanvasView @JvmOverloads constructor(
             st.cacheForOrSchedule(page)?.let { blitPageSurface(r, st, page, pr, it.surface) }
         }
         r.restore()
-
-        // Prefetch the N pages before and after the visible band (N = visible count) into the
-        // page cache so scrolling lands on already-rasterized pages. Scheduled after the on-screen
-        // pages above so visible content always builds first on the single cache thread, nearest
-        // pages first, and skipped during a pinch so the settle-rebuild isn't starved.
-        if (!st.zoomingInProgress) {
-            st.visiblePageRange()?.let { vis ->
-                val n = vis.last - vis.first + 1
-                for (d in 1..n) for (j in intArrayOf(vis.last + d, vis.first - d)) {
-                    val page = st.document.pages.getOrNull(j) ?: continue
-                    if (!cachedPages.add(page)) continue
-                    st.backgroundForOrSchedule(page)
-                    st.cacheForOrSchedule(page)
-                }
-            }
-        }
 
         // Past the resolution cap, cover the (soft, capped) page caches with a razor-sharp,
         // full-resolution render of just the viewport. While panning we slide the previous sharp
@@ -579,7 +561,7 @@ class CanvasView @JvmOverloads constructor(
 
         drawScrollbar(canvas, st)
 
-        st.dropCachesExcept(cachedPages)
+        st.prefetchAndPrune()
 
         // Debug HUD on top, reading the just-pruned cache state (viewport space).
         debugOverlay.sampleFrame(System.nanoTime())

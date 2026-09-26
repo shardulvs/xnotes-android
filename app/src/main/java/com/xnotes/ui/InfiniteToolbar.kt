@@ -178,6 +178,10 @@ fun InfiniteToolbar(
             Separator()
             Label(stringResource(R.string.gl_unavailable))
         }
+        if (!LocalBar.current.vertical && editor.outOfMemory) {
+            Separator()
+            Label(stringResource(R.string.canvas_out_of_memory))
+        }
         Spacer(Modifier.padding(horizontal = 2.dp))
     }
 }

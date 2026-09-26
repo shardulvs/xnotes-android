@@ -33,6 +33,13 @@ object PdfImporter {
         doc.pdfFile = source.file
         for (i in 0 until source.pageCount) {
             val (wPts, hPts) = source.pageSizePoints(i) ?: break
+            if (wPts <= 0 || hPts <= 0) {
+                // Android 15+ reports a page it can't load, or one with no visible area, as 0x0
+                val (w, h) = doc.pages.lastOrNull()?.let { it.width to it.height }
+                    ?: PageSize.A4.pixels(com.xnotes.core.model.Orientation.PORTRAIT, dpi)
+                doc.pages.add(Page(w, h))
+                continue
+            }
             val w = wPts / 72.0 * dpi
             val h = hPts / 72.0 * dpi
             doc.pages.add(Page(w, h, pdfPage = i))

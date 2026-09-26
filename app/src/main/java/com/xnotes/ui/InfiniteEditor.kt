@@ -156,6 +156,10 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     var renderFailure by mutableStateOf<String?>(null)
         private set
 
+    /** Set while some items are left undrawn because the device could not spare the memory. */
+    var outOfMemory by mutableStateOf(false)
+        private set
+
     /** Fired after any edit that makes the document dirty, so the host can schedule an autosave. */
     var onContentChanged: (() -> Unit)? = null
 
@@ -276,6 +280,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         // Decoding reads a file and can take tens of milliseconds, so it never runs on the render
         // thread; the finished bitmap is picked up and uploaded at the start of the next frame.
         scene.decodeOn = { work -> decodeExecutor.execute(work) }
+        scene.onOutOfMemory = { short -> view.post { outOfMemory = short } }
         document.listener = modelListener
     }
 
@@ -369,7 +374,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     private fun rebuildScene() {
         scene.reset()
         vectorMeshGen.clear()
-        for (item in document.items) pushItem(item)
+        scene.batch { for (item in document.items) pushItem(item) }
         scene.setOrder(document.items)
     }
 

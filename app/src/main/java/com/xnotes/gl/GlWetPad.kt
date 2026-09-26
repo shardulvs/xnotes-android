@@ -14,6 +14,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.util.Log
 import android.view.Choreographer
+import android.view.Surface
 import android.view.SurfaceControl
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -32,6 +33,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * It has to be a surface of its own because no multisampled config on this device carries the
  * mutable bit, and the canvas is not giving up its antialiasing. Ink quality comes back in
  * [GlWetPadInk], which draws into a small multisampled buffer and resolves the damage into here.
+ * On Android 12 and later that surface is a layer of the pad's own: see [openLayer].
  *
  * ### Threads
  *
@@ -46,6 +48,14 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
 
     private var thread: HandlerThread? = null
     private var handler: Handler? = null
+
+    /** The pad's own layer under the SurfaceView's, on Android 12 and later. */
+    @Volatile
+    private var layer: SurfaceControl? = null
+
+    /** What EGL draws into: [layer]'s surface where there is one, the holder's otherwise. */
+    @Volatile
+    private var target: Surface? = null
 
     /** Set when something has arrived that has not been drawn, so offers collapse into one draw. */
     private val dirty = AtomicBoolean(false)
@@ -159,26 +169,65 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
         val t = HandlerThread("xnotes-wet-pad").also { it.start() }
         thread = t
         handler = Handler(t.looper)
-        post { createEgl(holder) }
+        val surface = openLayer(holder) ?: holder.surface
+        target = surface
+        post { createEgl(surface) }
         // Nothing to show until a pen is down, and a hidden layer is one the compositor does not
         // have to blend every refresh.
         setLayerVisible(false)
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        post { resize(holder, width, height) }
+        post { resize(width, height) }
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
         // Every pixel goes with the surface, so nothing left on it may be joined afterwards.
         ink.forget()
         onSurfaceLost?.invoke()
-        val t = thread ?: return
+        val t = thread ?: return closeLayer()
         post { destroyEgl() }
         thread = null
         handler = null
         t.quitSafely()
         t.join(500)
+        closeLayer()
+    }
+
+    /**
+     * A layer of the pad's own under the SurfaceView's, for EGL to draw into.
+     *
+     * SurfaceView syncs its own buffer queue with every window resize, and a sync that ends while
+     * the driver is still queueing a pad frame crashes inside BLASTBufferQueue. Nothing knows about
+     * this layer's queue, so nothing syncs it. Before Android 12 there is no such sync.
+     */
+    private fun openLayer(holder: SurfaceHolder): Surface? {
+        if (android.os.Build.VERSION.SDK_INT < 31) return null
+        val parent = surfaceControl?.takeIf { it.isValid } ?: return null
+        val frame = holder.surfaceFrame
+        val child = SurfaceControl.Builder()
+            .setName("xnotes-wet-pad")
+            .setParent(parent)
+            .setBufferSize(frame.width().coerceAtLeast(1), frame.height().coerceAtLeast(1))
+            .setFormat(android.graphics.PixelFormat.TRANSLUCENT)
+            .build()
+        // Above the SurfaceView's own layer, which never gets a buffer now.
+        SurfaceControl.Transaction().use { it.setLayer(child, 1).apply() }
+        layer = child
+        return Surface(child)
+    }
+
+    /** Let the layer go, once nothing on the pad's thread can be drawing into it. */
+    private fun closeLayer() {
+        val surface = target
+        target = null
+        if (android.os.Build.VERSION.SDK_INT < 31) return
+        val child = layer ?: return
+        layer = null
+        // Ours to release only because the layer is: the holder's surface belongs to SurfaceView.
+        surface?.release()
+        SurfaceControl.Transaction().use { it.reparent(child, null).apply() }
+        child.release()
     }
 
     /**
@@ -355,7 +404,7 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
      */
     private fun setLayerVisible(visible: Boolean) {
         if (android.os.Build.VERSION.SDK_INT < 29) return
-        val control = surfaceControl?.takeIf { it.isValid } ?: return
+        val control = (layer ?: surfaceControl)?.takeIf { it.isValid } ?: return
         SurfaceControl.Transaction().use { t ->
             t.setVisibility(control, visible)
             t.apply()
@@ -438,7 +487,7 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
 
     // --- render thread ---
 
-    private fun createEgl(holder: SurfaceHolder) {
+    private fun createEgl(surface: Surface) {
         eglDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
         if (eglDisplay == EGL14.EGL_NO_DISPLAY) return fail("no display")
         val version = IntArray(2)
@@ -451,7 +500,7 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
         )
         if (eglContext == EGL14.EGL_NO_CONTEXT) return fail("eglCreateContext")
         eglSurface = EGL14.eglCreateWindowSurface(
-            eglDisplay, config, holder.surface, intArrayOf(EGL14.EGL_NONE), 0,
+            eglDisplay, config, surface, intArrayOf(EGL14.EGL_NONE), 0,
         )
         if (eglSurface == EGL14.EGL_NO_SURFACE) return fail("eglCreateWindowSurface ${EGL14.eglGetError()}")
         if (!EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) return fail("eglMakeCurrent")
@@ -464,7 +513,8 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
             null
         }
         coverTex = 0
-        Log.i(TAG, "wet pad surface up: ${GLES30.glGetString(GLES30.GL_RENDERER)}")
+        val on = if (layer != null) "its own layer" else "the SurfaceView"
+        Log.i(TAG, "wet pad surface up on $on: ${GLES30.glGetString(GLES30.GL_RENDERER)}")
         // Once, and for the life of the surface. Going back to the back buffer and forward again
         // leaves the compositor showing a buffer this is no longer writing to, so the mode stays
         // and only the refresh is switched.
@@ -521,17 +571,26 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
      * moment the canvas takes it back. Nothing here is cheap and nothing here is frequent either,
      * since a resize is a layout the whole window has already paid for.
      */
-    private fun resize(holder: SurfaceHolder, w: Int, h: Int) {
+    private fun resize(w: Int, h: Int) {
         if (w == surfaceW && h == surfaceH) return
         // A pad that never came up will not come up for being asked twice.
         if (!ready) return
+        val surface = target ?: return
         // Every pixel goes with the surface, so nothing on it may be joined or handed over.
         ink.forget()
         mainHandler.post { onSurfaceLost?.invoke() }
         destroyEgl()
-        createEgl(holder)
+        sizeLayer(w, h)
+        createEgl(surface)
         setLayerVisible(false)
         Log.i(TAG, "wet pad surface rebuilt for ${w}x$h, got ${surfaceW}x$surfaceH")
+    }
+
+    /** SurfaceView sizes its own queue, so the pad's layer is the pad's to size. */
+    private fun sizeLayer(w: Int, h: Int) {
+        if (android.os.Build.VERSION.SDK_INT < 31) return
+        val child = layer?.takeIf { it.isValid } ?: return
+        SurfaceControl.Transaction().use { it.setBufferSize(child, w, h).apply() }
     }
 
     /**

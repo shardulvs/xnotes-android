@@ -141,6 +141,7 @@
     <string name="insert_image">插入图片</string>
     <string name="fit_all">显示全部</string>
     <string name="gl_unavailable">GL 不可用</string>
+    <string name="canvas_out_of_memory">内存不足，部分墨迹未显示</string>
 
     <!-- Toolbar customizer -->
     <string name="drop_here">放到此处</string>

@@ -15,6 +15,9 @@ class SlotAllocator(initialCapacity: Int) {
 
     private var bump = 0
 
+    /** One past the highest slot handed out; the holes below it are not room for a new run. */
+    val end: Int get() = bump
+
     // Free ranges as (offset, count) pairs, kept sorted by offset so neighbours coalesce.
     private val freeOffsets = ArrayList<Int>()
     private val freeCounts = ArrayList<Int>()
@@ -68,6 +71,21 @@ class SlotAllocator(initialCapacity: Int) {
 
     fun grow(newCapacity: Int) {
         if (newCapacity > capacity) capacity = newCapacity
+    }
+
+    /** Capacity that fits [count] more slots past [end], doubled from the current, or null past an Int. */
+    fun grownCapacity(count: Int): Int? {
+        val need = bump.toLong() + count
+        var cap = maxOf(capacity, 1).toLong()
+        while (cap < need) cap *= 2
+        return if (cap > Int.MAX_VALUE) null else cap.toInt()
+    }
+
+    /** Capacity for a bulk load of [count] more slots past [end], an eighth over, or null past an Int. */
+    fun reservedCapacity(count: Long): Int? {
+        val need = bump + count
+        val cap = need + need / 8
+        return if (cap > Int.MAX_VALUE) null else maxOf(capacity.toLong(), cap).toInt()
     }
 
     /** Pull any free range that now touches the bump pointer back out of the free list. */

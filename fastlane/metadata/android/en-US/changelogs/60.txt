@@ -1,0 +1,4 @@
+- Fix a crash and vanishing ink on large canvases
+- Fix a crash on PDFs with broken or empty pages
+- Fix a rare crash while writing on some devices
+- Fix PDF pages rerendering while scrolling

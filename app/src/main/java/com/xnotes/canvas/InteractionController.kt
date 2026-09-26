@@ -3397,7 +3397,6 @@ class InteractionController(
         pinchInitZoom = state.zoom
         pinchAnchorContent = state.viewportToContent(mid)
         startTrackingVelocity(mid.x, mid.y)
-        state.zoomingInProgress = true
     }
 
     private fun updatePinch(e: MotionEvent) {
@@ -3416,6 +3415,8 @@ class InteractionController(
         // magnet grabs and is dismissed the moment it breaks free. A locked pinch is pan-only,
         // so it never snaps.
         val z = if (state.zoomLocked) pinchInitZoom else state.snapZoomToFit(raw)
+        // A two-finger pan held at its zoom (locked, or on a fit magnet) keeps prefetching like a one-finger one.
+        if (z != pinchInitZoom) state.zoomingInProgress = true
         state.zoom = z
         if (!state.zoomLocked) {
             val nowFit = state.fitWidthActive || state.fitHeightActive
@@ -3461,8 +3462,10 @@ class InteractionController(
 
     private fun endPinch() {
         mode = PointerMode.IDLE
-        state.zoomingInProgress = false
-        state.invalidateCachesForZoom() // keep stale surfaces to blit until the sharp rebuild lands
+        if (state.zoomingInProgress) {
+            state.zoomingInProgress = false
+            state.invalidateCachesForZoom() // keep stale surfaces to blit until the sharp rebuild lands
+        }
         onViewChanged()
         requestRender()
         if (!pinchPanAllowed()) return
@@ -3497,7 +3500,7 @@ class InteractionController(
         textDragRect = null
         // Cancel an in-progress capture drag; a frozen capture (mode IDLE) survives.
         if (mode == PointerMode.SHOT) { screenshotRect = null; onScreenshotMenu(null) }
-        if (mode == PointerMode.PINCH) {
+        if (mode == PointerMode.PINCH && state.zoomingInProgress) {
             state.zoomingInProgress = false
             state.invalidateCachesForZoom()
         }

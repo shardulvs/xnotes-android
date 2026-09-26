@@ -155,6 +155,7 @@
     <string name="insert_image">Insert image</string>
     <string name="fit_all">Fit all</string>
     <string name="gl_unavailable">GL unavailable</string>
+    <string name="canvas_out_of_memory">Out of memory, some ink hidden</string>
 
     <!-- Toolbar customizer -->
     <string name="drop_here">drop here</string>

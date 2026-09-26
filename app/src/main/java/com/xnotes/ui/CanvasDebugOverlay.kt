@@ -99,6 +99,10 @@ fun CanvasDebugOverlay(editor: InfiniteEditor) {
             add("")
             add("GL FAILED $it")
         }
+        if (editor.outOfMemory) {
+            add("")
+            add("GEOMETRY OUT OF MEMORY")
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopEnd) {

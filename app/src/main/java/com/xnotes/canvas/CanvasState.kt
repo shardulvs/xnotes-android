@@ -303,7 +303,7 @@ class CanvasState(
         return pageAffine(page).compose(local.compose(displayAffine(page)))
     }
 
-    /** While true (during a pinch/zoom drag) caches are blitted stale-scaled
+    /** While true (a pinch that has moved the zoom) caches are blitted stale-scaled
      *  instead of rebuilt every frame; they rebuild at the final resolution when
      *  the gesture ends. */
     var zoomingInProgress: Boolean = false
@@ -1381,10 +1381,70 @@ class CanvasState(
         releaseGeometryExcept(visible)
     }
 
+    /** Pages to build ahead of the viewport ([prefetch], nearest first) and pages whose caches survive the frame ([keep]). */
+    class CacheBand(val prefetch: List<Page>, val keep: Set<Page>)
+
+    /**
+     * Rows within a screenful of the viewport (at least the adjacent one; paginated, one row either side), kept one
+     * row further. Never sized by the visible page count: that flips as page edges cross the viewport, and every
+     * flip evicted the pages just prefetched.
+     */
+    fun cacheBand(): CacheBand {
+        val pages = document.pages
+        val rows = rowRanges()
+        if (rows.isEmpty()) return CacheBand(emptyList(), emptySet())
+        if (pageRects.size != pages.size) return CacheBand(emptyList(), pages.toHashSet()) // not laid out yet
+        // Rows on screen are first..last (last = first - 1 when the view sits in a gap); lo..hi adds the prefetch.
+        var first: Int
+        var last: Int
+        var lo: Int
+        var hi: Int
+        if (verticalScroll) {
+            val v = visibleContentRect()
+            fun top(r: Int) = rows[r].minOf { pageRects[it].top }
+            fun bottom(r: Int) = rows[r].maxOf { pageRects[it].bottom }
+            first = 0
+            while (first < rows.size && bottom(first) < v.top) first++
+            last = rows.lastIndex
+            while (last >= 0 && top(last) > v.bottom) last--
+            hi = last + 1
+            while (hi < rows.lastIndex && top(hi + 1) <= v.bottom + v.h) hi++
+            lo = first - 1
+            while (lo > 0 && bottom(lo - 1) >= v.top - v.h) lo--
+        } else {
+            first = currentRow.coerceIn(0, rows.lastIndex)
+            last = first
+            lo = first - 1
+            hi = first + 1
+        }
+        val prefetch = ArrayList<Page>()
+        for (r in first..last) for (i in rows[r]) prefetch += pages[i]
+        for (d in 1..max(hi - last, first - lo)) {
+            for (r in intArrayOf(last + d, first - d)) {
+                if (r in lo..hi && r in rows.indices) for (i in rows[r]) prefetch += pages[i]
+            }
+        }
+        val keep = HashSet<Page>()
+        for (r in max(lo - 1, 0)..min(hi + 1, rows.lastIndex)) for (i in rows[r]) keep += pages[i]
+        return CacheBand(prefetch, keep)
+    }
+
+    /** Runs after the visible pages are scheduled, so they build first; a pinch moving the zoom keeps the band but prefetches nothing. */
+    fun prefetchAndPrune() {
+        val band = cacheBand()
+        if (!zoomingInProgress) {
+            for (page in band.prefetch) {
+                backgroundForOrSchedule(page)
+                cacheForOrSchedule(page)
+            }
+        }
+        dropCachesExcept(band.keep)
+    }
+
     /**
      * The pages whose rect intersects the viewport, as a contiguous `first..last` index range
      * (pages stack vertically, so the visible set is always contiguous), or null when none is
-     * visible. Used for the debug readout and to size the off-screen prefetch band.
+     * visible. Used for the debug readout.
      */
     fun visiblePageRange(): IntRange? {
         val visible = visibleContentRect()

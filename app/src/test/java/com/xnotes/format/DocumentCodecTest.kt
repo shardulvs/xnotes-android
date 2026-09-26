@@ -8,9 +8,11 @@ import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.Bookmark
 import com.xnotes.core.model.Document
 import com.xnotes.core.model.ImageItem
+import com.xnotes.core.model.Orientation
 import com.xnotes.core.model.Page
 import com.xnotes.core.model.PageMargins
 import com.xnotes.core.model.PagePattern
+import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.PageStyle
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.ShapeItem
@@ -747,5 +749,31 @@ class DocumentCodecTest {
         val read = roundTrip(doc)
         assertEquals(1.0, read.pages[0].margins.left!!, 1e-9)
         assertEquals(0.0, read.pages[0].margins.right!!, 1e-9)
+    }
+
+    @Test fun aPageWithNoAreaLoadsAtItsNeighboursSize() {
+        val out = ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(out).use {
+            it.putNextEntry(java.util.zip.ZipEntry("manifest.json"))
+            it.write(
+                ("{\"format\":\"xnote\",\"dpi\":150,\"pages\":[" +
+                    "{\"width\":0,\"height\":0,\"pdf_page\":0}," +
+                    "{\"width\":1275,\"height\":1650,\"pdf_page\":1}," +
+                    "{\"width\":0,\"height\":0,\"pdf_page\":2}," +
+                    "{\"width\":\"NaN\",\"height\":-1}]}").toByteArray(),
+            )
+            it.closeEntry()
+        }
+        val pages = codec.read(ByteArrayInputStream(out.toByteArray())).pages
+        val (a4w, a4h) = PageSize.A4.pixels(Orientation.PORTRAIT, 150)
+        assertEquals(a4w, pages[0].width, 1e-9)
+        assertEquals(a4h, pages[0].height, 1e-9)
+        assertNull(pages[0].pdfPage)
+        assertEquals(1, pages[1].pdfPage)
+        for (page in pages.drop(2)) {
+            assertEquals(1275.0, page.width, 1e-9)
+            assertEquals(1650.0, page.height, 1e-9)
+            assertNull(page.pdfPage)
+        }
     }
 }
