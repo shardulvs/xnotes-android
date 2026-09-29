@@ -12,21 +12,27 @@
 
 ---
 
+## Why this fork
+
+Xnotes is a great app, and I'm grateful that the developer puts so much work into it and shares it openly. However, in my day to day use I noticed a few missing features and some details that bothered me. Above all, I really wanted some kind of cloud sync, so I made this fork. I do my best to keep it in sync with the original repository, and I almost always prefer the original developer's changes over mine, since they are much better implemented.
+
 ## Additions to the original xnotes
 
-n-notes is a fork of [xnotes](https://github.com/shardulvs/xnotes-android). On top of it:
-
-- **File import**: import images, txt, md, rtf, html, epub, docx, xlsx, and csv as notes.
-- **Filen cloud sync**: back up and sync notes and settings to Filen, with an on-demand Sync now action in the sidebar (hold it to open the sync settings), or pull down on Home to sync.
+- **File import**: Import file in the create menu takes images, txt, md, rtf, html, epub, docx, xlsx, and csv as well as PDFs and turns them into notes.
+- **Read-only reader**: md, docx, pptx, xlsx, csv and pdf files in the notes folder open in a read-only reader with a light/dark switch, and Convert to note turns one into an editable note.
+- **Filen cloud sync**: back up and sync notes and settings to Filen, with an on-demand Sync now action in the sidebar (hold it to open the sync settings), or pull down on Home to sync. Deletions go through a synced trash, and a banner flags notes changed on two devices.
 - **Sidebar layout**: Recent, Home, Trash and a foldable Pinned group on top, the file tree in the middle, Sync now, Preferences and About pinned to the bottom; Files, Sync now and About can each be hidden in Preferences. The collapsed sidebar shows Sync now too.
 - **Update check**: check GitHub for a newer n-notes release from Preferences.
 - **Home swipes**: swipe right on Home to open the sidebar.
-- **Create menu**: the new-note button is now a list to create a note, canvas, folder, or import a file.
-- **Sort button**: moved sorting out into its own dedicated button.
-- **Default page style**: set a default page style in settings, preselected when creating a note.
+- ~~**Create menu**: the new-note button is now a list to create a note, canvas, folder, or import a file.~~
+- ~~**Sort button**: moved sorting out into its own dedicated button.~~
+- **Hide dot files**: files and folders starting with a dot (.obsidian, .git) are hidden from the explorer, with a quick switch in View options.
+- **Default page style**: a Page template section in Preferences sets the page style new notes start with, and the new-note dialog lets you pick the template and page colour, preselected from that default.
 - **Mixed page orientation**: add a landscape page after a portrait one (or the other way round) from the page menu, for example under an imported PDF; PDF export keeps each page's orientation.
 - **Tables**: add a table shape and edit it (columns, rows, and per-line sizing).
 - **Image cropping**: crop a selected image with an interactive overlay.
+- **Hyperlinks**: add a link to a selected canvas item (Add link in the selection three-dots menu) or to text in the flow text tool, and tap it to open.
+- **Rotation snapping**: optionally snap a rotated selection to the nearest 90 degrees (Preferences).
 - **X-Y graph shape**: an x-y coordinate axes shape that can be rotated.
 - **X line shape**: a single number line with an arrowhead and tick marks.
 - **Curve shape**: a smooth line through movable points; add or remove points from the selection three-dots menu.
@@ -39,6 +45,8 @@ n-notes is a fork of [xnotes](https://github.com/shardulvs/xnotes-android). On t
 - **Handwriting to text**: convert selected handwriting into an editable text box (Czech and English) from the selection three-dots menu; reopen it later with Edit in the same menu, with font, size, and colour controls docked at the bottom.
 - **Handwriting to math**: an optional on-device add-on (downloaded and deleted in Preferences, under OCR) adds Convert to math to the selection three-dots menu, which turns handwritten formulas, fractions, exponents and integrals included, into a typeset formula; Edit in the same menu opens its LaTeX in a dialog with a live preview and a maths keyboard (fractions, powers, roots, derivatives, definite and indefinite integrals, sums, limits, functions and symbols).
 - **Pen shape snapping toggle**: turn "snap held strokes to shapes" on or off directly from the pen settings popup.
+
+Crossed-out items were later added to xnotes by its original developer.
 
 ## Versioning
 
