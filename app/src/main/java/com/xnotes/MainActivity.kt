@@ -185,6 +185,7 @@ class MainActivity : ComponentActivity() {
                         ) {
                             com.xnotes.ui.XnotesLoader()
                         }
+                        com.xnotes.ui.EyedropperOverlay()
                     }
                 }
             }
@@ -298,6 +299,10 @@ private fun EditorScreen(
     // The pane an image was picked for, and where a long-press menu asked it to land. Held together
     // so the picker's result lands in the pane that opened it, whatever the focus does meanwhile.
     var pendingInsert by remember { mutableStateOf<PendingInsert?>(null) }
+    var pendingPageInsert by remember { mutableStateOf<PendingPageInsert?>(null) }
+    var pendingImagePage by remember { mutableStateOf<PendingPageInsert?>(null) }
+    var pendingPhoto by remember { mutableStateOf<PendingPhoto?>(null) }
+    var pendingImportInto by remember { mutableStateOf<String?>(null) }
     // The same, for the infinite canvas.
     var pendingCanvasInsert by remember { mutableStateOf<PendingInsert?>(null) }
     var pendingShareUri by remember { mutableStateOf<String?>(null) }
@@ -448,6 +453,67 @@ private fun EditorScreen(
             runCatching {
                 resolver.openInputStream(uri)?.use { s -> pending.editor.insertImageAt(s.readBytes(), pending.at) }
             }.onFailure { editor.message = context.getString(R.string.err_read_image) }
+        }
+    }
+
+    // A file whose pages go into the open note, from a page's menu in the side panel.
+    val insertPagesLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val pending = pendingPageInsert; pendingPageInsert = null
+        if (uri == null || pending == null) return@rememberLauncherForActivityResult
+        val name = displayNameOf(resolver, uri) ?: "Document"
+        val mime = runCatching { resolver.getType(uri) }.getOrNull() ?: ""
+        scope.launch {
+            if (!pending.editor.importIntoOpenNote(uri.toString(), name, mime, pending.at)) editor.message = context.getString(R.string.err_read_file)
+        }
+    }
+
+    // A file appended to a note chosen in the explorer.
+    val importIntoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val note = pendingImportInto; pendingImportInto = null
+        if (uri == null || note == null) return@rememberLauncherForActivityResult
+        val name = displayNameOf(resolver, uri) ?: "Document"
+        val mime = runCatching { resolver.getType(uri) }.getOrNull() ?: ""
+        scope.launch {
+            editor.message = context.getString(if (editor.importIntoNoteFile(note, uri.toString(), name, mime)) R.string.imported_into_note else R.string.err_read_file)
+        }
+    }
+
+    // A picked image as a page of its own.
+    val imagePageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val pending = pendingImagePage; pendingImagePage = null
+        if (uri == null || pending == null) return@rememberLauncherForActivityResult
+        val name = displayNameOf(resolver, uri) ?: "image"
+        scope.launch {
+            if (!pending.editor.insertImagePage(uri, name, pending.at)) editor.message = context.getString(R.string.err_read_image)
+        }
+    }
+
+    // A photo from the camera app, written straight into a cache file we hand it.
+    val takePhotoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { taken ->
+        val pending = pendingPhoto; pendingPhoto = null
+        if (pending == null) return@rememberLauncherForActivityResult
+        if (!taken || pending.file.length() == 0L) { pending.file.delete(); return@rememberLauncherForActivityResult }
+        scope.launch {
+            val target = pending.editor
+            when {
+                pending.page != null -> target.insertImagePage(android.net.Uri.fromFile(pending.file), pending.file.name, pending.page)
+                target.canvasOpen -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { pending.file.readBytes() }
+                    .let { target.infinite.insertImage(it, pending.at) }
+                else -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { pending.file.readBytes() }
+                    .let { target.insertImageAt(it, pending.at) }
+            }
+            pending.file.delete()
+        }
+    }
+    fun takePhoto(target: Editor, at: com.xnotes.core.geometry.Pt?, page: Int?) {
+        val dir = java.io.File(context.cacheDir, "camera").apply { mkdirs() }
+        val file = java.io.File.createTempFile("photo", ".jpg", dir)
+        val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        pendingPhoto = PendingPhoto(target, file, at, page)
+        runCatching { takePhotoLauncher.launch(uri) }.onFailure {
+            pendingPhoto = null
+            file.delete()
+            editor.message = context.getString(R.string.err_no_camera)
         }
     }
 
@@ -838,6 +904,10 @@ private fun EditorScreen(
                 },
                 onOpenSplit = { first, second -> guardedAll { openSplit(first, second) } },
                 onShareFiles = { uris -> shareFiles(uris) },
+                onImportIntoNote = { note ->
+                    pendingImportInto = note
+                    importIntoLauncher.launch(importMimeTypes + arrayOf("application/octet-stream"))
+                },
                 onOpenBeside = { uri ->
                     editor.currentUri?.takeIf { !editor.isSameDocument(it, uri) }?.let { first -> { guardedAll { openSplit(first, uri) } } }
                 },
@@ -878,6 +948,24 @@ private fun EditorScreen(
                 onSharePages = { pane, pages, asPdf -> sharePages(pane, pages, asPdf) },
                 onSavePagesAsPdf = { pane, pages -> savePagesAsPdf(pane, pages) },
                 onSavePagesAsImages = { pane, pages -> savePagesAsImages(pane, pages) },
+                onInsertPages = { pane, kind, at ->
+                    when (kind) {
+                        com.xnotes.ui.PageInsert.FILE -> {
+                            pendingPageInsert = PendingPageInsert(pane, at)
+                            insertPagesLauncher.launch(importMimeTypes + arrayOf("application/octet-stream"))
+                        }
+                        com.xnotes.ui.PageInsert.IMAGE -> {
+                            pendingImagePage = PendingPageInsert(pane, at)
+                            imagePageLauncher.launch(arrayOf("image/*"))
+                        }
+                        com.xnotes.ui.PageInsert.PHOTO -> takePhoto(pane, null, at)
+                    }
+                },
+                onTakePhoto = { pane, at -> takePhoto(pane, at, null) },
+                onImagePage = { pane ->
+                    pendingImagePage = PendingPageInsert(pane, pane.pageIndex + 1)
+                    imagePageLauncher.launch(arrayOf("image/*"))
+                },
             )
             SplitHost(editor, actions)
 
@@ -1005,6 +1093,12 @@ private class GuardRequest(val editor: Editor, val action: () -> Unit)
 /** A picked image on its way into [editor], at [at] when a long-press chose the spot. */
 private class PendingInsert(val editor: Editor, val at: com.xnotes.core.geometry.Pt?)
 
+/** Pages about to go into [editor] before page [at], once a picker or the camera returns. */
+private class PendingPageInsert(val editor: Editor, val at: Int)
+
+/** A photo being taken into [file]: for [editor]'s page [page] when set, else placed at [at]. */
+private class PendingPhoto(val editor: Editor, val file: java.io.File, val at: com.xnotes.core.geometry.Pt?, val page: Int?)
+
 /** Side-panel pages of [editor] waiting on a SAF "Save as" destination. */
 private class PendingPages(val editor: Editor, val pages: List<Int>)
 
@@ -1040,6 +1134,11 @@ private class PaneActions(
     val onSharePages: (Editor, List<Int>, Boolean) -> Unit,
     val onSavePagesAsPdf: (Editor, List<Int>) -> Unit,
     val onSavePagesAsImages: (Editor, List<Int>) -> Unit,
+    val onInsertPages: (Editor, com.xnotes.ui.PageInsert, Int) -> Unit,
+    /** Take a photo and place it at the content point, or the page centre when null. */
+    val onTakePhoto: (Editor, com.xnotes.core.geometry.Pt?) -> Unit,
+    /** Pick an image and add it as a page after the current one. */
+    val onImagePage: (Editor) -> Unit,
 )
 
 /** Neither pane of a split may be squeezed below this share of the split axis. */
@@ -1198,6 +1297,7 @@ private fun EditorPane(
                     canvas,
                     onOpenBackstage = actions.onOpenBackstage,
                     onInsertImage = { actions.onInsertCanvasImage(editor, null) },
+                    onTakePhoto = { actions.onTakePhoto(editor, null) },
                     onClosePane = onClose,
                 )
             }
@@ -1210,7 +1310,7 @@ private fun EditorPane(
                     )
                     floatingBar()
                     com.xnotes.ui.SelectionMenu(canvas)
-                    com.xnotes.ui.LongPressMenu(canvas, onInsertImageAt = { c -> actions.onInsertCanvasImage(editor, c) })
+                    com.xnotes.ui.LongPressMenu(canvas, onInsertImageAt = { c -> actions.onInsertCanvasImage(editor, c) }, onTakePhotoAt = { c -> actions.onTakePhoto(editor, c) })
                     com.xnotes.ui.CanvasDebugOverlay(canvas)
                     CanvasToastPill(canvas)
                 }
@@ -1225,6 +1325,8 @@ private fun EditorPane(
                     onAddStickers = actions.onAddStickers,
                     onClosePane = onClose,
                     onImportTemplate = actions.onImportTemplate,
+                    onTakePhoto = { actions.onTakePhoto(editor, null) },
+                    onImagePage = { actions.onImagePage(editor) },
                 )
             }
             ToolbarAround(bar, onCover = editor::setToolbarCover) { floatingBar ->
@@ -1235,6 +1337,7 @@ private fun EditorPane(
                             onSharePages = { pages, asPdf -> actions.onSharePages(editor, pages, asPdf) },
                             onSavePagesAsPdf = { pages -> actions.onSavePagesAsPdf(editor, pages) },
                             onSavePagesAsImages = { pages -> actions.onSavePagesAsImages(editor, pages) },
+                            onInsertPages = { kind, at -> actions.onInsertPages(editor, kind, at) },
                         )
                     }
                     Box(modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
@@ -1251,11 +1354,16 @@ private fun EditorPane(
                         com.xnotes.ui.ScreenshotMenu(editor)
                         com.xnotes.ui.CropMenu(editor)
                         com.xnotes.ui.TextStyleBar(editor)
-                        com.xnotes.ui.LongPressMenu(editor, onInsertImageAt = { c -> actions.onInsertImage(editor, c) })
+                        com.xnotes.ui.LongPressMenu(editor, onInsertImageAt = { c -> actions.onInsertImage(editor, c) }, onTakePhotoAt = { c -> actions.onTakePhoto(editor, c) })
                         com.xnotes.ui.FlowEditMenu(editor)
                         com.xnotes.ui.SlashMenu(editor)
                         com.xnotes.ui.FlowTableMenu(editor)
                         com.xnotes.ui.TableChrome(editor)
+                        if (editor.findOpen) com.xnotes.ui.FindBar(
+                            editor.findQuery, editor::setFind,
+                            if (editor.findQuery.isBlank()) "" else if (editor.findHits.isEmpty()) "0 / 0" else "${editor.findIndex + 1} / ${editor.findHits.size}",
+                            { editor.findStep(false) }, { editor.findStep(true) }, { editor.toggleFind() },
+                        )
                         ZoomLockHint(editor)
                         RefiningPdfHint(editor)
                         CanvasToastPill(editor)
@@ -1264,6 +1372,7 @@ private fun EditorPane(
             }
             // Last children of the resized column: ride directly above the soft keyboard.
             com.xnotes.ui.TextFormatBar(editor)
+            com.xnotes.ui.MathKeyboardPanel(editor)
             com.xnotes.ui.TextBoxFormatBar(editor)
         }
     }

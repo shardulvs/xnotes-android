@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -56,6 +57,7 @@ import com.xnotes.R
 import com.xnotes.core.model.Rgba
 import com.xnotes.ui.theme.ColorMath
 import com.xnotes.ui.theme.LocalPalette
+import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.toComposeColor
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -129,9 +131,24 @@ internal fun ColorPickerPopup(
 
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
         Column(Modifier.width(GRID_W.dp).padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 TabChip(stringResource(R.string.swatches), tab == 0) { tab = 0 }
                 TabChip(stringResource(R.string.spectrum), tab == 1) { tab = 1 }
+                Spacer(Modifier.weight(1f))
+                // Close the picker and pick the colour off the screen instead; it lands like a pick here.
+                Icon(
+                    XnotesIcons.eyedropper,
+                    contentDescription = stringResource(R.string.eyedropper),
+                    tint = palette.text.toComposeColor(),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable {
+                            Eyedropper.target = onPick
+                            onDismiss()
+                        }
+                        .padding(4.dp)
+                        .size(20.dp),
+                )
             }
             Spacer(Modifier.size(12.dp))
             when (tab) {

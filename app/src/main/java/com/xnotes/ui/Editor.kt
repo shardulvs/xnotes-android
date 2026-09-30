@@ -607,16 +607,6 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     override val selectionMenuRect: com.xnotes.core.geometry.Rect? get() = selectionMenu
 
-    /** Compose mirror of the controller's table edit mode, so the selection menu's toggle updates. */
-    var tableEditMode by mutableStateOf(false)
-        private set
-
-    override val selectionIsTable: Boolean get() = controller.singleSelectedTable() != null
-    override val tableEditing: Boolean get() = tableEditMode
-    override fun toggleTableEditMode() = controller.toggleTableEditMode()
-
-    override val selectionSplinePoints: Int get() = controller.singleSelectedSpline()?.controlPoints()?.size ?: 0
-    override fun editSelectionSpline(add: Boolean) = controller.editSelectedSpline(add)
 
     override val selectionFunction: FunctionSpec? get() = controller.singleSelectedFunction()?.function
     override fun setSelectionFunction(spec: FunctionSpec): Boolean = controller.setSelectedFunction(spec)
@@ -1073,7 +1063,6 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         onContextMenu = { vp, content, locked -> contextMenu = ContextMenuTarget(vp.x, vp.y, content, locked) },
         onAddPageAtEnd = { addPageAtEnd() },
         onHaptic = { runCatching { view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS) } },
-        onTableEditingChanged = { on -> tableEditMode = on },
     )
 
     /**
@@ -1322,6 +1311,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             flowInput.startSession()
         } else {
             flowContextMenu = null
+            setMathKeyboard(false)
             flowInput.endSession()
             refreshContent()
         }
@@ -3508,25 +3498,42 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** Imports the image at [imgFile] into a new single-page `.xnote` whose page matches the image,
      *  the image filling it edge to edge. Returns its URI, or null. IO — call off-thread. */
     fun createImageNoteFile(treeUri: String, parentDocId: String, rawName: String, imgFile: java.io.File): String? {
-        val size = imageCodec.probeFile(imgFile.path) ?: return null
-        if (size.width <= 0 || size.height <= 0) return null
-        val (defW, _) = settings.prefs.newPagePixels()
-        val pageW = defW
-        val pageH = (defW * size.height.toDouble() / size.width).coerceIn(defW * 0.25, defW * 4.0)
-        val doc = Document(dpi = state.document.dpi)
-        val page = Page(pageW, pageH)
-        page.items.add(ImageItem(ImageData(imgFile, size.width, size.height), Rect(0.0, 0.0, pageW, pageH)))
-        doc.pages.add(page)
-        stampNewNoteDefaults(doc)
+        val doc = imageDocument(imgFile) ?: return null
         val name = uniqueDocumentName(treeUri, parentDocId, rawName, com.xnotes.core.util.DocumentKind.NOTE)
         return createNoteFile(treeUri, parentDocId, name) { codec.write(doc, it) { importCancelled.get() } }
+    }
+
+    /** A page [pageW] wide as tall as the image at [imgFile] needs (within 1:4 either way), the image
+     *  filling it edge to edge; null when the file is not an image. IO. */
+    private fun imagePage(imgFile: java.io.File, pageW: Double): Page? {
+        val size = imageCodec.probeFile(imgFile.path) ?: return null
+        if (size.width <= 0 || size.height <= 0) return null
+        val pageH = (pageW * size.height.toDouble() / size.width).coerceIn(pageW * 0.25, pageW * 4.0)
+        val page = Page(pageW, pageH)
+        page.items.add(ImageItem(ImageData(imgFile, size.width, size.height), Rect(0.0, 0.0, pageW, pageH)))
+        return page
+    }
+
+    /** A new single-page note holding the image at [imgFile] edge to edge. IO. */
+    private fun imageDocument(imgFile: java.io.File): Document? {
+        val page = imagePage(imgFile, settings.prefs.newPagePixels().first) ?: return null
+        val doc = Document(dpi = state.document.dpi)
+        doc.pages.add(page)
+        stampNewNoteDefaults(doc)
+        return doc
     }
 
     /** Imports [file] (txt/csv/rtf/html/md/docx/xlsx/epub) as a new `.xnote` whose flow text holds the
      *  content, laid out across as many pages as it needs. Markdown is parsed into rich text (headings,
      *  bold/italic, lists, code); the other formats are extracted as plain paragraphs. Returns its URI. IO. */
     fun createTextNoteFile(treeUri: String, parentDocId: String, rawName: String, file: java.io.File, sourceName: String, mime: String): String? {
-        val name = sourceName.ifEmpty { rawName }
+        val doc = textDocument(file, sourceName.ifEmpty { rawName }, mime)
+        val docName = uniqueDocumentName(treeUri, parentDocId, rawName, com.xnotes.core.util.DocumentKind.NOTE)
+        return createNoteFile(treeUri, parentDocId, docName) { codec.write(doc, it) { importCancelled.get() } }
+    }
+
+    /** A new note whose flow text holds [file]'s content (named [name] for its type), paginated. IO. */
+    private fun textDocument(file: java.io.File, name: String, mime: String): Document {
         val ext = name.substringAfterLast('.', "").lowercase()
         val isMarkdown = ext == "md" || ext == "markdown" || mime == "text/markdown" || mime == "text/x-markdown"
         val doc = blankDocument()
@@ -3543,8 +3550,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             doc.flow.paragraphs.addAll(paragraphs)
             paginateFlow(doc)
         }
-        val docName = uniqueDocumentName(treeUri, parentDocId, rawName, com.xnotes.core.util.DocumentKind.NOTE)
-        return createNoteFile(treeUri, parentDocId, docName) { codec.write(doc, it) { importCancelled.get() } }
+        return doc
     }
 
     /** Append pages (sized like the last) until [doc]'s flow text stops overflowing past the real pages. */
@@ -3559,6 +3565,223 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             repeat(need) { doc.pages.add(Page(last.width, last.height)) }
         }
     }
+
+    // --- putting one note or file into another ---
+
+    /**
+     * The picked [staged] file built into a note whose files (source PDF, images) live in this
+     * editor's own dirs, so they outlive the staged copy; null when it will not read. IO.
+     */
+    private fun buildImportedDocument(kind: ImportKind, staged: java.io.File, sourceName: String, mime: String): Document? {
+        fun keep(dir: java.io.File, suffix: String) =
+            java.io.File.createTempFile("imp", suffix, dir).also { staged.copyTo(it, overwrite = true) }
+        return when (kind) {
+            ImportKind.PDF -> {
+                val file = keep(pdfDir, ".pdf")
+                val source = com.xnotes.platform.PdfSource.create(appContext, file) ?: return null
+                try { com.xnotes.platform.PdfImporter.import(source, state.document.dpi) } finally { source.close() }
+            }
+            ImportKind.IMAGE -> imageDocument(keep(imageDir, "." + sourceName.substringAfterLast('.', "img")))
+            ImportKind.TEXT -> textDocument(staged, sourceName, mime)
+            ImportKind.OPEN -> runCatching { java.io.FileInputStream(staged).use { codec.read(it, pdfDir, imageDir) } }.getOrNull()
+        }
+    }
+
+    /** Where [appendDocument] finds the source's PDF pages: [file] becomes the note's PDF (the source's,
+     *  or both merged, the source's pages [offset] on), or else [flatten] is baked into images. */
+    private class PdfPlan(val file: java.io.File?, val offset: Int, val flatten: java.io.File?)
+
+    /** Merge [src]'s PDF into [target]'s when both have one. IO. */
+    private fun planPdf(target: java.io.File?, src: Document): PdfPlan {
+        val srcPdf = src.pdfFile
+        if (srcPdf == null || src.pages.none { it.pdfPage != null }) return PdfPlan(null, 0, null)
+        if (target == null) return PdfPlan(srcPdf, 0, null)
+        val out = java.io.File.createTempFile("merged", ".pdf", pdfDir)
+        val offset = com.xnotes.platform.PdfMerge.merge(appContext, target, srcPdf, out) ?: return PdfPlan(null, 0, srcPdf)
+        return PdfPlan(out, offset, null)
+    }
+
+    /** Add the image read from [uri] (named [name]) as a page of its own before page [at], undoably. */
+    suspend fun insertImagePage(uri: android.net.Uri, name: String, at: Int): Boolean {
+        val doc = state.document
+        val width = doc.pages.getOrNull((at - 1).coerceAtLeast(0))?.width ?: settings.prefs.newPagePixels().first
+        val page = withContext(Dispatchers.IO) {
+            runCatching {
+                val file = java.io.File.createTempFile("page", "." + name.substringAfterLast('.', "img"), imageDir)
+                appContext.contentResolver.openInputStream(uri)?.use { input -> file.outputStream().use { input.copyTo(it) } } ?: return@runCatching null
+                imagePage(file, width)
+            }.getOrNull()
+        } ?: return false
+        if (state.document !== doc) return false
+        val i = at.coerceIn(0, doc.pages.size)
+        doc.pages.add(i, page)
+        history.push(AddPage(doc, page, i))
+        afterPageEdit()
+        goToPage(i)
+        return true
+    }
+
+    /** Copy the picked file at [uri] in and build it as a note; null when it will not read. IO. */
+    private fun readImport(uri: String, name: String, mime: String): Document? {
+        val staged = runCatching {
+            appContext.contentResolver.openInputStream(android.net.Uri.parse(uri))?.let { stageImport(it) }
+        }.getOrNull() ?: return null
+        return try {
+            buildImportedDocument(ImportKind.classify(name, mime), staged, name, mime)
+        } finally {
+            staged.delete()
+        }
+    }
+
+    /** Put the file at [uri] into the open note before page [at], as one undoable step. */
+    suspend fun importIntoOpenNote(uri: String, name: String, mime: String, at: Int): Boolean {
+        importCancelled.set(false)
+        importing = true
+        val doc = state.document
+        val prepared = try {
+            withContext(Dispatchers.IO) { readImport(uri, name, mime)?.let { it to planPdf(doc.pdfFile, it) } }
+        } finally {
+            importing = false
+        }
+        val (src, plan) = prepared ?: return false
+        if (state.document !== doc) return false
+        val pdfBefore = doc.pdfFile
+        history.push(appendDocument(doc, src, at, plan) { rebuildPdfSource() })
+        if (doc.pdfFile != pdfBefore) rebuildPdfSource()
+        afterPageEdit()
+        goToPage(at.coerceIn(0, doc.pages.lastIndex))
+        return true
+    }
+
+    /** Append the file at [uri] to the end of the note at [noteUri], open or not. */
+    suspend fun importIntoNoteFile(noteUri: String, uri: String, name: String, mime: String): Boolean {
+        val open = state.document.path
+        if (open != null && isSameDocument(open, noteUri)) return importIntoOpenNote(uri, name, mime, state.document.pages.size)
+        importCancelled.set(false)
+        importing = true
+        return try {
+            withContext(Dispatchers.IO) {
+                val target = readNote(noteUri) ?: return@withContext false
+                val src = readImport(uri, name, mime) ?: return@withContext false
+                appendDocument(target, src, target.pages.size, planPdf(target.pdfFile, src)) {}
+                writeDocument(noteUri, target)
+            }
+        } finally {
+            importing = false
+        }
+    }
+
+    /** Join the notes at [uris], in order, into a new note named [rawName] under [parentDocId]; its URI or null. */
+    suspend fun mergeNotes(uris: List<String>, treeUri: String, parentDocId: String, rawName: String): String? {
+        if (uris.size < 2) return null
+        importCancelled.set(false)
+        importing = true
+        return try {
+            withContext(Dispatchers.IO) {
+                val docs = uris.map { readNote(it) ?: return@withContext null }
+                val base = docs.first()
+                for (next in docs.drop(1)) appendDocument(base, next, base.pages.size, planPdf(base.pdfFile, next)) {}
+                base.path = null
+                base.displayName = null
+                base.created = System.currentTimeMillis()
+                val name = uniqueDocumentName(treeUri, parentDocId, rawName, com.xnotes.core.util.DocumentKind.NOTE)
+                createNoteFile(treeUri, parentDocId, name) { codec.write(base, it) { importCancelled.get() } }
+            }
+        } finally {
+            importing = false
+        }
+    }
+
+    private fun readNote(uri: String): Document? = runCatching {
+        appContext.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { codec.read(it, pdfDir, imageDir) }
+    }.getOrNull()
+
+    /** Encode [doc] in full first, then replace the file at [uri], so a failed encode never truncates it. IO. */
+    private fun writeDocument(uri: String, doc: Document): Boolean = runCatching {
+        val tmp = java.io.File.createTempFile("merge", ".xnote", saveTmpDir)
+        try {
+            java.io.FileOutputStream(tmp).use { codec.write(doc, it) }
+            appContext.contentResolver.openOutputStream(android.net.Uri.parse(uri), "wt")?.use { out ->
+                java.io.FileInputStream(tmp).use { it.copyTo(out) }
+            } ?: return@runCatching false
+            true
+        } finally {
+            tmp.delete()
+        }
+    }.getOrDefault(false)
+
+    /**
+     * Put [src]'s pages into [target] before page [at], as one undoable command (already applied).
+     * A source PDF is merged into the target's so its pages stay vector; the source's flowing text
+     * follows the target's and is pushed down to start on the first page put in. IO for PDF merges.
+     */
+    private fun appendDocument(target: Document, src: Document, at: Int, plan: PdfPlan, onPdfSwap: () -> Unit): Command {
+        val cmds = ArrayList<Command>()
+        val insertAt = at.coerceIn(0, target.pages.size)
+        if (plan.file != null && plan.file != target.pdfFile) {
+            cmds.add(com.xnotes.core.history.SetPdfFile(target, target.pdfFile, plan.file, onPdfSwap))
+            target.pdfFile = plan.file
+        }
+        src.pages.forEachIndexed { k, p ->
+            val page = p.deepCopy(textMeasurer)
+            page.style = page.style.over(src.style)
+            if (plan.flatten != null) flattenForeignPdfPage(page, plan.flatten) else page.pdfPage = page.pdfPage?.let { it + plan.offset }
+            target.pages.add(insertAt + k, page)
+            cmds.add(AddPage(target, page, insertAt + k))
+        }
+        for (b in target.bookmarks) if (b.page >= insertAt) b.page += src.pages.size
+        src.bookmarks.forEach { target.bookmarks.add(Bookmark(it.page + insertAt, it.label)) }
+        target.templates = src.templates + target.templates
+        if (!src.flow.isEmpty) cmds.addAll(appendFlow(target, src, insertAt))
+        return CompositeCommand(cmds)
+    }
+
+    /** Follow [target]'s flowing text with [src]'s, padded with blank lines so it starts on page
+     *  [firstPage], then add pages for whatever overflows. Returns the applied commands. */
+    private fun appendFlow(target: Document, src: Document, firstPage: Int): List<Command> {
+        val flow = target.flow
+        val paras = flow.paragraphs
+        val removed = if (flow.isEmpty) paras.toList() else emptyList()
+        val index = paras.size - removed.size
+        val incoming = src.flow.paragraphs.map { it.deepCopy() }
+        // Try the text in place and add blank lines ahead of it until its first line reaches its page:
+        // most of a page at a time while it is pages short, then a line at a time.
+        repeat(removed.size) { paras.removeAt(index) }
+        paras.addAll(index, incoming)
+        flow.touch()
+        val pad = ArrayList<com.xnotes.core.text.Paragraph>()
+        var guard = 0
+        while (guard++ < 400) {
+            val frame = flowLayout.layout(flow, target.pages.map { com.xnotes.core.text.PageBox(it.width, it.height) }, target.dpi)
+            val (page, caret) = frame.caretRect(FlowPos(index + pad.size, 0)) ?: break
+            if (page >= firstPage) break
+            val pageH = target.pages.getOrNull(page)?.height ?: break
+            val lines = if (page < firstPage - 1) ((pageH / caret.h.coerceAtLeast(1.0)) * 0.9).toInt().coerceAtLeast(1) else 1
+            val blanks = List(lines) { com.xnotes.core.text.Paragraph() }
+            paras.addAll(index, blanks)
+            pad.addAll(blanks)
+            flow.touch()
+        }
+        // Put the flow back and apply it all as one splice, so one undo takes the padding with the text.
+        repeat(pad.size + incoming.size) { paras.removeAt(index) }
+        paras.addAll(index, removed)
+        val splice = com.xnotes.core.history.FlowSplice(flow, index, removed, pad + incoming).also { it.redo() }
+        val cmds = arrayListOf<Command>(splice)
+        val before = target.pages.size
+        paginateFlow(target)
+        for (i in before until target.pages.size) cmds.add(AddPage(target, target.pages[i], i))
+        return cmds
+    }
+
+    private fun PageStyle.over(base: PageStyle) = PageStyle(
+        pageColor = pageColor ?: base.pageColor,
+        template = template ?: base.template,
+        patternColor = patternColor ?: base.patternColor,
+        spacing = spacing ?: base.spacing,
+        accentColor = accentColor ?: base.accentColor,
+        params = params ?: base.params,
+        colors = colors ?: base.colors,
+    )
 
     /** Streams [input] to a private temp file for a pending import; returns it, or null. The caller
      *  owns the file (it's handed to [requestImport]). Copies in small buffers so a large pick never
@@ -5517,9 +5740,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * stands alone. Same-PDF pastes (duplicating within a PDF note) keep the vector link untouched.
      * On any failure the background is simply dropped, leaving a blank page with the copied items.
      */
-    private fun flattenForeignPdfPage(page: Page) {
+    private fun flattenForeignPdfPage(page: Page, srcPdf: java.io.File? = PageClipboard.sourcePdfFile) {
         val pi = page.pdfPage ?: return
-        val srcPdf = PageClipboard.sourcePdfFile
         if (srcPdf != null && srcPdf === state.document.pdfFile) return // same PDF note: keep the link
         page.pdfPage = null
         if (srcPdf == null) return
@@ -6387,6 +6609,34 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         message = appContext.getString(R.string.code_theme_imported)
     }
 
+    /** Write every setting (pens, colours, toolbars, preferences, sync options) and the imported
+     *  fonts, templates, stickers and code theme to [out] as one zip. The Filen login stays behind. IO. */
+    fun exportSettings(out: java.io.OutputStream) {
+        com.xnotes.settings.SettingsBackup.export(settings.toJson(), appContext.filesDir, out)
+    }
+
+    /** Adopt settings from a zip written by [exportSettings], applying them live in both panes. */
+    suspend fun importSettings(input: java.io.InputStream): Boolean {
+        val current = settings.toJson()
+        val adopted = withContext(Dispatchers.IO) {
+            runCatching { com.xnotes.settings.SettingsBackup.import(input, current, appContext.filesDir) }.getOrNull()
+        } ?: return false
+        settings = com.xnotes.settings.Settings.fromJson(adopted)
+        settingsRepo.save(settings)
+        com.xnotes.platform.FontCatalog.init(appContext)
+        com.xnotes.platform.TemplateLibrary.init(appContext)
+        for (editor in listOfNotNull(this, sibling)) {
+            editor.stickers = editor.listStickers()
+            editor.customCodeTheme = settings.prefs.codeThemePath?.let { path ->
+                runCatching { com.xnotes.format.HelixTheme.parse(java.io.File(path).readText()) }.getOrNull()
+            }
+            editor.applySettings()
+        }
+        applyPreferences(settings.prefs)
+        for (editor in listOfNotNull(this, sibling)) editor.retheme()
+        return true
+    }
+
     /** Back to the built-in dark/light code colours. */
     fun resetCodeTheme() {
         settings.prefs.codeThemePath?.let { runCatching { java.io.File(it).delete() } }
@@ -6480,8 +6730,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     fun flowToggleMath() {
         if (!flowText.active) return
         val sel = flowText.selection.normalized()
+        if (mathKeyboardShown) {
+            setMathKeyboard(false)
+            return
+        }
+        // With nothing selected the button starts a formula at the caret, typed on the maths keyboard.
         if (sel.collapsed) {
-            say(appContext.getString(R.string.select_latex_first))
+            flowText.pendingStyle = flowCaretStyle().copy(math = true)
+            setMathKeyboard(true)
             return
         }
         val on = !flowCaretStyle().math
@@ -6498,8 +6754,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 val (cmd, caret) = ed.replaceRange(range, PlainMath.toLatex(plain.trim()), style)
                 flowText.mirrorStale = true
                 flowText.commitEdit(cmd, caret)
-                flowText.pendingStyle = CharStyle.DEFAULT
                 flowSelTick++
+                setMathKeyboard(true)
                 return
             }
         }
@@ -6507,6 +6763,178 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             FlowEditor(state.document.flow).setCharStyle(sel) { it.copy(math = on) },
             null,
         )
+        flowSelTick++
+    }
+
+    /** One find-in-note hit: the boxes (page space) it covers on page [page]. */
+    class FindHit(val page: Int, val rects: List<com.xnotes.core.geometry.Rect>)
+
+    var findOpen by mutableStateOf(false)
+        private set
+    var findQuery by mutableStateOf("")
+        private set
+    var findHits by mutableStateOf<List<FindHit>>(emptyList())
+        private set
+    var findIndex by mutableStateOf(0)
+        private set
+    private var findJob: kotlinx.coroutines.Job? = null
+
+    fun toggleFind() {
+        findOpen = !findOpen
+        runFind()
+    }
+
+    fun setFind(query: String) {
+        findQuery = query
+        runFind()
+    }
+
+    /** Search the flowing text, every text box and the note's PDF text for [findQuery]. */
+    private fun runFind() {
+        findJob?.cancel()
+        val q = findQuery.trim().lowercase()
+        if (!findOpen || q.isEmpty()) {
+            findHits = emptyList()
+            publishFind()
+            return
+        }
+        val doc = state.document
+        val local = ArrayList<FindHit>()
+        val frame = publishedFlow?.frame
+        doc.flow.paragraphs.forEachIndexed { p, para ->
+            val text = para.plainText().lowercase()
+            var at = text.indexOf(q)
+            while (at >= 0) {
+                val rects = frame?.selectionRects(FlowRange(FlowPos(p, at), FlowPos(p, at + q.length))).orEmpty()
+                rects.groupBy { it.first }.forEach { (page, rs) -> local.add(FindHit(page, rs.map { it.second })) }
+                at = text.indexOf(q, at + q.length)
+            }
+        }
+        doc.pages.forEachIndexed { i, page ->
+            for (item in page.items) {
+                if (item is com.xnotes.core.model.TextItem && item.text.lowercase().contains(q)) local.add(FindHit(i, listOf(item.bounds())))
+            }
+        }
+        val pdf = doc.pdfFile
+        findJob = autosaveScope.launch {
+            val fromPdf = if (pdf == null) emptyList() else {
+                delay(200)
+                withContext(Dispatchers.IO) {
+                    val text = com.xnotes.platform.PdfText.pages(appContext, pdf)
+                    val hits = com.xnotes.platform.PdfText.find(text, q)
+                    doc.pages.flatMapIndexed { i, page ->
+                        val n = page.pdfPage ?: return@flatMapIndexed emptyList()
+                        hits.filter { it.page == n }.map { m ->
+                            FindHit(i, m.rects.map { r -> com.xnotes.core.geometry.Rect(r.x * page.width, r.y * page.height, r.w * page.width, r.h * page.height) })
+                        }
+                    }
+                }
+            }
+            findHits = (local + fromPdf).sortedWith(compareBy({ it.page }, { it.rects.first().y }, { it.rects.first().x }))
+            findIndex = 0
+            revealFind()
+        }
+    }
+
+    fun findStep(forward: Boolean) {
+        if (findHits.isEmpty()) return
+        findIndex = (findIndex + if (forward) 1 else findHits.size - 1) % findHits.size
+        revealFind()
+    }
+
+    /** Bring the current hit on screen, unless it already is, and repaint the highlights. */
+    private fun revealFind() {
+        publishFind()
+        val hit = findHits.getOrNull(findIndex) ?: return
+        val r = hit.rects.firstOrNull() ?: return
+        if (state.pageRects.getOrNull(hit.page) == null) return
+        val content = state.fromPageSpaceRect(hit.page, r)
+        val top = state.contentToViewport(Pt(content.left, content.top))
+        val bottom = state.contentToViewport(Pt(content.right, content.bottom))
+        val visible = top.y >= state.insetTop && bottom.y <= state.viewportH - state.insetBottom &&
+            top.x >= 0 && bottom.x <= state.viewportW
+        if (visible) return
+        state.goToPage(hit.page)
+        if (state.verticalScroll) {
+            val mid = state.contentToViewport(Pt(0.0, content.centerY)).y
+            state.scrollBy(0.0, mid - (state.insetTop + state.clearH / 2.0))
+        }
+        afterView()
+    }
+
+    private fun publishFind() {
+        controller.findHighlights = findHits.flatMap { h -> h.rects.map { h.page to it } }
+        controller.findCurrent = findHits.getOrNull(findIndex)?.let { h -> h.rects.map { h.page to it } }.orEmpty()
+        onRender()
+    }
+
+    /** The maths keyboard stands in for the soft keyboard while a formula is typed into the flow. */
+    var mathKeyboardShown by mutableStateOf(false)
+        private set
+
+    fun setMathKeyboard(on: Boolean) {
+        if (mathKeyboardShown == on) return
+        mathKeyboardShown = on
+        // Text typed after the formula is plain again.
+        if (!on && flowText.active) flowText.pendingStyle = flowCaretStyle().copy(math = false, mathDisplay = false)
+        flowInput.imeSuppressed = on
+    }
+
+    /** Type a maths key's [template] into the formula at the caret, the cursor landing at its `#`. */
+    fun flowMathKey(template: String) {
+        if (!flowText.active) return
+        val sel = flowText.selection.normalized()
+        val para = state.document.flow.paragraphs.getOrNull(sel.start.para) ?: return
+        val plain = para.plainText()
+        val selected = if (sel.start.para == sel.end.para) plain.substring(sel.start.offset, sel.end.offset) else ""
+        val (text, cursor) = latexInsertion(plain.substring(0, sel.start.offset), selected, template)
+        val style = flowCaretStyle().copy(math = true)
+        flowText.mirrorStale = true
+        flowText.applyReplace(sel, text, style)
+        flowText.setSelection(FlowRange.caret(FlowPos(sel.start.para, sel.start.offset + cursor)))
+        flowText.pendingStyle = style
+        flowInput.reconcile()
+        flowSelTick++
+    }
+
+    fun flowMathBackspace() {
+        if (!flowText.active) return
+        val sel = flowText.selection.normalized()
+        val flow = state.document.flow
+        val range = when {
+            !sel.collapsed -> sel
+            sel.start.offset > 0 -> FlowRange(FlowPos(sel.start.para, sel.start.offset - 1), sel.start)
+            sel.start.para > 0 -> FlowRange(FlowPos(sel.start.para - 1, flow.paragraphs[sel.start.para - 1].length), sel.start)
+            else -> return
+        }
+        flowText.mirrorStale = true
+        flowText.applyReplace(range, "")
+        flowInput.reconcile()
+        flowSelTick++
+    }
+
+    fun flowMathEnter() {
+        if (!flowText.active) return
+        flowText.mirrorStale = true
+        flowText.applyReplace(flowText.selection.normalized(), "\n")
+        flowInput.reconcile()
+        flowSelTick++
+    }
+
+    /** Step the caret [by] characters within its paragraph (or onto the neighbouring one). */
+    fun flowMathMove(by: Int) {
+        if (!flowText.active) return
+        val flow = state.document.flow
+        val at = flowText.selection.normalized().let { if (by < 0) it.start else it.end }
+        val len = flow.paragraphs.getOrNull(at.para)?.length ?: return
+        val next = when {
+            at.offset + by in 0..len -> FlowPos(at.para, at.offset + by)
+            by < 0 && at.para > 0 -> FlowPos(at.para - 1, flow.paragraphs[at.para - 1].length)
+            by > 0 && at.para < flow.paragraphs.size - 1 -> FlowPos(at.para + 1, 0)
+            else -> at
+        }
+        flowText.setSelection(FlowRange.caret(next))
+        flowText.pendingStyle = flowCaretStyle().copy(math = true)
         flowSelTick++
     }
 

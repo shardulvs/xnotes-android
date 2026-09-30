@@ -252,7 +252,8 @@ class CanvasCodec(private val imageCodec: ImageCodec) {
         // Polygon/polyline carry their vertices (absolute content px); other kinds omit them.
         s.vertices()?.let { verts ->
             j.name("points").beginArray()
-            for (p in verts) j.beginArray().value(p.x).value(p.y).endArray()
+            // A break between two runs (a plotted function's pole) is written as an empty point.
+            for (p in verts) if (p.x.isNaN()) j.beginArray().endArray() else j.beginArray().value(p.x).value(p.y).endArray()
             j.endArray()
         }
         if (s.neon) {
@@ -269,6 +270,10 @@ class CanvasCodec(private val imageCodec: ImageCodec) {
             j.name("function").value(it.expr)
             j.name("function_from").value(it.from)
             j.name("function_to").value(it.to)
+            if (it.yMin != null && it.yMax != null) {
+                j.name("function_ymin").value(it.yMin)
+                j.name("function_ymax").value(it.yMax)
+            }
         }
         if (s.locked) j.name("locked").value(true)
         j.endObject()
@@ -518,6 +523,8 @@ class CanvasCodec(private val imageCodec: ImageCodec) {
         var function: String? = null
         var functionFrom = 0.0
         var functionTo = 0.0
+        var functionYMin: Double? = null
+        var functionYMax: Double? = null
     }
 
     /** Stroke config fields as written; null = absent, so defaults resolve exactly as before. */
@@ -572,6 +579,8 @@ class CanvasCodec(private val imageCodec: ImageCodec) {
                 "function" -> s.function = stringOr(p, "")
                 "function_from" -> s.functionFrom = doubleOr(p, 0.0)
                 "function_to" -> s.functionTo = doubleOr(p, 0.0)
+                "function_ymin" -> s.functionYMin = doubleOr(p, 0.0)
+                "function_ymax" -> s.functionYMax = doubleOr(p, 0.0)
                 "locked" -> s.locked = boolOr(p, false)
                 else -> p.skipValue()
             }
@@ -626,11 +635,14 @@ class CanvasCodec(private val imageCodec: ImageCodec) {
     private fun buildShape(s: ItemScratch): ShapeItem {
         val kind = ShapeKind.fromId(s.shape)
         val strokeRgba = s.strokeRgba ?: DEFAULT_SHAPE_STROKE
-        s.points?.let { verts ->
+        val spec = s.function?.let { FunctionSpec(it, s.functionFrom, s.functionTo, s.functionYMin, s.functionYMax) }
+        // A plotted function is replotted from its spec in its box; the stored samples are for old readers.
+        val plotted = kind == ShapeKind.FUNCTION && spec?.normalizedSamples() != null && s.start != null && s.end != null
+        if (!plotted) s.points?.let { verts ->
             return ShapeItem.poly(
                 kind, verts, strokeRgba, s.strokeWidth, s.fillRgba, s.neon, s.neonStrength,
                 s.dashed, s.dashLength, s.dashGap,
-            ).also { shape -> s.function?.let { shape.function = FunctionSpec(it, s.functionFrom, s.functionTo) } }
+            ).also { shape -> shape.function = spec }
         }
         return ShapeItem(
             shape = kind,
@@ -645,6 +657,7 @@ class CanvasCodec(private val imageCodec: ImageCodec) {
             dashLength = s.dashLength,
             dashGap = s.dashGap,
             angle = s.angle,
+            function = if (plotted) spec else null,
         )
     }
 
@@ -825,9 +838,11 @@ class CanvasCodec(private val imageCodec: ImageCodec) {
         }
         val out = ArrayList<Pt>()
         p.beginArray()
-        while (p.hasNext()) ptOrNull(p)?.let { out.add(it) }
+        while (p.hasNext()) out.add(ptOrNull(p) ?: FunctionSpec.BREAK)
         p.endArray()
-        return if (out.size >= 2) out else null
+        while (out.isNotEmpty() && out.last().x.isNaN()) out.removeAt(out.size - 1)
+        while (out.isNotEmpty() && out.first().x.isNaN()) out.removeAt(0)
+        return if (out.count { !it.x.isNaN() } >= 2) out else null
     }
 
     companion object {

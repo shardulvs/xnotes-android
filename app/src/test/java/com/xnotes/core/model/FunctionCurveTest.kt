@@ -54,7 +54,7 @@ class FunctionCurveTest {
     }
 
     @Test fun shapeReplotsAndRoundTripsThroughUndo() {
-        val s = ShapeItem(ShapeKind.FUNCTION, Pt(0.0, 0.0), Pt(100.0, 50.0), Rgba(0, 0, 0, 255), function = FunctionSpec.PRESETS[4])
+        val s = ShapeItem(ShapeKind.FUNCTION, Pt(0.0, 0.0), Pt(100.0, 50.0), Rgba(0, 0, 0, 255), function = FunctionSpec.preset("sin(x)"))
         assertNotNull(s.vertices())
         val before = s.snapshotGeometry()
         assertTrue(s.setFunction(FunctionSpec("sin(2x)", -PI, PI)))
@@ -62,5 +62,22 @@ class FunctionCurveTest {
         assertFalse(s.setFunction(FunctionSpec("nope(", 0.0, 1.0)))
         s.restoreGeometry(before)
         assertEquals("sin(x)", s.function!!.expr)
+    }
+
+    @Test fun tangentBreaksAtItsPoles() {
+        val pts = FunctionSpec.preset("tan(x)").normalizedSamples()!!
+        val runs = FunctionSpec.runs(pts)
+        assertEquals(3, runs.size)
+        for (run in runs) for (p in run) assertTrue(p.y in -1e-9..1.0 + 1e-9)
+        // Each run reaches the clip edges rather than stopping a sample short of them.
+        for (run in runs) {
+            assertEquals(1.0, run.maxOf { it.y }, 0.02)
+            assertEquals(0.0, run.minOf { it.y }, 0.02)
+        }
+    }
+
+    @Test fun naturalAspectMatchesEqualScales() {
+        assertEquals(1.0, FunctionSpec("x^2", -2.0, 2.0).naturalAspect()!!, 1e-9)
+        assertEquals(2.0 / (4 * PI), FunctionSpec.preset("sin(x)").naturalAspect()!!, 1e-3)
     }
 }

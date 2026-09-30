@@ -40,6 +40,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.key
@@ -59,6 +60,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalContext
@@ -95,6 +97,7 @@ import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 internal val pageColorPresets = listOf(
     Rgba(22, 22, 22), Rgba(13, 13, 13), Rgba(255, 255, 255), Rgba(247, 243, 233), Rgba(232, 232, 232),
@@ -151,6 +154,15 @@ fun PreferencesPane(
     LaunchedEffect(editor.prefsVersion) { prefs = editor.preferences }
 
     val scrollState = rememberScrollState()
+    val search = remember { PrefSearch() }
+    val searchScope = androidx.compose.runtime.rememberCoroutineScope()
+    fun showHit(i: Int) {
+        val hits = search.hits()
+        if (hits.isEmpty()) return
+        search.current = ((i % hits.size) + hits.size) % hits.size
+        val y = hits[search.current].second
+        searchScope.launch { scrollState.animateScrollTo((y - 24f * search.density).roundToInt().coerceAtLeast(0)) }
+    }
     var syncTop by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(focusSync, syncTop) {
         val top = syncTop ?: return@LaunchedEffect
@@ -223,9 +235,26 @@ fun PreferencesPane(
             }
             Text(stringResource(R.string.preferences), color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 20.sp)
             Spacer(Modifier.weight(1f))
+            IconButton(onClick = { search.open = !search.open; if (!search.open) search.query = "" }) {
+                Icon(XnotesIcons.search, stringResource(R.string.search_settings), tint = palette.text.toComposeColor(), modifier = Modifier.size(22.dp))
+            }
             TextButton(onClick = { update(Preferences()) }) { Text(stringResource(R.string.reset_to_defaults), fontSize = 13.sp) }
         }
+        if (search.open) {
+            val hits = search.hits()
+            FindBar(
+                search.query,
+                { search.query = it; search.current = 0; showHit(0) },
+                if (search.query.isBlank()) "" else if (hits.isEmpty()) "0 / 0" else "${search.current + 1} / ${hits.size}",
+                { showHit(search.current - 1) },
+                { showHit(search.current + 1) },
+                { search.open = false; search.query = "" },
+            )
+        }
         Spacer(Modifier.height(12.dp))
+        search.toContentY = { rootY -> rootY - viewport.top + scrollState.value }
+        search.density = androidx.compose.ui.platform.LocalDensity.current.density
+        CompositionLocalProvider(LocalPrefSearch provides search) {
         Column(
             // Ending at the keyboard's edge scrolls a focused field up out from under it.
             Modifier.fillMaxSize().imePadding().verticalScroll(scrollState)
@@ -703,10 +732,13 @@ fun PreferencesPane(
                 },
             )
             HorizontalDivider(color = palette.border.toComposeColor())
-            Box(Modifier.onPlaced { syncTop = it.positionInParent().y.roundToInt() }) { FilenSyncSection(editor) }
+            BackupSection(editor)
             HorizontalDivider(color = palette.border.toComposeColor())
-            UpdateSection()
+            Box(Modifier.onPlaced { syncTop = it.positionInParent().y.roundToInt() }.searchAnchor(stringResource(R.string.search_keywords_sync))) { FilenSyncSection(editor) }
+            HorizontalDivider(color = palette.border.toComposeColor())
+            Box(Modifier.searchAnchor(stringResource(R.string.search_keywords_update))) { UpdateSection() }
             Spacer(Modifier.size(8.dp))
+        }
         }
     }
         // The dragged chip/section's floating copy: a pane-root sibling so the scroll never clips it.
@@ -798,14 +830,100 @@ private fun MathAddonControls() {
     }
 }
 
+/** Export every setting to a zip, or adopt one, for a new device or a fresh install. */
+@Composable
+private fun BackupSection(editor: Editor) {
+    val palette = LocalPalette.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var confirmImport by remember { mutableStateOf<android.net.Uri?>(null) }
+    val exportLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { context.contentResolver.openOutputStream(uri, "wt")?.use { editor.exportSettings(it) } != null }.getOrDefault(false)
+            }
+            editor.message = context.getString(if (ok) R.string.settings_exported else R.string.err_export_settings)
+        }
+    }
+    val importLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri -> confirmImport = uri }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        SectionTitle(stringResource(R.string.pref_backup))
+        Text(stringResource(R.string.pref_backup_help), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
+        Row {
+            TextButton(onClick = { exportLauncher.launch("n-notes-settings.zip") }) { Text(stringResource(R.string.export_settings), fontSize = 13.sp) }
+            TextButton(onClick = { importLauncher.launch(arrayOf("application/zip", "application/octet-stream")) }) { Text(stringResource(R.string.import_settings), fontSize = 13.sp) }
+        }
+    }
+    confirmImport?.let { uri ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmImport = null },
+            title = { Text(stringResource(R.string.import_settings)) },
+            text = { Text(stringResource(R.string.import_settings_confirm)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmImport = null
+                    scope.launch {
+                        val ok = runCatching {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { context.contentResolver.openInputStream(uri) }
+                                ?.use { editor.importSettings(it) } ?: false
+                        }.getOrDefault(false)
+                        editor.message = context.getString(if (ok) R.string.settings_imported else R.string.err_import_settings)
+                    }
+                }) { Text(stringResource(R.string.replace)) }
+            },
+            dismissButton = { TextButton(onClick = { confirmImport = null }) { Text(stringResource(R.string.cancel)) } },
+        )
+    }
+}
+
 @Composable
 private fun SectionTitle(text: String) {
-    Text(text, color = LocalPalette.current.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 15.sp)
+    Text(text, color = LocalPalette.current.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.searchAnchor(text))
 }
 
 @Composable
 private fun FieldLabel(text: String) {
-    Text(text, color = LocalPalette.current.accent.toComposeColor(), fontSize = 13.sp)
+    Text(text, color = LocalPalette.current.accent.toComposeColor(), fontSize = 13.sp, modifier = Modifier.searchAnchor(text))
+}
+
+/**
+ * The Preferences search: every section title and setting label registers where it sits in the
+ * scrolled column, so a query can light up the matches and step the scroll from one to the next.
+ */
+private class PrefSearch {
+    var open by mutableStateOf(false)
+    var query by mutableStateOf("")
+    var current by mutableStateOf(0)
+    var toContentY: (Float) -> Float = { it }
+    var density = 1f
+    /** Label text and its top in the column's content, by the label that registered it. Read only
+     *  when searching, so it is a plain map: a scroll repositions labels without recomposing. */
+    val anchors = HashMap<Any, Pair<String, Float>>()
+
+    fun matches(text: String): Boolean = query.isNotBlank() && text.contains(query.trim(), ignoreCase = true)
+
+    /** The matching labels, top to bottom. */
+    fun hits(): List<Pair<String, Float>> = anchors.values.filter { matches(it.first) }.sortedBy { it.second }
+}
+
+private val LocalPrefSearch = androidx.compose.runtime.staticCompositionLocalOf<PrefSearch?> { null }
+
+/** Register this label with the Preferences search under [text], and tint it while it matches. */
+@Composable
+private fun Modifier.searchAnchor(text: String): Modifier {
+    val search = LocalPrefSearch.current ?: return this
+    val key = remember { Any() }
+    androidx.compose.runtime.DisposableEffect(key) { onDispose { search.anchors.remove(key) } }
+    val hit = search.matches(text)
+    val tint = LocalPalette.current.accent.withAlpha(if (hit && search.hits().getOrNull(search.current)?.first == text) 90 else 40).toComposeColor()
+    return this
+        .onGloballyPositioned { search.anchors[key] = text to search.toContentY(it.positionInRoot().y) }
+        .then(if (hit) Modifier.background(tint, MaterialTheme.shapes.extraSmall) else Modifier)
 }
 
 @OptIn(ExperimentalLayoutApi::class)

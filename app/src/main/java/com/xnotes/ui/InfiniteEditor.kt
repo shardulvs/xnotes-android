@@ -499,19 +499,6 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     }
 
     // Tables are a paged-note feature; the infinite canvas has none.
-    override val selectionIsTable: Boolean get() = false
-    override val tableEditing: Boolean get() = false
-    override fun toggleTableEditMode() {}
-
-    override val selectionSplinePoints: Int get() = selection.spline()?.controlPoints()?.size ?: 0
-
-    override fun editSelectionSpline(add: Boolean) {
-        val command = selection.editSpline(add) ?: return
-        history.push(command)
-        markDirty()
-        refresh()
-        publishOverlay()
-    }
 
     override val selectionFunction: FunctionSpec? get() = selection.function()?.function
 

@@ -48,6 +48,7 @@ fun InfiniteToolbar(
     editor: InfiniteEditor,
     onOpenBackstage: () -> Unit,
     onInsertImage: () -> Unit = {},
+    onTakePhoto: () -> Unit = {},
     onClosePane: (() -> Unit)? = null,
 ) {
     // The stroke tools use the same designed drawables the paged toolbar does, so a pen looks like
@@ -117,7 +118,20 @@ fun InfiniteToolbar(
                         active = editor.wandEnabled,
                     ) { editor.toggleWand() }
 
-                    ToolbarItem.IMAGE -> ToolbarIcon(XnotesIcons.image, stringResource(R.string.insert_image)) { onInsertImage() }
+                    ToolbarItem.IMAGE -> Box {
+                        var imageMenu by remember { mutableStateOf(false) }
+                        ToolbarIcon(XnotesIcons.image, stringResource(R.string.insert_image)) { imageMenu = true }
+                        androidx.compose.material3.DropdownMenu(expanded = imageMenu, onDismissRequest = { imageMenu = false }) {
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { androidx.compose.material3.Text(stringResource(R.string.insert_image_ellipsis)) },
+                                onClick = { imageMenu = false; onInsertImage() },
+                            )
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { androidx.compose.material3.Text(stringResource(R.string.take_photo)) },
+                                onClick = { imageMenu = false; onTakePhoto() },
+                            )
+                        }
+                    }
 
                     ToolbarItem.COLORS ->
                         editor.toolbarColors.take(editor.toolbarColorCount).forEachIndexed { i, color ->

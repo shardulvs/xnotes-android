@@ -56,6 +56,22 @@ object XnotesIcons {
     // The block and the paper it rests on, without Lucide's crease across the body. The crease
     // spent its life off-canvas behind the relative-moveto bug, and the plain block turned out
     // to read better at 22dp, so it stays gone on purpose.
+    /** Lucide "merge": several notes joined into one. */
+    val merge = icon("m8 6 4-4 4 4", "M12 2v10.3a4 4 0 0 1-1.172 2.872L4 22", "m20 22-5-5")
+
+    /** Lucide "camera". */
+    val camera = icon(
+        "M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z",
+        circle(12.0, 13.0, 3.0),
+    )
+
+    /** Lucide "pipette": the colour picker's eyedropper. */
+    val eyedropper = icon(
+        "m2 22 1-1h3l9-9",
+        "M3 21v-3l9-9",
+        "m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z",
+    )
+
     val eraser = icon(
         "m7 21-4.3-4.3a1.7 1.7 0 0 1 0-2.4l9.6-9.6a1.7 1.7 0 0 1 2.4 0l5.6 5.6a1.7 1.7 0 0 1 0 2.4L13 21Z",
         "M22 21H7",

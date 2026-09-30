@@ -105,6 +105,7 @@ internal class EntryActions(
     val exportPdf: (BrowseEntry) -> Unit,
     val preview: (BrowseEntry) -> Unit,
     val convertToNote: (BrowseEntry) -> Unit,
+    val importInto: (BrowseEntry) -> Unit,
 )
 
 /** Everything an explorer layout draws from: the view, what's in it, and how to describe each item. */
@@ -275,6 +276,7 @@ internal fun EntryMenuFor(b: ExplorerBody, e: BrowseEntry, expanded: Boolean, on
         onMoveTo = { m.moveTo(e) },
         onPreview = if (e.isDir || readOnly) null else ({ m.preview(e) }),
         onConvertToNote = if (readOnly) ({ m.convertToNote(e) }) else null,
+        onImportInto = if (DocumentKind.ofName(e.name) == DocumentKind.NOTE) ({ m.importInto(e) }) else null,
         deleteLabel = b.deleteLabel,
     )
 }

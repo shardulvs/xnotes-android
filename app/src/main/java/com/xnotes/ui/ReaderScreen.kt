@@ -161,6 +161,41 @@ internal fun ReaderScreen(editor: Editor, file: ReaderFile, onClose: () -> Unit,
     val scope = rememberCoroutineScope()
     val zoom = remember(file.uri) { mutableFloatStateOf(1f) }
     val pages = (content as? ReaderContent.Pdf)?.doc?.ratios?.size ?: 0
+
+    // Find in page: the WebView finds in HTML itself; a PDF is searched through its text layer.
+    var finding by remember(file.uri) { mutableStateOf(false) }
+    var query by remember(file.uri) { mutableStateOf("") }
+    var webView by remember { mutableStateOf<WebView?>(null) }
+    var webHits by remember { mutableStateOf(0 to 0) }
+    var pdfHits by remember(file.uri) { mutableStateOf<List<com.xnotes.platform.PdfMatch>>(emptyList()) }
+    var pdfHit by remember(file.uri) { mutableStateOf(0) }
+    val isPdf = content is ReaderContent.Pdf
+    LaunchedEffect(query, finding, content, webView) {
+        val q = if (finding) query.trim() else ""
+        if (!isPdf) {
+            webView?.let { wv -> if (q.isEmpty()) { wv.clearMatches(); webHits = 0 to 0 } else wv.findAllAsync(q) }
+            return@LaunchedEffect
+        }
+        if (q.isEmpty()) { pdfHits = emptyList(); return@LaunchedEffect }
+        delay(250)
+        pdfHits = withContext(Dispatchers.IO) {
+            val text = com.xnotes.platform.PdfText.pages(context, file.uri) { context.contentResolver.openInputStream(Uri.parse(file.uri))!! }
+            com.xnotes.platform.PdfText.find(text, q)
+        }
+        pdfHit = 0
+        pdfHits.firstOrNull()?.let { pdfList.animateScrollToItem(it.page) }
+    }
+    fun step(forward: Boolean) {
+        if (!isPdf) { webView?.findNext(forward); return }
+        if (pdfHits.isEmpty()) return
+        pdfHit = (pdfHit + if (forward) 1 else pdfHits.size - 1) % pdfHits.size
+        scope.launch { pdfList.animateScrollToItem(pdfHits[pdfHit].page) }
+    }
+    val findStatus = when {
+        query.isBlank() -> ""
+        isPdf -> if (pdfHits.isEmpty()) "0 / 0" else "${pdfHit + 1} / ${pdfHits.size}"
+        else -> "${webHits.first} / ${webHits.second}"
+    }
     Column(Modifier.fillMaxSize().background(background.toComposeColor())) {
         // The bar is app chrome like the note toolbar; only the page below follows the reader's light/dark.
         ReaderBar(
@@ -170,8 +205,10 @@ internal fun ReaderScreen(editor: Editor, file: ReaderFile, onClose: () -> Unit,
             zoom = zoom.floatValue,
             onZoom = { zoom.floatValue = it },
             onToggleDark = { editor.applyHomePreferences(editor.preferences.copy(readerDark = !dark)) },
+            onFind = { finding = !finding },
             onClose = onClose,
         )
+        if (finding) FindBar(query, { query = it }, findStatus, { step(false) }, { step(true) }, { finding = false })
         CompositionLocalProvider(LocalPalette provides palette) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when (val c = content) {
@@ -179,10 +216,19 @@ internal fun ReaderScreen(editor: Editor, file: ReaderFile, onClose: () -> Unit,
                     ReaderContent.Failed -> ReaderMessage(stringResource(R.string.reader_open_failed), text)
                     is ReaderContent.Html -> {
                         val html = remember(c, palette) { ReaderHtml.page(c.body, readerColors(palette), c.wide) }
-                        ReaderWebView(html, background.toComposeColor(), (zoom.floatValue * 100).roundToInt()) { url -> openLink(context, url, onWikiLink) }
+                        ReaderWebView(
+                            html, background.toComposeColor(), (zoom.floatValue * 100).roundToInt(),
+                            onCreated = { wv ->
+                                webView = wv
+                                wv.setFindListener { active, count, _ -> webHits = (if (count == 0) 0 else active + 1) to count }
+                            },
+                        ) { url -> openLink(context, url, onWikiLink) }
                     }
                     // Light shows PDF pages as they are; dark inverts them to the reader colours.
-                    is ReaderContent.Pdf -> PdfPages(c.doc, pdfList, zoom, background.toComposeColor(), if (dark) duotone(background, text) else null)
+                    is ReaderContent.Pdf -> PdfPages(
+                        c.doc, pdfList, zoom, background.toComposeColor(), if (dark) duotone(background, text) else null,
+                        highlights = pdfHits, current = pdfHit, highlight = palette.accent.toComposeColor(),
+                    )
                 }
             }
         }
@@ -199,6 +245,7 @@ private fun ReaderBar(
     zoom: Float,
     onZoom: (Float) -> Unit,
     onToggleDark: () -> Unit,
+    onFind: () -> Unit,
     onClose: () -> Unit,
 ) {
     val palette = LocalPalette.current
@@ -234,6 +281,7 @@ private fun ReaderBar(
             Label("${(zoom * 100).roundToInt()}%", Modifier.widthIn(min = 44.dp))
             ToolbarIcon(Icons.Outlined.RestartAlt, stringResource(R.string.reader_zoom_reset), enabled = zoom != 1f) { onZoom(1f) }
         }
+        ToolbarIcon(XnotesIcons.search, stringResource(R.string.find_in_page), onClick = onFind)
         ToolbarIcon(
             if (dark) Icons.Outlined.LightMode else Icons.Outlined.DarkMode,
             stringResource(if (dark) R.string.reader_switch_to_light else R.string.reader_switch_to_dark),
@@ -251,7 +299,7 @@ private fun ReaderMessage(message: String, text: Rgba) {
 }
 
 @Composable
-private fun ReaderWebView(html: String, background: Color, textZoom: Int, onLink: (String) -> Unit) {
+private fun ReaderWebView(html: String, background: Color, textZoom: Int, onCreated: (WebView) -> Unit, onLink: (String) -> Unit) {
     val onLinkNow = rememberUpdatedState(onLink)
     AndroidView(
         modifier = Modifier.fillMaxSize(),
@@ -279,6 +327,7 @@ private fun ReaderWebView(html: String, background: Color, textZoom: Int, onLink
                         view.postDelayed({ view.scrollTo(0, y) }, 60)
                     }
                 }
+                onCreated(this)
             }
         },
         update = { wv ->
@@ -357,7 +406,16 @@ private class PdfTile(val bitmap: ImageBitmap, val pageWidth: Int, val left: Int
  * size so the column scrolls over all of them, and once a zoom or scroll settles the visible parts re-render sharp.
  */
 @Composable
-private fun PdfPages(doc: PdfDoc, listState: LazyListState, zoom: MutableFloatState, background: Color, filter: ColorFilter?) {
+private fun PdfPages(
+    doc: PdfDoc,
+    listState: LazyListState,
+    zoom: MutableFloatState,
+    background: Color,
+    filter: ColorFilter?,
+    highlights: List<com.xnotes.platform.PdfMatch>,
+    current: Int,
+    highlight: Color,
+) {
     val palette = LocalPalette.current
     val density = LocalDensity.current
     var scale by zoom
@@ -480,6 +538,17 @@ private fun PdfPages(doc: PdfDoc, listState: LazyListState, zoom: MutableFloatSt
                                         dstSize = IntSize((t.bitmap.width * f).roundToInt(), (t.bitmap.height * f).roundToInt()),
                                         colorFilter = filter,
                                     )
+                                }
+                                highlights.forEachIndexed { h, match ->
+                                    if (match.page != i) return@forEachIndexed
+                                    val tint = highlight.copy(alpha = if (h == current) 0.45f else 0.2f)
+                                    for (r in match.rects) {
+                                        drawRect(
+                                            tint,
+                                            topLeft = androidx.compose.ui.geometry.Offset((r.x * size.width).toFloat(), (r.y * size.height).toFloat()),
+                                            size = androidx.compose.ui.geometry.Size((r.w * size.width).toFloat(), (r.h * size.height).toFloat()),
+                                        )
+                                    }
                                 }
                             },
                     )

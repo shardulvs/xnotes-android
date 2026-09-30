@@ -3,6 +3,7 @@ package com.xnotes.core.stroke
 import com.xnotes.core.geometry.Geometry
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
+import com.xnotes.core.model.FunctionSpec
 import com.xnotes.core.tools.ShapeKind
 import kotlin.math.PI
 import kotlin.math.abs
@@ -19,13 +20,15 @@ import kotlin.math.sqrt
  * A geometric shape inferred from a freehand stroke (the "hold to snap" gesture).
  * [start]/[end] are opposite corners of the bounding box (or the two endpoints for
  * [ShapeKind.LINE]); [vertices] carries the corner list (content px) for the
- * [ShapeKind.POLYGON] and [ShapeKind.POLYLINE] kinds and is null for the rest.
+ * [ShapeKind.POLYGON] and [ShapeKind.POLYLINE] kinds and the control points for
+ * [ShapeKind.SPLINE], and is null for the rest; [function] is set for [ShapeKind.FUNCTION].
  */
 data class RecognizedShape(
     val kind: ShapeKind,
     val start: Pt,
     val end: Pt,
     val vertices: List<Pt>? = null,
+    val function: FunctionSpec? = null,
 )
 
 /**
@@ -39,11 +42,13 @@ data class RecognizedShape(
  * Shapes recognized:
  *  - open straight stroke -> [ShapeKind.LINE]
  *  - open multi-segment zig-zag -> [ShapeKind.POLYLINE] (vertices preserved)
- *  - any other smooth open stroke (a C, an S, ...) -> [ShapeKind.CURVE] (a single fitted cubic
- *    Bézier, sampled to a dense polyline), or left as ink if one cubic can't follow it
- *  - closed round blob -> [ShapeKind.ELLIPSE] (snapped to a circle when nearly round)
- *  - closed n-gon with sharp corners -> [ShapeKind.RECTANGLE] when it is an upright box,
- *    else [ShapeKind.POLYGON] (vertices preserved, including 3-corner triangles)
+ *  - an open graph of a known function (parabola, cubic, exp, ln, sine wave) -> [ShapeKind.FUNCTION]
+ *  - any other smooth open stroke (a C, an S, ...) -> an editable [ShapeKind.SPLINE] through a few
+ *    control points, or left as ink if a short spline can't follow it
+ *  - closed round blob -> [ShapeKind.ELLIPSE], or [ShapeKind.CIRCLE] when nearly round
+ *  - closed n-gon with sharp corners -> [ShapeKind.RECTANGLE] when it is an upright box (squared up
+ *    when its sides nearly match), [ShapeKind.TRIANGLE] for an upright isosceles triangle, else
+ *    [ShapeKind.POLYGON] (vertices preserved)
  *
  * Corners drive the closed-shape decision: a smooth outline (no sharp turns) is the only
  * thing that becomes an ellipse, so a hexagon stays a polygon and a circle never does. Corners are
@@ -137,8 +142,20 @@ object ShapeRecognizer {
      *  beyond this one cubic can't follow it (too wide an arc, or too complex) so it stays ink. */
     private const val CURVE_FIT_TOL_FRAC = 0.09
 
-    /** Points the single fitted cubic is sampled to when turned back into a polyline. */
+    /** Points the single fitted cubic is sampled to before its control points are picked. */
     private const val CURVE_SAMPLES = 64
+
+    /** Most control points a recognized curve is given; more and it is a scribble, left as ink. */
+    private const val SPLINE_MAX_POINTS = 7
+
+    /** Douglas-Peucker tolerance picking a curve's control points, as a fraction of the diagonal. */
+    private const val SPLINE_THIN_FRAC = 0.025
+
+    /** Shorter side / longer side at or above this squares a recognized rectangle up. */
+    private const val SQUARE_ASPECT_MIN = 0.88
+
+    /** How far each triangle corner may sit from the upright isosceles one, as a fraction of the diagonal. */
+    private const val TRIANGLE_CORNER_FRAC = 0.1
 
     /** Recognize from raw stroke samples (the page-local positions are what matter). */
     fun recognize(samples: List<Sample>): RecognizedShape? = recognizePoints(samples.map { it.pos })
@@ -172,8 +189,10 @@ object ShapeRecognizer {
         val path = resample(points, RESAMPLE_N)
         // A multi-segment zig-zag has sharp corners joined by straight runs -> polyline.
         polylineFrom(path, cornerPeaks(path, wrap = false), tol)?.let { return it }
-        // Otherwise a smooth freehand curve (a C, an S, a flowing open stroke): snap it to a single
-        // clean cubic Bézier, or leave it as ink if one cubic can't follow it.
+        // The graph of a familiar function snaps to that function, fitted to the drawn box.
+        FunctionFit.fit(path, bbox, diag)?.let { return RecognizedShape(ShapeKind.FUNCTION, bbox.topLeft, Pt(bbox.right, bbox.bottom), function = it) }
+        // Otherwise a smooth freehand curve (a C, an S, a flowing open stroke): snap it to an
+        // editable spline, or leave it as ink if a short one can't follow it.
         curveFrom(path, diag)?.let { return it }
         // Neither: retry the corner reading at tighter windows, which is what a run with a short
         // edge (a flat staircase riser, a traced long rectangle left open) needs.
@@ -202,12 +221,49 @@ object ShapeRecognizer {
         return RecognizedShape(ShapeKind.POLYLINE, box.topLeft, Pt(box.right, box.bottom), verts)
     }
 
+    /** A spline through a few control points along the stroke: those of one fitted cubic when it
+     *  follows, else the stroke's own thinned path, as long as that needs few enough points. */
     private fun curveFrom(path: List<Pt>, diag: Double): RecognizedShape? {
-        val curve = CubicFit.fitSampled(path, CURVE_FIT_TOL_FRAC * diag, CURVE_SAMPLES) ?: return null
-        if (curve.size < 3) return null
-        val box = Rect.bounding(curve)
-        return RecognizedShape(ShapeKind.CURVE, box.topLeft, Pt(box.right, box.bottom), curve)
+        val tol = CURVE_FIT_TOL_FRAC * diag
+        val source = CubicFit.fitSampled(path, tol, CURVE_SAMPLES)?.takeIf { it.size >= 3 } ?: path
+        var control = thin(source, SPLINE_THIN_FRAC * diag)
+        if (control.size > SPLINE_MAX_POINTS) return null
+        if (control.size < 3) control = listOf(source.first(), source[source.size / 2], source.last())
+        if (source === path && path.maxOf { p -> distanceToPolyline(p, control) } > tol) return null
+        val box = Rect.bounding(control)
+        return RecognizedShape(ShapeKind.SPLINE, box.topLeft, Pt(box.right, box.bottom), control)
     }
+
+    /** Douglas-Peucker: keep the fewest points of [pts] whose polyline stays within [eps] of it. */
+    private fun thin(pts: List<Pt>, eps: Double): List<Pt> {
+        if (pts.size < 3) return pts
+        val keep = BooleanArray(pts.size)
+        keep[0] = true
+        keep[pts.size - 1] = true
+        val stack = ArrayDeque<Pair<Int, Int>>()
+        stack.addLast(0 to pts.size - 1)
+        while (stack.isNotEmpty()) {
+            val (a, b) = stack.removeLast()
+            var far = -1
+            var farD = eps
+            for (i in a + 1 until b) {
+                val d = Geometry.distancePointToSegment(pts[i], pts[a], pts[b])
+                if (d > farD) {
+                    farD = d
+                    far = i
+                }
+            }
+            if (far >= 0) {
+                keep[far] = true
+                stack.addLast(a to far)
+                stack.addLast(far to b)
+            }
+        }
+        return pts.filterIndexed { i, _ -> keep[i] }
+    }
+
+    private fun distanceToPolyline(p: Pt, line: List<Pt>): Double =
+        (0 until line.size - 1).minOf { Geometry.distancePointToSegment(p, line[it], line[it + 1]) }
 
     // --- closed paths: polygon (incl. rectangle) or ellipse/circle ---
 
@@ -247,8 +303,9 @@ object ShapeRecognizer {
         if (!edgesStraight(loop, peaks, wrap = true, tol)) return null
         val verts = dropCollinear(refineCorners(loop, peaks, wrap = true), closed = true, tol)
         if (verts.size < 3) return null
-        if (verts.size == 4 && isAxisAlignedRect(verts, bbox, diag)) {
-            return RecognizedShape(ShapeKind.RECTANGLE, bbox.topLeft, Pt(bbox.right, bbox.bottom))
+        if (verts.size == 4 && isAxisAlignedRect(verts, bbox, diag)) return rectangleOrSquare(bbox)
+        if (verts.size == 3 && isUprightTriangle(verts, bbox, diag)) {
+            return RecognizedShape(ShapeKind.TRIANGLE, bbox.topLeft, Pt(bbox.right, bbox.bottom))
         }
         // A 4-gon that the stroke agrees is a box becomes an exact one, squared on its long edges.
         val squared = if (verts.size == 4) rectangleFit(loop, verts, tol) else null
@@ -256,10 +313,27 @@ object ShapeRecognizer {
         val box = Rect.bounding(snapped)
         if (min(box.w, box.h) < 1e-9) return null // snapped flat: the corners were never a shape
         // Every edge straightened flat: the 4-gon is a rectangle, so hand it over as one.
-        if (snapped.size == 4 && isUprightQuad(snapped)) {
-            return RecognizedShape(ShapeKind.RECTANGLE, box.topLeft, Pt(box.right, box.bottom))
-        }
+        if (snapped.size == 4 && isUprightQuad(snapped)) return rectangleOrSquare(box)
         return RecognizedShape(ShapeKind.POLYGON, box.topLeft, Pt(box.right, box.bottom), snapped)
+    }
+
+    /** An upright box, squared up about its centre when its sides nearly match. */
+    private fun rectangleOrSquare(box: Rect): RecognizedShape {
+        val aspect = if (max(box.w, box.h) > 1e-9) min(box.w, box.h) / max(box.w, box.h) else 1.0
+        if (aspect < SQUARE_ASPECT_MIN) return RecognizedShape(ShapeKind.RECTANGLE, box.topLeft, Pt(box.right, box.bottom))
+        val half = (box.w + box.h) / 4.0
+        return RecognizedShape(
+            ShapeKind.RECTANGLE,
+            Pt(box.centerX - half, box.centerY - half),
+            Pt(box.centerX + half, box.centerY + half),
+        )
+    }
+
+    /** Three corners near the apex-up isosceles triangle of the box (apex mid-top, base along the bottom). */
+    private fun isUprightTriangle(verts: List<Pt>, bbox: Rect, diag: Double): Boolean {
+        val ideal = listOf(Pt(bbox.centerX, bbox.top), Pt(bbox.left, bbox.bottom), Pt(bbox.right, bbox.bottom))
+        val tol = TRIANGLE_CORNER_FRAC * diag
+        return ideal.all { c -> verts.any { it.distanceTo(c) <= tol } }
     }
 
     /** Near-round ellipse -> a true circle (centred square box); a clear oval stays an ellipse. */
@@ -273,7 +347,7 @@ object ShapeRecognizer {
         val r = (bbox.w + bbox.h) / 4.0
         val cx = bbox.centerX
         val cy = bbox.centerY
-        return RecognizedShape(ShapeKind.ELLIPSE, Pt(cx - r, cy - r), Pt(cx + r, cy + r))
+        return RecognizedShape(ShapeKind.CIRCLE, Pt(cx - r, cy - r), Pt(cx + r, cy + r))
     }
 
     /**

@@ -71,6 +71,7 @@ val ToolbarItem.labelRes: Int
         ToolbarItem.UNDO -> R.string.undo
         ToolbarItem.REDO -> R.string.redo
         ToolbarItem.PAGE_NAV -> R.string.toolbar_page_nav
+        ToolbarItem.SEARCH -> R.string.find_in_page
         ToolbarItem.STYLES -> R.string.toolbar_styles
         ToolbarItem.MARGINS -> R.string.toolbar_margins
         ToolbarItem.VIEW -> R.string.toolbar_view

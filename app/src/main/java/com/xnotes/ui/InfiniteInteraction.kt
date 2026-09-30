@@ -7,6 +7,7 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import com.xnotes.canvas.InteractionController
 import com.xnotes.canvas.StylusButtonLatch
+import com.xnotes.core.geometry.Geometry
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.infinite.CanvasViewport
 import com.xnotes.canvas.HandleId
@@ -152,6 +153,12 @@ class InfiniteInteraction(
     // The live transform drag.
     private var grabHandle: HandleId? = null
     private var grabPoint = -1
+    // A press on a spline that barely travels is a tap: on the curve it adds a point, and a second
+    // tap on the same point soon after removes it.
+    private var pointDownAt = Pt.ZERO
+    private var pointTravel = 0.0
+    private var lastPointTapIndex = -1
+    private var lastPointTapAt = 0L
     private var moveAnchor = Pt.ZERO
     private var movedBy = Pt.ZERO
 
@@ -646,6 +653,17 @@ class InfiniteInteraction(
         }
         val point = sel.hitSplinePoint(at, tolerance)
         if (point >= 0) {
+            val now = android.os.SystemClock.uptimeMillis()
+            if (point == lastPointTapIndex && now - lastPointTapAt <= InteractionController.DOUBLE_TAP_MS) {
+                lastPointTapIndex = -1
+                onCommitSelection(sel.editSpline { it.removeControlPointAt(point) })
+                mode = CanvasPointerMode.IDLE
+                onSelectionChanged()
+                requestRender()
+                return true
+            }
+            pointDownAt = at
+            pointTravel = 0.0
             grabPoint = point
             sel.beginTransform()
             mode = CanvasPointerMode.POINT
@@ -693,15 +711,24 @@ class InfiniteInteraction(
     /** Drag the grabbed spline control point; the model moves live, as a text box resize does. */
     private fun extendPoint(vx: Double, vy: Double) {
         val sel = selection() ?: return
-        sel.moveSplinePointLive(grabPoint, viewport.viewportToContent(Pt(vx, vy)))
+        val at = viewport.viewportToContent(Pt(vx, vy))
+        pointTravel = maxOf(pointTravel, at.distanceTo(pointDownAt))
+        sel.moveSplinePointLive(grabPoint, at)
         onSelectionChanged()
         requestRender()
     }
 
     private fun endPoint() {
+        val index = grabPoint
         grabPoint = -1
         val sel = selection() ?: return
-        onCommitSelection(sel.buildCommand(movedOnly = false))
+        if (pointTravel * viewport.zoom <= TAP_SLOP_PX) {
+            sel.restoreStart()
+            lastPointTapIndex = index
+            lastPointTapAt = android.os.SystemClock.uptimeMillis()
+        } else {
+            onCommitSelection(sel.buildCommand(movedOnly = false))
+        }
         onSelectionChanged()
         requestRender()
     }
@@ -812,11 +839,27 @@ class InfiniteInteraction(
     /** Finger up: apply the whole move to the model once, then hand the drawing back to it. */
     private fun endMove() {
         val sel = selection() ?: return
+        if (movedBy.length() * viewport.zoom <= TAP_SLOP_PX && tapAddsSplinePoint(sel, moveAnchor)) return
         sel.moveLive(movedBy.x, movedBy.y)
         onLiftSelection(emptyList(), LiftTransform.NONE)
         onCommitSelection(sel.buildCommand(movedOnly = true, dx = movedBy.x, dy = movedBy.y))
         onSelectionChanged()
         requestRender()
+    }
+
+    /** A tap on the selected spline's curve adds a control point there, instead of a tiny move. */
+    private fun tapAddsSplinePoint(sel: CanvasSelection, at: Pt): Boolean {
+        val sp = sel.spline() ?: return false
+        val tol = HANDLE_TOUCH_PX / viewport.zoom
+        val path = sp.splinePath()
+        if ((0 until path.size - 1).none { Geometry.distancePointToSegment(at, path[it], path[it + 1]) <= tol }) return false
+        sel.previewMove(0.0, 0.0)
+        onLiftSelection(emptyList(), LiftTransform.NONE)
+        lastPointTapIndex = -1
+        onCommitSelection(sel.editSpline { it.insertControlPointNear(at); true })
+        onSelectionChanged()
+        requestRender()
+        return true
     }
 
     /**
@@ -907,21 +950,34 @@ class InfiniteInteraction(
             dashed = cfg.dashed, dashLength = cfg.dashLength, dashGap = cfg.dashGap,
             function = if (cfg.shape == ShapeKind.FUNCTION) FunctionSpec.preset(cfg.function) else null,
         )
+        shapeAnchor = at
+        shapeAspect = pendingShape?.function?.naturalAspect()
         mode = CanvasPointerMode.SHAPE
         setInteractive(false, false)
         onPendingShape(pendingShape)
         requestRender()
     }
 
+    // Where the shape drag began (a circle's centre) and a function's true height/width.
+    private var shapeAnchor = Pt.ZERO
+    private var shapeAspect: Double? = null
+
     private fun extendShape(vx: Double, vy: Double) {
         val shape = pendingShape ?: return
         val raw = viewport.viewportToContent(Pt(vx, vy))
-        shape.end = when {
-            // Line and arrow pin flat when the dragged end lands near an axis.
-            shape.shape.isEndpointShape -> snapAxisEndpoint(shape.start, raw)
-            // Circle keeps its box square, so it stays a circle rather than becoming an ellipse.
-            shape.shape == ShapeKind.CIRCLE -> squareCorner(shape.start, raw)
-            else -> raw
+        if (shape.shape == ShapeKind.CIRCLE) {
+            // A circle grows out from its centre, so the drag ends on the rim.
+            val (s, e) = ResizeMath.circleFromCentre(shapeAnchor, raw)
+            shape.start = s
+            shape.end = e
+        } else {
+            shape.end = when {
+                // Line and arrow pin flat when the dragged end lands near an axis.
+                shape.shape.isEndpointShape -> snapAxisEndpoint(shape.start, raw)
+                // A function graph keeps equal x and y scales while drawn; its handles stretch it later.
+                shape.shape == ShapeKind.FUNCTION -> ResizeMath.aspectCorner(shape.start, raw, shapeAspect)
+                else -> raw
+            }
         }
         onPendingShape(shape)
         requestRender()
@@ -944,14 +1000,6 @@ class InfiniteInteraction(
     private fun abandonShape() {
         pendingShape = null
         onPendingShape(null)
-    }
-
-    /** Constrain a dragged corner to a square box anchored at [anchor], for the perfect circle. */
-    private fun squareCorner(anchor: Pt, p: Pt): Pt {
-        val side = max(abs(p.x - anchor.x), abs(p.y - anchor.y))
-        val sx = if (p.x >= anchor.x) 1.0 else -1.0
-        val sy = if (p.y >= anchor.y) 1.0 else -1.0
-        return Pt(anchor.x + sx * side, anchor.y + sy * side)
     }
 
     /** Snap a line or arrow's dragged end to an exact horizontal or vertical run from [anchor]. */
@@ -1012,6 +1060,7 @@ class InfiniteInteraction(
                 dashed = dashed,
                 dashLength = stroke.config.dashLength,
                 dashGap = stroke.config.dashGap,
+                function = rec.function,
             )
         }
         // The stroke was never committed, so dropping it makes the wet ink vanish the moment it

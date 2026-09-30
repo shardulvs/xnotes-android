@@ -211,6 +211,7 @@ fun Backstage(
     onShareFiles: (List<String>) -> Unit = {},
     /** Opens a file beside the note last open; null when there's no note to pair it with. */
     onOpenBeside: (String) -> (() -> Unit)? = { null },
+    onImportIntoNote: (String) -> Unit = {},
 ) {
     // Below this width the sidebar becomes a slide-over drawer instead of a persistent pane.
     val compact = LocalConfiguration.current.screenWidthDp < COMPACT_WIDTH_DP
@@ -225,6 +226,7 @@ fun Backstage(
         exportFilePdf = onExportFilePdf,
         openSplit = onOpenSplit,
         openBeside = onOpenBeside,
+        importInto = onImportIntoNote,
     )
     // The backstage is the root of the stack — ordinary base content, not a dialog. The activity
     // window already runs edge-to-edge with the system bars hidden (MainActivity.applyFullscreen).
@@ -235,7 +237,7 @@ fun Backstage(
 private val SIDEBAR_SWIPE = 64.dp
 
 /** Width at or above which the sidebar is a persistent pane rather than a drawer. */
-private const val COMPACT_WIDTH_DP = 600
+internal const val COMPACT_WIDTH_DP = 600
 
 /** Open/close animation duration for the sidebar drawer/pane and its scrim. */
 private const val SIDEBAR_ANIM_MS = 150
@@ -842,6 +844,8 @@ private class ExplorerCalls(
     val openSplit: (String, String) -> Unit,
     /** Opens a file beside the note last open, or null when there is none to pair it with. */
     val openBeside: (String) -> (() -> Unit)?,
+    /** Picks a file and appends it to the note at this URI. */
+    val importInto: (String) -> Unit,
 )
 
 @Composable
@@ -978,6 +982,7 @@ private fun ExplorerSection(
     var clipboard by remember(root) { mutableStateOf<ClipItem?>(null) }
     var pendingDelete by remember(root) { mutableStateOf<List<BrowseEntry>?>(null) }
     var moving by remember(root) { mutableStateOf<List<BrowseEntry>?>(null) }
+    var merging by remember(root) { mutableStateOf<List<BrowseEntry>?>(null) }
     var previewing by remember(root) { mutableStateOf<BrowseEntry?>(null) }
     var opError by remember(root) { mutableStateOf<String?>(null) }
     var query by remember(root) { mutableStateOf("") }
@@ -1313,6 +1318,7 @@ private fun ExplorerSection(
                 exportPdf = { callsNow.value.exportFilePdf(it.documentUri) },
                 preview = { previewing = it },
                 convertToNote = { convertToNote(it) },
+                importInto = { callsNow.value.importInto(it.documentUri) },
             ),
         )
     }
@@ -1780,6 +1786,9 @@ private fun ExplorerSection(
                     val pair = files.map { it.documentUri }.distinct().takeIf { it.size == 2 && files.size == selection.size }
                     if (pair != null) ExplorerIcon(XnotesIcons.split, stringResource(R.string.open_side_by_side), fg) { selection.clear(); calls.openSplit(pair[0], pair[1]) }
                     ExplorerIcon(XnotesIcons.moveToFolder, stringResource(R.string.move_to_folder), fg) { moving = selection.toList() }
+                    // Only editable notes merge: canvases, reader files and folders have no pages to join.
+                    val notes = selection.all { DocumentKind.ofName(it.name) == DocumentKind.NOTE }
+                    ExplorerIcon(XnotesIcons.merge, stringResource(R.string.merge_notes), fg, enabled = selection.size >= 2 && notes) { merging = selection.toList() }
                     ExplorerIcon(XnotesIcons.copy, stringResource(R.string.copy), fg) { clipboard = ClipItem(selection.toList(), false); selection.clear() }
                     ExplorerIcon(XnotesIcons.cut, stringResource(R.string.cut), fg) { clipboard = ClipItem(selection.toList(), true); selection.clear() }
                     var colorsOpen by remember { mutableStateOf(false) }
@@ -1911,6 +1920,23 @@ private fun ExplorerSection(
                 }
             },
             onDismiss = { renaming = null },
+        )
+    }
+
+    merging?.let { items ->
+        MergeDialog(
+            initial = context.getString(R.string.merged_name, DocumentKind.stripSuffix(items.first().name)),
+            onConfirm = { name, trashOriginals ->
+                merging = null
+                selection.clear()
+                scope.launch {
+                    val uri = editor.mergeNotes(items.map { it.documentUri }, root, currentDocId, name)
+                    if (uri == null) opError = context.getString(R.string.err_merge_notes)
+                    else if (trashOriginals) remove(items)
+                    refreshKey++
+                }
+            },
+            onDismiss = { merging = null },
         )
     }
 
@@ -2108,6 +2134,7 @@ internal fun EntryMenu(
     onMoveTo: (() -> Unit)? = null,
     onPreview: (() -> Unit)? = null,
     onConvertToNote: (() -> Unit)? = null,
+    onImportInto: (() -> Unit)? = null,
     deleteLabel: String = stringResource(R.string.delete),
 ) {
     val palette = LocalPalette.current
@@ -2121,6 +2148,7 @@ internal fun EntryMenu(
         } else {
             if (onPreview != null) DropdownMenuItem(text = { Text(stringResource(R.string.preview)) }, onClick = { onDismiss(); onPreview() })
             if (onConvertToNote != null) DropdownMenuItem(text = { Text(stringResource(R.string.convert_to_note)) }, onClick = { onDismiss(); onConvertToNote() })
+            if (onImportInto != null) DropdownMenuItem(text = { Text(stringResource(R.string.import_into_note)) }, onClick = { onDismiss(); onImportInto() })
             DropdownMenuItem(text = { Text(stringResource(R.string.rename)) }, onClick = { onDismiss(); onRename?.invoke() })
             if (onMoveTo != null) DropdownMenuItem(text = { Text(stringResource(R.string.move_to_folder_ellipsis)) }, onClick = { onDismiss(); onMoveTo() })
             DropdownMenuItem(text = { Text(stringResource(R.string.copy)) }, onClick = { onDismiss(); onCopy?.invoke() })
@@ -2499,4 +2527,26 @@ private fun SyncConflictBanner() {
             Text("and ${conflicts.size - 6} more", color = palette.textDim.toComposeColor(), fontSize = 12.sp, modifier = Modifier.padding(start = 26.dp, top = 2.dp))
         }
     }
+}
+
+/** Names the note that selected notes merge into, and whether the originals go to trash after. */
+@Composable
+private fun MergeDialog(initial: String, onConfirm: (String, Boolean) -> Unit, onDismiss: () -> Unit) {
+    var name by remember { mutableStateOf(initial) }
+    var trash by remember { mutableStateOf(false) }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.merge_notes)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { trash = !trash }) {
+                    androidx.compose.material3.Checkbox(checked = trash, onCheckedChange = { trash = it })
+                    Text(stringResource(R.string.merge_trash_originals))
+                }
+            }
+        },
+        confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = { onConfirm(name.trim(), trash) }) { Text(stringResource(R.string.merge)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
 }

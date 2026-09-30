@@ -120,6 +120,9 @@
     <string name="caption_switch_back">Switch back</string>
     <string name="title_select">Select</string>
     <string name="title_shape">Shape</string>
+    <string name="title_table">Table</string>
+    <string name="caption_columns">Columns</string>
+    <string name="caption_rows">Rows</string>
     <string name="caption_fill">Fill</string>
     <string name="caption_opacity">Opacity</string>
     <string name="caption_dashed">Dashed</string>
@@ -265,6 +268,36 @@
     <string name="folder_name">Folder name</string>
     <string name="delete_confirm_title">Delete?</string>
     <string name="search_notes">Search notes</string>
+    <string name="search_settings">Search settings</string>
+    <string name="search_keywords_sync">Filen sync backup folder when to sync direction frequency wifi</string>
+    <string name="search_keywords_update">Updates check for update version release</string>
+    <string name="pref_backup">Backup</string>
+    <string name="pref_backup_help">Save all settings, including sync options, pens, toolbars, fonts, templates and stickers, to one file, or load them from one. The Filen login is not included; sign in again after importing.</string>
+    <string name="export_settings">Export settings</string>
+    <string name="import_settings">Import settings</string>
+    <string name="import_settings_confirm">Replace the current settings with the ones in this file?</string>
+    <string name="replace">Replace</string>
+    <string name="settings_exported">Settings exported</string>
+    <string name="settings_imported">Settings imported</string>
+    <string name="err_export_settings">Could not export the settings.</string>
+    <string name="err_import_settings">That file does not hold n-notes settings.</string>
+    <string name="insert_from_file">Insert from file...</string>
+    <string name="add_image_page">Add image page...</string>
+    <string name="add_photo_page">Photo as new page</string>
+    <string name="take_photo">Take photo</string>
+    <string name="image_as_page">Image as new page...</string>
+    <string name="import_into_note">Import into this note...</string>
+    <string name="imported_into_note">Added to the note</string>
+    <string name="err_no_camera">No camera app is available.</string>
+    <string name="merge_notes">Merge notes</string>
+    <string name="merge">Merge</string>
+    <string name="merged_name">%1$s merged</string>
+    <string name="merge_trash_originals">Move the originals to trash</string>
+    <string name="err_merge_notes">Could not merge the notes.</string>
+    <string name="find_in_page">Find in page</string>
+    <string name="find_previous">Previous match</string>
+    <string name="find_next">Next match</string>
+    <string name="find_close">Close search</string>
     <string name="clear_search">Clear search</string>
     <string name="share">Share</string>
     <string name="save_copy_ellipsis">Save a copy…</string>
@@ -503,7 +536,6 @@
     <string name="markdown_shortcuts">Markdown shortcuts</string>
     <string name="slash_commands">Slash commands</string>
     <string name="equation">Equation</string>
-    <string name="select_latex_first">Select the LaTeX to set as an equation</string>
     <string name="insert_date">Date</string>
     <string name="insert_time">Time</string>
     <string name="done">Done</string>
@@ -543,6 +575,8 @@
     <!-- Colour picker -->
     <string name="swatches">Swatches</string>
     <string name="spectrum">Spectrum</string>
+    <string name="eyedropper">Pick a colour from the screen</string>
+    <string name="eyedropper_hint">Touch a colour to pick it</string>
     <string name="caption_recent">Recent</string>
 
     <!-- Canvas and storage -->

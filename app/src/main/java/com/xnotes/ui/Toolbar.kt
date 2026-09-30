@@ -94,6 +94,8 @@ fun Toolbar(
     onAddStickers: () -> Unit,
     onClosePane: (() -> Unit)? = null,
     onImportTemplate: () -> Unit = {},
+    onTakePhoto: () -> Unit = {},
+    onImagePage: () -> Unit = {},
 ) {
     // The five stroke tools use the designed vector drawables (res/drawable/ic_stroke_*),
     // tinted at the call site like every other icon; the rest use the built-in line set.
@@ -135,6 +137,8 @@ fun Toolbar(
                     onRename = { renaming = true },
                     onOpenBackstage = onOpenBackstage,
                     onInsertImage = onInsertImage,
+                    onTakePhoto = onTakePhoto,
+                    onImagePage = onImagePage,
                     onAddStickers = onAddStickers,
                     onToggleFullscreen = onToggleFullscreen,
                     onImportTemplate = onImportTemplate,
@@ -169,6 +173,8 @@ private fun ToolbarItemView(
     onRename: () -> Unit,
     onOpenBackstage: () -> Unit,
     onInsertImage: () -> Unit,
+    onTakePhoto: () -> Unit,
+    onImagePage: () -> Unit,
     onAddStickers: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onImportTemplate: () -> Unit,
@@ -202,7 +208,7 @@ private fun ToolbarItemView(
         ToolbarItem.RULER ->
             ToolbarIcon(XnotesIcons.ruler, stringResource(R.string.tool_ruler), active = editor.rulerVisible) { editor.toggleRuler() }
 
-        ToolbarItem.IMAGE -> ImageMenu(editor, onInsertImage, onAddStickers)
+        ToolbarItem.IMAGE -> ImageMenu(editor, onInsertImage, onTakePhoto, onImagePage, onAddStickers)
 
         ToolbarItem.UNDO -> ToolbarIcon(XnotesIcons.undo, stringResource(R.string.undo), enabled = editor.canUndo) { editor.undo() }
         ToolbarItem.REDO -> ToolbarIcon(XnotesIcons.redo, stringResource(R.string.redo), enabled = editor.canRedo) { editor.redo() }
@@ -222,6 +228,7 @@ private fun ToolbarItemView(
             }
             ToolbarIcon(XnotesIcons.next, stringResource(R.string.next_page)) { editor.nextPage() }
         }
+        ToolbarItem.SEARCH -> ToolbarIcon(XnotesIcons.search, stringResource(R.string.find_in_page), active = editor.findOpen) { editor.toggleFind() }
         ToolbarItem.STYLES -> StylesButton(editor, onImportTemplate)
         ToolbarItem.MARGINS -> MarginsButton(editor)
         ToolbarItem.VIEW -> ViewButton(editor)
@@ -502,8 +509,8 @@ internal fun Swatch(color: androidx.compose.ui.graphics.Color, active: Boolean, 
         modifier = Modifier
             .then(if (LocalBar.current.vertical) Modifier.padding(vertical = 3.dp) else Modifier.padding(horizontal = 3.dp))
             .size(LocalBar.current.swatch)
-            // The selection ring takes the swatch's own colour, not the theme accent.
-            .then(if (active) Modifier.border(2.dp, color, CircleShape) else Modifier)
+            // The selection ring is white on a dark theme and black on a light one, so it shows whatever the swatch.
+            .then(if (active) Modifier.border(2.dp, if (LocalPalette.current.isDark) androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.Black, CircleShape) else Modifier)
             .padding(4.dp)
             .clip(CircleShape)
             .background(color)
@@ -554,7 +561,7 @@ private fun PageCounter(current: Int, count: Int, modifier: Modifier) {
 }
 
 @Composable
-private fun ImageMenu(editor: Editor, onInsertImage: () -> Unit, onAddStickers: () -> Unit) {
+private fun ImageMenu(editor: Editor, onInsertImage: () -> Unit, onTakePhoto: () -> Unit, onImagePage: () -> Unit, onAddStickers: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     var stickersOpen by remember { mutableStateOf(false) }
     Box {
@@ -562,6 +569,8 @@ private fun ImageMenu(editor: Editor, onInsertImage: () -> Unit, onAddStickers: 
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(text = { Text(stringResource(R.string.paste_image)) }, onClick = { editor.pasteImage(); expanded = false })
             DropdownMenuItem(text = { Text(stringResource(R.string.insert_image_ellipsis)) }, onClick = { onInsertImage(); expanded = false })
+            DropdownMenuItem(text = { Text(stringResource(R.string.take_photo)) }, onClick = { onTakePhoto(); expanded = false })
+            DropdownMenuItem(text = { Text(stringResource(R.string.image_as_page)) }, onClick = { onImagePage(); expanded = false })
             DropdownMenuItem(text = { Text(stringResource(R.string.stickers)) }, onClick = { expanded = false; stickersOpen = true })
         }
         if (stickersOpen) StickersMenu(editor, onAddStickers) { stickersOpen = false }

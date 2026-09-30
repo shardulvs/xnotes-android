@@ -133,6 +133,34 @@ class TableItem(
         renormalize(rowFractions)
     }
 
+    /** Insert a column of average width before column [at] (0..cols), keeping the others' proportions. */
+    fun insertColumn(at: Int) = insertLine(colFractions, at)
+
+    /** Insert a row of average height before row [at] (0..rows), keeping the others' proportions. */
+    fun insertRow(at: Int) = insertLine(rowFractions, at)
+
+    /** Remove columns [range] (at least one column always stays), renormalizing the rest. */
+    fun removeColumns(range: IntRange) = removeLines(colFractions, range)
+
+    /** Remove rows [range] (at least one row always stays), renormalizing the rest. */
+    fun removeRows(range: IntRange) = removeLines(rowFractions, range)
+
+    /**
+     * Move the far edge ([atEnd]) or the near edge of columns [first]..[last] to absolute [x]. The
+     * chosen columns share the new span in proportion, the other columns keep their widths, and the
+     * table grows or shrinks on the dragged side.
+     */
+    fun resizeColumnRange(first: Int, last: Int, x: Double, atEnd: Boolean) {
+        val (origin, size) = resizeRange(colFractions, rect.left, rect.w, first, last, x, atEnd) ?: return
+        rect = Rect(origin, rect.y, size, rect.h)
+    }
+
+    /** [resizeColumnRange] for rows [first]..[last], moving their bottom ([atEnd]) or top edge to [y]. */
+    fun resizeRowRange(first: Int, last: Int, y: Double, atEnd: Boolean) {
+        val (origin, size) = resizeRange(rowFractions, rect.top, rect.h, first, last, y, atEnd) ?: return
+        rect = Rect(rect.x, origin, rect.w, size)
+    }
+
     fun setColumns(n: Int) { val t = n.coerceIn(1, MAX_LINES); while (cols < t) addColumn(); while (cols > t) removeColumn() }
     fun setRows(n: Int) { val t = n.coerceIn(1, MAX_LINES); while (rows < t) addRow(); while (rows > t) removeRow() }
 
@@ -188,6 +216,42 @@ class TableItem(
         const val KIND = "table"
         const val MIN_CELL = 12.0
         const val MAX_LINES = 64
+
+        private fun insertLine(fr: MutableList<Double>, at: Int) {
+            if (fr.size >= MAX_LINES) return
+            val k = fr.size.toDouble() / (fr.size + 1)
+            for (i in fr.indices) fr[i] = fr[i] * k
+            fr.add(at.coerceIn(0, fr.size), 1.0 / (fr.size + 1))
+        }
+
+        private fun removeLines(fr: MutableList<Double>, range: IntRange) {
+            val drop = range.filter { it in fr.indices }
+            if (drop.isEmpty() || drop.size >= fr.size) return
+            for (i in drop.sortedDescending()) fr.removeAt(i)
+            renormalize(fr)
+        }
+
+        /** Rescale lines [first]..[last] of a table side at [origin] spanning [size] so the dragged
+         *  edge lands on [to]; returns the side's new origin and size, or null when out of range. */
+        private fun resizeRange(
+            fr: MutableList<Double>, origin: Double, size: Double,
+            first: Int, last: Int, to: Double, atEnd: Boolean,
+        ): Pair<Double, Double>? {
+            if (first < 0 || last >= fr.size || first > last || size <= 0) return null
+            val widths = fr.map { it * size }
+            val a = origin + widths.take(first).sum()
+            val b = a + widths.subList(first, last + 1).sum()
+            val old = b - a
+            if (old <= 0) return null
+            val smallest = widths.subList(first, last + 1).min()
+            val minSpan = old * (MIN_CELL / smallest).coerceAtMost(1.0)
+            val span = (if (atEnd) to - a else b - to).coerceAtLeast(minSpan)
+            val k = span / old
+            val next = widths.mapIndexed { i, w -> if (i in first..last) w * k else w }
+            val total = next.sum()
+            for (i in fr.indices) fr[i] = next[i] / total
+            return (if (atEnd) origin else origin + old - span) to total
+        }
 
         private fun renormalize(fr: MutableList<Double>) {
             val sum = fr.sum()

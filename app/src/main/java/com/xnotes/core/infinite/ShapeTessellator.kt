@@ -1,6 +1,7 @@
 package com.xnotes.core.infinite
 
 import com.xnotes.core.geometry.Pt
+import com.xnotes.core.model.FunctionSpec
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.tools.ShapeKind
 
@@ -58,8 +59,10 @@ object ShapeTessellator {
     fun outlineMesh(shape: ShapeItem, tolerance: Double): MeshData {
         val b = MeshBuilder()
         val half = shape.strokeWidth / 2.0
-        val (points, closed) = outlinePath(shape)
-        if (points.size >= 2) {
+        val (outline, closed) = outlinePath(shape)
+        // A plotted function breaks at its poles, so its outline may be several runs.
+        for (points in if (closed) listOf(outline) else FunctionSpec.runs(outline)) {
+            if (points.size < 2) continue
             if (shape.dashed) {
                 for (run in MeshBuilder.dashRuns(points, shape.dashLength, shape.dashGap, closed)) {
                     b.polylineRibbon(run, half, closed = false, tolerance = tolerance)

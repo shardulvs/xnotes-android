@@ -1011,7 +1011,7 @@ fun ShapeConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
             PopupTitle(stringResource(R.string.title_shape))
             // Swipe between the geometric shapes and the function curves; the dots show which page is up.
             val pager = rememberPagerState(initialPage = if (kind == ShapeKind.FUNCTION) 1 else 0) { 2 }
-            HorizontalPager(pager, Modifier.height(78.dp), verticalAlignment = Alignment.Top) { page ->
+            HorizontalPager(pager, Modifier.height(120.dp), verticalAlignment = Alignment.Top) { page ->
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -1076,10 +1076,10 @@ fun TableConfigPopup(editor: Editor, onDismiss: () -> Unit) {
     var width by remember { mutableStateOf(editor.tableToolWidth.toFloat()) }
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
         Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
-            PopupTitle("TABLE")
-            TableStepperRow("COLUMNS", cols, 1, 20) { cols = it; editor.tableToolCols = it }
-            TableStepperRow("ROWS", rows, 1, 20) { rows = it; editor.tableToolRows = it }
-            SliderRow("WIDTH", width, 1f..12f) { width = it; editor.tableToolWidth = it.toDouble() }
+            PopupTitle(stringResource(R.string.title_table))
+            TableStepperRow(stringResource(R.string.caption_columns), cols, 1, 20) { cols = it; editor.tableToolCols = it }
+            TableStepperRow(stringResource(R.string.caption_rows), rows, 1, 20) { rows = it; editor.tableToolRows = it }
+            SliderRow(stringResource(R.string.caption_width), width, 1f..12f) { width = it; editor.tableToolWidth = it.toDouble() }
         }
     }
 }
@@ -1137,7 +1137,7 @@ internal fun PopupTitle(text: String) {
 
 @Composable
 private fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.width(220.dp)) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
         Text(label, color = LocalPalette.current.text.toComposeColor(), fontSize = 12.sp)
         Switch(checked = checked, onCheckedChange = onChange)
     }
@@ -1184,11 +1184,14 @@ private fun shapeIcon(kind: ShapeKind): ImageVector = when (kind) {
 
 private fun functionLabel(expr: String): String = when (expr) {
     "x^2" -> "x\u00B2"
+    "x^3" -> "x\u00B3"
     "x^(1/2)" -> "\u221Ax"
     "ln(x)" -> "ln x"
     "e^x" -> "e\u02E3"
     "sin(x)" -> "sin x"
     "cos(x)" -> "cos x"
+    "tan(x)" -> "tan x"
+    "cot(x)" -> "cot x"
     else -> expr
 }
 

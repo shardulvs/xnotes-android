@@ -75,7 +75,7 @@ import kotlin.math.sin
 /** The pointer state machine modes (spec 06 §1). */
 enum class PointerMode {
     IDLE, DRAW, ERASE, BAND, LASSO_DRAW, SHOT, SHAPE, MOVE, RESIZE, TRANSFORM, PAN, PINCH, FLOW_TEXT,
-    TEXT_DRAG, RULER_MOVE, RULER_TRANSFORM, RULER_ROTATE, TABLE_LINE, TABLE_DRAW, CROP,
+    TEXT_DRAG, RULER_MOVE, RULER_TRANSFORM, RULER_ROTATE, TABLE_LINE, TABLE_GRIP, TABLE_PICK, TABLE_DRAW, CROP,
 }
 
 /** Column/row counts and line width for the next table drawn with the table tool. */
@@ -154,9 +154,11 @@ class InteractionController(
     private val onAddPageAtEnd: () -> Unit = {},
     /** A short haptic tick (e.g. the overscroll pull crossed the add-page threshold). */
     private val onHaptic: () -> Unit = {},
-    /** Table edit mode turned on/off (so the host can mirror it into a Compose state for the menu). */
-    private val onTableEditingChanged: (Boolean) -> Unit = {},
 ) {
+    /** Find-in-note hits to highlight (page index, page-space box), and the current hit's boxes. */
+    var findHighlights: List<Pair<Int, Rect>> = emptyList()
+    var findCurrent: List<Pair<Int, Rect>> = emptyList()
+
     /** Whether the system clipboard currently holds an image (provided by the host). */
     var clipboardHasImage: () -> Boolean = { false }
 
@@ -364,6 +366,12 @@ class InteractionController(
     // A spline control point being dragged, and the curve as it was, for the undo step.
     private var resizePointIndex: Int = -1
     private var resizeOldSnap: GeometrySnapshot? = null
+    // A press on a spline that barely travels is a tap: on the curve it adds a point, and a second
+    // tap on the same point soon after removes it.
+    private var resizeDownContent = Pt.ZERO
+    private var resizeTravel = 0.0
+    private var lastPointTapIndex = -1
+    private var lastPointTapAt = 0L
 
     // CROP (adjusting an image's crop rectangle before baking it)
     private var cropItem: ImageItem? = null
@@ -379,6 +387,14 @@ class InteractionController(
     private var tableLineIsColumn = false
     private var tableLineIndex = -1
     private var tableLinePageIndex = -1
+
+    // The columns and rows picked on the selected table's handle bars; null means all of them.
+    private var tableColPick: IntRange? = null
+    private var tableRowPick: IntRange? = null
+    // TABLE_GRIP (dragging a bar end, resizing the picked range) and TABLE_PICK (dragging along a bar).
+    private var tableGripAtEnd = true
+    private var tablePickAnchor = -1
+    private var tablePickPrior: IntRange? = null
 
     // GENERIC TRANSFORM (resize + rotate for any single non-line / multi / mixed selection)
     private var selObb: Obb? = null // the tilting selection box; null when nothing is selected
@@ -748,6 +764,8 @@ class InteractionController(
             PointerMode.RESIZE -> extendResize(content)
             PointerMode.CROP -> extendCrop(content)
             PointerMode.TABLE_LINE -> extendTableLine(content)
+            PointerMode.TABLE_GRIP -> extendTableGrip(content)
+            PointerMode.TABLE_PICK -> extendTablePick(content)
             PointerMode.TABLE_DRAW -> extendTable(content)
             PointerMode.TRANSFORM -> extendTransform(content)
             PointerMode.SHAPE -> extendShape(content)
@@ -820,7 +838,8 @@ class InteractionController(
             PointerMode.MOVE -> endMove(content)
             PointerMode.RESIZE -> endResize()
             PointerMode.CROP -> endCrop()
-            PointerMode.TABLE_LINE -> endTableLine()
+            PointerMode.TABLE_LINE, PointerMode.TABLE_GRIP -> endTableLine()
+            PointerMode.TABLE_PICK -> endTablePick()
             PointerMode.TABLE_DRAW -> endTable()
             PointerMode.TRANSFORM -> endTransform()
             PointerMode.SHAPE -> endShape()
@@ -1172,6 +1191,7 @@ class InteractionController(
                 dashed = dashed,
                 dashLength = stroke.config.dashLength,
                 dashGap = stroke.config.dashGap,
+                function = rec.function,
             )
         }
         page.items.add(shape)
@@ -1353,7 +1373,7 @@ class InteractionController(
     /** Resize handles for the current selection in content space: a single line/arrow's two
      *  endpoint handles, else the eight handles of the oriented selection box. */
     private fun selectionResizeHandles(): List<ResizeHandle> {
-        if (singleSpline() != null) return emptyList()
+        if (singleSpline() != null || singleSelectedTable() != null) return emptyList()
         val endpoint = singleEndpointShape()
         if (endpoint != null) return endpointHandles(endpoint)
         return selObb?.let { ResizeMath.obbHandles(it) } ?: emptyList()
@@ -1417,6 +1437,7 @@ class InteractionController(
         selectionRotatePoint()?.let { if (it.distanceTo(content) <= tol) return true }
         selectionMoveGrip()?.let { if (it.distanceTo(content) <= tol) return true }
         singleSpline()?.let { if (hitSplinePoint(it, content, tol) >= 0) return true }
+        if (tableChromeHit(content)) return true
         if (ResizeMath.hitHandle(selectionResizeHandles(), content, tol) != null) return true
         return selObb?.contains(content) == true
     }
@@ -1442,7 +1463,16 @@ class InteractionController(
         singleSpline()?.let { sp ->
             val i = hitSplinePoint(sp, content, tol)
             if (i < 0) return false
+            val now = android.os.SystemClock.uptimeMillis()
+            if (i == lastPointTapIndex && now - lastPointTapAt <= DOUBLE_TAP_MS) {
+                lastPointTapIndex = -1
+                editSelectedSpline { it.removeControlPointAt(i) }
+                mode = PointerMode.IDLE
+                return true
+            }
             beginResize(sp, HandleId.START)
+            resizeDownContent = content
+            resizeTravel = 0.0
             resizePointIndex = i
             resizeOldSnap = sp.item.snapshotGeometry()
             return true
@@ -1475,10 +1505,7 @@ class InteractionController(
     }
 
     private fun beginSelect(content: Pt) {
-        if (isTableEditing()) {
-            if (beginTableEdit(content)) return
-            setTableEditing(false) // tapped outside the table: leave edit mode, then select normally
-        }
+        if (beginTableChrome(content)) return
         if (tryGrabSelectionHandle(content)) return
         // Inside the settled selection the press moves it, whatever it landed on. Hit-testing
         // first would re-pick the stroke under the finger, and you meant to drag what is
@@ -1528,6 +1555,7 @@ class InteractionController(
     private fun beginLasso(content: Pt) {
         // A tap on the settled selection grabs it (a resize/rotate handle, or a move when inside the
         // oriented box) instead of starting a fresh lasso.
+        if (beginTableChrome(content)) return
         if (tryGrabSelectionHandle(content)) return
         if (selObb?.contains(content) == true) {
             beginMove(content)
@@ -1629,6 +1657,7 @@ class InteractionController(
 
     private fun endMove(content: Pt) {
         moveOffset = content - moveOrigin
+        if (moveOffset.length() * state.zoom <= TAP_SLOP && tapAddsSplinePoint(moveOrigin)) return
         val moved = abs(moveOffset.x) > MOVE_EPS || abs(moveOffset.y) > MOVE_EPS
         if (moved) {
             val items = selection.map { it.item }
@@ -1652,6 +1681,22 @@ class InteractionController(
         if (moved) maybeSwitchBackAfterSelect()
     }
 
+    /** A tap on the selected spline's curve adds a control point there, instead of a tiny move. */
+    private fun tapAddsSplinePoint(content: Pt): Boolean {
+        val sp = singleSpline() ?: return false
+        val item = sp.item as ShapeItem
+        if (state.pageRects.getOrNull(sp.pageIndex) == null) return false
+        val local = state.toPageSpace(sp.pageIndex, content)
+        val tol = HANDLE_HIT / state.zoom
+        val path = item.splinePath()
+        if ((0 until path.size - 1).none { Geometry.distancePointToSegment(local, path[it], path[it + 1]) <= tol }) return false
+        moveOffset = Pt.ZERO
+        mode = PointerMode.IDLE
+        lastPointTapIndex = -1
+        editSelectedSpline { it.insertControlPointNear(local); true }
+        return true
+    }
+
     // --- RESIZE ---
 
     private fun beginResize(sel: Selected, handle: HandleId) {
@@ -1668,6 +1713,7 @@ class InteractionController(
         val handle = resizeHandle ?: return
         if (state.pageRects.getOrNull(resizePageIndex) == null) return
         val local = state.toPageSpace(resizePageIndex, content)
+        resizeTravel = max(resizeTravel, content.distanceTo(resizeDownContent))
         when (item) {
             is ImageItem -> item.setGeometry(RectHandle(ResizeMath.resizeImage(item.rect, handle, local)))
             is TextItem -> {
@@ -1692,7 +1738,11 @@ class InteractionController(
         val old = resizeOldGeom
         var changed = false
         val oldSnap = resizeOldSnap
-        if (resizePointIndex >= 0 && oldSnap != null) {
+        if (resizePointIndex >= 0 && oldSnap != null && resizeTravel * state.zoom <= TAP_SLOP) {
+            resizeItem!!.restoreGeometry(oldSnap)
+            lastPointTapIndex = resizePointIndex
+            lastPointTapAt = android.os.SystemClock.uptimeMillis()
+        } else if (resizePointIndex >= 0 && oldSnap != null) {
             val moved = resizeItem!!
             val new = moved.snapshotGeometry()
             if (new != oldSnap) {
@@ -1769,53 +1819,172 @@ class InteractionController(
         }
         tableLineItem = null
         tableLineBefore = null
+        selObb = selectionObb()
         mode = PointerMode.IDLE
         refreshSelectionMenu()
         requestRender()
     }
 
-    /** Page-local geometry of the table edit chrome: per-line handle squares and the four
-     *  add/remove buttons (columns below the bottom edge, rows past the right edge). */
+    /** Page-local geometry of a selected table's handle bars: a bar above the columns and one left
+     *  of the rows, each with grips at the ends of the picked range and a -/+ pair past its end. */
     class TableChrome(
-        val colSeps: List<Rect>,
-        val rowSeps: List<Rect>,
+        val topBar: Rect, val leftBar: Rect,
+        val barY: Double, val barX: Double,
+        val colStart: Pt, val colEnd: Pt,
+        val rowStart: Pt, val rowEnd: Pt,
         val colMinus: Rect, val colPlus: Rect,
         val rowMinus: Rect, val rowPlus: Rect,
     )
 
+    private fun colPick(t: TableItem): IntRange = tableColPick?.takeIf { it.first >= 0 && it.last < t.cols } ?: 0 until t.cols
+    private fun rowPick(t: TableItem): IntRange = tableRowPick?.takeIf { it.first >= 0 && it.last < t.rows } ?: 0 until t.rows
+
     private fun tableChrome(t: TableItem): TableChrome {
-        val side = HANDLE_SIZE / state.zoom
-        val bs = HANDLE_SIZE * 1.2 / state.zoom
-        val arm = HANDLE_SIZE * 1.7 / state.zoom
-        val gap = bs * 0.75
-        fun sq(cx: Double, cy: Double, s: Double) = Rect(cx - s / 2, cy - s / 2, s, s)
-        val cx = t.rect.centerX
-        val cy = t.rect.centerY
+        val gap = HANDLE_SIZE * 0.9 / state.zoom
+        val hit = HANDLE_HIT / state.zoom
+        val bs = HANDLE_SIZE * 1.1 / state.zoom
+        fun sq(cx: Double, cy: Double) = Rect(cx - bs / 2, cy - bs / 2, bs, bs)
+        val barY = t.rect.top - gap
+        val barX = t.rect.left - gap
+        val cols = colPick(t)
+        val rows = rowPick(t)
         return TableChrome(
-            colSeps = (1 until t.cols).map { sq(t.colX(it), t.rect.top, side) },
-            rowSeps = (1 until t.rows).map { sq(t.rect.right, t.rowY(it), side) },
-            colMinus = sq(cx - gap, t.rect.bottom + arm, bs), colPlus = sq(cx + gap, t.rect.bottom + arm, bs),
-            rowPlus = sq(t.rect.right + arm, cy - gap, bs), rowMinus = sq(t.rect.right + arm, cy + gap, bs),
+            topBar = Rect(t.rect.left, barY - hit / 2, t.rect.w, hit),
+            leftBar = Rect(barX - hit / 2, t.rect.top, hit, t.rect.h),
+            barY = barY, barX = barX,
+            colStart = Pt(t.colX(cols.first), barY), colEnd = Pt(t.colX(cols.last + 1), barY),
+            rowStart = Pt(barX, t.rowY(rows.first)), rowEnd = Pt(barX, t.rowY(rows.last + 1)),
+            colMinus = sq(t.rect.right + gap + bs * 0.5, barY), colPlus = sq(t.rect.right + gap + bs * 1.7, barY),
+            rowMinus = sq(barX, t.rect.bottom + gap + bs * 0.5), rowPlus = sq(barX, t.rect.bottom + gap + bs * 1.7),
         )
     }
 
-    /** Handle a press in table edit mode: an add/remove button, an interior line drag, or a move.
-     *  Returns false when the press is outside the table and its chrome (so the caller can exit). */
-    private fun beginTableEdit(content: Pt): Boolean {
-        val sel = selection.singleOrNull() ?: return false
-        val t = sel.item as? TableItem ?: return false
-        if (state.pageRects.getOrNull(sel.pageIndex) == null) return false
-        val local = state.toPageSpace(sel.pageIndex, content)
-        val chrome = tableChrome(t)
+    /** The selected table and [content] in its page space, or null when the selection isn't one table. */
+    private fun tableAt(content: Pt): Pair<TableItem, Pt>? {
+        val sel = selection.singleOrNull() ?: return null
+        val t = sel.item as? TableItem ?: return null
+        if (state.pageRects.getOrNull(sel.pageIndex) == null) return null
+        return t to state.toPageSpace(sel.pageIndex, content)
+    }
+
+    /** True when [content] lands on the selected table's bars, grips or -/+ buttons. */
+    private fun tableChromeHit(content: Pt): Boolean {
+        val (t, local) = tableAt(content) ?: return false
+        val c = tableChrome(t)
+        val tol = HANDLE_HIT / state.zoom
+        return c.topBar.outset(tol / 2).contains(local) || c.leftBar.outset(tol / 2).contains(local) ||
+            listOf(c.colMinus, c.colPlus, c.rowMinus, c.rowPlus).any { it.contains(local) }
+    }
+
+    /**
+     * Handle a press on the selected table's chrome: a -/+ button, a bar-end grip (resize the picked
+     * columns or rows), the bar itself (pick columns or rows), or an interior line. Returns false when
+     * the press missed all of them, so the caller moves or reselects as usual.
+     */
+    private fun beginTableChrome(content: Pt): Boolean {
+        val (t, local) = tableAt(content) ?: return false
+        val c = tableChrome(t)
+        val tol = HANDLE_HIT / state.zoom
         when {
-            chrome.colPlus.contains(local) -> { editSelectedTable { it.addColumn() }; return true }
-            chrome.colMinus.contains(local) -> { editSelectedTable { it.removeColumn() }; return true }
-            chrome.rowPlus.contains(local) -> { editSelectedTable { it.addRow() }; return true }
-            chrome.rowMinus.contains(local) -> { editSelectedTable { it.removeRow() }; return true }
+            c.colPlus.contains(local) -> {
+                val at = tableColPick?.let { colPick(t).last + 1 } ?: t.cols
+                editSelectedTable { it.insertColumn(at) }
+                if (tableColPick != null) tableColPick = at..at
+                return true
+            }
+            c.colMinus.contains(local) -> {
+                val drop = tableColPick?.let { colPick(t) } ?: (t.cols - 1..t.cols - 1)
+                editSelectedTable { it.removeColumns(drop) }
+                tableColPick = null
+                return true
+            }
+            c.rowPlus.contains(local) -> {
+                val at = tableRowPick?.let { rowPick(t).last + 1 } ?: t.rows
+                editSelectedTable { it.insertRow(at) }
+                if (tableRowPick != null) tableRowPick = at..at
+                return true
+            }
+            c.rowMinus.contains(local) -> {
+                val drop = tableRowPick?.let { rowPick(t) } ?: (t.rows - 1..t.rows - 1)
+                editSelectedTable { it.removeRows(drop) }
+                tableRowPick = null
+                return true
+            }
         }
-        if (tryGrabTableLine(content)) return true
-        if (t.rect.contains(local)) { beginMove(content); return true }
-        return false
+        val grips = listOf(c.colStart, c.colEnd, c.rowStart, c.rowEnd)
+        val g = grips.indices.minByOrNull { grips[it].distanceTo(local) }
+        if (g != null && grips[g].distanceTo(local) <= tol) {
+            tableLineIsColumn = g < 2
+            tableGripAtEnd = g % 2 == 1
+            beginTableDrag(t, PointerMode.TABLE_GRIP)
+            return true
+        }
+        if (c.topBar.contains(local) || c.leftBar.contains(local)) {
+            tableLineIsColumn = c.topBar.contains(local)
+            tablePickPrior = if (tableLineIsColumn) tableColPick else tableRowPick
+            tablePickAnchor = if (tableLineIsColumn) columnAt(t, local.x) else rowAt(t, local.y)
+            setTablePick(tablePickAnchor..tablePickAnchor)
+            beginTableDrag(t, PointerMode.TABLE_PICK)
+            return true
+        }
+        return tryGrabTableLine(content)
+    }
+
+    private fun beginTableDrag(t: TableItem, dragMode: PointerMode) {
+        tableLineItem = t
+        tableLinePageIndex = selection.single().pageIndex
+        tableLineBefore = t.snapshotGeometry()
+        mode = dragMode
+        onSelectionMenu(null)
+        requestRender()
+    }
+
+    private fun columnAt(t: TableItem, x: Double): Int = (0 until t.cols).firstOrNull { x < t.colX(it + 1) } ?: (t.cols - 1)
+    private fun rowAt(t: TableItem, y: Double): Int = (0 until t.rows).firstOrNull { y < t.rowY(it + 1) } ?: (t.rows - 1)
+
+    private fun setTablePick(range: IntRange?) {
+        if (tableLineIsColumn) tableColPick = range else tableRowPick = range
+    }
+
+    /** Drag a bar-end grip: the picked columns (or rows) share the new span, the rest keep their size. */
+    private fun extendTableGrip(content: Pt) {
+        val t = tableLineItem ?: return
+        if (state.pageRects.getOrNull(tableLinePageIndex) == null) return
+        val local = state.toPageSpace(tableLinePageIndex, content)
+        if (tableLineIsColumn) {
+            val r = colPick(t)
+            t.resizeColumnRange(r.first, r.last, local.x, tableGripAtEnd)
+        } else {
+            val r = rowPick(t)
+            t.resizeRowRange(r.first, r.last, local.y, tableGripAtEnd)
+        }
+        selObb = selectionObb()
+        requestRender()
+    }
+
+    /** Drag along a bar: pick the columns (or rows) between the press and the pointer. */
+    private fun extendTablePick(content: Pt) {
+        val t = tableLineItem ?: return
+        if (state.pageRects.getOrNull(tableLinePageIndex) == null) return
+        val local = state.toPageSpace(tableLinePageIndex, content)
+        val at = if (tableLineIsColumn) columnAt(t, local.x) else rowAt(t, local.y)
+        setTablePick(minOf(at, tablePickAnchor)..maxOf(at, tablePickAnchor))
+        requestRender()
+    }
+
+    /** A pick covering the whole side means all of it; tapping the lone picked segment again clears it. */
+    private fun endTablePick() {
+        val t = tableLineItem
+        if (t != null) {
+            val picked = if (tableLineIsColumn) tableColPick else tableRowPick
+            val all = if (tableLineIsColumn) 0 until t.cols else 0 until t.rows
+            if (picked == all || (picked == tablePickPrior && picked?.first == picked?.last)) setTablePick(null)
+        }
+        tableLineItem = null
+        tableLineBefore = null
+        mode = PointerMode.IDLE
+        refreshSelectionMenu()
+        requestRender()
     }
 
     // --- CROP (adjust an image's crop rectangle, then bake it) ---
@@ -1951,28 +2120,39 @@ class InteractionController(
         }
     }
 
-    /** Draw the table edit chrome (content space): per-line handle squares and the +/- buttons. */
-    private fun drawTableEditChrome(r: Renderer) {
+    /** Draw the selected table's handle bars (content space): each bar with a tick at every line,
+     *  the picked range solid between its two grips, and the -/+ pair past the bar's end. */
+    private fun drawTableChrome(r: Renderer) {
         val t = singleSelectedTable() ?: return
         val pi = selection.firstOrNull()?.pageIndex ?: return
         if (state.pageRects.getOrNull(pi) == null) return
-        val chrome = tableChrome(t)
+        val c = tableChrome(t)
         val sel = com.xnotes.core.model.Rgba.SELECTION
         val white = Rgba(255, 255, 255, 255)
-        fun square(localRect: Rect, color: Rgba) = r.fillRect(state.fromPageSpaceRect(pi, localRect), color)
-        fun glyph(localRect: Rect, plus: Boolean) {
-            val c = state.fromPageSpaceRect(pi, localRect)
-            val pad = c.w * 0.28
+        fun at(p: Pt): Pt = state.fromPageSpace(pi, p).let { Pt(it.x + moveOffset.x, it.y + moveOffset.y) }
+        val tick = HANDLE_SIZE * 0.3 / state.zoom
+        val grip = HANDLE_SIZE * 0.42 / state.zoom
+        r.strokePolyline(listOf(at(Pt(t.rect.left, c.barY)), at(Pt(t.rect.right, c.barY))), Pen(sel.withAlpha(110), 4.0, cosmetic = true))
+        r.strokePolyline(listOf(at(Pt(c.barX, t.rect.top)), at(Pt(c.barX, t.rect.bottom))), Pen(sel.withAlpha(110), 4.0, cosmetic = true))
+        val tickPen = Pen(sel, 1.3, cosmetic = true)
+        for (i in 0..t.cols) r.strokePolyline(listOf(at(Pt(t.colX(i), c.barY - tick)), at(Pt(t.colX(i), c.barY + tick))), tickPen)
+        for (j in 0..t.rows) r.strokePolyline(listOf(at(Pt(c.barX - tick, t.rowY(j))), at(Pt(c.barX + tick, t.rowY(j)))), tickPen)
+        r.strokePolyline(listOf(at(c.colStart), at(c.colEnd)), Pen(sel, 4.0, cosmetic = true))
+        r.strokePolyline(listOf(at(c.rowStart), at(c.rowEnd)), Pen(sel, 4.0, cosmetic = true))
+        for (p in listOf(c.colStart, c.colEnd, c.rowStart, c.rowEnd)) r.fillCircle(at(p), grip, sel)
+        fun button(localRect: Rect, plus: Boolean) {
+            val tl = at(localRect.topLeft)
+            val box = Rect(tl.x, tl.y, localRect.w, localRect.h)
+            r.fillRect(box, sel)
+            val pad = box.w * 0.28
             val pen = Pen(white, 1.6, cosmetic = true)
-            r.strokePolyline(listOf(Pt(c.left + pad, c.centerY), Pt(c.right - pad, c.centerY)), pen)
-            if (plus) r.strokePolyline(listOf(Pt(c.centerX, c.top + pad), Pt(c.centerX, c.bottom - pad)), pen)
+            r.strokePolyline(listOf(Pt(box.left + pad, box.centerY), Pt(box.right - pad, box.centerY)), pen)
+            if (plus) r.strokePolyline(listOf(Pt(box.centerX, box.top + pad), Pt(box.centerX, box.bottom - pad)), pen)
         }
-        chrome.colSeps.forEach { square(it, sel) }
-        chrome.rowSeps.forEach { square(it, sel) }
-        square(chrome.colPlus, sel); glyph(chrome.colPlus, true)
-        square(chrome.colMinus, sel); glyph(chrome.colMinus, false)
-        square(chrome.rowPlus, sel); glyph(chrome.rowPlus, true)
-        square(chrome.rowMinus, sel); glyph(chrome.rowMinus, false)
+        button(c.colMinus, false)
+        button(c.colPlus, true)
+        button(c.rowMinus, false)
+        button(c.rowPlus, true)
     }
 
     // --- TRANSFORM (generic resize + rotate) ---
@@ -2071,32 +2251,38 @@ class InteractionController(
             dashed = shapeConfig.dashed, dashLength = shapeConfig.dashLength, dashGap = shapeConfig.dashGap,
             function = if (kind == ShapeKind.FUNCTION) FunctionSpec.preset(shapeConfig.function) else null,
         )
+        shapeAnchor = startLocal
+        shapeAspect = pendingShape?.function?.naturalAspect()
         shapePageIndex = pageIndex
         mode = PointerMode.SHAPE
         requestRender()
     }
+
+    // Where the shape drag began (a circle's centre) and a function's true height/width.
+    private var shapeAnchor = Pt.ZERO
+    private var shapeAspect: Double? = null
 
     private fun extendShape(content: Pt) {
         val shape = pendingShape ?: return
         val pi = shapePageIndex ?: return
         if (state.pageRects.getOrNull(pi) == null) return
         val raw = state.toPageSpace(pi, content)
+        if (shape.shape == ShapeKind.CIRCLE) {
+            // Circle: grown out from its centre, so the drag ends on the rim.
+            val (s, e) = ResizeMath.circleFromCentre(shapeAnchor, raw)
+            shape.start = s
+            shape.end = e
+            requestRender()
+            return
+        }
         shape.end = when {
             // Line/arrow: pin the dragged end flat when it lands near an axis.
             shape.shape.isEndpointShape -> snapAxisEndpoint(shape.start, raw)
-            // Circle: keep the box square so it stays a perfect circle.
-            shape.shape == ShapeKind.CIRCLE -> squareCorner(shape.start, raw)
+            // A function graph keeps equal x and y scales while drawn; its handles stretch it later.
+            shape.shape == ShapeKind.FUNCTION -> ResizeMath.aspectCorner(shape.start, raw, shapeAspect)
             else -> raw
         }
         requestRender()
-    }
-
-    /** Constrain a dragged corner [p] to a square box anchored at [anchor] (the perfect-circle shape). */
-    private fun squareCorner(anchor: Pt, p: Pt): Pt {
-        val side = max(abs(p.x - anchor.x), abs(p.y - anchor.y))
-        val sx = if (p.x >= anchor.x) 1.0 else -1.0
-        val sy = if (p.y >= anchor.y) 1.0 else -1.0
-        return Pt(anchor.x + sx * side, anchor.y + sy * side)
     }
 
     /** Snap a line/arrow's dragged endpoint to an exactly horizontal or vertical run from [anchor]
@@ -2530,9 +2716,13 @@ class InteractionController(
         // into the cache) and those entering it (lifted out of it). Update the selection
         // first so the in-place repair below sees the new lifted set.
         val touched = selection + items
+        // The picked table columns and rows belong to that table's selection; a new one starts over.
+        if (items.singleOrNull()?.item !== selection.singleOrNull()?.item) {
+            tableColPick = null
+            tableRowPick = null
+        }
         selection.clear()
         selection.addAll(items)
-        setTableEditing(false) // a new selection always starts out of table edit mode
         // A fresh selection starts upright: its box is the items' AABB, angle 0.
         selObb = selectionObb()
         repairRegions(dirtyRegions(touched))
@@ -2645,25 +2835,6 @@ class InteractionController(
         requestRender()
     }
 
-    private var tableEditing = false
-
-    /** In table edit mode: the resize box is replaced by add/remove buttons and per-line handles. */
-    fun isTableEditing(): Boolean = tableEditing && singleSelectedTable() != null
-
-    private fun setTableEditing(on: Boolean) {
-        if (tableEditing == on) return
-        tableEditing = on
-        onTableEditingChanged(on)
-    }
-
-    /** Toggle table edit mode for the selected table (no-op if the selection isn't a single table). */
-    fun toggleTableEditMode() {
-        if (singleSelectedTable() == null) return
-        setTableEditing(!tableEditing)
-        refreshSelectionMenu()
-        requestRender()
-    }
-
     /** Apply [mutate] to the single selected table as one undoable edit (add/remove line, etc.). */
     fun editSelectedTable(mutate: (TableItem) -> Unit) {
         val t = singleSelectedTable() ?: return
@@ -2679,14 +2850,11 @@ class InteractionController(
         requestRender()
     }
 
-    /** The single selected spline, for the menu's add/remove point actions. */
-    fun singleSelectedSpline(): ShapeItem? = singleSpline()?.item as? ShapeItem
-
-    /** Add a control point to the selected spline, or remove one, as one undoable edit. */
-    fun editSelectedSpline(add: Boolean) {
-        val sp = singleSelectedSpline() ?: return
+    /** Change the selected spline's control points with [edit], as one undoable edit. */
+    private fun editSelectedSpline(edit: (ShapeItem) -> Boolean) {
+        val sp = singleSpline()?.item as? ShapeItem ?: return
         val before = sp.snapshotGeometry()
-        if (add) sp.addControlPoint() else if (!sp.removeControlPoint()) return
+        if (!edit(sp)) return
         history.push(TransformItems(listOf(sp), listOf(before), listOf(sp.snapshotGeometry())))
         state.document.dirty = true
         selObb = selectionObb()
@@ -2720,7 +2888,8 @@ class InteractionController(
             onToolChanged(tool)
         }
         onSelectionMenu(null)
-        setTableEditing(false)
+        tableColPick = null
+        tableRowPick = null
         selObb = null
         if (selection.isEmpty()) return
         val regions = dirtyRegions(selection) // where the now-unlifted items sit (before clearing)
@@ -3060,6 +3229,11 @@ class InteractionController(
         if (selectionRotatePoint() != null) rect = Rect(rect.left, rect.top - clearance, rect.w, rect.h + clearance)
         // Likewise drop the bottom below the move grip, so the fallback placement clears it.
         if (selectionMoveGrip() != null) rect = Rect(rect.left, rect.top, rect.w, rect.h + clearance)
+        // A table's column bar sits above it: lift the bar's anchor clear of it too.
+        if (singleSelectedTable() != null) {
+            val lift = HANDLE_SIZE * 0.9 + HANDLE_HIT / 2
+            rect = Rect(rect.left, rect.top - lift, rect.w, rect.h + lift)
+        }
         return rect
     }
 
@@ -3553,6 +3727,12 @@ class InteractionController(
 
             // Selection chrome.
             val accent = chromePen(1.3)
+            // Find-in-note hits, the current one stronger.
+            for ((pi, rect) in findHighlights) {
+                if (state.pageRects.getOrNull(pi) == null) continue
+                r.fillRect(state.fromPageSpaceRect(pi, rect), state.palette.accent.withAlpha(if (findCurrent.any { it.second == rect && it.first == pi }) 120 else 50))
+            }
+
             // Flow caret + selection highlight, under the selection chrome.
             flowText?.drawOverlay(r)
 
@@ -3570,10 +3750,6 @@ class InteractionController(
             // Crop mode: dim the trimmed border and show the crop rect + handles instead of the box.
             if (mode == PointerMode.CROP) {
                 drawCrop(r)
-            } else
-            // Table edit mode: the resize box is replaced by add/remove buttons and per-line handles.
-            if (isTableEditing() && mode != PointerMode.BAND && mode != PointerMode.LASSO_DRAW) {
-                drawTableEditChrome(r)
             } else
             // Resize + rotate handles for the settled selection (single, multi, or mixed).
             if (selection.isNotEmpty() && mode != PointerMode.BAND && mode != PointerMode.LASSO_DRAW) {
@@ -3597,6 +3773,7 @@ class InteractionController(
                         r.fillCircle(Pt(p.x + moveOffset.x, p.y + moveOffset.y), side * 0.5, com.xnotes.core.model.Rgba.SELECTION)
                     }
                 }
+                drawTableChrome(r)
                 selectionMoveGrip()?.let { g ->
                     val c = Pt(g.x + moveOffset.x, g.y + moveOffset.y)
                     r.fillCircle(c, side * 0.8, com.xnotes.core.model.Rgba.SELECTION)
@@ -3922,6 +4099,9 @@ class InteractionController(
 
         /** Max finger drift (viewport px) from touch-down still counted as a tap (e.g. tap-to-dismiss). */
         const val TAP_SLOP = 12.0
+
+        /** Longest gap between two taps on a spline point that still removes it. */
+        const val DOUBLE_TAP_MS = 350L
 
         /** Padding (content px) added around erased items' bounds when repairing
          *  the cache, to cover stroke anti-aliasing at the dirty-rect edge. */

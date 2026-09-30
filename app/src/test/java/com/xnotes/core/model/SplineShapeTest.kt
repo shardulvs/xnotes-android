@@ -31,11 +31,11 @@ class SplineShapeTest {
 
     @Test fun addAndRemoveKeepAtLeastOneMiddlePoint() {
         val s = spline()
-        s.addControlPoint()
+        s.insertControlPointNear(Pt(25.0, 0.0))
         assertEquals(4, s.controlPoints().size)
-        assertTrue(s.removeControlPoint())
+        assertTrue(s.removeControlPointAt(1))
         assertEquals(3, s.controlPoints().size)
-        assertFalse(s.removeControlPoint())
+        assertFalse(s.removeControlPointAt(1))
         assertEquals(3, s.controlPoints().size)
     }
 
@@ -44,9 +44,10 @@ class SplineShapeTest {
         s.moveControlPoint(1, Pt(50.0, 40.0))
         val before = s.splinePath()
         val old = s.controlPoints()
-        s.addControlPoint()
+        s.insertControlPointNear(Pt(20.0, 30.0))
         val added = s.controlPoints().single { c -> old.none { it.distanceTo(c) < 1e-6 } }
         assertTrue(before.minOf { it.distanceTo(added) } < 2.0)
+        assertTrue(s.controlPoints().indexOf(added) == 1)
     }
 
     @Test fun rotationKeepsItASpline() {

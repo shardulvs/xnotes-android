@@ -2,6 +2,10 @@ package com.xnotes.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.focus.focusRequester
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -82,21 +86,6 @@ interface SelectionMenuHost {
 
     /** Pin the selection where it is and put it away; a held finger over it offers to release it. */
     fun lockSelection()
-
-    /** True when the selection is a single table (shows the table edit toggle in the menu). */
-    val selectionIsTable: Boolean
-
-    /** Whether table edit mode is currently on. */
-    val tableEditing: Boolean
-
-    /** Toggle the table edit overlay (add/remove columns and rows, drag interior lines). */
-    fun toggleTableEditMode()
-
-    /** Control points on the lone selected spline, or 0 when the selection is not one. */
-    val selectionSplinePoints: Int
-
-    /** Add a control point to the selected spline, or remove one (it keeps at least one in the middle). */
-    fun editSelectionSpline(add: Boolean)
 
     /** What the lone selected function curve plots, or null when the selection is not one. */
     val selectionFunction: FunctionSpec?
@@ -200,9 +189,6 @@ fun SelectionMenu(host: SelectionMenuHost) {
         ActionIcon(XnotesIcons.copy, stringResource(R.string.copy)) { host.copySelection(); host.dismissSelectionMenu() }
         ActionIcon(XnotesIcons.front, stringResource(R.string.bring_to_front)) { host.bringToFront(); host.dismissSelectionMenu() }
         ActionIcon(XnotesIcons.duplicate, stringResource(R.string.duplicate)) { host.duplicateSelection() }
-        if (host.selectionIsTable) {
-            ActionIcon(XnotesIcons.table, stringResource(R.string.edit_table), active = host.tableEditing) { host.toggleTableEditMode() }
-        }
         Box {
             ActionIcon(XnotesIcons.more, stringResource(R.string.more)) { overflowOpen = true }
             DropdownMenu(
@@ -218,19 +204,6 @@ fun SelectionMenu(host: SelectionMenuHost) {
                     enabled = styles.isNotEmpty(),
                     onClick = { overflowOpen = false; styleOpen = true },
                 )
-                var splinePoints by remember { mutableStateOf(host.selectionSplinePoints) }
-                if (splinePoints > 0) {
-                    // Left open so a few taps in a row add or strip several points.
-                    DropdownMenuItem(
-                        text = { Text("Add curve point") },
-                        onClick = { host.editSelectionSpline(add = true); splinePoints = host.selectionSplinePoints },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Remove curve point") },
-                        enabled = splinePoints > 3,
-                        onClick = { host.editSelectionSpline(add = false); splinePoints = host.selectionSplinePoints },
-                    )
-                }
                 if (host.selectionFunction != null) {
                     DropdownMenuItem(
                         text = { Text("Edit function") },
@@ -358,119 +331,125 @@ private fun FunctionDialog(initial: FunctionSpec, onConfirm: (FunctionSpec) -> U
     )
 }
 
-/**
- * Keys under the LaTeX field, like a maths keyboard. `#` marks where the cursor lands (and where a
- * selection is wrapped); the empty slots show as boxes on the key.
- */
-private val LATEX_STRUCTURE_KEYS = listOf(
-    "\\frac{#}{}", "^{#}", "_{#}", "\\sqrt{#}", "\\sqrt[3]{#}", "\\sqrt[#]{}",
-    "\\left(#\\right)'", "\\frac{d}{d#}", "\\frac{d^{2}}{d#^{2}}", "\\int # \\, dx", "\\int_{#}^{} \\, dx",
-    "\\sum_{#}^{}", "\\lim_{# \\to }", "\\left(#\\right)", "\\left|#\\right|", "\\log_{#}", "\\ln #",
-    "\\sin #", "\\cos #", "\\tan #",
-)
-
-private val LATEX_SYMBOL_KEYS = listOf(
-    "+", "-", "\\cdot", "\\div", "=", "\\neq", "<", ">", "\\le", "\\ge", "\\pm", "\\infty",
-    "\\pi", "e", "\\alpha", "\\beta", "\\theta", "\\lambda", "\\Delta", "\\to",
-)
-
-private fun latexKeyLabel(template: String): String =
-    template.replace("#", "\\square").replace("{}", "{\\square}")
-
 /** Put [template] at the cursor, wrapping the selection at its `#`, and leave the cursor there. */
 private fun insertLatex(value: TextFieldValue, template: String): TextFieldValue {
     val sel = value.selection
-    val selected = value.text.substring(sel.min, sel.max)
-    val mark = template.indexOf('#').takeIf { it >= 0 } ?: template.length
-    val body = template.replace("#", "")
-    // A letter right after a command would run into its name: \pi then e must not read \pie.
-    val afterCommand = Regex("\\\\[a-zA-Z]+$").containsMatchIn(value.text.substring(0, sel.min))
-    val spaced = if (body.first().isLetter() && afterCommand) " " else ""
-    val inserted = spaced + body.substring(0, mark) + selected + body.substring(mark)
+    val (inserted, cursor) = latexInsertion(value.text.substring(0, sel.min), value.text.substring(sel.min, sel.max), template)
     val text = value.text.substring(0, sel.min) + inserted + value.text.substring(sel.max)
-    val cursor = sel.min + spaced.length + mark + selected.length
-    return TextFieldValue(text, TextRange(cursor))
+    return TextFieldValue(text, TextRange(sel.min + cursor))
 }
 
-/** Move the cursor into the next empty `{}` after it, wrapping to the start. */
-private fun nextLatexSlot(value: TextFieldValue): TextFieldValue {
-    val from = value.selection.max
-    val i = value.text.indexOf("{}", from).takeIf { it >= 0 } ?: value.text.indexOf("{}")
-    return if (i < 0) value else value.copy(selection = TextRange(i + 1))
-}
-
-/** Edit a formula box's LaTeX. Save stays on the dialog when the renderer cannot set the result. */
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * Edit a formula box's LaTeX: a live preview over the source, typed on the maths keyboard (numbers
+ * and functions, as in flowing text) with the soft keyboard kept down until ABC asks for it. On a
+ * tablet the dialog and its keys grow to use the room. Save stays on the dialog when the renderer
+ * cannot set the result.
+ */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 private fun LatexDialog(initial: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+    val palette = LocalPalette.current
+    val wide = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= COMPACT_WIDTH_DP
     var value by remember { mutableStateOf(TextFieldValue(initial, TextRange(initial.length))) }
-    val keyConfig = LatexConfig(fontSize = 14.sp, theme = LatexTheme.material3())
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
-        modifier = Modifier.widthIn(max = 720.dp).padding(horizontal = 16.dp),
-        title = { Text("Formula") },
-        text = {
+    var mathKeys by remember { mutableStateOf(true) }
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    val shape = MaterialTheme.shapes.large
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier
+                .fillMaxWidth(if (wide) 0.86f else 1f)
+                .widthIn(max = 1100.dp)
+                .padding(if (wide) 0.dp else 12.dp)
+                .clip(shape)
+                .background(palette.menuBg.toComposeColor())
+                .border(1.dp, palette.border.toComposeColor(), shape)
+                .padding(if (wide) 24.dp else 16.dp),
+        ) {
+            Text("Formula", style = MaterialTheme.typography.headlineSmall, color = palette.text.toComposeColor())
             Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
             ) {
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 72.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .heightIn(min = if (wide) 120.dp else 72.dp)
+                        .clip(MaterialTheme.shapes.medium)
+                        .background(palette.surface.toComposeColor())
+                        .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium)
                         .horizontalScroll(rememberScrollState())
-                        .padding(12.dp),
+                        .padding(16.dp),
                 ) {
                     Latex(
                         latex = "\\displaystyle " + value.text,
-                        config = LatexConfig(fontSize = 22.sp, theme = LatexTheme.material3()),
+                        config = LatexConfig(fontSize = if (wide) 30.sp else 22.sp, theme = latexTheme()),
                     )
                 }
-                OutlinedTextField(
-                    value = value,
-                    onValueChange = { value = it },
-                    label = { Text("LaTeX") },
-                    minLines = 3,
-                    maxLines = 6,
-                    modifier = Modifier.fillMaxWidth(),
-                    textStyle = androidx.compose.ui.text.TextStyle(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace),
-                )
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                // While the maths keys are up the field keeps its caret but asks for no soft keyboard.
+                androidx.compose.ui.platform.InterceptPlatformTextInput(
+                    interceptor = { request, next -> if (mathKeys) kotlinx.coroutines.awaitCancellation() else next.startInputMethod(request) },
                 ) {
-                    (LATEX_STRUCTURE_KEYS + LATEX_SYMBOL_KEYS).forEach { key ->
-                        LatexKey(onClick = { value = insertLatex(value, key) }) {
-                            Latex(latex = latexKeyLabel(key), config = keyConfig)
-                        }
-                    }
-                    LatexKey(onClick = { value = nextLatexSlot(value) }) { Text("Next") }
+                    OutlinedTextField(
+                        value = value,
+                        onValueChange = { value = it },
+                        label = { Text("LaTeX") },
+                        minLines = if (wide) 2 else 3,
+                        maxLines = 6,
+                        modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            fontSize = if (wide) 18.sp else 15.sp,
+                            color = palette.text.toComposeColor(),
+                        ),
+                    )
+                }
+                if (mathKeys) {
+                    MathKeys(
+                        MathKeyActions(
+                            onKey = { value = insertLatex(value, it) },
+                            onAbc = {
+                                mathKeys = false
+                                // The field restarts its input with the interceptor out of the way.
+                                scope.launch {
+                                    focusManager.clearFocus()
+                                    kotlinx.coroutines.delay(30)
+                                    runCatching { focus.requestFocus() }
+                                    keyboard?.show()
+                                }
+                            },
+                            onMove = { value = moveLatexCursor(value, it) },
+                            onDelete = { value = deleteLatexBack(value) },
+                            onEnter = { value = insertLatex(value, "\n") },
+                        ),
+                    )
+                } else {
+                    TextButton(onClick = { keyboard?.hide(); mathKeys = true }) { Text("Maths keys") }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(enabled = value.text.isNotBlank(), onClick = { onConfirm(value.text.trim()) }) { Text("Save") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        },
-    )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+                TextButton(enabled = value.text.isNotBlank(), onClick = { onConfirm(value.text.trim()) }) { Text("Save") }
+            }
+        }
+    }
 }
 
-@Composable
-private fun LatexKey(onClick: () -> Unit, content: @Composable () -> Unit) {
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .size(width = 56.dp, height = 48.dp)
-            .clip(RoundedCornerShape(6.dp))
-            .background(MaterialTheme.colorScheme.secondaryContainer)
-            .clickable(onClick = onClick),
-    ) { content() }
+private fun moveLatexCursor(value: TextFieldValue, by: Int): TextFieldValue {
+    val at = (if (by < 0) value.selection.min else value.selection.max) + by
+    return value.copy(selection = TextRange(at.coerceIn(0, value.text.length)))
+}
+
+private fun deleteLatexBack(value: TextFieldValue): TextFieldValue {
+    val sel = value.selection
+    val from = if (sel.collapsed) (sel.min - 1).coerceAtLeast(0) else sel.min
+    if (from == sel.max) return value
+    return TextFieldValue(value.text.removeRange(from, sel.max), TextRange(from))
 }
 
 /** A range bound as the user would type it: multiples of pi as "2pi", the rest trimmed. */
@@ -693,7 +672,11 @@ interface LongPressMenuHost {
  * nothing else can be done with one and there is no other way back.
  */
 @Composable
-fun LongPressMenu(host: LongPressMenuHost, onInsertImageAt: (com.xnotes.core.geometry.Pt) -> Unit) {
+fun LongPressMenu(
+    host: LongPressMenuHost,
+    onInsertImageAt: (com.xnotes.core.geometry.Pt) -> Unit,
+    onTakePhotoAt: (com.xnotes.core.geometry.Pt) -> Unit = {},
+) {
     val target = host.contextMenu ?: return
     val density = LocalDensity.current
     val xDp = with(density) { target.viewportX.toFloat().toDp() }
@@ -720,6 +703,9 @@ fun LongPressMenu(host: LongPressMenuHost, onInsertImageAt: (com.xnotes.core.geo
             }
             DropdownMenuItem(text = { Text(stringResource(R.string.insert_image_ellipsis)) }, onClick = {
                 onInsertImageAt(target.content); host.dismissContextMenu()
+            })
+            DropdownMenuItem(text = { Text(stringResource(R.string.take_photo)) }, onClick = {
+                onTakePhotoAt(target.content); host.dismissContextMenu()
             })
         }
     }

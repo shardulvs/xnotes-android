@@ -18,6 +18,22 @@ data class ResizeHandle(val id: HandleId, val content: Pt)
 
 /** Pure resize-handle geometry and per-type resize updates (spec 06 §8). */
 object ResizeMath {
+
+    /** The square box of a circle dragged out from its centre [centre] to a point [p] on its rim. */
+    fun circleFromCentre(centre: Pt, p: Pt): Pair<Pt, Pt> {
+        val r = centre.distanceTo(p)
+        return Pt(centre.x - r, centre.y - r) to Pt(centre.x + r, centre.y + r)
+    }
+
+    /** The corner, from [anchor] toward [p], of the box that covers the drag at height/width [aspect]. */
+    fun aspectCorner(anchor: Pt, p: Pt, aspect: Double?): Pt {
+        if (aspect == null || !(aspect > 1e-9)) return p
+        val w = max(abs(p.x - anchor.x), abs(p.y - anchor.y) / aspect)
+        val sx = if (p.x >= anchor.x) 1.0 else -1.0
+        val sy = if (p.y >= anchor.y) 1.0 else -1.0
+        return Pt(anchor.x + sx * w, anchor.y + sy * w * aspect)
+    }
+
     const val MIN_SIZE = 24.0
 
     /** Lowest scale a generic box-handle drag yields, so a selection can't collapse to zero or

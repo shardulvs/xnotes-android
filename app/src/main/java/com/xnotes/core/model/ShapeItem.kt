@@ -67,6 +67,9 @@ class ShapeItem(
         return pts.map { Pt(b.left + it.x * b.w, b.top + it.y * b.h) }
     }
 
+    /** The open vertex-list outline as separate runs: a plotted function breaks at its poles. */
+    internal fun runs(): List<List<Pt>> = FunctionSpec.runs(absPoints())
+
     /** Absolute (content-space) vertices for polygon/polyline kinds; null for the rest. */
     fun vertices(): List<Pt>? = if (points == null) null else absPoints()
 
@@ -174,19 +177,32 @@ class ShapeItem(
         setControlPoints(c)
     }
 
-    /** Add a control point on the curve, halfway along its longest span, so the shape stays put. */
-    fun addControlPoint() {
+    /** Add a control point on the curve where it passes closest to [near], so the shape stays put. */
+    fun insertControlPointNear(near: Pt) {
         val c = controlPoints()
-        val i = (0 until c.size - 1).maxByOrNull { c[it].distanceTo(c[it + 1]) } ?: return
-        setControlPoints(c.take(i + 1) + catmullRom(c, i, 0.5) + c.drop(i + 1))
+        if (c.size < 2) return
+        var bestSpan = 0
+        var bestT = 0.5
+        var bestD = Double.MAX_VALUE
+        for (i in 0 until c.size - 1) {
+            for (s in 1 until SPLINE_SAMPLES * 4) {
+                val t = s.toDouble() / (SPLINE_SAMPLES * 4)
+                val d = catmullRom(c, i, t).distanceTo(near)
+                if (d < bestD) {
+                    bestD = d
+                    bestSpan = i
+                    bestT = t
+                }
+            }
+        }
+        setControlPoints(c.take(bestSpan + 1) + catmullRom(c, bestSpan, bestT) + c.drop(bestSpan + 1))
     }
 
-    /** Drop the middle point that bends the curve least; a spline keeps at least one. */
-    fun removeControlPoint(): Boolean {
+    /** Drop control point [index]; a spline keeps at least three. */
+    fun removeControlPointAt(index: Int): Boolean {
         val c = controlPoints()
-        if (c.size <= 3) return false
-        val j = (1 until c.size - 1).minByOrNull { Geometry.distancePointToSegment(c[it], c[it - 1], c[it + 1]) } ?: return false
-        setControlPoints(c.filterIndexed { k, _ -> k != j })
+        if (c.size <= 3 || index !in c.indices) return false
+        setControlPoints(c.filterIndexed { k, _ -> k != index })
         return true
     }
 
@@ -256,7 +272,7 @@ class ShapeItem(
             ShapeKind.TRIANGLE -> r.strokePolygon(triangleVertices(), pen)
             ShapeKind.POLYGON -> r.strokePolygon(absPoints(), pen)
             ShapeKind.COORD_AXES -> axesSegments().forEach { r.strokePolyline(it, pen) }
-            ShapeKind.POLYLINE, ShapeKind.CURVE, ShapeKind.FUNCTION -> r.strokePolyline(absPoints(), pen)
+            ShapeKind.POLYLINE, ShapeKind.CURVE, ShapeKind.FUNCTION -> runs().forEach { r.strokePolyline(it, pen) }
             ShapeKind.NUMBER_LINE -> numberLineSegments().forEach { r.strokePolyline(it, pen) }
             ShapeKind.SPLINE -> r.strokePolyline(splinePath(), pen)
         }
@@ -346,7 +362,7 @@ class ShapeItem(
                 if (fillRgba != null) Geometry.pointInPolygon(v, p) else nearPolyOutline(v, p, tol)
             }
             ShapeKind.COORD_AXES -> nearAxes(p, tol)
-            ShapeKind.POLYLINE, ShapeKind.CURVE, ShapeKind.FUNCTION -> nearPolyOutline(absPoints(), p, tol, closed = false)
+            ShapeKind.POLYLINE, ShapeKind.CURVE, ShapeKind.FUNCTION -> runs().any { nearPolyOutline(it, p, tol, closed = false) }
             ShapeKind.SPLINE -> nearPolyOutline(splinePath(), p, tol, closed = false)
         }
     }
@@ -382,7 +398,7 @@ class ShapeItem(
     override fun outlinePoints(): List<Pt> = when (shape) {
         ShapeKind.LINE, ShapeKind.ARROW, ShapeKind.NUMBER_LINE -> listOf(start, end)
         ShapeKind.COORD_AXES -> axesSegments().take(2).flatten()
-        else -> currentOutline()
+        else -> currentOutline().filterNot { it.x.isNaN() }
     }
 
     /** True if an eraser circle of [radius] at (cx,cy) touches the shape's geometry. */
@@ -407,7 +423,7 @@ class ShapeItem(
                 if (fillRgba != null && Geometry.pointInPolygon(v, p)) true else nearPolyOutline(v, p, tol)
             }
             ShapeKind.COORD_AXES -> nearAxes(p, tol)
-            ShapeKind.POLYLINE, ShapeKind.CURVE, ShapeKind.FUNCTION -> nearPolyOutline(absPoints(), p, tol, closed = false)
+            ShapeKind.POLYLINE, ShapeKind.CURVE, ShapeKind.FUNCTION -> runs().any { nearPolyOutline(it, p, tol, closed = false) }
             ShapeKind.SPLINE -> nearPolyOutline(splinePath(), p, tol, closed = false)
         }
     }
@@ -433,7 +449,7 @@ class ShapeItem(
         }
         if (verts.size < 2) return if (intersectsCircle(cx, cy, radius)) emptyList() else null
         val closed = shape.isClosed
-        val pts = if (closed) verts + verts.first() else verts
+        val paths = if (closed) listOf(verts + verts.first()) else FunctionSpec.runs(verts)
 
         var touched = false
         val runs = mutableListOf<MutableList<Pt>>()
@@ -442,37 +458,40 @@ class ShapeItem(
             if (current.size >= 2 && polylineLength(current) > 1e-6) runs.add(current)
             current = mutableListOf()
         }
-        for (i in 0 until pts.size - 1) {
-            val a = pts[i]
-            val b = pts[i + 1]
-            val outside = outsideSpans(a, b, c, radius)
-            if (outside.size == 1 && outside[0].first == 0.0 && outside[0].second == 1.0) {
-                if (current.isEmpty()) current.add(a)
-                current.add(b)
-                continue
-            }
-            touched = true
-            if (outside.isEmpty()) { // the whole segment sits inside the circle
-                flush()
-                continue
-            }
-            for ((ta, tb) in outside) {
-                if (ta == 0.0) {
+        for (pts in paths) {
+            for (i in 0 until pts.size - 1) {
+                val a = pts[i]
+                val b = pts[i + 1]
+                val outside = outsideSpans(a, b, c, radius)
+                if (outside.size == 1 && outside[0].first == 0.0 && outside[0].second == 1.0) {
                     if (current.isEmpty()) current.add(a)
-                } else {
-                    flush()
-                    current.add(lerp(a, b, ta))
+                    current.add(b)
+                    continue
                 }
-                current.add(if (tb == 1.0) b else lerp(a, b, tb))
-                if (tb < 1.0) flush()
+                touched = true
+                if (outside.isEmpty()) { // the whole segment sits inside the circle
+                    flush()
+                    continue
+                }
+                for ((ta, tb) in outside) {
+                    if (ta == 0.0) {
+                        if (current.isEmpty()) current.add(a)
+                    } else {
+                        flush()
+                        current.add(lerp(a, b, ta))
+                    }
+                    current.add(if (tb == 1.0) b else lerp(a, b, tb))
+                    if (tb < 1.0) flush()
+                }
             }
+            flush()
         }
-        flush()
         if (!touched) return null
 
         // A closed outline cut away from the seam vertex leaves the seam intact in two runs;
         // join them so the survivor is one continuous polyline instead of splitting at v0.
         if (closed && runs.size >= 2) {
+            val pts = paths.first()
             val first = runs.first()
             val last = runs.last()
             if (first.first().distanceTo(pts.first()) < 1e-9 && last.last().distanceTo(pts.first()) < 1e-9) {
@@ -571,7 +590,7 @@ class ShapeItem(
             return
         }
         val verts = currentOutline().map { t.apply(it) }
-        val bb = Rect.bounding(verts)
+        val bb = Rect.bounding(verts.filterNot { it.x.isNaN() })
         shape = if (shape.isClosed) ShapeKind.POLYGON else ShapeKind.POLYLINE
         function = null
         start = bb.topLeft

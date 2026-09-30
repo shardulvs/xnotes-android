@@ -296,6 +296,24 @@ class AddPage(
     }
 }
 
+/** Swap the note's source PDF (another note's PDF merged in); [onSwap] reloads what draws it. */
+class SetPdfFile(
+    private val document: Document,
+    private val before: java.io.File?,
+    private val after: java.io.File?,
+    private val onSwap: () -> Unit,
+) : Command {
+    override fun redo() {
+        document.pdfFile = after
+        onSwap()
+    }
+
+    override fun undo() {
+        document.pdfFile = before
+        onSwap()
+    }
+}
+
 /** Several commands applied as one undoable unit: redo in order, undo in reverse. */
 class CompositeCommand(private val commands: List<Command>) : Command {
     override fun redo() {

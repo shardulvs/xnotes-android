@@ -108,11 +108,11 @@ class CanvasSelection(private val doc: InfiniteDocument) {
         refreshBox()
     }
 
-    /** Add or remove a control point on the lone spline, returning the undo step or null when nothing changed. */
-    fun editSpline(add: Boolean): Command? {
+    /** Change the lone spline's control points with [edit], returning the undo step or null when nothing changed. */
+    fun editSpline(edit: (ShapeItem) -> Boolean): Command? {
         val sp = spline() ?: return null
         val before = sp.snapshotGeometry()
-        if (add) sp.addControlPoint() else if (!sp.removeControlPoint()) return null
+        if (!edit(sp)) return null
         doc.itemsChanged(items)
         refreshBox()
         return OnCanvas(doc, TransformItems(items, listOf(before), listOf(sp.snapshotGeometry())), items)
@@ -148,6 +148,13 @@ class CanvasSelection(private val doc: InfiniteDocument) {
         val centre = box?.center
         startGrabAngle = if (grabAt == null || centre == null) null
         else kotlin.math.atan2(grabAt.y - centre.y, grabAt.x - centre.x)
+    }
+
+    /** Put every item back where the drag began, for a press that turned out to be a tap. */
+    fun restoreStart() {
+        for (i in items.indices) items[i].restoreGeometry(startSnapshots[i])
+        doc.itemsChanged(items)
+        refreshBox()
     }
 
     /**

@@ -114,10 +114,10 @@ class ShapeRecognizerTest {
 
     // --- positives ---
 
-    @Test fun circleSnapsToEllipse() {
+    @Test fun circleSnapsToCircle() {
         val rec = ShapeRecognizer.recognizePoints(circle(200.0, 200.0, 150.0, 48, 5.0))
         assertNotNull(rec)
-        assertEquals(ShapeKind.ELLIPSE, rec!!.kind)
+        assertEquals(ShapeKind.CIRCLE, rec!!.kind)
         assertEquals(200.0, (rec.start.x + rec.end.x) / 2.0, 20.0)
         assertEquals(200.0, (rec.start.y + rec.end.y) / 2.0, 20.0)
         assertEquals(150.0, abs(rec.end.x - rec.start.x) / 2.0, 25.0)
@@ -200,9 +200,21 @@ class ShapeRecognizerTest {
         )
     }
 
-    @Test fun threeCornerStrokeSnapsToFreePolygon() {
+    @Test fun uprightIsoscelesSnapsToTriangle() {
         val tri = polygon(
             listOf(Pt(200.0, 40.0), Pt(360.0, 340.0), Pt(40.0, 340.0)),
+            perEdge = 22, noise = 5.0,
+        )
+        val rec = ShapeRecognizer.recognizePoints(tri)
+        assertNotNull(rec)
+        assertEquals(ShapeKind.TRIANGLE, rec!!.kind)
+        assertEquals(320.0, abs(rec.end.x - rec.start.x), 30.0)
+        assertEquals(300.0, abs(rec.end.y - rec.start.y), 30.0)
+    }
+
+    @Test fun threeCornerStrokeSnapsToFreePolygon() {
+        val tri = polygon(
+            listOf(Pt(80.0, 40.0), Pt(360.0, 300.0), Pt(40.0, 340.0)),
             perEdge = 22, noise = 5.0,
         )
         val rec = ShapeRecognizer.recognizePoints(tri)
@@ -255,7 +267,8 @@ class ShapeRecognizerTest {
         }
         val rec = ShapeRecognizer.recognizePoints(c)
         assertNotNull(rec)
-        assertEquals(ShapeKind.CURVE, rec!!.kind)
+        assertEquals(ShapeKind.SPLINE, rec!!.kind)
+        assertTrue(rec.vertices!!.size in 3..7)
         for (p in rec.vertices!!) assertEquals(r, hypot(p.x - cx, p.y - cy), 34.0)
     }
 
@@ -274,7 +287,7 @@ class ShapeRecognizerTest {
         // Aspect ~0.87 is within the balanced circle threshold, so it squares up to a circle.
         val rec = ShapeRecognizer.recognizePoints(ellipse(200.0, 200.0, 150.0, 130.0, 56, 4.0))
         assertNotNull(rec)
-        assertEquals(ShapeKind.ELLIPSE, rec!!.kind)
+        assertEquals(ShapeKind.CIRCLE, rec!!.kind)
         val w = abs(rec.end.x - rec.start.x)
         val h = abs(rec.end.y - rec.start.y)
         assertEquals("near-circle squares up", w, h, 6.0)
@@ -328,8 +341,7 @@ class ShapeRecognizerTest {
         }
         val rec = ShapeRecognizer.recognizePoints(arc)
         assertNotNull(rec)
-        assertEquals(ShapeKind.CURVE, rec!!.kind)
-        assertTrue(rec.vertices!!.size >= 4)
+        assertTrue(rec!!.kind == ShapeKind.SPLINE || rec.kind == ShapeKind.FUNCTION)
     }
 
     @Test fun sCurveSnapsToCurve() {
@@ -340,7 +352,7 @@ class ShapeRecognizerTest {
         }
         val rec = ShapeRecognizer.recognizePoints(s)
         assertNotNull(rec)
-        assertEquals(ShapeKind.CURVE, rec!!.kind)
+        assertEquals(ShapeKind.SPLINE, rec!!.kind)
         // The fit keeps the stroke's endpoints.
         assertEquals(s.first().x, rec.vertices!!.first().x, 18.0)
         assertEquals(s.last().x, rec.vertices!!.last().x, 18.0)
@@ -356,15 +368,15 @@ class ShapeRecognizerTest {
     @Test fun classificationIsScaleInvariant() {
         val small = circle(100.0, 100.0, 80.0, 48, 3.0)
         val big = small.map { Pt(it.x * 5.0, it.y * 5.0) }
-        assertEquals(ShapeKind.ELLIPSE, ShapeRecognizer.recognizePoints(small)?.kind)
-        assertEquals(ShapeKind.ELLIPSE, ShapeRecognizer.recognizePoints(big)?.kind)
+        assertEquals(ShapeKind.CIRCLE, ShapeRecognizer.recognizePoints(small)?.kind)
+        assertEquals(ShapeKind.CIRCLE, ShapeRecognizer.recognizePoints(big)?.kind)
     }
 
     @Test fun recognizeReadsSamplePositions() {
         val samples = circle(180.0, 180.0, 140.0, 48, 4.0).map { Sample(it.x, it.y, 1.0) }
         val rec = ShapeRecognizer.recognize(samples)
         assertNotNull(rec)
-        assertEquals(ShapeKind.ELLIPSE, rec!!.kind)
+        assertEquals(ShapeKind.CIRCLE, rec!!.kind)
     }
 
     @Test fun lineEndpointsAreOrdered() {
@@ -422,7 +434,7 @@ class ShapeRecognizerTest {
     @Test fun triangleNearHorizontalBaseLevels() {
         // A triangle whose base is ~1.5° off level: the base flattens, the steep sides are left alone.
         val tri = polygon(
-            listOf(Pt(200.0, 40.0), Pt(360.0, 344.0), Pt(40.0, 336.0)),
+            listOf(Pt(90.0, 40.0), Pt(360.0, 344.0), Pt(40.0, 336.0)),
             perEdge = 22, noise = 3.0,
         )
         val rec = ShapeRecognizer.recognizePoints(tri)
@@ -454,5 +466,63 @@ class ShapeRecognizerTest {
             val b = v[(i + 1) % v.size]
             assertTrue("a 45° edge keeps both components", abs(a.x - b.x) > 20.0 && abs(a.y - b.y) > 20.0)
         }
+    }
+
+    // --- function graphs ---
+
+    private fun graph(f: (Double) -> Double, from: Double, to: Double, x0: Double, w: Double, h: Double, noise: Double): List<Pt> {
+        val n = 70
+        val ys = (0..n).map { f(from + (to - from) * it / n) }
+        val lo = ys.min()
+        val hi = ys.max()
+        return (0..n).map { i ->
+            Pt(x0 + w * i / n + jit(noise), 40.0 + h * (hi - ys[i]) / (hi - lo) + jit(noise))
+        }
+    }
+
+    @Test fun sineWaveSnapsToFunction() {
+        val rec = ShapeRecognizer.recognizePoints(graph({ sin(it) }, 0.0, 4 * PI, 40.0, 600.0, 120.0, 3.0))
+        assertNotNull(rec)
+        assertEquals(ShapeKind.FUNCTION, rec!!.kind)
+        val spec = rec.function!!
+        assertEquals(4 * PI, spec.to - spec.from, 0.5)
+    }
+
+    @Test fun cosineWaveSnapsToCos() {
+        val rec = ShapeRecognizer.recognizePoints(graph({ cos(it) }, 0.0, 2 * PI, 40.0, 400.0, 150.0, 3.0))
+        assertEquals(ShapeKind.FUNCTION, rec!!.kind)
+        assertEquals("cos(x)", rec.function!!.expr)
+    }
+
+    @Test fun parabolaSnapsToFunction() {
+        val rec = ShapeRecognizer.recognizePoints(graph({ it * it }, -2.0, 2.0, 40.0, 300.0, 300.0, 3.0))
+        assertEquals(ShapeKind.FUNCTION, rec!!.kind)
+        assertEquals("x^2", rec.function!!.expr)
+    }
+
+    @Test fun exponentialSnapsToFunction() {
+        val rec = ShapeRecognizer.recognizePoints(graph({ kotlin.math.exp(it) }, -2.0, 2.0, 40.0, 200.0, 360.0, 3.0))
+        assertEquals(ShapeKind.FUNCTION, rec!!.kind)
+        assertEquals("e^x", rec.function!!.expr)
+    }
+
+    @Test fun logarithmSnapsToFunction() {
+        val rec = ShapeRecognizer.recognizePoints(graph({ kotlin.math.ln(it) }, 0.3, 6.0, 40.0, 360.0, 200.0, 3.0))
+        assertEquals(ShapeKind.FUNCTION, rec!!.kind)
+        assertEquals("ln(x)", rec.function!!.expr)
+    }
+
+    @Test fun cubicSnapsToFunction() {
+        val rec = ShapeRecognizer.recognizePoints(graph({ it * it * it }, -1.5, 1.5, 40.0, 240.0, 360.0, 3.0))
+        assertEquals(ShapeKind.FUNCTION, rec!!.kind)
+        assertEquals("x^3", rec.function!!.expr)
+    }
+
+    @Test fun openScribbleStaysInk() {
+        val scribble = (0 until 80).map { i ->
+            val t = i / 79.0
+            Pt(40.0 + 300.0 * t + 90.0 * sin(t * 37.0), 200.0 + 120.0 * cos(t * 23.0) + jit(6.0))
+        }
+        assertNull(ShapeRecognizer.recognizePoints(scribble))
     }
 }

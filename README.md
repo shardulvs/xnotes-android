@@ -29,21 +29,28 @@ Xnotes is a great app, and I'm grateful that the developer puts so much work int
 - **Hide dot files**: files and folders starting with a dot (.obsidian, .git) are hidden from the explorer, with a quick switch in View options.
 - **Default page style**: a Page template section in Preferences sets the page style new notes start with, and the new-note dialog lets you pick the template and page colour, preselected from that default.
 - **Mixed page orientation**: add a landscape page after a portrait one (or the other way round) from the page menu, for example under an imported PDF; PDF export keeps each page's orientation.
-- **Tables**: add a table shape and edit it (columns, rows, and per-line sizing).
+- **Tables**: add a table shape and edit it. A selected table has a bar above its columns and one beside its rows: tap or drag along a bar to pick columns or rows, drag a bar end to resize just those (or the whole table), and use the -/+ at the bar ends to remove or add them. Interior lines still drag on their own.
 - **Image cropping**: crop a selected image with an interactive overlay.
 - **Hyperlinks**: add a link to a selected canvas item (Add link in the selection three-dots menu) or to text in the flow text tool, and tap it to open.
 - **Rotation snapping**: optionally snap a rotated selection to the nearest 90 degrees (Preferences).
 - **X-Y graph shape**: an x-y coordinate axes shape that can be rotated.
 - **X line shape**: a single number line with an arrowhead and tick marks.
-- **Curve shape**: a smooth line through movable points; add or remove points from the selection three-dots menu.
-- **Function curves**: swipe the shape picker to its second page for x^2, x^(1/2), ln x, e^x, sin x and cos x; retype the function (for example sin(2x)) and its x range with Edit function in the selection three-dots menu.
+- **Curve shape**: a smooth line through movable points; tap the curve to add a point and double tap a point to remove it.
+- **Function curves**: swipe the shape picker to its second page for x^2, x^3, x^(1/2), ln x, e^x, sin x, cos x, tan x and cot x. They draw at their true proportions and stretch freely once selected; tan and cot break at their poles. Retype the function (for example sin(2x)) and its x range with Edit function in the selection three-dots menu.
+- **Circles from the centre**: the circle shape grows out from where the drag starts.
+- **Smarter shape snapping**: a held stroke also snaps to a circle, square, triangle, sine or cosine wave, parabola, cubic, exponential or logarithm, and any other smooth stroke becomes an editable curve.
 - **New shapes stay selected**: a freshly drawn shape or table stays selected, so it can be moved or resized straight away without drawing another one.
+- **Maths keyboard**: the equation button in flowing text, and the formula editor, swap the keyboard for a maths one (numbers beside functions with bigger keys on a tablet, a 123 / f(x) switch on a phone); ABC brings the normal keyboard back.
+- **Find**: search the text of a note (flowing text, text boxes and its PDF) from the toolbar, and any file in the reader; Preferences has its own search too.
+- **Eyedropper**: pick a colour from anywhere on screen from the colour picker.
+- **Import and merge**: import a file into an existing note from its explorer menu, or insert one after a page from the page panel; merge several selected notes into one; add an image or a photo as a page, or take a photo straight into a note.
+- **Settings backup**: export all settings (sync options included, the Filen login not) with fonts, templates and stickers to one file, and import it on another device.
 - **Plain text to equation**: select maths typed as plain text (lim x->0 sin(x)/x, int_0^1 x^2 dx, d/dx x^2, dy/dx, x^(1/2)) and tap the equation button to turn it into a formula; /equation converts the same way.
 - **Move grip**: a small selection gets a pan-icon grip to drag it by, so tiny items can be moved without hitting the resize handles.
 - **Finger tap to select**: with the select tool, a finger tap picks the item under it while a finger drag still pans.
 - **Whole or partial selection**: the select and lasso tools can take only fully enclosed items or anything they touch.
 - **Handwriting to text**: convert selected handwriting into an editable text box (Czech and English) from the selection three-dots menu; reopen it later with Edit in the same menu, with font, size, and colour controls docked at the bottom.
-- **Handwriting to math**: an optional on-device add-on (downloaded and deleted in Preferences, under OCR) adds Convert to math to the selection three-dots menu, which turns handwritten formulas, fractions, exponents and integrals included, into a typeset formula; Edit in the same menu opens its LaTeX in a dialog with a live preview and a maths keyboard (fractions, powers, roots, derivatives, definite and indefinite integrals, sums, limits, functions and symbols).
+- **Handwriting to math**: an optional on-device add-on (downloaded and deleted in Preferences, under OCR) adds Convert to math to the selection three-dots menu, which turns handwritten formulas, fractions, exponents and integrals included, into a typeset formula; Edit in the same menu opens its LaTeX in a dialog with a live preview and a paged maths keyboard (fractions, powers, roots, derivatives, definite and indefinite integrals, sums, limits, functions and symbols).
 - **Pen shape snapping toggle**: turn "snap held strokes to shapes" on or off directly from the pen settings popup.
 
 Crossed-out items were later added to xnotes by its original developer.
