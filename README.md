@@ -35,8 +35,8 @@ Xnotes is a great app, and I'm grateful that the developer puts so much work int
 - **Rotation snapping**: optionally snap a rotated selection to the nearest 90 degrees (Preferences).
 - **X-Y graph shape**: an x-y coordinate axes shape that can be rotated.
 - **X line shape**: a single number line with an arrowhead and tick marks.
-- **Curve shape**: a smooth line through movable points; tap the curve to add a point and double tap a point to remove it.
-- **Function curves**: swipe the shape picker to its second page for x^2, x^3, x^(1/2), ln x, e^x, sin x, cos x, tan x and cot x. They draw at their true proportions and stretch freely once selected; tan and cot break at their poles. Retype the function (for example sin(2x)) and its x range with Edit function in the selection three-dots menu.
+- **Curve shape**: a smooth line through movable points; double tap an empty spot on the selected curve to add a point there and double tap a point to remove it.
+- **Function curves**: swipe the shape picker to its second page for x^2, x^3, x^(1/2), ln x, e^x, sin x, cos x, tan x, cot x, arcsin x, arccos x and arctan x. They draw at their true proportions and stretch freely once selected; tan and cot break at their poles. Retype the function (for example sin(2x)) and its x range with Edit function in the selection three-dots menu.
 - **Circles from the centre**: the circle shape grows out from where the drag starts.
 - **Smarter shape snapping**: a held stroke also snaps to a circle, square, triangle, sine or cosine wave, parabola, cubic, exponential or logarithm, and any other smooth stroke becomes an editable curve.
 - **New shapes stay selected**: a freshly drawn shape or table stays selected, so it can be moved or resized straight away without drawing another one.

@@ -76,6 +76,14 @@ class FunctionCurveTest {
         }
     }
 
+    @Test fun inverseTrigPresetsPlotAsOneUnbrokenRun() {
+        for (expr in listOf("arcsin(x)", "arccos(x)", "arctan(x)")) {
+            val pts = FunctionSpec.preset(expr).normalizedSamples()!!
+            assertEquals(expr, 1, FunctionSpec.runs(pts).size)
+            assertEquals(expr, FunctionSpec.SAMPLES + 1, pts.size)
+        }
+    }
+
     @Test fun naturalAspectMatchesEqualScales() {
         assertEquals(1.0, FunctionSpec("x^2", -2.0, 2.0).naturalAspect()!!, 1e-9)
         assertEquals(2.0 / (4 * PI), FunctionSpec.preset("sin(x)").naturalAspect()!!, 1e-3)

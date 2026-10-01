@@ -1192,6 +1192,9 @@ private fun functionLabel(expr: String): String = when (expr) {
     "cos(x)" -> "cos x"
     "tan(x)" -> "tan x"
     "cot(x)" -> "cot x"
+    "arcsin(x)" -> "arcsin x"
+    "arccos(x)" -> "arccos x"
+    "arctan(x)" -> "arctan x"
     else -> expr
 }
 

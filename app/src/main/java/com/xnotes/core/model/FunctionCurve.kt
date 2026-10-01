@@ -104,6 +104,9 @@ data class FunctionSpec(
             FunctionSpec("cos(x)", -2 * PI, 2 * PI),
             FunctionSpec("tan(x)", -3 * PI / 2, 3 * PI / 2, -4.0, 4.0),
             FunctionSpec("cot(x)", -3 * PI / 2, 3 * PI / 2, -4.0, 4.0),
+            FunctionSpec("arcsin(x)", -1.0, 1.0),
+            FunctionSpec("arccos(x)", -1.0, 1.0),
+            FunctionSpec("arctan(x)", -6.0, 6.0),
         )
 
         fun preset(expr: String): FunctionSpec = PRESETS.firstOrNull { it.expr == expr } ?: PRESETS.first()

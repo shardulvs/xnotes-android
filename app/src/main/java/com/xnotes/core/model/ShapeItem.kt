@@ -177,17 +177,20 @@ class ShapeItem(
         setControlPoints(c)
     }
 
-    /** Add a control point on the curve where it passes closest to [near], so the shape stays put. */
-    fun insertControlPointNear(near: Pt) {
+    /**
+     * Add a control point at [at], slotted in after the span the curve passes closest to. Past
+     * either end of the curve it extends that end instead.
+     */
+    fun addControlPointAt(at: Pt) {
         val c = controlPoints()
         if (c.size < 2) return
         var bestSpan = 0
-        var bestT = 0.5
+        var bestT = 0.0
         var bestD = Double.MAX_VALUE
         for (i in 0 until c.size - 1) {
-            for (s in 1 until SPLINE_SAMPLES * 4) {
-                val t = s.toDouble() / (SPLINE_SAMPLES * 4)
-                val d = catmullRom(c, i, t).distanceTo(near)
+            for (s in 0..SPLINE_SAMPLES) {
+                val t = s.toDouble() / SPLINE_SAMPLES
+                val d = catmullRom(c, i, t).distanceTo(at)
                 if (d < bestD) {
                     bestD = d
                     bestSpan = i
@@ -195,7 +198,14 @@ class ShapeItem(
                 }
             }
         }
-        setControlPoints(c.take(bestSpan + 1) + catmullRom(c, bestSpan, bestT) + c.drop(bestSpan + 1))
+        fun beyond(end: Pt, inward: Pt) = (at.x - end.x) * (inward.x - end.x) + (at.y - end.y) * (inward.y - end.y) < 0.0
+        val step = 1.0 / SPLINE_SAMPLES
+        val index = when {
+            bestSpan == 0 && bestT == 0.0 && beyond(c.first(), catmullRom(c, 0, step)) -> 0
+            bestSpan == c.size - 2 && bestT == 1.0 && beyond(c.last(), catmullRom(c, c.size - 2, 1.0 - step)) -> c.size
+            else -> bestSpan + 1
+        }
+        setControlPoints(c.take(index) + at + c.drop(index))
     }
 
     /** Drop control point [index]; a spline keeps at least three. */
