@@ -184,26 +184,31 @@ class ShapeItem(
     fun addControlPointAt(at: Pt) {
         val c = controlPoints()
         if (c.size < 2) return
-        var bestSpan = 0
-        var bestT = 0.0
+        val last = c.size - 2
+        var index = 1
         var bestD = Double.MAX_VALUE
-        for (i in 0 until c.size - 1) {
-            for (s in 0..SPLINE_SAMPLES) {
-                val t = s.toDouble() / SPLINE_SAMPLES
-                val d = catmullRom(c, i, t).distanceTo(at)
-                if (d < bestD) {
+        var bestOvershoot = Double.MAX_VALUE
+        for (i in 0..last) {
+            var a = c[i]
+            for (s in 1..SPLINE_SAMPLES) {
+                val b = catmullRom(c, i, s.toDouble() / SPLINE_SAMPLES)
+                val ab = b - a
+                val len2 = Geometry.dot(ab, ab)
+                val u = if (len2 < 1e-12) 0.0 else Geometry.dot(at - a, ab) / len2
+                val d = (a + ab * u.coerceIn(0.0, 1.0)).distanceTo(at)
+                // At a joint both neighbouring segments are equally close; the one the tap overshoots less wins.
+                val overshoot = max(-u, u - 1.0) * sqrt(len2)
+                if (d < bestD - 1e-9 || (d <= bestD + 1e-9 && overshoot < bestOvershoot)) {
                     bestD = d
-                    bestSpan = i
-                    bestT = t
+                    bestOvershoot = overshoot
+                    index = when {
+                        i == 0 && s == 1 && u < 0.0 -> 0
+                        i == last && s == SPLINE_SAMPLES && u > 1.0 -> c.size
+                        else -> i + 1
+                    }
                 }
+                a = b
             }
-        }
-        fun beyond(end: Pt, inward: Pt) = (at.x - end.x) * (inward.x - end.x) + (at.y - end.y) * (inward.y - end.y) < 0.0
-        val step = 1.0 / SPLINE_SAMPLES
-        val index = when {
-            bestSpan == 0 && bestT == 0.0 && beyond(c.first(), catmullRom(c, 0, step)) -> 0
-            bestSpan == c.size - 2 && bestT == 1.0 && beyond(c.last(), catmullRom(c, c.size - 2, 1.0 - step)) -> c.size
-            else -> bestSpan + 1
         }
         setControlPoints(c.take(index) + at + c.drop(index))
     }

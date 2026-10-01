@@ -1010,8 +1010,9 @@ fun ShapeConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
         Column(Modifier.width(284.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
             PopupTitle(stringResource(R.string.title_shape))
             // Swipe between the geometric shapes and the function curves; the dots show which page is up.
+            // Both pages stay composed so the pager is as tall as the fuller one, whatever the font scale.
             val pager = rememberPagerState(initialPage = if (kind == ShapeKind.FUNCTION) 1 else 0) { 2 }
-            HorizontalPager(pager, Modifier.height(120.dp), verticalAlignment = Alignment.Top) { page ->
+            HorizontalPager(pager, beyondViewportPageCount = 1, verticalAlignment = Alignment.Top) { page ->
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),

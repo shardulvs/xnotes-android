@@ -312,6 +312,8 @@ class InteractionController(
     private var bandRect: Rect? = null
     private var moveOrigin = Pt.ZERO
     private var moveOffset = Pt.ZERO
+    // The press that started this move also selected what it moves.
+    private var movePicked = false
 
     // SCREENSHOT (drag a rectangle; on release it stays frozen and offers "copy as image")
     /** The capture rectangle in content space: live while dragging (mode == SHOT), then frozen
@@ -366,14 +368,12 @@ class InteractionController(
     // A spline control point being dragged, and the curve as it was, for the undo step.
     private var resizePointIndex: Int = -1
     private var resizeOldSnap: GeometrySnapshot? = null
-    // A press on a spline that barely travels is a tap: two quick taps on a point remove it, and
+    // A quick press on a spline that barely travels is a tap: two quick taps on a point remove it, and
     // two quick taps on the empty space around it add a point there.
     private var resizeDownContent = Pt.ZERO
     private var resizeTravel = 0.0
-    private var lastPointTapIndex = -1
-    private var lastPointTapAt = 0L
-    private var lastEmptyTapContent = Pt.ZERO
-    private var lastEmptyTapAt = 0L
+    private var splineDownMs = 0L
+    private val splineTaps = SplineTapTracker()
 
     // CROP (adjusting an image's crop rectangle before baking it)
     private var cropItem: ImageItem? = null
@@ -1464,25 +1464,11 @@ class InteractionController(
         }
         singleSpline()?.let { sp ->
             val i = hitSplinePoint(sp, content, tol)
-            val now = android.os.SystemClock.uptimeMillis()
-            if (i < 0) {
-                if (now - lastEmptyTapAt > DOUBLE_TAP_MS || lastEmptyTapContent.distanceTo(content) > tol) return false
-                if (state.pageRects.getOrNull(sp.pageIndex) == null) return false
-                lastEmptyTapAt = 0L
-                val local = state.toPageSpace(sp.pageIndex, content)
-                editSelectedSpline { it.addControlPointAt(local); true }
-                mode = PointerMode.IDLE
-                return true
-            }
-            if (i == lastPointTapIndex && now - lastPointTapAt <= DOUBLE_TAP_MS) {
-                lastPointTapIndex = -1
-                editSelectedSpline { it.removeControlPointAt(i) }
-                mode = PointerMode.IDLE
-                return true
-            }
+            if (i < 0) return false
             beginResize(sp, HandleId.START)
             resizeDownContent = content
             resizeTravel = 0.0
+            splineDownMs = android.os.SystemClock.uptimeMillis()
             resizePointIndex = i
             resizeOldSnap = sp.item.snapshotGeometry()
             return true
@@ -1529,8 +1515,10 @@ class InteractionController(
             val local = state.toPageSpace(pageIndex, content)
             val hit = state.document.pages[pageIndex].items.lastOrNull { !it.locked && it.contains(local) }
             if (hit != null) {
-                if (selection.none { it.item === hit }) setSelection(listOf(Selected(pageIndex, hit)))
+                val picked = selection.none { it.item === hit }
+                if (picked) setSelection(listOf(Selected(pageIndex, hit)))
                 beginMove(content)
+                movePicked = picked
                 return
             }
         }
@@ -1657,6 +1645,8 @@ class InteractionController(
         mode = PointerMode.MOVE
         moveOrigin = content
         moveOffset = Pt.ZERO
+        movePicked = false
+        splineDownMs = android.os.SystemClock.uptimeMillis()
         onSelectionMenu(null) // hide while dragging
     }
 
@@ -1667,7 +1657,7 @@ class InteractionController(
 
     private fun endMove(content: Pt) {
         moveOffset = content - moveOrigin
-        if (moveOffset.length() * state.zoom <= TAP_SLOP && noteSplineTap(moveOrigin)) return
+        if (moveOffset.length() * state.zoom <= TAP_SLOP && splineTapped(moveOrigin)) return
         val moved = abs(moveOffset.x) > MOVE_EPS || abs(moveOffset.y) > MOVE_EPS
         if (moved) {
             val items = selection.map { it.item }
@@ -1691,14 +1681,24 @@ class InteractionController(
         if (moved) maybeSwitchBackAfterSelect()
     }
 
-    /** A tap inside the selected spline is the first half of a double tap that adds a point, not a tiny move. */
-    private fun noteSplineTap(content: Pt): Boolean {
-        if (singleSpline() == null) return false
+    /**
+     * A tap inside the selected spline is not a tiny move. The second of two quick taps on one spot
+     * adds a point there; the tap that only just selected the curve does not count towards that.
+     */
+    private fun splineTapped(content: Pt): Boolean {
+        val sp = singleSpline() ?: return false
+        val now = android.os.SystemClock.uptimeMillis()
+        if (!splineTaps.isTap(splineDownMs, now)) return false
         moveOffset = Pt.ZERO
         mode = PointerMode.IDLE
-        lastPointTapIndex = -1
-        lastEmptyTapContent = content
-        lastEmptyTapAt = android.os.SystemClock.uptimeMillis()
+        val tol = HANDLE_HIT / state.zoom
+        when {
+            movePicked -> splineTaps.reset()
+            splineTaps.tapEmpty(sp.item, content, tol, splineDownMs, now) && state.pageRects.getOrNull(sp.pageIndex) != null -> {
+                val local = state.toPageSpace(sp.pageIndex, content)
+                editSelectedSpline { it.addControlPointAt(local); true }
+            }
+        }
         refreshSelectionMenu()
         requestRender()
         return true
@@ -1745,11 +1745,11 @@ class InteractionController(
         val old = resizeOldGeom
         var changed = false
         val oldSnap = resizeOldSnap
-        if (resizePointIndex >= 0 && oldSnap != null && resizeTravel * state.zoom <= TAP_SLOP) {
+        val now = android.os.SystemClock.uptimeMillis()
+        var removePoint = -1
+        if (resizePointIndex >= 0 && oldSnap != null && resizeTravel * state.zoom <= TAP_SLOP && splineTaps.isTap(splineDownMs, now)) {
             resizeItem!!.restoreGeometry(oldSnap)
-            lastPointTapIndex = resizePointIndex
-            lastPointTapAt = android.os.SystemClock.uptimeMillis()
-            lastEmptyTapAt = 0L
+            if (splineTaps.tapPoint(resizeItem!!, resizePointIndex, splineDownMs, now)) removePoint = resizePointIndex
         } else if (resizePointIndex >= 0 && oldSnap != null) {
             val moved = resizeItem!!
             val new = moved.snapshotGeometry()
@@ -1778,6 +1778,7 @@ class InteractionController(
         // The endpoint resize (a single line/arrow) reshapes the box; refit it upright.
         selObb = selectionObb()
         mode = PointerMode.IDLE
+        if (removePoint >= 0) editSelectedSpline { it.removeControlPointAt(removePoint) }
         refreshSelectionMenu()
         requestRender()
         if (changed) maybeSwitchBackAfterSelect()
@@ -4110,6 +4111,9 @@ class InteractionController(
 
         /** Longest gap between two taps on a spline that still removes or adds a point. */
         const val DOUBLE_TAP_MS = 350L
+
+        /** Longest press on a selected spline that is still a tap; a longer one is a small drag. */
+        const val TAP_MAX_MS = 250L
 
         /** Padding (content px) added around erased items' bounds when repairing
          *  the cache, to cover stroke anti-aliasing at the dirty-rect edge. */

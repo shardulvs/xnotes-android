@@ -6,6 +6,7 @@ import android.view.Choreographer
 import android.view.KeyEvent
 import android.view.MotionEvent
 import com.xnotes.canvas.InteractionController
+import com.xnotes.canvas.SplineTapTracker
 import com.xnotes.canvas.StylusButtonLatch
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.infinite.CanvasViewport
@@ -152,16 +153,16 @@ class InfiniteInteraction(
     // The live transform drag.
     private var grabHandle: HandleId? = null
     private var grabPoint = -1
-    // A press on a spline that barely travels is a tap: two quick taps on a point remove it, and
+    // A quick press on a spline that barely travels is a tap: two quick taps on a point remove it, and
     // two quick taps on the empty space around it add a point there.
     private var pointDownAt = Pt.ZERO
     private var pointTravel = 0.0
-    private var lastPointTapIndex = -1
-    private var lastPointTapAt = 0L
-    private var lastEmptyTapAt = Pt.ZERO
-    private var lastEmptyTapMs = 0L
+    private var splineDownMs = 0L
+    private val splineTaps = SplineTapTracker()
     private var moveAnchor = Pt.ZERO
     private var movedBy = Pt.ZERO
+    // The press that started this move also selected what it moves.
+    private var movePicked = false
 
     // Where a handle or the rotate grip is being dragged to, and whether the renderer is doing the
     // work. Ink, shapes and placed SVGs map faithfully in the shader, since all three are triangles.
@@ -654,30 +655,12 @@ class InfiniteInteraction(
         }
         val point = sel.hitSplinePoint(at, tolerance)
         if (point >= 0) {
-            val now = android.os.SystemClock.uptimeMillis()
-            if (point == lastPointTapIndex && now - lastPointTapAt <= InteractionController.DOUBLE_TAP_MS) {
-                lastPointTapIndex = -1
-                onCommitSelection(sel.editSpline { it.removeControlPointAt(point) })
-                mode = CanvasPointerMode.IDLE
-                onSelectionChanged()
-                requestRender()
-                return true
-            }
             pointDownAt = at
             pointTravel = 0.0
+            splineDownMs = android.os.SystemClock.uptimeMillis()
             grabPoint = point
             sel.beginTransform()
             mode = CanvasPointerMode.POINT
-            return true
-        }
-        if (sel.spline() != null && android.os.SystemClock.uptimeMillis() - lastEmptyTapMs <= InteractionController.DOUBLE_TAP_MS &&
-            lastEmptyTapAt.distanceTo(at) <= tolerance
-        ) {
-            lastEmptyTapMs = 0L
-            onCommitSelection(sel.editSpline { it.addControlPointAt(at); true })
-            mode = CanvasPointerMode.IDLE
-            onSelectionChanged()
-            requestRender()
             return true
         }
         val handle = sel.hitHandle(at, tolerance)
@@ -707,8 +690,10 @@ class InfiniteInteraction(
         // item is not there as far as this is concerned, so a band can be started over one.
         val hit = grabbableAt(at)
         if (hit != null) {
-            if (sel.items.none { it === hit }) sel.select(listOf(hit))
+            val picked = sel.items.none { it === hit }
+            if (picked) sel.select(listOf(hit))
             beginMoveAt(sel, at)
+            movePicked = picked
             onSelectionChanged()
             return
         }
@@ -733,11 +718,11 @@ class InfiniteInteraction(
         val index = grabPoint
         grabPoint = -1
         val sel = selection() ?: return
-        if (pointTravel * viewport.zoom <= TAP_SLOP_PX) {
+        val now = android.os.SystemClock.uptimeMillis()
+        val curve = sel.spline()
+        if (curve != null && pointTravel * viewport.zoom <= TAP_SLOP_PX && splineTaps.isTap(splineDownMs, now)) {
             sel.restoreStart()
-            lastPointTapIndex = index
-            lastPointTapAt = android.os.SystemClock.uptimeMillis()
-            lastEmptyTapMs = 0L
+            if (splineTaps.tapPoint(curve, index, splineDownMs, now)) onCommitSelection(sel.editSpline { it.removeControlPointAt(index) })
         } else {
             onCommitSelection(sel.buildCommand(movedOnly = false))
         }
@@ -763,6 +748,8 @@ class InfiniteInteraction(
         sel.beginTransform()
         moveAnchor = at
         movedBy = Pt.ZERO
+        movePicked = false
+        splineDownMs = android.os.SystemClock.uptimeMillis()
         mode = CanvasPointerMode.MOVE
         onLiftSelection(sel.items, LiftTransform.NONE)
     }
@@ -851,7 +838,7 @@ class InfiniteInteraction(
     /** Finger up: apply the whole move to the model once, then hand the drawing back to it. */
     private fun endMove() {
         val sel = selection() ?: return
-        if (movedBy.length() * viewport.zoom <= TAP_SLOP_PX && noteSplineTap(sel, moveAnchor)) return
+        if (movedBy.length() * viewport.zoom <= TAP_SLOP_PX && splineTapped(sel, moveAnchor)) return
         sel.moveLive(movedBy.x, movedBy.y)
         onLiftSelection(emptyList(), LiftTransform.NONE)
         onCommitSelection(sel.buildCommand(movedOnly = true, dx = movedBy.x, dy = movedBy.y))
@@ -859,14 +846,21 @@ class InfiniteInteraction(
         requestRender()
     }
 
-    /** A tap inside the selected spline is the first half of a double tap that adds a point, not a tiny move. */
-    private fun noteSplineTap(sel: CanvasSelection, at: Pt): Boolean {
-        if (sel.spline() == null) return false
+    /**
+     * A tap inside the selected spline is not a tiny move. The second of two quick taps on one spot
+     * adds a point there; the tap that only just selected the curve does not count towards that.
+     */
+    private fun splineTapped(sel: CanvasSelection, at: Pt): Boolean {
+        val curve = sel.spline() ?: return false
+        val now = android.os.SystemClock.uptimeMillis()
+        if (!splineTaps.isTap(splineDownMs, now)) return false
         sel.previewMove(0.0, 0.0)
         onLiftSelection(emptyList(), LiftTransform.NONE)
-        lastPointTapIndex = -1
-        lastEmptyTapAt = at
-        lastEmptyTapMs = android.os.SystemClock.uptimeMillis()
+        when {
+            movePicked -> splineTaps.reset()
+            splineTaps.tapEmpty(curve, at, HANDLE_TOUCH_PX / viewport.zoom, splineDownMs, now) ->
+                onCommitSelection(sel.editSpline { it.addControlPointAt(at); true })
+        }
         onSelectionChanged()
         requestRender()
         return true

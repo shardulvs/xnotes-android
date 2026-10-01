@@ -48,6 +48,14 @@ class SplineShapeTest {
         assertTrue(s.splinePath().any { it.distanceTo(Pt(20.0, 30.0)) < 1e-6 })
     }
 
+    @Test fun pointJustPastAJointGoesIntoTheOutgoingSpan() {
+        val s = spline()
+        s.addControlPointAt(Pt(51.0, 2.0))
+        val c = s.controlPoints()
+        assertTrue(c[2].distanceTo(Pt(51.0, 2.0)) < 1e-6)
+        assertTrue((0 until c.size - 1).all { c[it].x < c[it + 1].x })
+    }
+
     @Test fun pointPastAnEndExtendsTheCurve() {
         val s = spline()
         s.addControlPointAt(Pt(130.0, 10.0))
