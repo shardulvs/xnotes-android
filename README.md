@@ -27,6 +27,7 @@ Xnotes is a great app, and I'm grateful that the developer puts so much work int
 - **File import**: create notes from PDFs, images, txt, md, rtf, html, epub, docx, xlsx and csv.
 - **Import and merge**: import a file into an existing note, merge notes, and add images or photos as pages.
 - **Read-only reader**: open md, docx, pptx, xlsx, csv and pdf files as they are, or convert them to notes.
+- **Reader mode**: a toolbar button that locks a note for reading, with only navigation, search and zoom left in the bar.
 - **Find**: search text in the reader and Preferences.
 - **Shape snapping**: held strokes snap to circles, squares, triangles, waves, parabolas, cubics, exponentials and logarithms, or become an editable curve; toggle it in the pen popup.
 - **Tables**: a table shape with row and column bars for selecting, resizing, adding and removing.
@@ -36,7 +37,7 @@ Xnotes is a great app, and I'm grateful that the developer puts so much work int
 - **Circles from the centre**: circles grow out from where the drag starts.
 - **New shapes stay selected**: move or resize a shape right after drawing it.
 - **Mixed page orientation**: mix portrait and landscape pages in one note, kept in PDF export.
-- **Default page style**: set the template and colour new notes start with.
+- **Default page style**: pick any template (Cornell, checklist, planners and more) and its settings for new notes in Preferences or the new-note dialog, in portrait or landscape.
 - **Hyperlinks**: add tappable links to canvas items and text.
 - **Image cropping**: crop selected images.
 - **Eyedropper**: pick a colour from anywhere on screen.

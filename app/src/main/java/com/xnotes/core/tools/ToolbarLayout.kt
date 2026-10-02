@@ -21,6 +21,9 @@ enum class ToolbarItem(val id: String) {
     HIGHLIGHTER("highlighter"),
     ERASER("eraser"),
     PAN("pan"),
+
+    /** Switches a paged note to reading: the bar shrinks to reading controls and nothing edits. */
+    READER("reader"),
     SELECT("select"),
     LASSO("lasso"),
     SCREENSHOT("screenshot"),
@@ -157,6 +160,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
             ToolbarItem.TABLE to ToolbarItem.IMAGE,
             ToolbarItem.SEARCH to ToolbarItem.PAGE_NAV,
             ToolbarItem.MARKUP to ToolbarItem.TEXT_BOX,
+            ToolbarItem.READER to ToolbarItem.PAN,
         )
 
         /**
@@ -188,7 +192,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
                 ToolbarItem.PEN, ToolbarItem.DASHED, ToolbarItem.CALLIGRAPHY, ToolbarItem.SPEED,
                 ToolbarItem.TAPER, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER,
             ),
-            listOf(ToolbarItem.PAN, ToolbarItem.SELECT, ToolbarItem.LASSO, ToolbarItem.SCREENSHOT),
+            listOf(ToolbarItem.PAN, ToolbarItem.READER, ToolbarItem.SELECT, ToolbarItem.LASSO, ToolbarItem.SCREENSHOT),
             listOf(ToolbarItem.WAND, ToolbarItem.SHAPE, ToolbarItem.RULER, ToolbarItem.TEXT, ToolbarItem.TEXT_BOX, ToolbarItem.MARKUP),
             listOf(ToolbarItem.IMAGE, ToolbarItem.TABLE),
             listOf(ToolbarItem.COLORS),

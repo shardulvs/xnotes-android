@@ -19,6 +19,8 @@
     <string name="tool_text">文本</string>
     <string name="tool_text_box">文本框</string>
     <string name="tool_markup">PDF 文本标注</string>
+    <string name="tool_reader">阅读模式</string>
+    <string name="reader_exit">退出阅读模式</string>
     <string name="markup_highlight">高亮</string>
     <string name="markup_squiggly">波浪线</string>
     <string name="markup_colour">颜色</string>
@@ -456,6 +458,7 @@
     <string name="image_png">图片（PNG）</string>
     <string name="back_save_as">"‹  另存为"</string>
     <string name="add_page">添加页面</string>
+    <string name="add_ellipsis">添加...</string>
     <string name="erase_page">清空页面</string>
     <string name="share_ellipsis">分享…</string>
     <string name="save_as_ellipsis">另存为…</string>

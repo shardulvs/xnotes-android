@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -43,10 +44,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -74,6 +78,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -164,6 +169,7 @@ fun PreferencesPane(
         val y = hits[search.current].second
         searchScope.launch { scrollState.animateScrollTo((y - 24f * search.density).roundToInt().coerceAtLeast(0)) }
     }
+    var sectionsOpen by rememberSaveable { mutableStateOf(!compact) }
     var syncTop by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(focusSync, syncTop) {
         val top = syncTop ?: return@LaunchedEffect
@@ -239,7 +245,9 @@ fun PreferencesPane(
             IconButton(onClick = { search.open = !search.open; if (!search.open) search.query = "" }) {
                 Icon(XnotesIcons.search, stringResource(R.string.search_settings), tint = palette.text.toComposeColor(), modifier = Modifier.size(22.dp))
             }
-            TextButton(onClick = { update(Preferences()) }) { Text(stringResource(R.string.reset_to_defaults), fontSize = 13.sp) }
+            IconButton(onClick = { sectionsOpen = !sectionsOpen }) {
+                Icon(XnotesIcons.sidebar, stringResource(R.string.side_panel), tint = (if (sectionsOpen) palette.accent else palette.text).toComposeColor(), modifier = Modifier.size(22.dp))
+            }
         }
         if (search.open) {
             val hits = search.hits()
@@ -255,6 +263,24 @@ fun PreferencesPane(
         Spacer(Modifier.height(12.dp))
         search.toContentY = { rootY -> rootY - viewport.top + scrollState.value }
         search.density = androidx.compose.ui.platform.LocalDensity.current.density
+        val currentSection by remember {
+            derivedStateOf {
+                val line = scrollState.value + 24f * search.density
+                search.sections.entries.filter { it.value <= line }.maxByOrNull { it.value }?.key
+            }
+        }
+        val sectionsPanel = @Composable {
+            PrefSectionsPanel(search.sections.entries.sortedBy { it.value }.map { it.key }, currentSection) { title ->
+                search.sections[title]?.let { y -> searchScope.launch { scrollState.animateScrollTo(y) } }
+                if (compact) sectionsOpen = false
+            }
+        }
+        Row(Modifier.fillMaxSize()) {
+        if (sectionsOpen && !compact) {
+            sectionsPanel()
+            Spacer(Modifier.width(16.dp))
+        }
+        Box(Modifier.weight(1f)) {
         CompositionLocalProvider(LocalPrefSearch provides search) {
         Column(
             // Ending at the keyboard's edge scrolls a focused field up out from under it.
@@ -296,6 +322,7 @@ fun PreferencesPane(
                 }
             }
             CheckRow(stringResource(R.string.pref_start_fullscreen), editor.fullscreen) { editor.setFullscreenPref(it) }
+            TextButton(onClick = { update(Preferences()) }) { Text(stringResource(R.string.reset_to_defaults), fontSize = 13.sp) }
 
             HorizontalDivider(color = palette.border.toComposeColor())
             SectionTitle(stringResource(R.string.pref_input))
@@ -383,16 +410,6 @@ fun PreferencesPane(
             )
 
             HorizontalDivider(color = palette.border.toComposeColor())
-            SectionTitle("Page template")
-            Text(
-                "The default page style stamped onto new notes (also preselected in the new-note dialog).",
-                color = palette.textDim.toComposeColor(),
-                fontSize = 12.sp,
-            )
-            Spacer(Modifier.size(8.dp))
-            PageStyleControls(editor.newNoteStyle, inheritFrom = null) { editor.saveNewNoteStyle(it) }
-
-            HorizontalDivider(color = palette.border.toComposeColor())
             SectionTitle(stringResource(R.string.pref_page))
             FieldLabel(stringResource(R.string.pref_default_page_size))
             SizeDropdown(prefs.defaultPageSize) { update(prefs.copy(defaultPageSize = it)) }
@@ -443,6 +460,8 @@ fun PreferencesPane(
             CheckRow(stringResource(R.string.pref_page_colour_follows_theme), prefs.pageColor == null) {
                 update(prefs.copy(pageColor = if (it) null else pageColorPresets.first()))
             }
+            Spacer(Modifier.size(8.dp))
+            TemplateControls(editor, editor.newNoteStyle, editor.newNotePageMm()) { editor.saveNewNoteStyle(it) }
 
             HorizontalDivider(color = palette.border.toComposeColor())
             SectionTitle(stringResource(R.string.pref_home_explorer))
@@ -741,10 +760,17 @@ fun PreferencesPane(
             HorizontalDivider(color = palette.border.toComposeColor())
             BackupSection(editor)
             HorizontalDivider(color = palette.border.toComposeColor())
-            Box(Modifier.onPlaced { syncTop = it.positionInParent().y.roundToInt() }.searchAnchor(stringResource(R.string.search_keywords_sync))) { FilenSyncSection(editor) }
+            Box(Modifier.onPlaced { syncTop = it.positionInParent().y.roundToInt() }.searchAnchor(stringResource(R.string.search_keywords_sync)).sectionAnchor("Filen sync")) { FilenSyncSection(editor) }
             HorizontalDivider(color = palette.border.toComposeColor())
-            Box(Modifier.searchAnchor(stringResource(R.string.search_keywords_update))) { UpdateSection() }
+            Box(Modifier.searchAnchor(stringResource(R.string.search_keywords_update)).sectionAnchor("Updates")) { UpdateSection() }
             Spacer(Modifier.size(8.dp))
+        }
+        }
+        // Phones lay the panel over the settings, so opening it never squeezes the column.
+        if (sectionsOpen && compact) {
+            Box(Modifier.fillMaxSize().background(palette.materialColors.scrim.withAlpha(82).toComposeColor()).clickable { sectionsOpen = false })
+            sectionsPanel()
+        }
         }
         }
     }
@@ -890,7 +916,7 @@ private fun BackupSection(editor: Editor) {
 
 @Composable
 private fun SectionTitle(text: String) {
-    Text(text, color = LocalPalette.current.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.searchAnchor(text))
+    Text(text, color = LocalPalette.current.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.searchAnchor(text).sectionAnchor(text))
 }
 
 @Composable
@@ -911,6 +937,8 @@ private class PrefSearch {
     /** Label text and its top in the column's content, by the label that registered it. Read only
      *  when searching, so it is a plain map: a scroll repositions labels without recomposing. */
     val anchors = HashMap<Any, Pair<String, Float>>()
+    /** Section titles and their tops in the column's content, for the sections panel. */
+    val sections = mutableStateMapOf<String, Int>()
 
     fun matches(text: String): Boolean = query.isNotBlank() && text.contains(query.trim(), ignoreCase = true)
 
@@ -931,6 +959,48 @@ private fun Modifier.searchAnchor(text: String): Modifier {
     return this
         .onGloballyPositioned { search.anchors[key] = text to search.toContentY(it.positionInRoot().y) }
         .then(if (hit) Modifier.background(tint, MaterialTheme.shapes.extraSmall) else Modifier)
+}
+
+/** List this section under [title] in the sections panel, at where it sits in the column. */
+@Composable
+private fun Modifier.sectionAnchor(title: String): Modifier {
+    val search = LocalPrefSearch.current ?: return this
+    androidx.compose.runtime.DisposableEffect(title) { onDispose { search.sections.remove(title) } }
+    return onGloballyPositioned {
+        val y = search.toContentY(it.positionInRoot().y).roundToInt()
+        if (search.sections[title] != y) search.sections[title] = y
+    }
+}
+
+/** The settings' sections, styled like the note's side panel; a tap jumps to that section. */
+@Composable
+private fun PrefSectionsPanel(titles: List<String>, current: String?, onPick: (String) -> Unit) {
+    val palette = LocalPalette.current
+    Column(
+        Modifier
+            .width(224.dp)
+            .fillMaxHeight()
+            .background(palette.panel.toComposeColor())
+            .verticalScroll(rememberScrollState())
+            .padding(vertical = 4.dp),
+    ) {
+        for (title in titles) {
+            val selected = title == current
+            Text(
+                title,
+                color = (if (selected) palette.selectionForeground else palette.text).toComposeColor(),
+                fontSize = 12.sp,
+                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (selected) Modifier.background(palette.selectionBackground.toComposeColor()) else Modifier)
+                    .clickable { onPick(title) }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
+        }
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)

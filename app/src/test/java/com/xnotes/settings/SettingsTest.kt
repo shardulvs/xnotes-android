@@ -153,6 +153,13 @@ class SettingsTest {
         assertEquals(PageSize.mmToPx(215.9, 150), h, 1e-6)
     }
 
+    @Test fun anExplicitOrientationOverridesTheDefault() {
+        val prefs = Preferences(defaultPageSize = PageSize.A4, defaultPageOrientation = Orientation.PORTRAIT)
+        val (w, h) = prefs.newPagePixels(150, Orientation.LANDSCAPE)
+        assertEquals(PageSize.mmToPx(297.0, 150), w, 1e-6)
+        assertEquals(PageSize.mmToPx(210.0, 150), h, 1e-6)
+    }
+
     @Test fun anOutOfRangeCustomSideIsPulledBackIn() {
         val o = JSONObject().put(
             "prefs",

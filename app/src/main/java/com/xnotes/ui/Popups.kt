@@ -67,7 +67,6 @@ import com.xnotes.canvas.ViewingMode
 import com.xnotes.core.model.FunctionSpec
 import com.xnotes.core.model.PageEdge
 import com.xnotes.core.model.PageMargins
-import com.xnotes.core.model.PagePattern
 import com.xnotes.core.model.PageTemplates
 import com.xnotes.core.model.PageStyle
 import com.xnotes.core.model.Rgba
@@ -346,15 +345,10 @@ fun StylesPopup(editor: Editor, onImportTemplate: () -> Unit = {}, onDismiss: ()
     }
 }
 
-/**
- * The page-style editing controls shared by [StylesPopup] and the new-note dialog: page colour,
- * pattern, spacing, pattern colour and its opacity. Each edit produces a new [PageStyle] via
- * [onChange]. [inheritFrom] supplies the pattern-colour fallback when this style leaves it Default
- * (the Styles popup's Current Page tab inherits the document's); pass null when there is no fallback.
- */
+/** The new-note dialog's page style: page colour, then the template and its settings ([TemplateControls]). */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun PageStyleControls(style: PageStyle, inheritFrom: PageStyle?, onChange: (PageStyle) -> Unit) {
+fun PageStyleControls(editor: Editor, style: PageStyle, pageMm: Pair<Double, Double>, onChange: (PageStyle) -> Unit) {
     StyleCaption(stringResource(R.string.caption_page_colour))
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -373,55 +367,7 @@ fun PageStyleControls(style: PageStyle, inheritFrom: PageStyle?, onChange: (Page
     }
 
     Spacer(Modifier.size(12.dp))
-    StyleCaption(stringResource(R.string.caption_pattern))
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        ModeChip(stringResource(R.string.default_choice), style.template == null) { onChange(style.withTemplate(null, PageTemplates.NONE)) }
-        ModeChip(stringResource(R.string.none), style.template == PageTemplates.NONE) { onChange(style.withTemplate(PageTemplates.NONE, PageTemplates.NONE)) }
-        ModeChip(stringResource(R.string.pattern_lines), style.template == PagePattern.LINES.id) { onChange(style.withTemplate(PagePattern.LINES.id, PageTemplates.NONE)) }
-        ModeChip(stringResource(R.string.pattern_dots), style.template == PagePattern.DOTS.id) { onChange(style.withTemplate(PagePattern.DOTS.id, PageTemplates.NONE)) }
-        ModeChip(stringResource(R.string.pattern_grid), style.template == PagePattern.GRID.id) { onChange(style.withTemplate(PagePattern.GRID.id, PageTemplates.NONE)) }
-    }
-
-    Spacer(Modifier.size(12.dp))
-    val spacing = style.spacing ?: PageStyle.DEFAULT_SPACING
-    StyleCaption(stringResource(R.string.caption_spacing_px, spacing.toInt()) + if (style.spacing == null) stringResource(R.string.default_suffix) else "")
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        ModeChip(stringResource(R.string.default_choice), style.spacing == null) { onChange(style.copy(spacing = null)) }
-        Slider(
-            value = spacing.toFloat().coerceIn(PageStyle.MIN_SPACING.toFloat(), PageStyle.MAX_SPACING.toFloat()),
-            onValueChange = { onChange(style.copy(spacing = it.toDouble())) },
-            valueRange = PageStyle.MIN_SPACING.toFloat()..PageStyle.MAX_SPACING.toFloat(),
-            modifier = Modifier.weight(1f),
-        )
-    }
-
-    Spacer(Modifier.size(12.dp))
-    // Effective pattern colour: this style's own, else the inherited fallback, else the built-in grey.
-    val effPatternColor = style.patternColor ?: inheritFrom?.patternColor ?: PageStyle.DEFAULT_PATTERN_COLOR
-    StyleCaption(stringResource(R.string.caption_pattern_colour))
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        ModeChip(stringResource(R.string.default_choice), style.patternColor == null) { onChange(style.copy(patternColor = null)) }
-        ColorPickerDot(
-            style.patternColor?.copy(a = 255), // show the hue at full strength; OPACITY sets the alpha
-            custom = style.patternColor != null,
-            onPick = { onChange(style.copy(patternColor = it.copy(a = effPatternColor.a))) }, // keep current opacity
-            dismissOnPick = false,
-        ) { d, p -> PageColorGridPopup(style.patternColor?.copy(a = 255), d, p) }
-    }
-
-    Spacer(Modifier.size(12.dp))
-    val opacityPct = effPatternColor.a * 100f / 255f
-    StyleCaption(stringResource(R.string.caption_opacity_percent, opacityPct.roundToInt()))
-    Slider(
-        value = opacityPct,
-        onValueChange = { pct ->
-            onChange(style.copy(patternColor = effPatternColor.copy(a = (pct / 100f * 255f).roundToInt().coerceIn(0, 255))))
-        },
-        valueRange = 0f..100f,
-    )
+    TemplateControls(editor, style, pageMm, onChange)
 }
 
 /**
@@ -465,58 +411,7 @@ private fun TemplateCustomizer(
             Text(it, color = palette.textDim.toComposeColor(), fontSize = 12.sp)
         }
 
-        Spacer(Modifier.size(12.dp))
-        val numbers = HashMap<String, Double>()
-        lower?.params?.let(numbers::putAll)
-        style.params?.let(numbers::putAll)
-        val spacing = t.spacingParam
-        (style.spacing ?: lower?.spacing)?.let { px -> if (spacing != null) numbers[spacing.name] = px * 25.4 / dpi }
-        val colors = (lower?.colors ?: emptyMap()) + (style.colors ?: emptyMap())
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            TemplatePreview(
-                t, key, editor.currentPageMm, look.ink, look.accent, look.paper,
-                com.xnotes.core.template.TemplateValues(numbers, colors), 112.dp,
-            )
-        }
-
-        Spacer(Modifier.size(12.dp))
-        StyleCaption(stringResource(R.string.caption_pattern_colour))
-        Spacer(Modifier.size(4.dp))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            ModeChip(stringResource(R.string.default_choice), style.patternColor == null) { apply(style.copy(patternColor = null)) }
-            ColorPickerDot(
-                style.patternColor?.copy(a = 255), // show the hue at full strength; OPACITY sets the alpha
-                custom = style.patternColor != null,
-                onPick = { apply(style.copy(patternColor = it.copy(a = look.ink.a))) }, // keep current opacity
-                dismissOnPick = false,
-            ) { d, p -> PageColorGridPopup(style.patternColor?.copy(a = 255), d, p) }
-        }
-        Spacer(Modifier.size(12.dp))
-        val opacityPct = look.ink.a * 100f / 255f
-        StyleCaption(stringResource(R.string.caption_opacity_percent, opacityPct.roundToInt()))
-        Slider(
-            value = opacityPct,
-            onValueChange = { pct ->
-                apply(style.copy(patternColor = look.ink.copy(a = (pct / 100f * 255f).roundToInt().coerceIn(0, 255))))
-            },
-            valueRange = 0f..100f,
-        )
-        if (t.usesAccent) {
-            Spacer(Modifier.size(4.dp))
-            StyleCaption(stringResource(R.string.caption_accent_colour))
-            Spacer(Modifier.size(4.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                ModeChip(stringResource(R.string.default_choice), style.accentColor == null) { apply(style.copy(accentColor = null)) }
-                ColorPickerDot(
-                    style.accentColor?.copy(a = 255),
-                    custom = style.accentColor != null,
-                    onPick = { apply(style.copy(accentColor = it.copy(a = look.accent.a))) },
-                    dismissOnPick = false,
-                ) { d, p -> PageColorGridPopup(style.accentColor?.copy(a = 255), d, p) }
-            }
-        }
-
-        TemplateParamControls(t, style, lower, dpi, apply)
+        TemplateSettings(t, key, style, lower, look, editor.currentPageMm, dpi, apply)
 
         Spacer(Modifier.size(12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -525,6 +420,109 @@ private fun TemplateCustomizer(
             }
         }
     }
+}
+
+/** [t]'s live preview, pattern and accent colours and every parameter it declares, as [style] sets them over [lower]. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TemplateSettings(
+    t: com.xnotes.core.template.Template,
+    key: String,
+    style: PageStyle,
+    lower: PageStyle?,
+    look: TemplateLook,
+    pageMm: Pair<Double, Double>,
+    dpi: Int,
+    apply: (PageStyle) -> Unit,
+) {
+    Spacer(Modifier.size(12.dp))
+    val numbers = HashMap<String, Double>()
+    lower?.params?.let(numbers::putAll)
+    style.params?.let(numbers::putAll)
+    val spacing = t.spacingParam
+    (style.spacing ?: lower?.spacing)?.let { px -> if (spacing != null) numbers[spacing.name] = px * 25.4 / dpi }
+    val colors = (lower?.colors ?: emptyMap()) + (style.colors ?: emptyMap())
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        TemplatePreview(
+            t, key, pageMm, look.ink, look.accent, look.paper,
+            com.xnotes.core.template.TemplateValues(numbers, colors), 112.dp,
+        )
+    }
+
+    Spacer(Modifier.size(12.dp))
+    StyleCaption(stringResource(R.string.caption_pattern_colour))
+    Spacer(Modifier.size(4.dp))
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        ModeChip(stringResource(R.string.default_choice), style.patternColor == null) { apply(style.copy(patternColor = null)) }
+        ColorPickerDot(
+            style.patternColor?.copy(a = 255), // show the hue at full strength; OPACITY sets the alpha
+            custom = style.patternColor != null,
+            onPick = { apply(style.copy(patternColor = it.copy(a = look.ink.a))) }, // keep current opacity
+            dismissOnPick = false,
+        ) { d, p -> PageColorGridPopup(style.patternColor?.copy(a = 255), d, p) }
+    }
+    Spacer(Modifier.size(12.dp))
+    val opacityPct = look.ink.a * 100f / 255f
+    StyleCaption(stringResource(R.string.caption_opacity_percent, opacityPct.roundToInt()))
+    Slider(
+        value = opacityPct,
+        onValueChange = { pct ->
+            apply(style.copy(patternColor = look.ink.copy(a = (pct / 100f * 255f).roundToInt().coerceIn(0, 255))))
+        },
+        valueRange = 0f..100f,
+    )
+    if (t.usesAccent) {
+        Spacer(Modifier.size(4.dp))
+        StyleCaption(stringResource(R.string.caption_accent_colour))
+        Spacer(Modifier.size(4.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            ModeChip(stringResource(R.string.default_choice), style.accentColor == null) { apply(style.copy(accentColor = null)) }
+            ColorPickerDot(
+                style.accentColor?.copy(a = 255),
+                custom = style.accentColor != null,
+                onPick = { apply(style.copy(accentColor = it.copy(a = look.accent.a))) },
+                dismissOnPick = false,
+            ) { d, p -> PageColorGridPopup(style.accentColor?.copy(a = 255), d, p) }
+        }
+    }
+
+    TemplateParamControls(t, style, lower, dpi, apply)
+}
+
+/**
+ * The new-note template: Default, None or any library template, and under a picked one its colours
+ * and parameters as the Styles popup's Customize page has them. [pageMm] sizes the previews.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun TemplateControls(editor: Editor, style: PageStyle, pageMm: Pair<Double, Double>, onChange: (PageStyle) -> Unit) {
+    StyleCaption(stringResource(R.string.caption_template))
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        ModeChip(stringResource(R.string.default_choice), style.template == null) { onChange(style.withTemplate(null, PageTemplates.NONE)) }
+        ModeChip(stringResource(R.string.none), style.template == PageTemplates.NONE) { onChange(style.withTemplate(PageTemplates.NONE, PageTemplates.NONE)) }
+    }
+    Spacer(Modifier.size(6.dp))
+    val look = TemplateLook.of(style, null, LocalPalette.current.paper)
+    val libraryVersion = TemplateLibraryUi.version
+    val choices = remember(libraryVersion) { com.xnotes.platform.TemplateLibrary.all() }
+    TemplateStrip(
+        entries = choices,
+        selected = style.template,
+        pageMm = pageMm,
+        ink = look.ink,
+        accent = look.accent,
+        paper = look.paper,
+        onSelect = { onChange(style.withTemplate(it, PageTemplates.NONE)) },
+        onImport = null,
+        onRemove = { editor.removeTemplate(it) },
+        onKeep = {},
+    )
+    val key = style.template?.takeIf { it != PageTemplates.NONE } ?: return
+    val shown = com.xnotes.platform.TemplateLibrary.entry(key)?.template ?: return
+    TemplateSettings(shown, key, style, null, look, pageMm, com.xnotes.core.model.PageSize.DEFAULT_DPI, onChange)
 }
 
 /**

@@ -20,6 +20,8 @@
     <string name="tool_text">Text</string>
     <string name="tool_text_box">Text box</string>
     <string name="tool_markup">PDF text markup</string>
+    <string name="tool_reader">Reader</string>
+    <string name="reader_exit">Exit reader</string>
     <string name="markup_highlight">Highlight</string>
     <string name="markup_squiggly">Squiggly</string>
     <string name="markup_colour">Colour</string>
@@ -135,7 +137,7 @@
     <string name="caption_fill">Fill</string>
     <string name="caption_opacity">Opacity</string>
     <string name="caption_dashed">Dashed</string>
-    <string name="caption_spacing_px">"SPACING  %1$d px"</string>
+    <string name="caption_spacing_px">"Spacing  %1$d px"</string>
     <string name="default_suffix">"  (default)"</string>
     <string name="caption_opacity_percent">"Opacity  %1$d%%"</string>
     <string name="caption_value_percent">"%1$s  %2$d%%"</string>
@@ -491,6 +493,7 @@
     <string name="add_page">Add page</string>
     <string name="add_landscape_page">Add landscape page</string>
     <string name="add_portrait_page">Add portrait page</string>
+    <string name="add_ellipsis">Add...</string>
     <string name="erase_page">Erase page</string>
     <string name="share_ellipsis">Share…</string>
     <string name="save_as_ellipsis">Save as…</string>

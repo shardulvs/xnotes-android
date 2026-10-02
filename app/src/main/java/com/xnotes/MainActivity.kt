@@ -949,6 +949,8 @@ private fun EditorScreen(
                 BackHandler(enabled = focused.editingField == null && !focused.flowEditingActive) {
                     guarded(focused) { focused.goHome() }
                 }
+                // Reader mode is left before the note is.
+                BackHandler(enabled = focused.readerMode) { focused.exitReader() }
             }
 
             val actions = PaneActions(

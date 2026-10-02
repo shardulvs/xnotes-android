@@ -29,10 +29,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -52,9 +54,12 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xnotes.R
@@ -165,6 +170,7 @@ private fun PagesTab(
             itemsIndexed(pages, key = { _, page -> page.uid }) { index, page ->
                 PageThumb(editor, index, page, selecting, settled, Modifier.animateItem(), onSharePages, onSavePagesAsPdf, onSavePagesAsImages, onInsertPages)
             }
+            if (!selecting && pages.isNotEmpty()) item(key = "add") { AddPageButton(editor, pages.lastIndex, onInsertPages) }
         }
         VerticalScrollbar(listState, Modifier.align(Alignment.CenterEnd))
     }
@@ -290,12 +296,23 @@ private fun PageContextMenu(
                 DropdownMenuItem(text = { Text("PDF") }, leadingIcon = menuIcon(XnotesIcons.exportDoc), onClick = { onSavePagesAsPdf(one); onDismiss() })
             }
             else -> {
-                DropdownMenuItem(text = { Text(stringResource(R.string.add_page)) }, leadingIcon = menuIcon(XnotesIcons.plus), onClick = { editor.insertPageAfter(index); onDismiss() })
-                val turnedLabel = if (editor.isLandscapePage(index)) R.string.add_portrait_page else R.string.add_landscape_page
-                DropdownMenuItem(text = { Text(stringResource(turnedLabel)) }, leadingIcon = menuIcon(XnotesIcons.plus), onClick = { editor.insertPageAfter(index, turned = true); onDismiss() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.insert_from_file)) }, leadingIcon = menuIcon(XnotesIcons.exportDoc), onClick = { onInsertPages(PageInsert.FILE, index + 1); onDismiss() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.add_image_page)) }, leadingIcon = menuIcon(XnotesIcons.image), onClick = { onInsertPages(PageInsert.IMAGE, index + 1); onDismiss() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.add_photo_page)) }, leadingIcon = menuIcon(XnotesIcons.camera), onClick = { onInsertPages(PageInsert.PHOTO, index + 1); onDismiss() })
+                // The ways to add a page open beside this row, so the menu stays short.
+                var addOpen by remember { mutableStateOf(false) }
+                var row by remember { mutableStateOf(IntSize.Zero) }
+                Box(Modifier.onSizeChanged { row = it }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.add_ellipsis)) },
+                        leadingIcon = menuIcon(XnotesIcons.plus),
+                        trailingIcon = menuIcon(XnotesIcons.next),
+                        onClick = { addOpen = true },
+                    )
+                    val side = with(LocalDensity.current) { DpOffset(row.width.toDp(), -row.height.toDp()) }
+                    CompositionLocalProvider(LocalMenuOffset provides side) {
+                        DropdownMenu(expanded = addOpen, onDismissRequest = { addOpen = false }) {
+                            AddPageItems(editor, index, onInsertPages) { addOpen = false; onDismiss() }
+                        }
+                    }
+                }
                 DropdownMenuItem(text = { Text(stringResource(R.string.copy)) }, leadingIcon = menuIcon(XnotesIcons.copy), onClick = { editor.copyPages(one); onDismiss() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.cut)) }, leadingIcon = menuIcon(XnotesIcons.cut), onClick = { editor.cutPages(one); onDismiss() })
                 if (editor.canPastePages) {
@@ -306,6 +323,42 @@ private fun PageContextMenu(
                 DropdownMenuItem(text = { Text(stringResource(R.string.share_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.share), onClick = { sub = MENU_SHARE })
                 DropdownMenuItem(text = { Text(stringResource(R.string.save_as_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.download), onClick = { sub = MENU_SAVE })
             }
+        }
+    }
+}
+
+/** The ways to put a page in after [index]: blank, turned, from a file, from an image or from a photo. */
+@Composable
+private fun AddPageItems(editor: Editor, index: Int, onInsertPages: (PageInsert, Int) -> Unit, onDone: () -> Unit) {
+    val palette = LocalPalette.current
+    fun menuIcon(icon: ImageVector) = @Composable { Icon(icon, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp)) }
+    DropdownMenuItem(text = { Text(stringResource(R.string.add_page)) }, leadingIcon = menuIcon(XnotesIcons.plus), onClick = { editor.insertPageAfter(index); onDone() })
+    val turnedLabel = if (editor.isLandscapePage(index)) R.string.add_portrait_page else R.string.add_landscape_page
+    DropdownMenuItem(text = { Text(stringResource(turnedLabel)) }, leadingIcon = menuIcon(XnotesIcons.plus), onClick = { editor.insertPageAfter(index, turned = true); onDone() })
+    DropdownMenuItem(text = { Text(stringResource(R.string.insert_from_file)) }, leadingIcon = menuIcon(XnotesIcons.exportDoc), onClick = { onInsertPages(PageInsert.FILE, index + 1); onDone() })
+    DropdownMenuItem(text = { Text(stringResource(R.string.add_image_page)) }, leadingIcon = menuIcon(XnotesIcons.image), onClick = { onInsertPages(PageInsert.IMAGE, index + 1); onDone() })
+    DropdownMenuItem(text = { Text(stringResource(R.string.add_photo_page)) }, leadingIcon = menuIcon(XnotesIcons.camera), onClick = { onInsertPages(PageInsert.PHOTO, index + 1); onDone() })
+}
+
+/** The + under the last page: the same ways to add a page, at the end of the note. */
+@Composable
+private fun AddPageButton(editor: Editor, last: Int, onInsertPages: (PageInsert, Int) -> Unit) {
+    val palette = LocalPalette.current
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Box(
+            Modifier
+                .width(150.dp)
+                .height(44.dp)
+                .clip(MaterialTheme.shapes.extraSmall)
+                .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.extraSmall)
+                .clickable { open = true },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(XnotesIcons.plus, stringResource(R.string.add_page), tint = palette.textDim.toComposeColor(), modifier = Modifier.size(20.dp))
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            AddPageItems(editor, last, onInsertPages) { open = false }
         }
     }
 }

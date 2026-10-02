@@ -132,14 +132,14 @@ data class Preferences(
 ) {
     /**
      * A new note's page size in document pixels. A named size is laid out under
-     * [defaultPageOrientation]; a custom one is taken as typed, since the two fields already say
+     * [orientation]; a custom one is taken as typed, since the two fields already say
      * which way round the page goes.
      */
-    fun newPagePixels(dpi: Int = PageSize.DEFAULT_DPI): Pair<Double, Double> =
+    fun newPagePixels(dpi: Int = PageSize.DEFAULT_DPI, orientation: Orientation = defaultPageOrientation): Pair<Double, Double> =
         if (defaultPageSize == PageSize.CUSTOM) {
             PageSize.mmToPx(customPageWidthMm, dpi) to PageSize.mmToPx(customPageHeightMm, dpi)
         } else {
-            defaultPageSize.pixels(defaultPageOrientation, dpi)
+            defaultPageSize.pixels(orientation, dpi)
         }
 
     fun toJson(): JSONObject = JSONObject()

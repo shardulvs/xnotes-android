@@ -221,6 +221,9 @@ class InteractionController(
     /** Tool the stylus side button activates while held, or null to ignore the button. */
     var penButtonTool: Tool? = Tool.ERASER
 
+    /** Reader mode: every pointer pans and follows links, and a long press only selects PDF text. */
+    var readOnly: Boolean = false
+
     /** Side button as last seen on the hover/generic-motion stream or a stylus-button KeyEvent
      *  (Feeder C, for Bluetooth pens that report it only there); read only at touch-down, so a
      *  press after the pen is already down does not activate the mapped tool. */
@@ -566,7 +569,7 @@ class InteractionController(
             e.actionMasked != MotionEvent.ACTION_HOVER_EXIT &&
             ((e.buttonState and STYLUS_BUTTON_MASK) != 0 || stylusButtonHeld)
         val want = penButtonHover && buttonNow &&
-            (penButtonTool == Tool.ERASER || penButtonTool == Tool.PAN)
+            (penButtonTool == Tool.ERASER && !readOnly || penButtonTool == Tool.PAN)
         val vx = e.x.toDouble()
         val vy = e.y.toDouble()
         return when {
@@ -659,6 +662,7 @@ class InteractionController(
         val buttonHeld = drawingIsStylus &&
             ((e.buttonState and STYLUS_BUTTON_MASK) != 0 || stylusButtonHeld)
         val effectiveTool: Tool = when {
+            readOnly -> Tool.PAN
             toolType == MotionEvent.TOOL_TYPE_ERASER -> Tool.ERASER
             buttonHeld && penButtonTool != null -> penButtonTool!!
             // While something is selected, the stylus grabs that selection (resize on a handle,
@@ -2769,8 +2773,8 @@ class InteractionController(
         // gesture. A stylus or mouse only has it when free, under the PAN tool, where it mirrors the
         // finger; otherwise it draws, so resting it never grabs or pops a menu.
         if (!isFinger && !free) return
-        val grabEligible = tool.isStroke || tool == Tool.PAN || tool == Tool.SELECT ||
-            tool == Tool.LASSO || tool == Tool.SHAPE || tool == Tool.TEXT || tool == Tool.TEXT_BOX
+        val grabEligible = !readOnly && (tool.isStroke || tool == Tool.PAN || tool == Tool.SELECT ||
+            tool == Tool.LASSO || tool == Tool.SHAPE || tool == Tool.TEXT || tool == Tool.TEXT_BOX)
         val pageIndex = state.pageIndexAtContent(content)
         val hit = if (pageIndex != null) {
             val local = state.toPageSpace(pageIndex, content)
@@ -2782,7 +2786,7 @@ class InteractionController(
         longPressContent = content
         // A locked item cannot be picked up, so a held finger offers to release it instead. That is
         // the only way back: it is out of reach of the band, the lasso and every tap.
-        longPressLocked = hit?.takeIf { it.locked }
+        longPressLocked = hit?.takeIf { it.locked && !readOnly }
         longPressCandidate =
             if (grabEligible && hit != null && !hit.locked) Selected(pageIndex!!, hit) else null
         // An item on top wins; a free pointer on the bare PDF selects its text.
@@ -2793,7 +2797,7 @@ class InteractionController(
         }
         // Arm to grab an item, to unlock one, to select text, or (on empty space) to open the paste
         // menu when there is content to paste.
-        val showEmptyMenu = hit == null && (hasClipboardItems() || clipboardHasImage())
+        val showEmptyMenu = !readOnly && hit == null && (hasClipboardItems() || clipboardHasImage())
         if (longPressCandidate == null && longPressLocked == null && longPressTextPage < 0 && !showEmptyMenu) return
         val r = Runnable { triggerLongPress() }
         longPressRunnable = r
@@ -2841,7 +2845,7 @@ class InteractionController(
             val start = longPressStart
             val content = longPressContent
             pdfText?.longPress(textPage, state.toPageSpace(textPage, content)) {
-                if (hasClipboardItems() || clipboardHasImage()) onContextMenu(start, content, null)
+                if (!readOnly && (hasClipboardItems() || clipboardHasImage())) onContextMenu(start, content, null)
             }
         } else {
             // Empty space, or a locked item: open the context menu at the press point.

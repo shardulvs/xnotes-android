@@ -133,6 +133,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import com.xnotes.R
+import com.xnotes.core.model.Orientation
 import com.xnotes.core.model.Rgba
 import com.xnotes.platform.PdfOpenError
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -291,7 +292,7 @@ private fun BackstageContent(
     val scope = rememberCoroutineScope()
     var renamingColor by remember { mutableStateOf<Rgba?>(null) }
     var focusSync by remember { mutableStateOf(false) }
-    val pinsOpen = rememberSaveable { mutableStateOf(false) }
+    val pinsOpen = rememberSaveable { mutableStateOf(true) }
     // Colour names live in the notes folder, so pick up another device's edits whenever Home comes back.
     LaunchedEffect(editor.browseRoot, editor.noteOpen) { withContext(Dispatchers.IO) { editor.loadColorNames() } }
     val colors = editor.colorNames.entries.sortedBy { it.value.lowercase() }.map { it.key to it.value }
@@ -753,7 +754,7 @@ private fun PinnedCommand(label: String, selected: Boolean, onClick: () -> Unit,
                 .height(48.dp)
                 .then(if (selected) Modifier.background(palette.selectionBackground.toComposeColor()) else Modifier)
                 .combinedClickable(onClick = onClick, onLongClick = { menuOpen = true })
-                .padding(horizontal = 18.dp),
+                .padding(start = 32.dp, end = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(XnotesIcons.folder, null, tint = (if (selected) palette.selectionForeground else palette.accent).toComposeColor(), modifier = Modifier.size(20.dp))
@@ -1766,8 +1767,6 @@ private fun ExplorerSection(
                     Box(Modifier.floatingBacking(liftNow, CircleShape, floatFill, floatEdge)) {
                         ExplorerIcon(XnotesIcons.more, stringResource(R.string.more)) { moreOpen = true }
                         DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
-                            NewItemMenuItems({ moreOpen = false }, onCreateMode, calls.importPdf)
-                            HorizontalDivider(color = palette.border.toComposeColor())
                             clipboard?.let { clip ->
                                 DropdownMenuItem(text = { Text(pluralStringResource(R.plurals.paste_items_here, clip.entries.size, clip.entries.size)) }, onClick = { moreOpen = false; paste(clip) })
                             }
@@ -1833,9 +1832,9 @@ private fun ExplorerSection(
             editor = editor,
             initial = nextUntitled(editor, editor.cachedChildren(root, currentDocId)),
             error = fieldError,
-            onConfirm = { n, style ->
+            onConfirm = { n, style, orientation ->
                 scope.launch {
-                    val uri = withContext(Dispatchers.IO) { editor.createBlankNoteFile(root, currentDocId, n, style) }
+                    val uri = withContext(Dispatchers.IO) { editor.createBlankNoteFile(root, currentDocId, n, style, orientation) }
                     if (uri != null) { onCreateMode(CreateMode.NONE); refreshKey++; calls.openFile(uri) } else fieldError = context.getString(R.string.err_create_note)
                 }
             },
@@ -2236,21 +2235,22 @@ private fun StackedNoteCard(editor: Editor, entry: BrowseEntry, modifier: Modifi
 
 // --- shared bits ---
 
-/** The new-note prompt: its name plus the toolbar's page-style controls (template, page colour), preset from the new-note default. */
+/** The new-note prompt: its name, page orientation and the toolbar's page-style controls (template, page colour), preset from the new-note defaults. */
 @Composable
 private fun NewNoteDialog(
     editor: Editor,
     initial: String,
     error: String?,
-    onConfirm: (String, com.xnotes.core.model.PageStyle) -> Unit,
+    onConfirm: (String, com.xnotes.core.model.PageStyle, Orientation) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val palette = LocalPalette.current
     var text by remember { mutableStateOf(TextFieldValue(initial, selection = TextRange(0, initial.length))) }
     var style by remember { mutableStateOf(editor.newNoteStyle) }
+    var orientation by remember { mutableStateOf(editor.preferences.defaultPageOrientation) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
-    val confirm = { onConfirm(text.text.trim(), style) }
+    val confirm = { onConfirm(text.text.trim(), style, orientation) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.new_note)) },
@@ -2278,7 +2278,13 @@ private fun NewNoteDialog(
                             }
                         },
                 )
-                PageStyleControls(style, inheritFrom = null) { style = it }
+                StyleCaption(stringResource(R.string.pref_orientation))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ModeChip(stringResource(R.string.orientation_portrait), orientation == Orientation.PORTRAIT) { orientation = Orientation.PORTRAIT }
+                    ModeChip(stringResource(R.string.orientation_landscape), orientation == Orientation.LANDSCAPE) { orientation = Orientation.LANDSCAPE }
+                }
+                Spacer(Modifier.size(12.dp))
+                PageStyleControls(editor, style, editor.newNotePageMm(orientation)) { style = it }
             }
         },
         confirmButton = { TextButton(onClick = { confirm() }) { Text(stringResource(R.string.create)) } },

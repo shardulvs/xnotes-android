@@ -500,6 +500,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     var tool by mutableStateOf(Tool.DEFAULT)
         private set
+
+    /** Reader mode: the note can be read, searched and followed through links, but not changed. */
+    var readerMode by mutableStateOf(false)
+        private set
+    private var toolBeforeReader: Tool? = null
     var palette by mutableStateOf(state.palette)
         private set
     /** How round the chrome is, [Preferences.cornerStyle]. */
@@ -1280,6 +1285,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private fun tapMarkup(at: Pt, withLink: Boolean): Boolean {
         val hit = markupHit(at) ?: return false
         val anchor = markupAnchor(hit.page, hit.markup) ?: return false
+        // Reading toggles a markup's note and never opens its menu; a markup without one lets the tap reach the PDF.
+        if (readerMode) {
+            if (hit.markup.note == null) return false
+            notePeekSize = null
+            notePeek = if (notePeek?.markup === hit.markup) null else NotePeek(hit.page, hit.markup, anchor, state.viewportW, state.viewportH)
+            return true
+        }
         if (hit.markup.note != null && notePeek?.markup !== hit.markup) {
             markupMenu = null
             notePeekSize = null
@@ -2825,9 +2837,16 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** A blank document at the user's default page size, custom dimensions included. */
-    private fun blankDocument(): Document {
-        val (w, h) = settings.prefs.newPagePixels()
+    private fun blankDocument(orientation: Orientation = settings.prefs.defaultPageOrientation): Document {
+        val (w, h) = settings.prefs.newPagePixels(orientation = orientation)
         return Document.blankPixels(Document.DEFAULT_NEW_PAGES, w, h).also { it.created = System.currentTimeMillis() }
+    }
+
+    /** A new note's page size in mm, for template previews. */
+    fun newNotePageMm(orientation: Orientation = settings.prefs.defaultPageOrientation): Pair<Double, Double> {
+        val (w, h) = settings.prefs.newPagePixels(orientation = orientation)
+        val mmPerPx = 25.4 / com.xnotes.core.model.PageSize.DEFAULT_DPI
+        return w * mmPerPx to h * mmPerPx
     }
 
     /** Stamp the saved new-note defaults (page style + flow config) onto a fresh [doc]. */
@@ -4024,9 +4043,18 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** Creates a blank `.xnote` under [parentDocId]; returns its URI, or null. IO — call off-thread.
      *  [style] overrides the new-note default page style (template + colour) when non-null. */
-    fun createBlankNoteFile(treeUri: String, parentDocId: String, rawName: String, style: PageStyle? = null): String? {
+    fun createBlankNoteFile(
+        treeUri: String,
+        parentDocId: String,
+        rawName: String,
+        style: PageStyle? = null,
+        orientation: Orientation = settings.prefs.defaultPageOrientation,
+    ): String? {
         val name = uniqueDocumentName(treeUri, parentDocId, rawName, com.xnotes.core.util.DocumentKind.NOTE)
-        val blank = blankDocument().also { stampNewNoteDefaults(it); if (style != null) it.style = style }
+        val blank = blankDocument(orientation).also {
+            stampNewNoteDefaults(it)
+            if (style != null) { it.style = style; TemplateLibrary.embed(it, style.template) }
+        }
         return createNoteFile(treeUri, parentDocId, name) { codec.write(blank, it) }
     }
 
@@ -6006,6 +6034,25 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     // --- tools & colour ---
 
+    fun enterReader() {
+        if (readerMode) return
+        escape()
+        controller.clearSelection()
+        toolBeforeReader = tool
+        selectTool(Tool.PAN)
+        controller.readOnly = true
+        readerMode = true
+    }
+
+    fun exitReader() {
+        if (!readerMode) return
+        readerMode = false
+        controller.readOnly = false
+        notePeek = null
+        toolBeforeReader?.let { selectTool(it) }
+        toolBeforeReader = null
+    }
+
     fun selectTool(t: Tool) {
         // The markup tool marks a PDF's text: a note without one gets Pan, and the next with one gets it back.
         markupResting = t == Tool.MARKUP && !hasPdf
@@ -6019,6 +6066,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private fun dispatchTapGesture(action: String) = when {
         // The pen's taps arrive here whichever surface is up; a canvas on top must not edit the note under it.
         canvasOpen -> infinite.dispatchTapGesture(action)
+        readerMode -> Unit
         action == "undo" -> undo()
         action == "redo" -> redo()
         action == "toggle_pan" -> toggleTool(Tool.PAN)
@@ -6543,6 +6591,17 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
         val ctrl = e.isCtrlPressed
         val shift = e.isShiftPressed
+        // Reader mode passes on every key that edits or picks a tool; Escape clears a text selection, then leaves it.
+        if (readerMode) {
+            val key = e.keyCode
+            if (key == android.view.KeyEvent.KEYCODE_ESCAPE) {
+                if (pdfText.selection != null) pdfText.clear() else exitReader()
+                return true
+            }
+            val edits = if (ctrl) key == android.view.KeyEvent.KEYCODE_Z || key == android.view.KeyEvent.KEYCODE_A
+            else key != android.view.KeyEvent.KEYCODE_PAGE_UP && key != android.view.KeyEvent.KEYCODE_PAGE_DOWN && key != android.view.KeyEvent.KEYCODE_F11
+            if (edits) return false
+        }
         when {
             ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_Z && shift -> redo()
             ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_Z -> undo()
@@ -7983,6 +8042,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             }
             return
         }
+        exitReader()
         commitText() // commit an open text box before leaving (also hides its keyboard)
         flowText.endSession() // end any live flow caret (flushes typing, hides the keyboard)
         saveViewState() // remember this folder note's view before leaving

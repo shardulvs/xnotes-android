@@ -29,6 +29,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -120,30 +122,57 @@ fun Toolbar(
     var configForTool by remember { mutableStateOf<Tool?>(null) }
     var switcherIndex by remember { mutableStateOf<Int?>(null) }
     var renaming by remember { mutableStateOf(false) }
-    // Pinned outside the scrolling strip so closing a split pane is always one tap away.
-    ToolbarFrame(armed = editor.tool, trailing = onClosePane?.let { { ClosePaneButton(it) } }) {
-        // The bar is driven by the user-customisable layout; separators sit between non-empty
-        // sections, and each item dispatches to its renderer (see ToolbarItemView).
-        editor.toolbarLayout.visibleSections.forEachIndexed { si, section ->
-            if (si > 0) Separator()
-            section.visibleEntries.forEach { entry ->
-                ToolbarItemView(
-                    editor = editor,
-                    item = entry.item,
-                    toolIcons = toolIcons,
-                    configForTool = configForTool,
-                    setConfigForTool = { configForTool = it },
-                    switcherIndex = switcherIndex,
-                    setSwitcherIndex = { switcherIndex = it },
-                    onRename = { renaming = true },
-                    onOpenBackstage = onOpenBackstage,
-                    onInsertImage = onInsertImage,
-                    onTakePhoto = onTakePhoto,
-                    onImagePage = onImagePage,
-                    onAddStickers = onAddStickers,
-                    onToggleFullscreen = onToggleFullscreen,
-                    onImportTemplate = onImportTemplate,
-                )
+    @Composable
+    fun Item(item: ToolbarItem) = ToolbarItemView(
+        editor = editor,
+        item = item,
+        toolIcons = toolIcons,
+        configForTool = configForTool,
+        setConfigForTool = { configForTool = it },
+        switcherIndex = switcherIndex,
+        setSwitcherIndex = { switcherIndex = it },
+        onRename = { renaming = true },
+        onOpenBackstage = onOpenBackstage,
+        onInsertImage = onInsertImage,
+        onTakePhoto = onTakePhoto,
+        onImagePage = onImagePage,
+        onAddStickers = onAddStickers,
+        onToggleFullscreen = onToggleFullscreen,
+        onImportTemplate = onImportTemplate,
+    )
+    if (editor.readerMode) {
+        // The file reader's bar for a note: where you are and how you see it, and the way back to editing.
+        ToolbarFrame(
+            armed = null,
+            trailing = {
+                ToolbarIcon(Icons.Outlined.AutoStories, stringResource(R.string.reader_exit), active = true) { editor.exitReader() }
+                onClosePane?.let { ClosePaneButton(it) }
+            },
+        ) {
+            Item(ToolbarItem.HOME)
+            Item(ToolbarItem.TITLE)
+            Separator()
+            Item(ToolbarItem.SIDEBAR)
+            Separator()
+            Icon(XnotesIcons.lock, null, tint = LocalPalette.current.textDim.toComposeColor(), modifier = Modifier.padding(4.dp).size(16.dp))
+            if (!LocalBar.current.vertical) Label(stringResource(R.string.reader_read_only))
+            Separator()
+            Item(ToolbarItem.PAGE_NAV)
+            Item(ToolbarItem.SEARCH)
+            Separator()
+            Item(ToolbarItem.ZOOM)
+            Item(ToolbarItem.FIT)
+            Separator()
+            Item(ToolbarItem.FULLSCREEN)
+        }
+    } else {
+        // Pinned outside the scrolling strip so closing a split pane is always one tap away.
+        ToolbarFrame(armed = editor.tool, trailing = onClosePane?.let { { ClosePaneButton(it) } }) {
+            // The bar is driven by the user-customisable layout; separators sit between non-empty
+            // sections, and each item dispatches to its renderer (see ToolbarItemView).
+            editor.toolbarLayout.visibleSections.forEachIndexed { si, section ->
+                if (si > 0) Separator()
+                section.visibleEntries.forEach { entry -> Item(entry.item) }
             }
         }
     }
@@ -193,6 +222,8 @@ private fun ToolbarItemView(
                 .clip(MaterialTheme.shapes.extraSmall)
                 .clickable { onRename() },
         )
+        ToolbarItem.READER ->
+            ToolbarIcon(Icons.Outlined.AutoStories, stringResource(R.string.tool_reader)) { editor.enterReader() }
         ToolbarItem.SIDEBAR ->
             ToolbarIcon(XnotesIcons.sidebar, stringResource(R.string.side_panel), active = editor.sidebarVisible) { editor.toggleSidebar() }
 

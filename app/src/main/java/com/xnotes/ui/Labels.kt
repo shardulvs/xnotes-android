@@ -70,6 +70,7 @@ val ToolbarItem.labelRes: Int
         ToolbarItem.HIGHLIGHTER -> R.string.tool_highlighter
         ToolbarItem.ERASER -> R.string.tool_eraser
         ToolbarItem.PAN -> R.string.tool_pan
+        ToolbarItem.READER -> R.string.tool_reader
         ToolbarItem.SELECT -> R.string.tool_select
         ToolbarItem.LASSO -> R.string.tool_lasso
         ToolbarItem.SCREENSHOT -> R.string.tool_screenshot
