@@ -40,6 +40,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.IntrinsicMeasurable
+import androidx.compose.ui.layout.IntrinsicMeasureScope
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.Measurable
+import androidx.compose.ui.layout.MeasurePolicy
+import androidx.compose.ui.layout.MeasureResult
+import androidx.compose.ui.layout.MeasureScope
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -47,6 +54,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1017,21 +1025,23 @@ fun ShapeConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
             // Swipe between the geometric shapes and the function curves; the dots show which page is up.
             // Both pages stay composed so the pager is as tall as the fuller one, whatever the font scale.
             val pager = rememberPagerState(initialPage = if (kind == ShapeKind.FUNCTION) 1 else 0) { 2 }
-            HorizontalPager(pager, beyondViewportPageCount = 1, verticalAlignment = Alignment.Top) { page ->
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    if (page == 0) {
-                        ShapeKind.DRAW_TOOL_KINDS.forEach { k ->
-                            KindChip(shapeIcon(k), k.id, selected = kind == k) { kind = k; emit() }
-                        }
-                    } else {
-                        FunctionSpec.PRESETS.forEach { f ->
-                            FunctionChip(functionLabel(f.expr), selected = kind == ShapeKind.FUNCTION && function == f.expr) {
-                                kind = ShapeKind.FUNCTION
-                                function = f.expr
-                                emit()
+            NoIntrinsics {
+                HorizontalPager(pager, beyondViewportPageCount = 1, verticalAlignment = Alignment.Top) { page ->
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (page == 0) {
+                            ShapeKind.DRAW_TOOL_KINDS.forEach { k ->
+                                KindChip(shapeIcon(k), k.id, selected = kind == k) { kind = k; emit() }
+                            }
+                        } else {
+                            FunctionSpec.PRESETS.forEach { f ->
+                                FunctionChip(functionLabel(f.expr), selected = kind == ShapeKind.FUNCTION && function == f.expr) {
+                                    kind = ShapeKind.FUNCTION
+                                    function = f.expr
+                                    emit()
+                                }
                             }
                         }
                     }
@@ -1208,6 +1218,24 @@ internal fun SliderRow(
             enabled = enabled,
         )
     }
+}
+
+/** Lays out [content] as a plain box but answers intrinsic queries with zero, so a pager can sit
+ *  in a menu, whose column sizes itself by intrinsics that a pager can't report. */
+@Composable
+private fun NoIntrinsics(content: @Composable () -> Unit) = Layout(content, measurePolicy = NoIntrinsicsPolicy)
+
+private object NoIntrinsicsPolicy : MeasurePolicy {
+    override fun MeasureScope.measure(measurables: List<Measurable>, constraints: Constraints): MeasureResult {
+        val placeables = measurables.map { it.measure(constraints) }
+        return layout(placeables.maxOfOrNull { it.width } ?: 0, placeables.maxOfOrNull { it.height } ?: 0) {
+            placeables.forEach { it.place(0, 0) }
+        }
+    }
+    override fun IntrinsicMeasureScope.minIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int) = 0
+    override fun IntrinsicMeasureScope.maxIntrinsicWidth(measurables: List<IntrinsicMeasurable>, height: Int) = 0
+    override fun IntrinsicMeasureScope.minIntrinsicHeight(measurables: List<IntrinsicMeasurable>, width: Int) = 0
+    override fun IntrinsicMeasureScope.maxIntrinsicHeight(measurables: List<IntrinsicMeasurable>, width: Int) = 0
 }
 
 /** Glyph shown in the shape-kind picker for each [ShapeKind]. */
