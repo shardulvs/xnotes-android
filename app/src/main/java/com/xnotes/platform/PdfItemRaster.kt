@@ -6,7 +6,6 @@ import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.Stroke
-import com.xnotes.core.model.TextItem
 import com.xnotes.core.pal.Renderer
 import com.xnotes.core.tools.Tool
 import kotlin.math.ceil
@@ -14,9 +13,9 @@ import kotlin.math.ceil
 /**
  * The part of a PDF export that cannot stay vector.
  *
- * [PdfBoxRenderer] turns plain ink, shapes and images into real PDF objects, but a few looks have no
- * vector equivalent — a neon glow, the highlighter's multiply blend, translucent ink, laid-out text —
- * so those are drawn into a bitmap cropped to their own box and dropped back in at the right z-order.
+ * [PdfBoxRenderer] turns plain ink, shapes, images and text into real PDF objects, but a few looks
+ * have no vector equivalent (a neon glow, the highlighter's multiply blend, translucent ink), so
+ * those are drawn into a bitmap cropped to their own box and dropped back in at the right z-order.
  *
  * Shared by the paged [PdfExporter] and [CanvasPdfExporter] rather than written twice, so the two can
  * never disagree about which items those are: the same stroke vectorized on one surface and
@@ -27,7 +26,7 @@ internal object PdfItemRaster {
     /** Ceiling on either side of a rasterized region, so one huge item cannot blow the heap. */
     const val MAX_DIM = 4096
 
-    /** Supersample factor for rasterized effect/text items (×150 dpi content ⇒ ~300 dpi). */
+    /** Supersample factor for rasterized effect items (×150 dpi content ⇒ ~300 dpi). */
     private const val ITEM_SCALE = 2.0
 
     class Raster(val bmp: Bitmap, val rect: Rect, val multiply: Boolean)
@@ -40,8 +39,7 @@ internal object PdfItemRaster {
         is ShapeItem -> item.neon ||
             item.strokeRgba.a < 255 ||
             (item.fillRgba?.let { it.a < 255 } ?: false)
-        is TextItem -> true
-        else -> false // ImageItem is embedded as an image XObject by the renderer's drawRaster
+        else -> false // text boxes are real text and images are image XObjects, both from the renderer
     }
 
     /** Render a single item, cropped to its [cover]-clamped paint bounds, into a transparent bitmap. */

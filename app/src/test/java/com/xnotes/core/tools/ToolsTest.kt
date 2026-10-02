@@ -7,6 +7,18 @@ import org.junit.Test
 
 class ToolsTest {
 
+    @Test fun theMarkupToolHighlightsAtHalfAndPansAFreeFinger() {
+        val c = ToolDefaults.configFor(Tool.MARKUP)
+        assertEquals(MarkupMode.HIGHLIGHT, c.markupMode)
+        assertEquals(0.5, c.markupIntensity, 1e-9)
+        assertTrue(Tool.MARKUP.fingerPansWhenOff)
+        assertFalse(Tool.MARKUP.isStroke)
+        assertTrue(Tool.MARKUP in Tool.wheelOrder && Tool.MARKUP in ToolDefaults.persistedTools)
+        assertEquals(MarkupMode.HIGHLIGHT, MarkupMode.fromId("nonsense"))
+        assertEquals(null, MarkupMode.SELECT.type)
+        assertEquals(com.xnotes.core.model.MarkupType.SQUIGGLY, MarkupMode.SQUIGGLY.type)
+    }
+
     @Test fun factoryDefaultsMatchSpec() {
         assertEquals(ToolConfig(3.0, true, 0.35, 0.0), ToolDefaults.configFor(Tool.PEN).copy(rgba = ToolConfig().rgba))
         val cal = ToolDefaults.configFor(Tool.CALLIGRAPHY)
@@ -65,6 +77,6 @@ class ToolsTest {
 
     @Test fun toolIdRoundTrip() {
         for (t in Tool.entries) assertEquals(t, Tool.fromId(t.id))
-        assertEquals(13, Tool.wheelOrder.size)
+        assertEquals(14, Tool.wheelOrder.size)
     }
 }

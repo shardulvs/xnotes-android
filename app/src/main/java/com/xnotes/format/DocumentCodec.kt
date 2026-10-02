@@ -23,6 +23,7 @@ import com.xnotes.core.model.TextItem
 import com.xnotes.core.pal.FontFace
 import com.xnotes.core.pal.ImageCodec
 import com.xnotes.core.pal.TextMeasurer
+import com.xnotes.core.pdf.PdfPageGeometry
 import com.xnotes.core.stroke.Sample
 import com.xnotes.core.stroke.StrokeSimplify
 import com.xnotes.core.tools.ShapeKind
@@ -54,6 +55,8 @@ class XNoteFormatException(message: String) : Exception(message)
 class DocumentCodec(
     private val imageCodec: ImageCodec,
     private val textMeasurer: TextMeasurer,
+    /** How page [Int] of a document's PDF maps to its points as displayed, when the PDF is at hand, for the markups' PDF coordinates. */
+    private val pdfGeometry: (Document, Int) -> PdfPageGeometry? = { _, _ -> null },
 ) {
 
     /** Thrown out of [write] when [isCancelled] turns true mid-copy, so the caller can discard the partial file. */
@@ -186,6 +189,10 @@ class DocumentCodec(
         for ((key, text) in usedTemplates(doc)) {
             zos.putDeflated("$TEMPLATE_DIR$key$TEMPLATE_EXT", text.toByteArray(Charsets.UTF_8))
         }
+        // Text markups, in their own XFDF entry written only when there are any, like the flow.
+        if (doc.pages.any { it.markups.isNotEmpty() }) {
+            zos.putDeflated(MarkupsXfdf.ENTRY_NAME, MarkupsXfdf.write(doc.pages) { geometryOf(doc, doc.pages[it]) })
+        }
         // The manifest streams straight into the deflater: a dense note's JSON is never
         // materialized as an org.json DOM, a String, or a byte[] (three copies per save).
         zos.putNextEntry(ZipEntry("manifest.json").apply { method = ZipEntry.DEFLATED })
@@ -197,6 +204,10 @@ class DocumentCodec(
         timing?.deflateMs = probe.nanos / 1_000_000L
         timing?.manifestBytes = probe.bytes
     }
+
+    /** [page]'s map into PDF user space: its source page's, else its own points with y up. */
+    private fun geometryOf(doc: Document, page: Page): PdfPageGeometry =
+        page.pdfPage?.let { pdfGeometry(doc, it) } ?: PdfPageGeometry.flipped(page.height * 72.0 / doc.dpi)
 
     /** The embedded templates [doc]'s styles name, in key order; built-in rulings need none. */
     internal fun usedTemplates(doc: Document): List<Pair<String, String>> {
@@ -504,6 +515,7 @@ class DocumentCodec(
     ): Document {
         var manifest: ParsedManifest? = null
         var flowBytes: ByteArray? = null
+        var markupBytes: ByteArray? = null
         val templates = HashMap<String, String>()
         val imageFiles = HashMap<String, File>()
         var pdfFile: File? = null
@@ -548,6 +560,8 @@ class DocumentCodec(
                         }
                     } else if (name == FlowXml.ENTRY_NAME) {
                         flowBytes = zis.readBytes()
+                    } else if (name == MarkupsXfdf.ENTRY_NAME) {
+                        markupBytes = readAtMost(zis, MarkupsXfdf.MAX_BYTES)
                     } else if (name.startsWith(TEMPLATE_DIR) && name.endsWith(TEMPLATE_EXT)) {
                         val key = name.substring(TEMPLATE_DIR.length, name.length - TEMPLATE_EXT.length)
                         val bytes = readAtMost(zis, TemplateReader.MAX_BYTES)
@@ -583,6 +597,7 @@ class DocumentCodec(
             return doc
         }
         doc.pages.addAll(m.pages)
+        markupBytes?.let { MarkupsXfdf.readInto(doc.pages, it) }
 
         // Image entries stream out of the zip after the manifest, so image items materialize only
         // now that their files exist; the recorded index restores each one's z-order slot.

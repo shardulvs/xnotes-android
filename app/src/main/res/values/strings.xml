@@ -19,6 +19,14 @@
     <string name="tool_ruler">Ruler</string>
     <string name="tool_text">Text</string>
     <string name="tool_text_box">Text box</string>
+    <string name="tool_markup">PDF text markup</string>
+    <string name="markup_highlight">Highlight</string>
+    <string name="markup_squiggly">Squiggly</string>
+    <string name="markup_colour">Colour</string>
+    <string name="markup_kind">Kind</string>
+    <string name="markup_note">Note</string>
+    <string name="markup_note_hint">Write a note</string>
+    <string name="open_link">Open link</string>
     <string name="tool_image">Image</string>
     <string name="toolbar_home">Home</string>
     <string name="toolbar_title">Title</string>
@@ -118,6 +126,7 @@
     <string name="eraser_area">Area</string>
     <string name="caption_size">Size</string>
     <string name="caption_switch_back">Switch back</string>
+    <string name="caption_erase_markups">Erase PDF text markups</string>
     <string name="title_select">Select</string>
     <string name="title_shape">Shape</string>
     <string name="title_table">Table</string>
@@ -206,6 +215,8 @@
     <string name="pref_hide_page_borders">Hide page borders</string>
     <string name="pref_page_colour">Page colour</string>
     <string name="pref_page_colour_follows_theme">Page colour follows the theme</string>
+    <string name="pref_pdf_export">PDF export</string>
+    <string name="pref_pdf_heading_bookmarks">Bookmarks from headings</string>
     <string name="pref_performance">Performance</string>
     <string name="pref_cache_help">Higher feels smoother when you pan and zoom but uses more memory. Your ink and PDFs look just as crisp either way.</string>
     <string name="pref_disable_front_buffering">Disable front buffering</string>
@@ -295,10 +306,16 @@
     <string name="merge_trash_originals">Move the originals to trash</string>
     <string name="err_merge_notes">Could not merge the notes.</string>
     <string name="find_in_page">Find in page</string>
-    <string name="find_previous">Previous match</string>
-    <string name="find_next">Next match</string>
     <string name="find_close">Close search</string>
     <string name="clear_search">Clear search</string>
+    <string name="search">Search</string>
+    <string name="find_in_note">Find in note</string>
+    <string name="match_case">Match case</string>
+    <string name="whole_words">Whole words</string>
+    <string name="previous_match">Previous match</string>
+    <string name="next_match">Next match</string>
+    <string name="no_matches">No matches</string>
+    <string name="search_position">%1$s / %2$s</string>
     <string name="share">Share</string>
     <string name="save_copy_ellipsis">Save a copy…</string>
     <string name="export_pdf">Export to PDF</string>
@@ -311,6 +328,7 @@
     <string name="save">Save</string>
     <string name="create">Create</string>
     <string name="err_save_that_note">Couldn’t save that note.</string>
+    <string name="err_pdf_password">That PDF is password-protected, which xnotes can’t open.</string>
     <string name="err_create_folder">Couldn’t create that folder.</string>
     <string name="err_create_canvas">Couldn’t create the canvas.</string>
     <string name="err_create_note">Couldn’t create the note.</string>
@@ -410,6 +428,9 @@
     <string name="preparing">Preparing…</string>
     <string name="export_page_progress">page %1$d / %2$d</string>
     <string name="export_item_progress">item %1$d / %2$d</string>
+    <!-- What a screen reader says for the handwriting and for each image in an exported PDF -->
+    <string name="pdf_alt_drawing">Handwritten notes and drawings</string>
+    <string name="pdf_alt_image">Image</string>
     <string name="importing_pdf">Importing PDF…</string>
     <string name="importing_pdfs">Importing PDFs…</string>
     <string name="import_progress">%1$d of %2$d imported</string>
@@ -417,7 +438,6 @@
         <item quantity="one">Imported %d PDF</item>
         <item quantity="other">Imported %d PDFs</item>
     </plurals>
-    <string name="refining_pdf_colours">Refining PDF colours %1$d/%2$d pages…</string>
     <string name="unlock_zoom">Unlock zoom</string>
     <string name="lock_zoom_fit_width">Lock zoom at fit width</string>
     <string name="lock_zoom">Lock zoom</string>

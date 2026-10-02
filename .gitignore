@@ -6,6 +6,8 @@ CLAUDE.md
 .gradle/
 build/
 **/build/
+# PDFium's build/ headers are vendored sources, not build output.
+!app/src/main/cpp/pdfium/build/
 
 # --- Android Studio / IntelliJ ---
 .idea/

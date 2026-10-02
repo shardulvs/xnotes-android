@@ -5,14 +5,19 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
 import android.util.LruCache
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
+import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.sp
 import com.hrm.latex.renderer.export.ExportConfig
 import com.hrm.latex.renderer.export.LatexExporterState
 import com.hrm.latex.renderer.measure.LatexMeasurerState
 import com.hrm.latex.renderer.model.LatexConfig
+import com.hrm.latex.renderer.model.LatexFontFamilies
 import com.hrm.latex.renderer.model.LatexTheme
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.pal.MathBox
@@ -28,11 +33,17 @@ import com.xnotes.core.pal.MathTypesetter
  */
 object MathRendering : MathTypesetter {
 
-    /** The measurer, the exporter and the density they were both built against. */
+    /**
+     * The measurer, the exporter and the density they were both built against, plus the pieces
+     * they were built from, which drawing a formula as vectors needs directly.
+     */
     private class Engine(
         val measurer: LatexMeasurerState,
         val exporter: LatexExporterState,
         val spPx: Float,
+        val density: Density,
+        val text: TextMeasurer,
+        val fonts: LatexFontFamilies,
     )
 
     @Volatile private var engine: Engine? = null
@@ -78,10 +89,16 @@ object MathRendering : MathTypesetter {
      * Adopt the renderer built in the composition. Called again whenever the
      * density changes, which invalidates every rastered formula.
      */
-    fun install(measurer: LatexMeasurerState, exporter: LatexExporterState, density: Density) {
+    fun install(
+        measurer: LatexMeasurerState,
+        exporter: LatexExporterState,
+        density: Density,
+        text: TextMeasurer,
+        fonts: LatexFontFamilies,
+    ) {
         val spPx = with(density) { 1.sp.toPx() }
         synchronized(this) {
-            engine = Engine(measurer, exporter, spPx)
+            engine = Engine(measurer, exporter, spPx, density, text, fonts)
             bitmaps.evictAll()
             boxes.evictAll()
         }
@@ -137,6 +154,39 @@ object MathRendering : MathTypesetter {
             ),
             blit,
         )
+    }
+
+    /**
+     * Draw [latex] with the renderer's own drawing calls into [canvas], its box's top-left at the
+     * canvas origin and in content px: the same box [measure] reports, so a backend recording the
+     * calls gets the formula as outlines where the bitmap would have gone. False when there is no
+     * engine yet or the LaTeX does not set.
+     */
+    fun drawVector(canvas: Canvas, latex: String, sizePt: Double, color: Rgba, display: Boolean): Boolean {
+        val e = engine ?: return false
+        if (latex.isBlank() || e.spPx <= 0f) return false
+        return synchronized(this) {
+            runCatching {
+                val layout = LatexInternals.layout(source(latex, display), config(e, sizePt, color), e.fonts, e.text, e.density)
+                    ?: return@runCatching false
+                val size = Size(LatexInternals.width(layout), LatexInternals.height(layout))
+                CanvasDrawScope().draw(e.density, LayoutDirection.Ltr, androidx.compose.ui.graphics.Canvas(canvas), size) {
+                    LatexInternals.draw(this, layout)
+                }
+                true
+            }.getOrDefault(false)
+        }
+    }
+
+    /**
+     * The bitmap [draw] blits for [latex] and the box it fills, for a backend that places the
+     * image itself. The bitmap belongs to the cache: callers copy it and never recycle it.
+     */
+    fun formulaBitmap(latex: String, sizePt: Double, color: Rgba, display: Boolean): Pair<Bitmap, MathBox>? {
+        val e = engine ?: return null
+        val box = measure(latex, sizePt, display) ?: return null
+        val bmp = raster(e, source(latex, display), sizePt, color, box) ?: return null
+        return bmp to box
     }
 
     /**

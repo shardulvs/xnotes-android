@@ -1,0 +1,44 @@
+Name: OpenJPEG
+URL: https://github.com/uclouvain/openjpeg
+Version: 2.5.4
+Revision: 6c4a29b00211eb0430fa0e5e890f1ce5c80f409f
+Update Mechanism: Manual
+Security Critical: yes
+Shipped: yes
+License: BSD-2-Clause
+License File: LICENSE
+CPEPrefix: cpe:/a:uclouvain:openjpeg:2.5.4
+
+Description:
+JPEG 2000 library. See http://www.openjpeg.org/
+
+Local Modifications:
+
+0003-dwt-decode.patch: Check array bounds for opj_dwt_decode_1() and friends.
+0005-jp2_apply_pclr.patch: Fix out of bounds access.
+0006-tcd_init_tile.patch: Fix a divide by zero bug in opj_tcd_init_tile().
+0007-jp2_read_cmap.patch: Fix wrong rendering on greyscale images with index colorspace.
+0009-opj_pi_next.patch: Fix potential bad precno value in opj_pi_next* functions.
+0011-j2k_update_image_data.patch: Prevent bad signed -> unsigned casting.
+0012-mct_sse.patch: Don't use SSE intrinsics in 32-bit builds.
+0014-opj_jp2_read_ihdr_leak.patch: Memory leak in opj_jp2_read_ihdr().
+0015-read_SPCod_SPCoc_overflow.patch: Prevent a buffer overflow in opj_j2k_read_SPCod_SPCoc.
+0016-read_SQcd_SQcc_overflow.patch: Prevent a buffer overflow in opj_j2k_read_SQcd_SQcc.
+0019-tcd_init_tile.patch: Prevent integer overflows during calculation of |l_nb_code_blocks_size|.
+0022-jp2_apply_pclr_overflow.patch: Prevent integer overflow in opj_jp2_apply_pclr.
+0023-opj_j2k_read_mct_records.patch: Fix opj_j2k_read to prevent heap-use-after-free.
+0025-opj_j2k_add_mct_null_data.patch: Check m_data != null before trying to read from it.
+0034-opj_malloc.patch: PDFium changes in opj_malloc.
+0039-opj_mqc_renorme.patch: Remove unused opj_mqc_renorme(), part of https://github.com/uclouvain/openjpeg/pull/1632
+0041-remove_opj_clock.patch: Remove unused opj_clock.h include.
+0046-func-ptr-mixup.patch: Prevent mixing up function pointer types.
+0047-opj_j2k_read_sod.patch: Cherry-pick https://github.com/uclouvain/openjpeg/pull/1621
+0048-dwt_neon_9-7_idwt.patch: Cherry-pick https://github.com/uclouvain/openjpeg/pull/1629
+0049-dwt_neon_5-3_idwt.patch: Cherry-pick https://github.com/uclouvain/openjpeg/pull/1630
+0050-opj_pi_initialise_encode_overflow.patch: Cherry-pick https://github.com/uclouvain/openjpeg/pull/1619
+0051-opj_j2k_copy_default_double_free.patch: Fix a double free.
+0052-opj_j2k_copy_default_mcc_records.patch: Fix MCC records count.
+
+Note:
+
+Also update the version numbers in opj_config*.

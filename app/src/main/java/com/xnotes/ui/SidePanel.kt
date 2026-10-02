@@ -67,6 +67,9 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
+/** The side panel's tabs. */
+enum class SidePanelTab { PAGES, CONTENTS, BOOKMARKS, SEARCH }
+
 /**
  * The side panel. The Pages tab shows page thumbnails with a per-page three-dot menu (add / copy /
  * cut / paste / delete / erase / share / save as) and supports multi-select (long-press, then tap
@@ -82,7 +85,7 @@ fun SidePanel(
     onInsertPages: (PageInsert, Int) -> Unit = { _, _ -> },
 ) {
     val palette = LocalPalette.current
-    var tab by remember { mutableStateOf(0) }
+    val tab = editor.sidePanelTab
     Column(
         Modifier
             .width(224.dp)
@@ -90,18 +93,20 @@ fun SidePanel(
             .background(palette.panel.toComposeColor()),
     ) {
         Row(Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-            SegIcon(XnotesIcons.thumbnails, stringResource(R.string.pages), tab == 0) { tab = 0 }
-            SegIcon(XnotesIcons.contents, stringResource(R.string.contents), tab == 1) { tab = 1 }
-            SegIcon(XnotesIcons.bookmark, stringResource(R.string.bookmarks), tab == 2) { tab = 2 }
+            SegIcon(XnotesIcons.thumbnails, stringResource(R.string.pages), tab == SidePanelTab.PAGES) { editor.sidePanelTab = SidePanelTab.PAGES }
+            SegIcon(XnotesIcons.contents, stringResource(R.string.contents), tab == SidePanelTab.CONTENTS) { editor.sidePanelTab = SidePanelTab.CONTENTS }
+            SegIcon(XnotesIcons.bookmark, stringResource(R.string.bookmarks), tab == SidePanelTab.BOOKMARKS) { editor.sidePanelTab = SidePanelTab.BOOKMARKS }
+            SegIcon(XnotesIcons.search, stringResource(R.string.search), tab == SidePanelTab.SEARCH) { editor.sidePanelTab = SidePanelTab.SEARCH }
         }
         Box(Modifier.fillMaxWidth().weight(1f)) {
             when (tab) {
-                0 -> PagesTab(editor, onSharePages, onSavePagesAsPdf, onSavePagesAsImages, onInsertPages)
-                1 -> ContentsTab(editor)
-                else -> BookmarksTab(editor)
+                SidePanelTab.PAGES -> PagesTab(editor, onSharePages, onSavePagesAsPdf, onSavePagesAsImages, onInsertPages)
+                SidePanelTab.CONTENTS -> ContentsTab(editor)
+                SidePanelTab.BOOKMARKS -> BookmarksTab(editor)
+                SidePanelTab.SEARCH -> SearchTab(editor)
             }
         }
-        if (tab == 0 && editor.inPageSelectionMode) {
+        if (tab == SidePanelTab.PAGES && editor.inPageSelectionMode) {
             PageSelectionBar(editor, onSharePages, onSavePagesAsPdf, onSavePagesAsImages)
         }
     }
@@ -538,7 +543,7 @@ private fun BookmarksTab(editor: Editor) {
 }
 
 @Composable
-private fun EmptyHint(text: String) {
+internal fun EmptyHint(text: String) {
     Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
         Text(text, color = LocalPalette.current.textDim.toComposeColor(), fontSize = 12.sp)
     }

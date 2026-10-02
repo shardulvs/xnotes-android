@@ -18,7 +18,7 @@ val keystoreProperties = Properties().apply {
 android {
     namespace = "com.xnotes"
     compileSdk = 36
-    // Pinned toolchain for the vendored tree-sitter build (F-Droid reproducibility).
+    // Pinned toolchain for the vendored native builds (F-Droid reproducibility).
     ndkVersion = "27.0.12077973"
 
     defaultConfig {
@@ -30,6 +30,11 @@ android {
         versionName = "0.8.23-0.36"
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
+        externalNativeBuild {
+            cmake {
+                arguments += "-DANDROID_STL=c++_static"
+            }
         }
     }
 

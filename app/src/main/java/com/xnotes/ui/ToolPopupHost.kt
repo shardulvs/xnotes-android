@@ -39,4 +39,7 @@ interface ToolPopupHost {
 
     /** The picker closed: keep the swatch's colour among the recents. */
     fun rememberSwatchColor(index: Int)
+
+    /** Whether the open note has a PDF, whose text markups the eraser can take. */
+    val hostHasPdf: Boolean get() = false
 }

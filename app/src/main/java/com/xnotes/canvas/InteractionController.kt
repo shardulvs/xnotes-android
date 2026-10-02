@@ -20,6 +20,7 @@ import com.xnotes.core.history.LockItems
 import com.xnotes.core.history.EditText
 import com.xnotes.core.history.MoveItems
 import com.xnotes.core.history.ReorderItems
+import com.xnotes.core.history.RemoveMarkup
 import com.xnotes.core.history.ReplacePageItems
 import com.xnotes.core.history.ResizeItem
 import com.xnotes.core.history.RestyleItems
@@ -52,6 +53,7 @@ import com.xnotes.core.pal.FontSpec
 import com.xnotes.core.pal.Pen
 import com.xnotes.core.pal.Renderer
 import com.xnotes.core.pal.TextMeasurer
+import com.xnotes.core.pdf.MarkupPainter
 import com.xnotes.core.stroke.RecognizedShape
 import com.xnotes.core.stroke.Sample
 import com.xnotes.core.stroke.ShapeRecognizer
@@ -60,6 +62,7 @@ import com.xnotes.core.tools.EraseMode
 import com.xnotes.core.tools.InkPalette
 import com.xnotes.core.tools.ShapeConfig
 import com.xnotes.core.tools.ShapeKind
+import com.xnotes.core.tools.MarkupMode
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
 import com.xnotes.core.tools.ToolDefaults
@@ -75,7 +78,7 @@ import kotlin.math.sin
 /** The pointer state machine modes (spec 06 §1). */
 enum class PointerMode {
     IDLE, DRAW, ERASE, BAND, LASSO_DRAW, SHOT, SHAPE, MOVE, RESIZE, TRANSFORM, PAN, PINCH, FLOW_TEXT,
-    TEXT_DRAG, RULER_MOVE, RULER_TRANSFORM, RULER_ROTATE, TABLE_LINE, TABLE_GRIP, TABLE_PICK, TABLE_DRAW, CROP,
+    TEXT_DRAG, RULER_MOVE, RULER_TRANSFORM, RULER_ROTATE, TABLE_LINE, TABLE_GRIP, TABLE_PICK, TABLE_DRAW, CROP, PDF_TEXT,
 }
 
 /** Column/row counts and line width for the next table drawn with the table tool. */
@@ -155,10 +158,6 @@ class InteractionController(
     /** A short haptic tick (e.g. the overscroll pull crossed the add-page threshold). */
     private val onHaptic: () -> Unit = {},
 ) {
-    /** Find-in-note hits to highlight (page index, page-space box), and the current hit's boxes. */
-    var findHighlights: List<Pair<Int, Rect>> = emptyList()
-    var findCurrent: List<Pair<Int, Rect>> = emptyList()
-
     /** Whether the system clipboard currently holds an image (provided by the host). */
     var clipboardHasImage: () -> Boolean = { false }
 
@@ -171,6 +170,27 @@ class InteractionController(
      *  main thread, so a tap on a not-yet-parsed page returns false and opens the link a moment later
      *  once it is ready. */
     var onLinkTap: ((pageIndex: Int, pageLocal: Pt) -> Boolean)? = null
+
+    /**
+     * A tap that may open a markup, at viewport point [at]: a pan tap ([withLink], so a menu can offer
+     * the link under it) or the markup tool's. True when a markup or its note icon took it.
+     */
+    var onMarkupTap: ((at: Pt, withLink: Boolean) -> Boolean)? = null
+
+    /** A pan tap or a markup tool tap at viewport point [at], told before anything acts on it. */
+    var onTap: ((at: Pt) -> Unit)? = null
+
+    /** PDF text selection: a free pointer's long press on a PDF page selects there (installed by the Editor). */
+    var pdfText: PdfTextController? = null
+
+    /** The open search's matches, tinted under the selections. */
+    var searchTints: SearchTints? = null
+
+    /** Text markups the page layers don't show yet, under everything else in the overlay. */
+    var markupOverlay: MarkupOverlay? = null
+
+    /** The icons over noted markups, above all the page's content. */
+    var noteIcons: NoteIcons? = null
     val document: Document get() = state.document
 
     var tool: Tool = Tool.DEFAULT
@@ -327,6 +347,8 @@ class InteractionController(
     /** AREA mode: each touched page's item list snapshotted on first contact this gesture, so the
      *  whole split-and-trim drag undoes/redoes as one [ReplacePageItems] step. */
     private val eraseSnapshots = linkedMapOf<Page, List<CanvasItem>>()
+    /** The text markups this erase took off, one [RemoveMarkup] each in the order taken, so undo puts them back in place. */
+    private val eraseMarkups = mutableListOf<RemoveMarkup>()
     private var eraserCursor: Pt? = null // viewport pixels
     /** Tool armed just before the eraser was selected, for the "switch back after erasing" option. */
     private var toolBeforeEraser: Tool? = null
@@ -416,6 +438,15 @@ class InteractionController(
     private var longPressCandidate: Selected? = null
     private var longPressLocked: CanvasItem? = null
     private var longPressPrevTool: Tool? = null
+
+    /** The page whose PDF text the armed long press would select, -1 for none. */
+    private var longPressTextPage = -1
+
+    /** A press zoom lock kept from panning, where it went down: a tap there still ends a PDF text selection. */
+    private var lockedPressAt: Pt? = null
+
+    /** Where the markup tool pressed, in the viewport, so a lift there counts as a tap. */
+    private var markupPressAt: Pt? = null
 
     // TEXT EDITING
     private var editingText: TextItem? = null
@@ -605,6 +636,8 @@ class InteractionController(
         stopFling() // a new touch halts any in-progress glide
         stopOverscrollSettle() // ...and lets a re-grab take over the elastic mid-spring
         panMayCommitText = false // a fresh gesture; the editing branch below re-arms it if it applies
+        lockedPressAt = null
+        markupPressAt = null
         val toolType = e.getToolType(0)
         val vx = e.getX(0).toDouble()
         val vy = e.getY(0).toDouble()
@@ -637,6 +670,8 @@ class InteractionController(
             toolType == MotionEvent.TOOL_TYPE_FINGER && !fingerDraws && tool.fingerPansWhenOff -> Tool.PAN
             else -> tool
         }
+        val isFinger = toolType == MotionEvent.TOOL_TYPE_FINGER
+        val free = FreePointer.isFree(tool, effectiveTool, isFinger)
 
         // A press off the box while editing. With a finger we defer: a tap commits (re-arming the
         // prior tool), a drag scrolls the page with the edit kept live (decided in handleUp's PAN
@@ -696,9 +731,23 @@ class InteractionController(
             }
         }
 
+        // A PDF text selection's handle drags with any pointer. Otherwise only a pan or a pinch keeps
+        // the selection: anything else ends it now, and a tap ends it on release.
+        pdfText?.let { text ->
+            if (text.press(Pt(vx, vy))) {
+                mode = PointerMode.PDF_TEXT
+                cancelLongPress()
+                return
+            }
+            if (effectiveTool != Tool.PAN) text.clear()
+        }
+
         // Zoom-lock pan preference: swallow a single-finger pan when locked and set to "double"/"none".
+        // The pointer stays free, so a long press still picks up an item or selects text.
         if (effectiveTool == Tool.PAN && !singleFingerPanAllowed()) {
             mode = PointerMode.IDLE
+            lockedPressAt = Pt(vx, vy)
+            armLongPress(Pt(vx, vy), content, isFinger, free)
             return
         }
 
@@ -717,17 +766,33 @@ class InteractionController(
             effectiveTool == Tool.TABLE -> beginTable(content)
             effectiveTool == Tool.TEXT -> beginTextGesture(content, Pt(vx, vy))
             effectiveTool == Tool.TEXT_BOX -> beginTextBoxGesture(content)
+            effectiveTool == Tool.MARKUP -> beginMarkup(content)
             else -> Unit
         }
-        // The flow caret owns its own long press (word selection), and mid text-drag it is
-        // suppressed so a hold-then-drag still sizes a box.
-        if (mode != PointerMode.FLOW_TEXT && mode != PointerMode.TEXT_DRAG) {
-            armLongPress(Pt(vx, vy), content, toolType == MotionEvent.TOOL_TYPE_FINGER)
+        // The flow caret owns its own long press (word selection), mid text-drag it is suppressed so
+        // a hold-then-drag still sizes a box, and a markup drag held still is just a slow drag.
+        if (mode != PointerMode.FLOW_TEXT && mode != PointerMode.TEXT_DRAG && mode != PointerMode.PDF_TEXT) {
+            armLongPress(Pt(vx, vy), content, isFinger, free)
         }
+    }
+
+    /** The markup tool's press: selects, or marks, the PDF text it then drags over; anywhere else nothing. */
+    private fun beginMarkup(content: Pt) {
+        val text = pdfText ?: return
+        val (page, local) = state.pagePointAt(content) ?: return
+        if (state.document.pages.getOrNull(page)?.pdfPage == null) return
+        mode = PointerMode.PDF_TEXT
+        markupPressAt = state.contentToViewport(content)
+        text.beginToolDrag(page, local, mark = configFor(Tool.MARKUP).markupMode != MarkupMode.SELECT)
     }
 
     private fun handlePointerDown(e: MotionEvent) {
         cancelLongPress()
+        // A second finger turns a PDF text drag into a pinch; the selection stays, a mark in the making goes.
+        if (mode == PointerMode.PDF_TEXT) {
+            pdfText?.interrupt()
+            mode = PointerMode.IDLE
+        }
         // A second finger on a ruler being moved twists/translates it instead of pinch-zooming.
         if (mode == PointerMode.RULER_MOVE && e.pointerCount >= 2) {
             beginRulerTransform(e)
@@ -776,6 +841,7 @@ class InteractionController(
                 // drag extends the selection (dragTo returns true to request the pan handoff).
                 if (flowText?.dragTo(content, Pt(vx, vy)) == true) beginPan(vx, vy)
             PointerMode.TEXT_DRAG -> extendTextDrag(content)
+            PointerMode.PDF_TEXT -> pdfText?.dragTo(Pt(vx, vy))
             else -> Unit
         }
     }
@@ -808,6 +874,7 @@ class InteractionController(
                 mode = PointerMode.IDLE
                 val upViewport = Pt(e.getX(idx).toDouble(), e.getY(idx).toDouble())
                 val tap = !downStoppedFling && upViewport.distanceTo(panDownViewport) <= TAP_SLOP
+                if (tap) onTap?.invoke(upViewport)
                 if (panMayCommitText) {
                     // Press off the box while editing: only a tap commits (and re-arms the prior tool);
                     // a drag just scrolled with the edit kept live. Either way settle any elastic/glide.
@@ -819,11 +886,14 @@ class InteractionController(
                         else -> startPanFling()
                     }
                 } else {
+                    // A tap ends a PDF text selection and does nothing else.
+                    val textCleared = tap && pdfText?.selection != null
+                    if (textCleared) pdfText?.clear()
                     // A finger tap (no drag) that didn't just halt a glide, landing off the current
                     // selection, dismisses it — the finger's counterpart to the stylus's empty-tap clear.
-                    val linkHandled = tap && state.overscrollY <= 0.0 && tryLinkTap(content)
+                    val linkHandled = !textCleared && tap && state.overscrollY <= 0.0 && tryLinkTap(content)
                     when {
-                        linkHandled -> Unit
+                        textCleared || linkHandled -> Unit
                         state.overscrollY > 0.0 -> releaseOverscroll()
                         tap && tool == Tool.SELECT && fingerTapSelect(content) -> Unit
                         tap && hasSelection && selectionBoundsContent()?.contains(content) != true -> clearSelection()
@@ -850,6 +920,26 @@ class InteractionController(
                 flowText?.release(content, Pt(e.getX(idx).toDouble(), e.getY(idx).toDouble()), e.eventTime)
             }
             PointerMode.TEXT_DRAG -> endTextDrag(content)
+            PointerMode.PDF_TEXT -> {
+                mode = PointerMode.IDLE
+                // A markup tool tap marks nothing; on a markup it opens that markup's menu.
+                val pressAt = markupPressAt
+                markupPressAt = null
+                pdfText?.release()
+                val up = Pt(e.getX(idx).toDouble(), e.getY(idx).toDouble())
+                if (pressAt != null && up.distanceTo(pressAt) <= TAP_SLOP) {
+                    onTap?.invoke(pressAt)
+                    onMarkupTap?.invoke(pressAt, false)
+                }
+            }
+            PointerMode.IDLE -> lockedPressAt?.let { at ->
+                lockedPressAt = null
+                val up = Pt(e.getX(idx).toDouble(), e.getY(idx).toDouble())
+                if (up.distanceTo(at) <= TAP_SLOP) {
+                    onTap?.invoke(up)
+                    pdfText?.clear()
+                }
+            }
             PointerMode.RULER_MOVE -> { mode = PointerMode.IDLE; requestRender() }
             PointerMode.RULER_TRANSFORM -> { mode = PointerMode.IDLE; requestRender() }
             PointerMode.RULER_ROTATE -> { mode = PointerMode.IDLE; requestRender() }
@@ -857,8 +947,9 @@ class InteractionController(
         }
     }
 
-    /** Map a finger tap's content point to its page + page-space point and offer it to [onLinkTap]. */
+    /** Offer a finger tap at [content] to [onMarkupTap], then as a page + page-space point to [onLinkTap]. */
     private fun tryLinkTap(content: Pt): Boolean {
+        if (onMarkupTap?.invoke(state.contentToViewport(content), true) == true) return true
         val cb = onLinkTap ?: return false
         val pageIndex = state.pageIndexAtContent(content) ?: return false
         return cb(pageIndex, state.toPageSpace(pageIndex, content))
@@ -1228,6 +1319,7 @@ class InteractionController(
     private fun beginErase(vx: Double, vy: Double) {
         eraseRemovals.clear()
         eraseSnapshots.clear()
+        eraseMarkups.clear()
         mode = PointerMode.ERASE
         eraseAt(vx, vy)
     }
@@ -1257,9 +1349,21 @@ class InteractionController(
                 if (!state.repairRegion(page, rect)) state.invalidatePage(page)
                 changed = true
             }
+            if (eraseMarkupsFromPage(page, cx, cy, radius)) changed = true
         }
         if (changed) onContentChanged()
         requestRender()
+    }
+
+    /** Takes off [page]'s text markups the eraser circle touches, when the eraser is set to; true if any. */
+    private fun eraseMarkupsFromPage(page: Page, cx: Double, cy: Double, radius: Double): Boolean {
+        if (page.markups.isEmpty() || !configFor(Tool.ERASER).eraseMarkups) return false
+        val ptPerPx = 72.0 / state.document.dpi
+        val hit = page.markups.filter { MarkupPainter.touches(it, cx * ptPerPx, cy * ptPerPx, radius * ptPerPx) }
+        if (hit.isEmpty()) return false
+        for (m in hit) eraseMarkups += RemoveMarkup(page, m).also { it.redo() }
+        state.rebakeBackground(page, emptyList())
+        return true
     }
 
     /** STROKE mode: remove every stroke/shape the eraser circle touches. Images and text boxes are
@@ -1313,25 +1417,26 @@ class InteractionController(
     }
 
     private fun endErase() {
+        val cmds = ArrayList<Command>()
         if (areaErase()) {
             // One drag may split/trim many strokes across pages; commit each touched page's
             // net before/after as one undo step.
-            val cmds = eraseSnapshots.mapNotNull { (page, before) ->
+            eraseSnapshots.mapNotNullTo(cmds) { (page, before) ->
                 val after = page.items.toList()
                 if (after != before) ReplacePageItems(page, before, after) else null
             }
-            if (cmds.isNotEmpty()) {
-                history.push(if (cmds.size == 1) cmds[0] else CompositeCommand(cmds))
-                state.document.dirty = true
-                onContentChanged()
-            }
         } else if (eraseRemovals.isNotEmpty()) {
-            history.push(EraseItems(eraseRemovals.toList()))
+            cmds += EraseItems(eraseRemovals.toList())
+        }
+        cmds += eraseMarkups
+        if (cmds.isNotEmpty()) {
+            history.push(cmds.singleOrNull() ?: CompositeCommand(cmds))
             state.document.dirty = true
             onContentChanged()
         }
         eraseRemovals.clear()
         eraseSnapshots.clear()
+        eraseMarkups.clear()
         eraserCursor = null
         mode = PointerMode.IDLE
         requestRender()
@@ -2648,11 +2753,12 @@ class InteractionController(
 
     // --- LONG-PRESS GRAB ---
 
-    private fun armLongPress(viewport: Pt, content: Pt, isFinger: Boolean) {
+    private fun armLongPress(viewport: Pt, content: Pt, isFinger: Boolean, free: Boolean) {
         cancelLongPress()
-        // Long-press (grab an item, or the paste menu on empty space) is a finger-only gesture:
-        // the stylus always draws, so resting it never grabs or pops a menu.
-        if (!isFinger) return
+        // Long press (grab an item, select PDF text, or the paste menu on empty space) is a finger
+        // gesture. A stylus or mouse only has it when free, under the PAN tool, where it mirrors the
+        // finger; otherwise it draws, so resting it never grabs or pops a menu.
+        if (!isFinger && !free) return
         val grabEligible = tool.isStroke || tool == Tool.PAN || tool == Tool.SELECT ||
             tool == Tool.LASSO || tool == Tool.SHAPE || tool == Tool.TEXT || tool == Tool.TEXT_BOX
         val pageIndex = state.pageIndexAtContent(content)
@@ -2669,10 +2775,16 @@ class InteractionController(
         longPressLocked = hit?.takeIf { it.locked }
         longPressCandidate =
             if (grabEligible && hit != null && !hit.locked) Selected(pageIndex!!, hit) else null
-        // Arm to grab an item, to unlock one, or (on empty space) to open the paste menu when there
-        // is content to paste.
+        // An item on top wins; a free pointer on the bare PDF selects its text.
+        val text = pdfText
+        if (free && text != null && hit == null && pageIndex != null && state.document.pages[pageIndex].pdfPage != null) {
+            longPressTextPage = pageIndex
+            text.prefetch(pageIndex)
+        }
+        // Arm to grab an item, to unlock one, to select text, or (on empty space) to open the paste
+        // menu when there is content to paste.
         val showEmptyMenu = hit == null && (hasClipboardItems() || clipboardHasImage())
-        if (longPressCandidate == null && longPressLocked == null && !showEmptyMenu) return
+        if (longPressCandidate == null && longPressLocked == null && longPressTextPage < 0 && !showEmptyMenu) return
         val r = Runnable { triggerLongPress() }
         longPressRunnable = r
         handler.postDelayed(r, LONG_PRESS_MS)
@@ -2687,6 +2799,7 @@ class InteractionController(
         longPressRunnable = null
         longPressCandidate = null
         longPressLocked = null
+        longPressTextPage = -1
     }
 
     private fun triggerLongPress() {
@@ -2694,6 +2807,8 @@ class InteractionController(
         val candidate = longPressCandidate
         longPressCandidate = null
         val locked = longPressLocked
+        val textPage = longPressTextPage
+        longPressTextPage = -1
         // Abort the in-progress gesture (keep eraser removals); commit any text edit.
         commitTextEdit()
         liveStroke = null
@@ -2709,6 +2824,15 @@ class InteractionController(
             onToolChanged(tool)
             setSelection(listOf(candidate))
             beginMove(state.viewportToContent(longPressStart))
+        } else if (textPage >= 0 && pdfText != null) {
+            // Select the word under the press, which may drag on to extend it; no text there means
+            // empty space, so the paste menu as before.
+            mode = PointerMode.PDF_TEXT
+            val start = longPressStart
+            val content = longPressContent
+            pdfText?.longPress(textPage, state.toPageSpace(textPage, content)) {
+                if (hasClipboardItems() || clipboardHasImage()) onContextMenu(start, content, null)
+            }
         } else {
             // Empty space, or a locked item: open the context menu at the press point.
             mode = PointerMode.IDLE
@@ -3669,6 +3793,7 @@ class InteractionController(
         stopFling()
         clearFlipPull()
         clearOverscroll()
+        if (mode == PointerMode.ERASE) endErase() // what a cancelled erase took stays one undo step
         pushStrokeEdit(null) // a cancelled crossing still left segments on the pages behind it
         liveStroke = null
         strokePageIndex = null
@@ -3700,6 +3825,8 @@ class InteractionController(
         r.withSave {
             r.translate(origin.x, origin.y)
             r.scale(state.zoom, state.zoom)
+
+            markupOverlay?.draw(r)
 
             // Lifted (selected) items, drawn live at the move offset.
             for (sel in selection) {
@@ -3736,14 +3863,10 @@ class InteractionController(
 
             // Selection chrome.
             val accent = chromePen(1.3)
-            // Find-in-note hits, the current one stronger.
-            for ((pi, rect) in findHighlights) {
-                if (state.pageRects.getOrNull(pi) == null) continue
-                r.fillRect(state.fromPageSpaceRect(pi, rect), state.palette.accent.withAlpha(if (findCurrent.any { it.second == rect && it.first == pi }) 120 else 50))
-            }
-
-            // Flow caret + selection highlight, under the selection chrome.
+            // Search matches, then the flow caret + selection highlight, under the selection chrome; then the PDF's.
+            searchTints?.draw(r)
             flowText?.drawOverlay(r)
+            pdfText?.drawOverlay(r)
 
             when {
                 mode == PointerMode.BAND -> bandRect?.let { r.strokeRect(it, accent) }
@@ -3791,6 +3914,9 @@ class InteractionController(
                 }
             }
         }
+
+        // Note icons: chrome of one size at any zoom, so in viewport space.
+        noteIcons?.draw(r)
 
         // Eraser cursor (viewport space, after the transform is restored).
         eraserCursor?.let {

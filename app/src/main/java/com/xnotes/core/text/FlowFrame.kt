@@ -18,9 +18,10 @@ data class PageBox(val width: Double, val height: Double)
 enum class MathShow { FORMULA, SOURCE, ERROR }
 
 /**
- * A drawable fragment: [text] starts at page-local [x] on the line baseline.
- * With [math] set it is LaTeX to be typeset there rather than characters to
- * draw, which is the same run read either way depending on where the caret is.
+ * A drawable fragment: [text] starts at page-local [x] on the line baseline, and
+ * at paragraph-local character [start]. With [math] set it is LaTeX to be
+ * typeset there rather than characters to draw, which is the same run read
+ * either way depending on where the caret is.
  */
 class Seg(
     val text: String,
@@ -28,7 +29,11 @@ class Seg(
     val font: FontSpec,
     val style: CharStyle,
     val math: Boolean = false,
-)
+    val start: Int = 0,
+) {
+    /** The paragraph-local character just past this fragment. */
+    val end: Int get() = start + text.length
+}
 
 /**
  * A decorated span of one line (underline/strike/highlight/inline-code chip),
@@ -79,6 +84,8 @@ class PlacedLine(
     val codeRight: Double,
     /** Paragraph-local offsets where a drawn formula begins on this line. */
     val mathStarts: IntArray = IntArray(0),
+    /** The font of the line's first run, or the empty paragraph's: what a space with no word beside it sets in. */
+    val font: FontSpec = FontSpec(TextFlow.DEFAULT_SIZE_PT),
 ) {
     val height: Double get() = bottom - top
 

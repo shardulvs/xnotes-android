@@ -82,6 +82,7 @@ import com.xnotes.core.model.Orientation
 import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.Rgba
 import com.xnotes.settings.ExplorerLayout
+import com.xnotes.core.tools.InkPalette
 import com.xnotes.core.tools.ToolbarItem
 import com.xnotes.core.tools.ToolbarLayout
 import com.xnotes.core.util.NameTemplate
@@ -143,7 +144,7 @@ fun PreferencesPane(
         prefs = p
         editor.applyPreferences(p)
     }
-    // Home and explorer settings leave the open note alone, so they skip its canvas refresh.
+    // Home, explorer and export settings leave the open note alone, so they skip its canvas refresh.
     fun updateHome(p: Preferences) {
         prefs = p
         editor.applyHomePreferences(p)
@@ -533,6 +534,12 @@ fun PreferencesPane(
             CheckRow(stringResource(R.string.pref_hide_dot_items), prefs.hideDotItems) { editor.setHideDotItems(it) }
 
             HorizontalDivider(color = palette.border.toComposeColor())
+            SectionTitle(stringResource(R.string.pref_pdf_export))
+            CheckRow(stringResource(R.string.pref_pdf_heading_bookmarks), prefs.pdfHeadingBookmarks) {
+                updateHome(prefs.copy(pdfHeadingBookmarks = it))
+            }
+
+            HorizontalDivider(color = palette.border.toComposeColor())
             SectionTitle(stringResource(R.string.pref_performance))
             FieldLabel(stringResource(R.string.pref_max_cache_px, prefs.maxCacheResolution))
             Slider(
@@ -647,8 +654,8 @@ fun PreferencesPane(
             Slider(
                 value = editor.toolbarColorCount.toFloat(),
                 onValueChange = { editor.applyToolbarColorCount(Math.round(it)) },
-                valueRange = 1f..7f,
-                steps = 5,
+                valueRange = 1f..InkPalette.MAX_SWATCHES.toFloat(),
+                steps = InkPalette.MAX_SWATCHES - 2,
                 modifier = Modifier.width(280.dp),
             )
             Row(

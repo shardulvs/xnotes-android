@@ -70,6 +70,8 @@ class InfiniteInteraction(
     private val onEraseBegin: () -> EraseSession? = { null },
     /** The eraser drag ended: push its single undo command. */
     private val onEraseEnd: (EraseSession) -> Unit = {},
+    /** An eraser drag lifted, rather than being cut short by a pinch or a cancel. */
+    private val onEraseLifted: () -> Unit = {},
     /** Where the eraser cursor sits in viewport pixels, and how wide, or null to hide it. */
     private val onEraserCursor: (Pt?, Double) -> Unit = { _, _ -> },
     /** The shape being dragged out, re-tessellated as it grows, or null to clear the preview. */
@@ -184,6 +186,9 @@ class InfiniteInteraction(
 
     // The tool a long-press grab borrowed the canvas from, given back when the selection goes.
     private var longPressPrevTool: Tool? = null
+
+    /** Whether a long-press grab is borrowing the selection tool, which it hands back by itself. */
+    val grabbing: Boolean get() = longPressPrevTool != null
 
     // Hold-still-to-snap: a freehand stroke that stops moving becomes the shape it looks like.
     private val handler = Handler(Looper.getMainLooper())
@@ -442,7 +447,10 @@ class InfiniteInteraction(
         }
         panMayDismiss = false
         if (mode == CanvasPointerMode.DRAW) endDraw(e)
-        if (mode == CanvasPointerMode.ERASE) endErase()
+        if (mode == CanvasPointerMode.ERASE) {
+            endErase()
+            onEraseLifted()
+        }
         if (mode == CanvasPointerMode.SHAPE) endShape()
         when (mode) {
             CanvasPointerMode.BAND -> endBand()

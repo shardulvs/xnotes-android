@@ -81,6 +81,21 @@ class CloneTest {
         assertEquals(5, snap.pages[1].items.size)
     }
 
+    @Test fun copiesKeepThePagesMarkups() {
+        val doc = denseDoc()
+        val m = TextMarkup(
+            TextMarkup.newId(), MarkupType.UNDERLINE, Rgba(255, 92, 92), 1.0,
+            listOf(com.xnotes.core.pdf.TextQuad(1f, 2f, 3f, 4f, 0)), "x", null, 1L, 1L,
+        )
+        doc.pages[1].markups = listOf(m)
+
+        assertSame(m, doc.pages[1].deepCopy(FakeTextMeasurer()).markups.single())
+        assertSame(m, doc.deepCopy(FakeTextMeasurer()).pages[1].markups.single())
+        val snap = doc.snapshot()
+        doc.pages[1].markups = emptyList()
+        assertSame(m, snap.pages[1].markups.single())
+    }
+
     /** The flow has no volatile-publish discipline, so it is the one thing still copied. */
     @Test fun snapshotCopiesTheFlow() {
         val doc = denseDoc()

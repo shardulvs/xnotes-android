@@ -1,6 +1,7 @@
 package com.xnotes.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.border
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
@@ -14,12 +15,18 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.GridOff
 import androidx.compose.material.icons.outlined.TableChart
@@ -38,9 +45,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupProperties
@@ -64,6 +75,7 @@ import com.xnotes.core.model.Rgba
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
+import kotlin.math.roundToInt
 
 /**
  * What the selection menu needs from whichever editor is open.
@@ -731,7 +743,7 @@ fun FlowEditMenu(editor: Editor) {
     val barWidthPx = with(density) { (4 * 46).dp.toPx() }
     val gap = with(density) { 10.dp.toPx() }
     // When pushed below the selection, also clear the teardrop handles hanging there.
-    val handleClearance = with(density) { (2 * com.xnotes.canvas.FlowTextController.HANDLE_RADIUS_DP).dp.toPx() }
+    val handleClearance = with(density) { (2 * com.xnotes.canvas.TextHandles.RADIUS_DP).dp.toPx() }
     val centerX = ((rect.left + rect.right) / 2.0).toFloat()
     val xPx = (centerX - barWidthPx / 2f).coerceAtLeast(with(density) { 8.dp.toPx() })
     val yPx = if (rect.top.toFloat() - barHeightPx - gap > 0f) {
@@ -776,6 +788,224 @@ fun FlowEditMenu(editor: Editor) {
         }
     }
 }
+
+/**
+ * The PDF text selection's bar: Copy, the four marks (made in the active ink colour), and behind
+ * the overflow the apps that act on selected text ("Translate", "Search" and the like). Never takes
+ * focus; a canvas touch hides it until the selection, or the view under it, settles again.
+ */
+@Composable
+fun PdfSelectionMenu(editor: Editor) {
+    val rect = editor.pdfTextMenu ?: return
+    val palette = LocalPalette.current
+    val density = LocalDensity.current
+    val actions = remember { editor.pdfTextActions() }
+    var overflowOpen by remember { mutableStateOf(false) }
+
+    val barHeightPx = with(density) { 48.dp.toPx() }
+    val barWidthPx = with(density) { ((1 + PDF_MARKS.size + if (actions.isEmpty()) 0 else 1) * 46).dp.toPx() }
+    val gap = with(density) { 10.dp.toPx() }
+    val margin = with(density) { 8.dp.toPx() }
+    // When pushed below the selection, also clear the teardrop handles hanging there.
+    val handleClearance = with(density) { (2 * com.xnotes.canvas.TextHandles.RADIUS_DP).dp.toPx() }
+    val centerX = ((rect.left + rect.right) / 2.0).toFloat()
+    val xPx = (centerX - barWidthPx / 2f).coerceAtLeast(margin)
+    val above = rect.top.toFloat() - barHeightPx - gap
+    val below = rect.bottom.toFloat() + handleClearance + gap
+    // A selection taller than the view leaves no room either side: keep the bar on screen.
+    val maxY = (editor.state.viewportH - barHeightPx - margin).coerceAtLeast(margin)
+    val yPx = (if (above > 0f) above else below).coerceIn(margin, maxY)
+
+    Row(
+        modifier = Modifier
+            .offset(with(density) { xPx.toDp() }, with(density) { yPx.toDp() })
+            .clip(MaterialTheme.shapes.medium)
+            .background(palette.menuBg.toComposeColor())
+            .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium),
+    ) {
+        ActionIcon(XnotesIcons.copy, stringResource(R.string.copy)) { editor.copyPdfText() }
+        for ((type, icon, label) in PDF_MARKS) {
+            ActionIcon(icon, stringResource(label)) { editor.markPdfSelection(type) }
+        }
+        if (actions.isNotEmpty()) {
+            Box {
+                ActionIcon(XnotesIcons.more, stringResource(R.string.more)) { overflowOpen = true }
+                DropdownMenu(
+                    expanded = overflowOpen,
+                    onDismissRequest = { overflowOpen = false },
+                    properties = PopupProperties(focusable = false),
+                ) {
+                    for ((label, app) in actions) {
+                        DropdownMenuItem(text = { Text(label) }, onClick = {
+                            overflowOpen = false
+                            editor.processPdfText(app)
+                        })
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A markup's tap menu: its colour and kind (each a small list), its note, Copy (the text it marks),
+ * Delete, and Open link when the tap was on a link. Placed like the selection bar, by the markup.
+ */
+@Composable
+fun MarkupMenu(editor: Editor) {
+    val menu = editor.markupMenu ?: return
+    val palette = LocalPalette.current
+    val density = LocalDensity.current
+    var colorsOpen by remember { mutableStateOf(false) }
+    var kindsOpen by remember { mutableStateOf(false) }
+    val icons = 5 + if (menu.openLink != null) 1 else 0
+    val barHeightPx = with(density) { 48.dp.toPx() }
+    val barWidthPx = with(density) { (icons * 46).dp.toPx() }
+    val gap = with(density) { 10.dp.toPx() }
+    val margin = with(density) { 8.dp.toPx() }
+    val rect = menu.anchor
+    val xPx = (((rect.left + rect.right) / 2.0).toFloat() - barWidthPx / 2f).coerceAtLeast(margin)
+    val above = rect.top.toFloat() - barHeightPx - gap
+    val maxY = (editor.state.viewportH - barHeightPx - margin).coerceAtLeast(margin)
+    val yPx = (if (above > 0f) above else rect.bottom.toFloat() + gap).coerceIn(margin, maxY)
+    val m = menu.markup
+
+    Row(
+        modifier = Modifier
+            .offset(with(density) { xPx.toDp() }, with(density) { yPx.toDp() })
+            .clip(MaterialTheme.shapes.medium)
+            .background(palette.menuBg.toComposeColor())
+            .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box {
+            val colourLabel = stringResource(R.string.markup_colour)
+            IconButton(onClick = { colorsOpen = true }, modifier = Modifier.size(46.dp).semantics { contentDescription = colourLabel }) {
+                Box(Modifier.size(20.dp).clip(CircleShape).background(m.color.toComposeColor()))
+            }
+            DropdownMenu(expanded = colorsOpen, onDismissRequest = { colorsOpen = false }, properties = PopupProperties(focusable = false)) {
+                Row(Modifier.padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    editor.toolbarColors.take(editor.toolbarColorCount).forEach { c ->
+                        MarkupDot(c.toComposeColor(), active = c.r == m.color.r && c.g == m.color.g && c.b == m.color.b) {
+                            colorsOpen = false
+                            editor.recolorMarkup(c)
+                        }
+                    }
+                }
+            }
+        }
+        Box {
+            ActionIcon(markIcon(m.type), stringResource(R.string.markup_kind)) { kindsOpen = true }
+            DropdownMenu(expanded = kindsOpen, onDismissRequest = { kindsOpen = false }, properties = PopupProperties(focusable = false)) {
+                for ((type, icon, label) in PDF_MARKS) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(label)) },
+                        leadingIcon = { Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                        onClick = {
+                            kindsOpen = false
+                            if (type != m.type) editor.retypeMarkup(type)
+                        },
+                    )
+                }
+            }
+        }
+        ActionIcon(XnotesIcons.note, stringResource(R.string.markup_note)) { editor.editMarkupNote() }
+        ActionIcon(XnotesIcons.copy, stringResource(R.string.copy)) { editor.copyMarkupText() }
+        ActionIcon(XnotesIcons.trash, stringResource(R.string.delete)) { editor.deleteMarkup() }
+        if (menu.openLink != null) ActionIcon(XnotesIcons.link, stringResource(R.string.open_link)) { editor.openMarkupLink() }
+    }
+}
+
+/**
+ * A markup's note, shown by a first tap on it: placed as its menu would be, then moving with the
+ * page, one size at any zoom. It takes no focus and leaves the page working around it; on itself it
+ * takes touches, so a long note scrolls. It goes once scrolled out of view.
+ */
+@Composable
+fun MarkupNotePeek(editor: Editor) {
+    val peek = editor.notePeek ?: return
+    val note = peek.markup.note ?: return
+    val palette = LocalPalette.current
+    val density = LocalDensity.current
+    val scroll = remember(peek) { ScrollState(0) }
+    val maxHeight = with(density) { (editor.state.viewportH * NOTE_PEEK_MAX_HEIGHT).toDp() }.coerceAtMost(240.dp)
+    Box(
+        Modifier
+            .layout { measurable, constraints ->
+                val p = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
+                editor.notePeekTick
+                editor.notePeekLaidOut(p.width, p.height)
+                val at = editor.notePeekRect(p.width, p.height)
+                layout(p.width, p.height) {
+                    if (at != null) p.place(at.left.roundToInt(), at.top.roundToInt())
+                }
+            }
+            .widthIn(max = 300.dp)
+            .heightIn(max = maxHeight)
+            .clip(MaterialTheme.shapes.medium)
+            .background(palette.menuBg.toComposeColor())
+            .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium)
+            .verticalScroll(scroll)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Text(note, style = MaterialTheme.typography.bodyMedium, color = palette.text.toComposeColor())
+    }
+}
+
+/** The most of the view's height a markup's note window takes before it scrolls. */
+private const val NOTE_PEEK_MAX_HEIGHT = 0.4f
+
+/** A markup's note to read or write: plain text, kept on Save, dropped when emptied or deleted. */
+@Composable
+fun MarkupNoteDialog(editor: Editor) {
+    val target = editor.markupNote ?: return
+    var text by remember(target) { mutableStateOf(target.markup.note.orEmpty()) }
+    AlertDialog(
+        onDismissRequest = { editor.dismissMarkupNote() },
+        title = { Text(stringResource(R.string.markup_note)) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                placeholder = { Text(stringResource(R.string.markup_note_hint)) },
+                minLines = 3,
+                maxLines = 10,
+            )
+        },
+        confirmButton = { TextButton(onClick = { editor.saveMarkupNote(text) }) { Text(stringResource(R.string.save)) } },
+        dismissButton = {
+            Row {
+                if (target.markup.note != null) {
+                    TextButton(onClick = { editor.saveMarkupNote("") }) { Text(stringResource(R.string.delete)) }
+                }
+                TextButton(onClick = { editor.dismissMarkupNote() }) { Text(stringResource(R.string.cancel)) }
+            }
+        },
+    )
+}
+
+@Composable
+private fun MarkupDot(color: Color, active: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(36.dp)
+            .then(if (active) Modifier.border(2.dp, color, CircleShape) else Modifier)
+            .padding(5.dp)
+            .clip(CircleShape)
+            .background(color)
+            .clickable(onClick = onClick),
+    )
+}
+
+private fun markIcon(type: com.xnotes.core.model.MarkupType): ImageVector = PDF_MARKS.first { it.first == type }.second
+
+/** The selection bar's marks, in the order the markup tool's popup lists them. */
+private val PDF_MARKS = listOf(
+    Triple(com.xnotes.core.model.MarkupType.HIGHLIGHT, XnotesIcons.highlight, R.string.markup_highlight),
+    Triple(com.xnotes.core.model.MarkupType.UNDERLINE, XnotesIcons.underline, R.string.underline),
+    Triple(com.xnotes.core.model.MarkupType.STRIKEOUT, XnotesIcons.strikethrough, R.string.strikethrough),
+    Triple(com.xnotes.core.model.MarkupType.SQUIGGLY, XnotesIcons.squiggly, R.string.markup_squiggly),
+)
 
 private const val TABLE_BAR_ICONS = 4
 

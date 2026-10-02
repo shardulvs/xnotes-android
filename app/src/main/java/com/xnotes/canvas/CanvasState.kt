@@ -10,6 +10,7 @@ import com.xnotes.core.model.PageInsets
 import com.xnotes.core.model.PageTemplates
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.Stroke
+import com.xnotes.core.model.TextMarkup
 import com.xnotes.core.model.insets
 import com.xnotes.core.model.resolvedPageColor
 import com.xnotes.core.model.resolvedTemplate
@@ -39,7 +40,10 @@ internal fun CanvasItem.isHighlighterInk(): Boolean = this is Stroke && this.too
  * mismatch — and blitted stretched into the new one meanwhile, like a stale-resolution entry is
  * during a pinch.
  */
-class CacheEntry(val surface: RasterSurface, val res: Double, val cover: Rect = Rect(0.0, 0.0, 0.0, 0.0))
+class CacheEntry(val surface: RasterSurface, val res: Double, val cover: Rect = Rect(0.0, 0.0, 0.0, 0.0)) {
+    /** A background layer's last markup edit held (see [CanvasState.rebakeBackground]). Main thread only. */
+    var seq: Int = 0
+}
 
 /**
  * A cached highlighter ribbon: its opaque bitmap, the resolution + geometry + opaque colour it
@@ -428,6 +432,8 @@ class CanvasState(
         val sy: Double,
         val z: Double,
         val gen: Int,
+        /** The last markup edit its base layer holds, like [CacheEntry.seq]. */
+        val seq: Int,
     )
 
     private var sharpFrame: SharpFrame? = null
@@ -695,6 +701,31 @@ class CanvasState(
         val drawable = drawablePageRange()
         for (i in pageRects.indices) if (i in drawable && pageRects[i].contains(p)) return i
         return null
+    }
+
+    /**
+     * The page under [content], or the nearest shown one (drags cross the gaps between pages),
+     * with the point in its page space clamped to the page.
+     */
+    fun pagePointAt(content: Pt): Pair<Int, Pt>? {
+        var pi = pageIndexAtContent(content)
+        if (pi == null) {
+            val drawable = drawablePageRange()
+            var bestD = Double.MAX_VALUE
+            for (i in pageRects.indices) {
+                if (i !in drawable) continue // never target a hidden paginated neighbour
+                val d = pageRects[i].distanceTo(content)
+                if (d < bestD) {
+                    bestD = d
+                    pi = i
+                }
+            }
+        }
+        val index = pi ?: return null
+        if (pageRects.getOrNull(index) == null) return null
+        val page = document.pages.getOrNull(index) ?: return null
+        val p = toPageSpace(index, content)
+        return index to Pt(p.x.coerceIn(0.0, page.width), p.y.coerceIn(0.0, page.height))
     }
 
     /** The current page (spec 05 §4): contains the viewport vertical centre, biased by half a gap.
@@ -1104,12 +1135,13 @@ class CanvasState(
     }
 
     /**
-     * Whether [page] has anything in its background layer — a PDF page or a resolved ruling.
+     * Whether [page] has anything in its background layer — a PDF page, a resolved ruling or markups.
      * Plain colour pages return false so no (large, transparent) background surface is allocated,
      * even though [paintPageBackground] is always installed for the pattern path.
      */
     fun hasPageBackground(page: Page): Boolean =
-        paintPageBackground != null && (page.pdfPage != null || effectiveTemplate(page) != PageTemplates.NONE)
+        paintPageBackground != null &&
+            (page.pdfPage != null || effectiveTemplate(page) != PageTemplates.NONE || page.markups.isNotEmpty())
 
     /**
      * The page's rendered background layer (PDF/template) at the current resolution,
@@ -1122,7 +1154,7 @@ class CanvasState(
         val res = clampedRes(page)
         val existing = bgCaches[page]
         if (existing != null && existing.usableFor(page, res)) return existing
-        return buildBackground(page, res).also { bgCaches[page] = it }
+        return buildBackground(page, res).also { it.seq = markupSeq; bgCaches[page] = it }
     }
 
     /** Non-blocking counterpart to [backgroundFor]; see [cacheForOrSchedule]. */
@@ -1138,11 +1170,12 @@ class CanvasState(
     private fun scheduleBg(page: Page, res: Double) {
         if (!pendingBg.add(page)) return
         val gen = cacheGen
+        val seq = markupSeq // the build reads the markups after this, so it holds every edit up to here
         runAsync {
             val entry = buildBackground(page, res)
             postToMain {
                 pendingBg.remove(page)
-                if (gen == cacheGen) bgCaches[page] = entry
+                if (gen == cacheGen) bgCaches[page] = entry.also { it.seq = seq }
                 onCacheReady?.invoke() // discarded or not; see [scheduleInk]
             }
         }
@@ -1159,6 +1192,70 @@ class CanvasState(
         r.translate(-cover.left, -cover.top)
         paintPageBackground?.invoke(page, r, res, cover)
         return CacheEntry(surface, res, cover)
+    }
+
+    /** Markup edits made so far; each background layer and sharp frame records the last one it holds. */
+    private var markupSeq = 0
+
+    private class Unbaked(val seq: Int, val markup: TextMarkup)
+
+    /** Markups an edit put on a page that a layer on screen may not hold yet, by page. Main thread only. */
+    private val unbaked = HashMap<Page, MutableList<Unbaked>>()
+
+    /** Pages whose background is being painted afresh for a markup edit, and those edited again meanwhile. */
+    private val rebaking = HashSet<Page>()
+    private val rebakeAgain = HashSet<Page>()
+
+    /** A markup edit came in while a sharp render was under way, which may have read the page before it. */
+    private var sharpAgain = false
+
+    /**
+     * [page]'s markups changed: its background layer is painted afresh on the cache thread and
+     * swapped in once done, the old one shown meanwhile, and the sharp viewport likewise. Patching
+     * just the region they cover would leave seams: PDFium draws a region's pixels visibly
+     * differently from the same pixels of a whole page, around glyphs and images near its edges.
+     * [added] are the markups the edit put on; [unbakedMarkups] hands them to the overlay until the
+     * layers on screen hold them, so nothing blinks while the new layer renders.
+     */
+    fun rebakeBackground(page: Page, added: List<TextMarkup>) {
+        val seq = ++markupSeq
+        if (added.isNotEmpty()) unbaked.getOrPut(page) { ArrayList() }.addAll(added.map { Unbaked(seq, it) })
+        // A whole-layer build under way may have read the markups before the edit.
+        cacheGen++
+        if (pendingSharp) sharpAgain = true else if (sharpFrame?.gen == sharpGen) requestSharpViewport()
+        val entry = bgCaches[page] ?: return
+        if (entry.usableFor(page, clampedRes(page))) scheduleRebake(page) // else the draw loop builds it anew
+    }
+
+    private fun scheduleRebake(page: Page) {
+        if (!rebaking.add(page)) {
+            rebakeAgain += page
+            return
+        }
+        val res = clampedRes(page)
+        val seq = markupSeq // the build reads the markups after this, so it holds every edit up to here
+        runAsync {
+            val fresh = buildBackground(page, res)
+            postToMain {
+                rebaking.remove(page)
+                val shown = bgCaches[page]
+                if (shown != null && shown.seq < seq) bgCaches[page] = fresh.also { it.seq = seq }
+                if (rebakeAgain.remove(page) && bgCaches[page] != null) scheduleRebake(page)
+                onCacheReady?.invoke()
+            }
+        }
+    }
+
+    /** [page]'s markups the layers on screen don't hold yet, for the overlay to draw meanwhile. */
+    fun unbakedMarkups(page: Page): List<TextMarkup> {
+        val list = unbaked[page] ?: return emptyList()
+        var held = bgCaches[page]?.takeIf { it.cover == footprint(page) }?.seq ?: 0
+        val frame = sharpFrame
+        if (frame != null && frame.gen == sharpGen && isPastResolutionCap()) held = min(held, frame.seq)
+        val now = page.markups
+        list.removeAll { u -> u.seq <= held || now.none { it === u.markup } }
+        if (list.isEmpty()) unbaked.remove(page)
+        return list.map { it.markup }
     }
 
     /** Append a single just-committed stroke into an existing cache (cheap), else rebuild. */
@@ -1220,10 +1317,9 @@ class CanvasState(
      * baked into [caches]/[bgCaches]), so a colour-only change just needs the sharp viewport — which
      * *does* bake the paper — to re-render: bump [sharpGen]. A ruling, by contrast, lives in the
      * background cache, so a pattern/spacing/pattern-colour change must drop that page's background
-     * and let the draw loop rebuild via [backgroundForOrSchedule]. Unlike
-     * [refreshBackground] (the PDF-refine path) these do **not** early-return on a missing cache, so a
-     * plain page that *gains* a ruling rebuilds correctly; one that loses it stops drawing a background
-     * (see [hasPageBackground]).
+     * and let the draw loop rebuild via [backgroundForOrSchedule]. These do **not** early-return on a
+     * missing cache, so a plain page that *gains* a ruling rebuilds correctly; one that loses it stops
+     * drawing a background (see [hasPageBackground]).
      */
     fun invalidatePaper() {
         sharpGen++
@@ -1257,6 +1353,7 @@ class CanvasState(
         caches.clear()
         staleInk.clear()
         bgCaches.clear()
+        unbaked.clear()
         hlCaches.clear()
         wetInk.clear()
         cacheGen++
@@ -1291,11 +1388,11 @@ class CanvasState(
      * out input — a full page of ink is the same work [renderInk] does on the cache thread, times
      * every cached page, on the thread the tap arrived on.
      *
-     * So it schedules instead, exactly like [refreshBackground] does for a PDF page: the current
-     * surface stays in [caches] and keeps being blitted until the rebuild lands, so the page shows
-     * its pre-edit content for a frame or two rather than blanking (the flicker [invalidateAllCaches]
-     * caused). [staleInk] is what stops [usableFor] handing that surface back as current — an edit
-     * changes neither the cover nor the resolution, so nothing else would notice.
+     * So it schedules instead: the current surface stays in [caches] and keeps being blitted until
+     * the rebuild lands, so the page shows its pre-edit content for a frame or two rather than
+     * blanking (the flicker [invalidateAllCaches] caused). [staleInk] is what stops [usableFor]
+     * handing that surface back as current — an edit changes neither the cover nor the resolution,
+     * so nothing else would notice.
      *
      * Bumps [cacheGen] so a build scheduled before the edit is discarded on publish rather than
      * overwriting the page with its pre-edit snapshot, and [sharpGen] because the sharp viewport can
@@ -1331,25 +1428,6 @@ class CanvasState(
             for ((page, rect) in byPage) repairRegion(page, rect.outset(SHARP_EDIT_PAD))
         }
         cacheGen++
-    }
-
-    /**
-     * Re-render only [page]'s background layer (e.g. a PDF page whose embedded-image colours just
-     * finished parsing), swapping the refreshed surface in when it's ready and leaving the current
-     * one on screen until then so the page never blanks. Unlike a global background flush this
-     * touches *only* [page]: other pages' cached backgrounds and in-flight builds are left intact,
-     * so refining one page never re-rasterizes — or flickers — the rest of the visible pages.
-     *
-     * Skips pages with no live background cache (off-screen now): they render stamped on their own
-     * when next scrolled into view. The rebuild is scheduled at the current generation, so on the
-     * single-threaded cache executor it lands after the (already-published) provisional build and
-     * its stamped surface wins.
-     */
-    fun refreshBackground(page: Page) {
-        if (paintPageBackground == null) return
-        if (!bgCaches.containsKey(page)) return
-        sharpGen++ // also refine the sharp viewport if it's covering this page (deep zoom)
-        scheduleBg(page, clampedRes(page))
     }
 
     /**
@@ -1544,6 +1622,7 @@ class CanvasState(
         if (draws.isEmpty()) return
         pendingSharp = true
         pendingSharpEdits.clear()
+        val seq = markupSeq
         val withFlow = !flowLifted // snapshot; a session toggle bumps sharpGen and discards this
         runAsync {
             val base = surfaceFactory.create(vw, vh, 1.0).also { it.fill(bg) }
@@ -1552,12 +1631,16 @@ class CanvasState(
             postToMain {
                 pendingSharp = false
                 if (gen == sharpGen && sx == scrollX && sy == scrollY && z == zoom) {
-                    sharpFrame = SharpFrame(base, ink, sx, sy, z, gen)
+                    sharpFrame = SharpFrame(base, ink, sx, sy, z, gen, seq)
                     // Replay edits committed during the build; the item snapshot predates them.
                     for ((p, rect) in pendingSharpEdits) repairSharpInk(p, rect)
                     onCacheReady?.invoke()
                 }
                 pendingSharpEdits.clear()
+                if (sharpAgain) {
+                    sharpAgain = false
+                    requestSharpViewport()
+                }
             }
         }
     }

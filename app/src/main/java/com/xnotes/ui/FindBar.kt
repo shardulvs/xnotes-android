@@ -63,8 +63,8 @@ internal fun FindBar(
             modifier = Modifier.weight(1f).focusRequester(focus),
         )
         Label(status)
-        ToolbarIcon(XnotesIcons.prev, stringResource(R.string.find_previous), enabled = query.isNotBlank(), onClick = onPrev)
-        ToolbarIcon(XnotesIcons.next, stringResource(R.string.find_next), enabled = query.isNotBlank(), onClick = onNext)
+        ToolbarIcon(XnotesIcons.prev, stringResource(R.string.previous_match), enabled = query.isNotBlank(), onClick = onPrev)
+        ToolbarIcon(XnotesIcons.next, stringResource(R.string.next_match), enabled = query.isNotBlank(), onClick = onNext)
         ToolbarIcon(XnotesIcons.close, stringResource(R.string.find_close), onClick = onClose)
     }
 }

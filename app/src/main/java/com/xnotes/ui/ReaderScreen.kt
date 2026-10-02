@@ -179,8 +179,8 @@ internal fun ReaderScreen(editor: Editor, file: ReaderFile, onClose: () -> Unit,
         if (q.isEmpty()) { pdfHits = emptyList(); return@LaunchedEffect }
         delay(250)
         pdfHits = withContext(Dispatchers.IO) {
-            val text = com.xnotes.platform.PdfText.pages(context, file.uri) { context.contentResolver.openInputStream(Uri.parse(file.uri))!! }
-            com.xnotes.platform.PdfText.find(text, q)
+            val text = com.xnotes.platform.ReaderPdfText.pages(context, file.uri) { context.contentResolver.openInputStream(Uri.parse(file.uri))!! }
+            com.xnotes.platform.ReaderPdfText.find(text, q)
         }
         pdfHit = 0
         pdfHits.firstOrNull()?.let { pdfList.animateScrollToItem(it.page) }

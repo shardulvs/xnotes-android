@@ -3,7 +3,7 @@ package com.xnotes.core.text
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.Rgba
-import com.xnotes.core.pal.Pen
+import com.xnotes.core.pal.Mark
 import com.xnotes.core.pal.Renderer
 
 /**
@@ -12,22 +12,28 @@ import com.xnotes.core.pal.Renderer
  * call from any thread against the immutable frame. Draw order per line: code
  * chip, highlight/inline-code backgrounds, list marker, text runs, then
  * underline/strike so decorations sit over their glyphs. Translucent fills use
- * plain colour alpha; every backend that paints flow text rasterizes (PDF
- * export receives the flow pre-rendered), so no layer tricks are needed.
+ * plain colour alpha, which the PDF backend carries as real transparency, so no
+ * layer tricks are needed.
  */
 object FlowPainter {
 
-    fun paintPage(r: Renderer, frame: FlowFrame, pageIndex: Int, region: Rect) {
+    /**
+     * [breaks] holds, per paragraph, offsets where a backend writing text needs a run to end and
+     * the next begin, so each piece can be tagged on its own (a link inside a word, for one).
+     */
+    fun paintPage(r: Renderer, frame: FlowFrame, pageIndex: Int, region: Rect, breaks: Map<Int, IntArray> = emptyMap()) {
         val page = frame.pages.getOrNull(pageIndex) ?: return
+        if (r.writesText) r.beginMark(Mark.Decoration)
         for (table in page.tables) {
             if (table.bottom < region.top || table.top > region.bottom) continue
             paintTableFills(r, table)
             paintTableRules(r, table)
         }
         paintCodeChips(r, frame, page.lines, region)
+        if (r.writesText) r.endMark()
         for (line in page.lines) {
             if (line.bottom < region.top || line.top > region.bottom) continue
-            paintLine(r, frame, line)
+            paintLine(r, frame, line, breaks[line.paraIndex])
         }
     }
 
@@ -109,7 +115,11 @@ object FlowPainter {
         }
     }
 
-    private fun paintLine(r: Renderer, frame: FlowFrame, line: PlacedLine) {
+    private fun paintLine(r: Renderer, frame: FlowFrame, line: PlacedLine, breaks: IntArray?) {
+        // Marks are only for a backend recording structure; the screen never allocates one.
+        val tag = r.writesText
+        val para = line.paraIndex
+        if (tag) r.beginMark(Mark.Decoration)
         for (deco in line.decos) {
             deco.style.highlight?.let {
                 r.fillRect(Rect(deco.x0, line.top, deco.x1 - deco.x0, line.height), it)
@@ -129,15 +139,54 @@ object FlowPainter {
                 )
             }
         }
-        line.marker?.let { paintMarker(r, frame, line, it) }
+        if (tag) r.endMark()
+        line.marker?.let {
+            if (tag) r.beginMark(Mark.FlowMarker(para))
+            paintMarker(r, frame, line, it)
+            if (tag) r.endMark()
+        }
+        // A backend writing real text gets the spaces too, each in reading order before the word
+        // after it: a reader copies in content order, so trailing them all behind would scramble it.
+        var next = line.startChar
         for (seg in line.segs) {
             val color = inkColor(seg.style, frame)
+            if (tag) {
+                for (k in next until seg.start) {
+                    r.beginMark(Mark.FlowText(para, k, k + 1))
+                    r.drawTextRun(" ", line.caretX(k), line.baseline, seg.font, color)
+                    r.endMark()
+                }
+                next = seg.end
+                if (!seg.math && breaks != null && breaks.any { it > seg.start && it < seg.end }) {
+                    paintPieces(r, line, seg, color, breaks)
+                    continue
+                }
+                r.beginMark(Mark.FlowText(para, seg.start, seg.end))
+            }
             if (seg.math) {
                 r.drawMath(seg.text, seg.x, line.baseline, seg.font.pointSize, color, seg.style.mathDisplay)
-                continue
+            } else {
+                r.drawTextRun(seg.text, seg.x, line.baseline, seg.font, color)
             }
-            r.drawTextRun(seg.text, seg.x, line.baseline, seg.font, color)
+            if (tag) r.endMark()
         }
+        if (tag) {
+            // A line wrapped at a space keeps it, so the words either side of the break stay two words.
+            val last = line.segs.lastOrNull()
+            val color = last?.style?.color ?: frame.defaultColor
+            for (k in next until line.endChar) {
+                r.beginMark(Mark.FlowText(para, k, k + 1))
+                r.drawTextRun(" ", line.caretX(k), line.baseline, last?.font ?: line.font, color)
+                r.endMark()
+            }
+        }
+        // A blank line inside a code block has to exist in the copy, or the code pastes back squashed.
+        if (tag && line.codeLine && line.endChar == line.startChar) {
+            r.beginMark(Mark.FlowText(para, line.startChar, line.startChar))
+            r.drawTextRun(" ", line.caretX(line.startChar), line.baseline, line.font, frame.defaultColor)
+            r.endMark()
+        }
+        if (tag) r.beginMark(Mark.Decoration)
         val ascent = line.baseline - line.top
         val descent = line.bottom - line.baseline
         val thickness = (line.height / 14.0).coerceAtLeast(1.0)
@@ -159,6 +208,20 @@ object FlowPainter {
                 )
             }
         }
+        if (tag) r.endMark()
+    }
+
+    /** [seg] cut at [breaks], each piece marked on its own and set where the line places it. */
+    private fun paintPieces(r: Renderer, line: PlacedLine, seg: Seg, color: Rgba, breaks: IntArray) {
+        var a = seg.start
+        for (b in breaks.sorted() + seg.end) {
+            if (b <= a || b > seg.end) continue
+            r.beginMark(Mark.FlowText(line.paraIndex, a, b))
+            val x = seg.x + line.caretX(a) - line.caretX(seg.start)
+            r.drawTextRun(seg.text.substring(a - seg.start, b - seg.start), x, line.baseline, seg.font, color)
+            r.endMark()
+            a = b
+        }
     }
 
     /** A run's ink colour: its own colour, else the link colour for a hyperlink, else the flow default. */
@@ -173,7 +236,7 @@ object FlowPainter {
                 val radius = (ascent * 0.16).coerceIn(2.0, 6.0)
                 val cx = m.rect.right - FlowLayout.MARKER_GAP - radius
                 val cy = line.baseline - ascent * 0.32
-                r.fillCircle(Pt(cx, cy), radius, color)
+                r.drawBullet(Pt(cx, cy), radius, line.baseline, m.font, color)
             }
             ListKind.ORDERED -> {
                 m.text?.let { r.drawTextRun(it, m.textX, line.baseline, m.font, color) }
@@ -181,12 +244,12 @@ object FlowPainter {
             ListKind.CHECK -> {
                 val side = (ascent * 0.85).coerceIn(8.0, 26.0)
                 val box = Rect(m.rect.right - FlowLayout.MARKER_GAP - side, line.baseline - side, side, side)
-                r.strokeRect(box, Pen(color, width = (side / 9.0).coerceAtLeast(1.2), cosmetic = false))
-                // Checked state is a solid inner fill: legible on any paper without knowing it.
-                if (m.checked) r.fillRect(box.outset(-side * 0.25), color)
+                r.drawCheckbox(box, (side / 9.0).coerceAtLeast(1.2), m.checked, line.baseline, m.font, color)
             }
-            ListKind.NONE -> {}
+            ListKind.NONE -> return
         }
+        // Copied, a marker is followed by a real space, so "• item" does not read "•item".
+        if (r.writesText) r.drawTextRun(" ", m.rect.right - FlowLayout.MARKER_GAP, line.baseline, m.font, color)
     }
 
     /** Code line/chip backgrounds: neutral translucent grey, legible on light and dark paper. */

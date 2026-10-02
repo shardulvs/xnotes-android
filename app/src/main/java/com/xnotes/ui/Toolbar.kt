@@ -115,6 +115,7 @@ fun Toolbar(
         Tool.TEXT to XnotesIcons.text,
         Tool.TEXT_BOX to XnotesIcons.textBox,
         Tool.TABLE to XnotesIcons.table,
+        Tool.MARKUP to XnotesIcons.markup,
     )
     var configForTool by remember { mutableStateOf<Tool?>(null) }
     var switcherIndex by remember { mutableStateOf<Int?>(null) }
@@ -203,6 +204,10 @@ private fun ToolbarItemView(
             if (tool != null) ToolButton(editor, tool, toolIcons[tool], configForTool, setConfigForTool)
         }
 
+        // Marks a PDF's text, so a note without a PDF has no use for it.
+        ToolbarItem.MARKUP ->
+            if (editor.hasPdf) ToolButton(editor, Tool.MARKUP, toolIcons[Tool.MARKUP], configForTool, setConfigForTool)
+
         ToolbarItem.WAND ->
             ToolbarIcon(XnotesIcons.magicWand, stringResource(R.string.tool_wand), active = editor.wandEnabled) { editor.toggleWand() }
         ToolbarItem.RULER ->
@@ -228,7 +233,12 @@ private fun ToolbarItemView(
             }
             ToolbarIcon(XnotesIcons.next, stringResource(R.string.next_page)) { editor.nextPage() }
         }
-        ToolbarItem.SEARCH -> ToolbarIcon(XnotesIcons.search, stringResource(R.string.find_in_page), active = editor.findOpen) { editor.toggleFind() }
+        ToolbarItem.SEARCH -> {
+            val open = editor.sidebarVisible && editor.sidePanelTab == SidePanelTab.SEARCH
+            ToolbarIcon(XnotesIcons.search, stringResource(R.string.search), active = open) {
+                if (open) editor.sidebarVisible = false else editor.openSearch()
+            }
+        }
         ToolbarItem.STYLES -> StylesButton(editor, onImportTemplate)
         ToolbarItem.MARGINS -> MarginsButton(editor)
         ToolbarItem.VIEW -> ViewButton(editor)
@@ -281,7 +291,7 @@ private fun ToolButton(
     if (icon == null) return
     Box {
         ToolbarIcon(icon, stringResource(tool.labelRes), active = editor.tool == tool, glideKey = tool) {
-            if (editor.tool == tool && (tool.isStroke || tool == Tool.SHAPE || tool == Tool.ERASER || tool == Tool.SELECT || tool == Tool.LASSO || tool == Tool.TEXT || tool == Tool.TABLE)) {
+            if (editor.tool == tool && (tool.isStroke || tool == Tool.SHAPE || tool == Tool.ERASER || tool == Tool.SELECT || tool == Tool.LASSO || tool == Tool.TEXT || tool == Tool.TABLE || tool == Tool.MARKUP)) {
                 setConfigForTool(tool)
             } else {
                 editor.selectTool(tool)
@@ -295,6 +305,7 @@ private fun ToolButton(
                 tool == Tool.ERASER -> EraserConfigPopup(editor) { setConfigForTool(null) }
                 tool == Tool.SELECT || tool == Tool.LASSO -> SelectConfigPopup(editor, tool) { setConfigForTool(null) }
                 tool == Tool.TEXT -> TextToolConfigPopup(editor) { setConfigForTool(null) }
+                tool == Tool.MARKUP -> MarkupToolPopup(editor) { setConfigForTool(null) }
                 else -> ToolConfigPopup(editor, tool) { setConfigForTool(null) }
             }
         }

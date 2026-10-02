@@ -104,6 +104,26 @@ object XnotesIcons {
         "M7.5 9.5v-2h9v2", "M12 7.5v9", "M9 16.5h6",
     )
 
+    // The text markup tool: three lines of text, the middle one marked.
+    val markup = icon("M4 4.5h16", roundRect(2.5, 8.5, 19.0, 7.0, 2.0), "M6.5 12h11", "M4 19.5h10")
+
+    // Its modes: selecting text (Lucide "text-select"), highlighting it (Lucide "highlighter"), and a
+    // squiggle under it (the underline's U over a wave); underline and strikethrough are the flow bar's.
+    val textSelect = icon(
+        "M5 3a2 2 0 0 0-2 2", "M19 3a2 2 0 0 1 2 2", "M21 19a2 2 0 0 1-2 2", "M5 21a2 2 0 0 1-2-2",
+        "M9 3h1", "M9 21h1", "M14 3h1", "M14 21h1", "M3 9v1", "M21 9v1", "M3 14v1", "M21 14v1",
+        "M7 8h8", "M7 12h10", "M7 16h6",
+    )
+    val highlight = icon("M9 11l-6 6v3h9l3-3", "M22 12l-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4")
+    val squiggly = icon("M6 4v6a6 6 0 0 0 12 0V4", "M4 20q2-2.5 4 0t4 0t4 0t4 0")
+
+    // A markup's note (Lucide "message-square") and the link under it (Lucide "link").
+    val note = icon("M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z")
+    val link = icon(
+        "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71",
+        "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71",
+    )
+
     // The flow format bar's glyphs (Lucide: bold/italic/underline/strikethrough, lists,
     // square-check, aligns, indents).
     val bold = icon("M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8")
@@ -151,7 +171,6 @@ object XnotesIcons {
     )
     val prev = icon("M15 18l-6-6 6-6")
     val next = icon("M9 18l6-6-6-6")
-    val chevronDown = icon("M6 9l6 6 6-6")
     val file = icon("M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z", "M14 2v6h6")
     val edit = icon("M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7", "M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z")
     val sidebar = icon(rect(3.0, 3.0, 18.0, 18.0), "M9 3v18")
@@ -227,8 +246,6 @@ object XnotesIcons {
     )
     val paste = icon("M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2", "M9 2h6a1 1 0 0 1 1 1v1a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z")
     val more = icon(circle(12.0, 5.0, 1.0), circle(12.0, 12.0, 1.0), circle(12.0, 19.0, 1.0))
-    // Filter/sort: three horizontal lines that narrow top to bottom (Lucide "list-filter").
-    val filter = icon("M3 6h18", "M7 12h10", "M10 18h4")
     val menu = icon("M4 6h16", "M4 12h16", "M4 18h16")
     val search = icon(circle(11.0, 11.0, 8.0), "M21 21l-4.35-4.35")
 
@@ -251,6 +268,9 @@ object XnotesIcons {
         "M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12",
         "M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17",
     )
+    val filter = icon("M3 6h18", "M7 12h10", "M10 18h4")
+    val chevronDown = icon("M6 9l6 6 6-6")
+    val chevronUp = icon("M18 15l-6-6-6 6")
     val clock = icon(circle(12.0, 12.0, 10.0), "M12 6v6l4 2")
     val restore = icon("M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5")
     val moveToFolder = icon(

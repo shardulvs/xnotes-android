@@ -85,6 +85,12 @@ class InfiniteCanvasView @JvmOverloads constructor(
     /** Fired on a clean four-finger tap, the same gesture that toggles the paged canvas's HUD. */
     var onFourFingerTap: (() -> Unit)? = null
 
+    /** Clean two-finger tap, for the configurable gesture, as on the paged canvas. */
+    var onTwoFingerTap: (() -> Unit)? = null
+
+    /** Clean three-finger tap, for the configurable gesture, as on the paged canvas. */
+    var onThreeFingerTap: (() -> Unit)? = null
+
     /** Non-null when a shader would not build; the host shows a message instead of a black view. */
     val failure: String? get() = glRenderer.failure
 
@@ -265,7 +271,22 @@ class InfiniteCanvasView @JvmOverloads constructor(
     @Suppress("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (trackFourFingerTap(event)) return true
+        if (trackMultiFingerTap(event)) return true
         return input?.invoke(event) ?: super.onTouchEvent(event)
+    }
+
+    private val fingerTaps = com.xnotes.canvas.MultiFingerTap()
+
+    /** Fire the configured two/three-finger tap, cancelling the pinch it began; true when consumed. */
+    private fun trackMultiFingerTap(e: MotionEvent): Boolean {
+        val cb = when (fingerTaps.tapEndedBy(e)) {
+            2 -> onTwoFingerTap
+            3 -> onThreeFingerTap
+            else -> null
+        } ?: return false
+        cancelInteraction(e)
+        cb()
+        return true
     }
 
     // --- four-finger-tap recognition (toggles the debug HUD, as on the paged canvas) ---

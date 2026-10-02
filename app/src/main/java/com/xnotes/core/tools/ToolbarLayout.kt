@@ -29,6 +29,9 @@ enum class ToolbarItem(val id: String) {
     RULER("ruler"),
     TEXT("text"),
     TEXT_BOX("text_box"),
+
+    /** The text markup tool; only notes with a PDF show it. */
+    MARKUP("markup"),
     IMAGE("image"),
     TABLE("table"),
     UNDO("undo"),
@@ -153,6 +156,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
             ToolbarItem.WAND to ToolbarItem.LASSO,
             ToolbarItem.TABLE to ToolbarItem.IMAGE,
             ToolbarItem.SEARCH to ToolbarItem.PAGE_NAV,
+            ToolbarItem.MARKUP to ToolbarItem.TEXT_BOX,
         )
 
         /**
@@ -185,7 +189,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
                 ToolbarItem.TAPER, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER,
             ),
             listOf(ToolbarItem.PAN, ToolbarItem.SELECT, ToolbarItem.LASSO, ToolbarItem.SCREENSHOT),
-            listOf(ToolbarItem.WAND, ToolbarItem.SHAPE, ToolbarItem.RULER, ToolbarItem.TEXT, ToolbarItem.TEXT_BOX),
+            listOf(ToolbarItem.WAND, ToolbarItem.SHAPE, ToolbarItem.RULER, ToolbarItem.TEXT, ToolbarItem.TEXT_BOX, ToolbarItem.MARKUP),
             listOf(ToolbarItem.IMAGE, ToolbarItem.TABLE),
             listOf(ToolbarItem.COLORS),
             listOf(ToolbarItem.UNDO, ToolbarItem.REDO),

@@ -6,6 +6,7 @@ import com.xnotes.core.model.Rgba
 import com.xnotes.core.pal.FontSpec
 import com.xnotes.platform.AndroidRenderer
 import com.xnotes.platform.AndroidText
+import com.xnotes.platform.PdfiumDocument
 
 /**
  * A translucent, non-interactive debug HUD pinned to the top-right of the canvas,
@@ -103,6 +104,7 @@ class DebugOverlay {
             add("pss    %.0f MB".format(pssMb))
             add("native %.0f MB".format(nativeMb))
             add("gfx    %.0f MB".format(gfxMb))
+            add("pdfium     ${PdfiumDocument.hud}")
             frontHud()?.let { add("front     $it") }
             add("autosave   ${state.autosaveStatus}")
             if (state.lastOpenTotalMs >= 0) {

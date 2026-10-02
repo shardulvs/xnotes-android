@@ -8,6 +8,14 @@
     <!-- Filen cloud backup/sync (opt-in, off by default). -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- The apps that act on selected text ("Translate", "Search"), listed in a PDF text
+         selection's menu; Android 11 and later hide them from apps that do not ask. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
+    </queries>
 
     <application
         android:allowBackup="true"

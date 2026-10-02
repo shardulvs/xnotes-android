@@ -28,7 +28,7 @@ class ToolbarLayoutTest {
             d.sections[3].entries.map { it.item },
         )
         assertEquals(
-            listOf(ToolbarItem.WAND, ToolbarItem.SHAPE, ToolbarItem.RULER, ToolbarItem.TEXT, ToolbarItem.TEXT_BOX),
+            listOf(ToolbarItem.WAND, ToolbarItem.SHAPE, ToolbarItem.RULER, ToolbarItem.TEXT, ToolbarItem.TEXT_BOX, ToolbarItem.MARKUP),
             d.sections[4].entries.map { it.item },
         )
         assertEquals(listOf(ToolbarItem.FULLSCREEN), d.sections[10].entries.map { it.item })
@@ -83,6 +83,17 @@ class ToolbarLayoutTest {
         val sec = back.sections.first { s -> s.entries.any { it.item == ToolbarItem.TEXT } }
         val items = sec.entries.map { it.item }
         assertEquals(items.indexOf(ToolbarItem.TEXT) + 1, items.indexOf(ToolbarItem.TEXT_BOX))
+    }
+
+    @Test fun missingMarkupSlotsInAfterTextBox() {
+        // A layout stored before the text markup tool existed gains it beside the text box.
+        val raw = ToolbarLayout.DEFAULT.toRaw()
+            .map { s -> s.filterNot { it.first == ToolbarItem.MARKUP.id } }
+        val back = ToolbarLayout.fromRaw(raw)
+        val sec = back.sections.first { s -> s.entries.any { it.item == ToolbarItem.TEXT_BOX } }
+        val items = sec.entries.map { it.item }
+        assertEquals(items.indexOf(ToolbarItem.TEXT_BOX) + 1, items.indexOf(ToolbarItem.MARKUP))
+        assertTrue(ToolbarItem.MARKUP !in ToolbarLayout.CANVAS_ITEMS)
     }
 
     @Test fun missingViewSlotsInAfterStyles() {

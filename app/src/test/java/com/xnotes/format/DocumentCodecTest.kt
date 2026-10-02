@@ -65,6 +65,44 @@ class DocumentCodecTest {
         return codec.read(ByteArrayInputStream(out.toByteArray()), imageDir = imageDir)
     }
 
+    private fun entryNames(bundle: ByteArray): List<String> {
+        val out = ArrayList<String>()
+        ZipInputStream(ByteArrayInputStream(bundle)).use { zis ->
+            var e = zis.nextEntry
+            while (e != null) {
+                out += e.name
+                e = zis.nextEntry
+            }
+        }
+        return out
+    }
+
+    @Test fun markupsRideTheirOwnEntryJustBeforeTheManifest() {
+        val doc = Document(dpi = 150)
+        doc.pages += Page(1240.0, 1754.0)
+        doc.pages += Page(1240.0, 1754.0)
+        val m = com.xnotes.core.model.TextMarkup(
+            "id-1", com.xnotes.core.model.MarkupType.SQUIGGLY, Rgba(88, 196, 255), 0.7,
+            listOf(com.xnotes.core.pdf.TextQuad(10f, 20f, 30f, 40f, 0)), "text", "note", 1000L, 2000L,
+        )
+        doc.pages[1].markups = listOf(m)
+        val out = ByteArrayOutputStream()
+        codec.write(doc, out)
+        assertEquals(listOf(MarkupsXfdf.ENTRY_NAME, "manifest.json"), entryNames(out.toByteArray()).takeLast(2))
+        val back = codec.read(ByteArrayInputStream(out.toByteArray()))
+        assertTrue(back.pages[0].markups.isEmpty())
+        val r = back.pages[1].markups.single()
+        assertEquals("id-1", r.id)
+        assertEquals(com.xnotes.core.model.MarkupType.SQUIGGLY, r.type)
+        assertEquals(m.quads, r.quads)
+        assertEquals("note", r.note)
+
+        doc.pages[1].markups = emptyList()
+        val plain = ByteArrayOutputStream()
+        codec.write(doc, plain)
+        assertFalse(MarkupsXfdf.ENTRY_NAME in entryNames(plain.toByteArray()))
+    }
+
     @Test fun lockedItemsSurviveARoundTripAndOnlyThoseLockedComeBackLocked() {
         val doc = Document(dpi = 150)
         val page = Page(1240.0, 1754.0)

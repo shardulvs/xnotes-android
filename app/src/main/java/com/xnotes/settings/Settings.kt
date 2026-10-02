@@ -13,6 +13,7 @@ import com.xnotes.core.text.TableDefaults
 import com.xnotes.core.text.TableStyle
 import com.xnotes.core.tools.EraseMode
 import com.xnotes.core.tools.InkPalette
+import com.xnotes.core.tools.MarkupMode
 import com.xnotes.core.tools.ShapeConfig
 import com.xnotes.core.tools.ShapeKind
 import com.xnotes.core.tools.Tool
@@ -137,7 +138,7 @@ data class Settings(
             val shape = toolsObj?.optJSONObject("shape")?.let { shapeConfig(it) } ?: ShapeConfig()
 
             val colors = rgbaList(o.optJSONArray("toolbar_colors")).toMutableList()
-            while (colors.size < 7) colors.add(InkPalette.presets[colors.size])
+            while (colors.size < InkPalette.MAX_SWATCHES) colors.add(InkPalette.presets[colors.size])
 
             return Settings(
                 viewDefaults = o.optJSONObject("view_defaults")
@@ -145,15 +146,15 @@ data class Settings(
                     ?: legacyViewDefaults(o.optJSONObject("prefs")),
                 tools = tools,
                 shapeConfig = shape,
-                toolbarColors = colors.take(7),
-                toolbarColorCount = o.optInt("toolbar_color_count", 5).coerceIn(1, 7),
+                toolbarColors = colors.take(InkPalette.MAX_SWATCHES),
+                toolbarColorCount = o.optInt("toolbar_color_count", 5).coerceIn(1, InkPalette.MAX_SWATCHES),
                 toolbarLayout = toolbarLayout(o.optJSONObject("toolbar_layout")),
                 canvasToolbarLayout = toolbarLayout(
                     o.optJSONObject("canvas_toolbar_layout"),
                     ToolbarLayout.CANVAS_ITEMS,
                     ToolbarLayout.CANVAS_DEFAULT,
                 ),
-                activeColor = o.optInt("active_color", 0).coerceIn(0, 6),
+                activeColor = o.optInt("active_color", 0).coerceIn(0, InkPalette.MAX_SWATCHES - 1),
                 // Only tools the toolbar can arm come back; a transient one (e.g. TEXT_BOX) would
                 // leave the bar showing a tool the user never picked.
                 lastTool = Tool.fromId(o.optString("last_tool", ""))
@@ -339,12 +340,15 @@ data class Settings(
             .put("dash_gap", c.dashGap)
             .put("erase_mode", c.eraseMode.id)
             .put("switch_back_after_erase", c.switchBackAfterErase)
+            .put("erase_markups", c.eraseMarkups)
             .put("switch_back_after_select", c.switchBackAfterSelect)
             .put("select_whole_items", c.selectWholeItems)
             .put("straight_line", c.straightLine)
             .put("scale", c.scale)
             .put("highlighter_alpha", c.highlighterAlpha)
             .put("highlighter_inverse", c.highlighterInverse)
+            .put("markup_mode", c.markupMode.id)
+            .put("markup_intensity", c.markupIntensity)
             .put("rgba", rgbaArr(c.rgba))
             .apply { c.colorOverride?.let { put("color_override", rgbaArr(it)) } }
 
@@ -365,12 +369,16 @@ data class Settings(
                 dashGap = o.optDouble("dash_gap", d.dashGap),
                 eraseMode = EraseMode.fromId(o.optString("erase_mode", d.eraseMode.id)),
                 switchBackAfterErase = o.optBoolean("switch_back_after_erase", d.switchBackAfterErase),
+                eraseMarkups = o.optBoolean("erase_markups", d.eraseMarkups),
                 switchBackAfterSelect = o.optBoolean("switch_back_after_select", d.switchBackAfterSelect),
                 selectWholeItems = o.optBoolean("select_whole_items", d.selectWholeItems),
                 straightLine = o.optBoolean("straight_line", d.straightLine),
                 scale = o.optBoolean("scale", d.scale),
                 highlighterAlpha = o.optDouble("highlighter_alpha", d.highlighterAlpha),
                 highlighterInverse = o.optBoolean("highlighter_inverse", d.highlighterInverse),
+                markupMode = if (o.has("markup_mode")) MarkupMode.fromId(o.optString("markup_mode")) else d.markupMode,
+                markupIntensity = o.optDouble("markup_intensity", d.markupIntensity)
+                    .coerceIn(ToolConfig.MARKUP_INTENSITY_MIN, 1.0),
                 colorOverride = o.optJSONArray("color_override")
                     ?.let { a -> Rgba.fromList((0 until a.length()).map { i -> a.optInt(i, 0) }) }
                     ?: d.colorOverride,

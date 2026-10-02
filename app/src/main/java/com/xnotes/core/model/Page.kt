@@ -14,6 +14,8 @@ class Page(
     var style: PageStyle = PageStyle(),
     /** Per-page margin override (extra paper outside the content box); null fields inherit. */
     var margins: PageMargins = PageMargins(),
+    /** The marks on its PDF text, bottom first. Replaced whole, never mutated, so any thread can read it. */
+    @Volatile var markups: List<TextMarkup> = emptyList(),
 ) {
     /**
      * A process-unique, stable id (not persisted). Pages compare by identity, but Compose list keys

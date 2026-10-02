@@ -1,22 +1,33 @@
 package com.xnotes.platform
 
 import android.graphics.Bitmap
+import com.tom_roush.pdfbox.cos.COSArray
+import com.tom_roush.pdfbox.cos.COSInteger
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
+import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
+import com.tom_roush.pdfbox.pdmodel.interactive.action.PDActionURI
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink
 import com.tom_roush.pdfbox.pdmodel.graphics.blend.BlendMode
 import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
-import com.tom_roush.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState
 import com.tom_roush.pdfbox.util.Matrix
+import com.xnotes.core.geometry.Affine
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.ImageData
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.pal.FillRule
 import com.xnotes.core.pal.FontSpec
+import com.xnotes.core.pal.Mark
 import com.xnotes.core.pal.Pen
 import com.xnotes.core.pal.RasterSurface
 import com.xnotes.core.pal.Renderer
 import com.xnotes.core.pal.TextFlags
+import com.xnotes.core.pdf.GlyphPlacement
+import com.xnotes.core.pdf.LinkFinder
+import com.xnotes.core.pdf.PdfNumbers
+import com.xnotes.core.pdf.PlacedLink
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -30,26 +41,42 @@ import com.xnotes.core.pal.BlendMode as PalBlend
  * Coordinates: the model paints in *content pixels* (top-left origin, y-down, page sized at the
  * document dpi). PDF user space is points (bottom-left origin, y-up), offset to the page's crop box.
  * Rather than push a flipped CTM — which would also mirror placed images and text — this maps every
- * point in software: `user = (ox + x·sx, oy + y·sy)` with `sx = +s, sy = −s, s = 72/dpi`.
+ * point in software: `user = (ox + x·sx, oy + y·sy)` with `sx = +s, sy = −s, s = 72/dpi`. On a
+ * source page turned by /Rotate that is an upright frame, which the stream's one `cm` ([turn])
+ * takes into user space, so ink, text and images sit upright on the page as displayed.
  *
- * Only the primitives the *vectorizable* items use are meaningful here (fills, strokes, images).
- * Effect-heavy items (neon glow, highlighter multiply, translucent ink) and text are rasterized by
- * the exporter and handed back as bitmaps via [drawItemBitmap]; the glow/layer/text methods here are
- * inert, so they never silently flatten anything to a crisp-but-wrong vector shape.
+ * Only the primitives the *vectorizable* items use are meaningful here (fills, strokes, images,
+ * text). Effect-heavy items (neon glow, highlighter multiply, translucent ink) are rasterized by the
+ * exporter and handed back as bitmaps via [drawItemBitmap]; the glow methods here are inert, so they
+ * never silently flatten anything to a crisp-but-wrong vector shape. When the export is tagged,
+ * every primitive first tells the page's [PageTagger] what it is about to draw.
  */
-class PdfBoxRenderer(
+internal class PdfBoxRenderer(
     private val cs: PDPageContentStream,
-    private val doc: PDDocument,
+    private val ctx: PdfExportContext,
+    private val page: PDPage,
     ox: Double,
     oy: Double,
     s: Double,
+    private val turn: Affine = Affine.IDENTITY,
 ) : Renderer {
+
+    private val doc: PDDocument get() = ctx.doc
+
+    private val tagger: PageTagger? = ctx.tags?.page(page, cs)
+
+    init {
+        if (turn != Affine.IDENTITY) cs.transform(Matrix(turn.a.toFloat(), turn.b.toFloat(), turn.c.toFloat(), turn.d.toFloat(), turn.e.toFloat(), turn.f.toFloat()))
+    }
 
     // Affine content→user mapping (translation + axis scale only; never rotation/shear — PAL §1).
     private var ox = ox
     private var oy = oy
     private var sx = s
     private var sy = -s
+
+    // The opacity a saveLayerAlpha put in force; a translucent colour inside it multiplies with it.
+    private var layerAlpha = 1.0
     private val stack = ArrayDeque<DoubleArray>()
     private val scaleAbs get() = (abs(sx) + abs(sy)) / 2.0
 
@@ -58,18 +85,20 @@ class PdfBoxRenderer(
 
     // --- transform stack ---
     override fun save() {
-        stack.addLast(doubleArrayOf(ox, oy, sx, sy))
+        stack.addLast(doubleArrayOf(ox, oy, sx, sy, layerAlpha))
         cs.saveGraphicsState()
     }
 
     override fun restore() {
+        tagger?.restoring(stack.size - 1)
         cs.restoreGraphicsState()
-        stack.removeLastOrNull()?.let { ox = it[0]; oy = it[1]; sx = it[2]; sy = it[3] }
+        stack.removeLastOrNull()?.let { ox = it[0]; oy = it[1]; sx = it[2]; sy = it[3]; layerAlpha = it[4] }
     }
 
     override fun saveLayerAlpha(bounds: Rect, alpha: Double) {
         save()
-        cs.setGraphicsStateParameters(alphaState(alpha, null))
+        layerAlpha *= alpha.coerceIn(0.0, 1.0)
+        cs.setGraphicsStateParameters(ctx.graphicsState(layerAlpha))
     }
 
     override fun saveLayerBlended(bounds: Rect, alpha: Double, blend: PalBlend) {
@@ -79,7 +108,21 @@ class PdfBoxRenderer(
             PalBlend.SCREEN -> BlendMode.SCREEN
             PalBlend.SRC_OVER -> null
         }
-        cs.setGraphicsStateParameters(alphaState(alpha, pdfBlend))
+        layerAlpha *= alpha.coerceIn(0.0, 1.0)
+        cs.setGraphicsStateParameters(ctx.graphicsState(layerAlpha, pdfBlend))
+    }
+
+    /**
+     * Run [paint] at [color]'s own opacity. PDF keeps opacity in the graphics state rather than
+     * the colour, and a state set later replaces it instead of multiplying, so a translucent
+     * colour gets a state of its own, scoped by q/Q so the layer's opacity is back afterwards.
+     */
+    private inline fun translucent(color: Rgba, paint: () -> Unit) {
+        if (color.a >= 255) return paint()
+        cs.saveGraphicsState()
+        cs.setGraphicsStateParameters(ctx.graphicsState(layerAlpha * color.a / 255.0))
+        paint()
+        cs.restoreGraphicsState()
     }
 
     override fun translate(dx: Double, dy: Double) {
@@ -104,16 +147,22 @@ class PdfBoxRenderer(
     override fun fillBackground(rect: Rect, color: Rgba) = fillRect(rect, color)
 
     override fun fillRect(rect: Rect, color: Rgba) {
-        setFill(color)
-        rectPath(rect)
-        cs.fill()
+        tag()
+        translucent(color) {
+            setFill(color)
+            rectPath(rect)
+            cs.fill()
+        }
     }
 
     override fun fillPolygon(points: List<Pt>, color: Rgba, rule: FillRule) {
         if (points.size < 3) return
-        setFill(color)
-        polyPath(points, close = true)
-        if (rule == FillRule.EVEN_ODD) cs.fillEvenOdd() else cs.fill()
+        tag()
+        translucent(color) {
+            setFill(color)
+            polyPath(points, close = true)
+            if (rule == FillRule.EVEN_ODD) cs.fillEvenOdd() else cs.fill()
+        }
     }
 
     override fun fillCircle(center: Pt, radius: Double, color: Rgba) =
@@ -121,43 +170,59 @@ class PdfBoxRenderer(
 
     override fun fillEllipse(center: Pt, rx: Double, ry: Double, color: Rgba) {
         if (rx <= 0.0 || ry <= 0.0) return
-        setFill(color)
-        ellipsePath(center, rx, ry)
-        cs.fill()
+        tag()
+        translucent(color) {
+            setFill(color)
+            ellipsePath(center, rx, ry)
+            cs.fill()
+        }
     }
 
     // --- outlines ---
     override fun strokeRect(rect: Rect, pen: Pen) {
-        applyPen(pen)
-        rectPath(rect)
-        cs.stroke()
+        tag()
+        translucent(pen.color) {
+            applyPen(pen)
+            rectPath(rect)
+            cs.stroke()
+        }
     }
 
     override fun strokePolyline(points: List<Pt>, pen: Pen) {
         if (points.size < 2) return
-        applyPen(pen)
-        polyPath(points, close = false)
-        cs.stroke()
+        tag()
+        translucent(pen.color) {
+            applyPen(pen)
+            polyPath(points, close = false)
+            cs.stroke()
+        }
     }
 
     override fun strokePolygon(points: List<Pt>, pen: Pen) {
         if (points.size < 2) return
-        applyPen(pen)
-        polyPath(points, close = true)
-        cs.stroke()
+        tag()
+        translucent(pen.color) {
+            applyPen(pen)
+            polyPath(points, close = true)
+            cs.stroke()
+        }
     }
 
     override fun strokeEllipse(center: Pt, rx: Double, ry: Double, pen: Pen) {
         if (rx <= 0.0 || ry <= 0.0) return
-        applyPen(pen)
-        ellipsePath(center, rx, ry)
-        cs.stroke()
+        tag()
+        translucent(pen.color) {
+            applyPen(pen)
+            ellipsePath(center, rx, ry)
+            cs.stroke()
+        }
     }
 
     // --- raster ---
     override fun drawRaster(raster: RasterSurface, dest: Rect, src: Rect?) {
         val bmp = (raster as? AndroidRasterSurface)?.bitmap ?: return
         if (bmp.isRecycled) return
+        tag()
         placeBitmap(bmp, dest, multiply = false)
     }
 
@@ -181,6 +246,7 @@ class PdfBoxRenderer(
             val m = android.graphics.Matrix().apply { postRotate(o.toFloat()) }
             bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
         }
+        tag()
         if (angle == 0.0) placeBitmap(bmp, dest, multiply = false) else placeTurnedBitmap(bmp, dest, angle)
     }
 
@@ -213,10 +279,235 @@ class PdfBoxRenderer(
      * rect. [multiply] composites it with the page beneath via the Multiply blend mode — used for the
      * highlighter, so it tints the PDF/ink underneath instead of painting a flat translucent block.
      */
-    fun drawItemBitmap(bmp: Bitmap, dest: Rect, multiply: Boolean) = placeBitmap(bmp, dest, multiply)
+    fun drawItemBitmap(bmp: Bitmap, dest: Rect, multiply: Boolean) {
+        tag()
+        placeBitmap(bmp, dest, multiply)
+    }
 
+    /**
+     * A text box, as real text: laid out by the same [AndroidText.layout] the screen draws it with,
+     * then written a word and a space at a time where that layout puts them. Asking the layout for
+     * each position, rather than summing advances, keeps tab stops and right-to-left lines where
+     * the screen has them.
+     */
     override fun drawText(text: String, rect: Rect, font: FontSpec, color: Rgba, flags: TextFlags) {
-        // Text boxes are rasterized by the exporter for now. TODO: embed selectable PDF text instead.
+        if (text.isEmpty()) return
+        val layout = AndroidText.layout(text, rect.w.toInt(), AndroidText.textPaint(font))
+        val links = LinkFinder.find(text)
+        // Tagged, a word stops where a link starts or ends, so the link's text is an element of its own.
+        fun linkAt(k: Int): Int = if (tagger == null) -1 else links.indexOfFirst { k >= it.start && k < it.end }
+        for (line in 0 until layout.lineCount) {
+            val start = layout.getLineStart(line)
+            var end = layout.getLineEnd(line)
+            while (end > start && text[end - 1].isWhitespace()) end--
+            val baseline = rect.top + layout.getLineBaseline(line)
+            fun leftOf(a: Int, b: Int): Double =
+                rect.left + minOf(layout.getPrimaryHorizontal(a), layout.getPrimaryHorizontal(b)).toDouble()
+            var i = start
+            while (i < end) {
+                if (text[i] == ' ' || text[i] == '\t') {
+                    tagger?.boxLink = -1
+                    drawTextRun(" ", leftOf(i, i + 1), baseline, font, color)
+                    i++
+                    continue
+                }
+                val link = linkAt(i)
+                var j = i
+                while (j < end && text[j] != ' ' && text[j] != '\t' && linkAt(j) == link) j++
+                tagger?.boxLink = link
+                drawTextRun(text.substring(i, j), leftOf(i, j), baseline, font, color)
+                i = j
+            }
+            // A line broken at a space or a newline ends in one, so the words either side stay apart.
+            if (end < layout.getLineEnd(line)) {
+                tagger?.boxLink = -1
+                drawTextRun(" ", rect.left + layout.getPrimaryHorizontal(end), baseline, font, color)
+            }
+        }
+        for ((n, link) in links.withIndex()) {
+            for (line in layout.getLineForOffset(link.start)..layout.getLineForOffset(link.end - 1)) {
+                val a = maxOf(link.start, layout.getLineStart(line))
+                val b = minOf(link.end, layout.getLineEnd(line))
+                if (b <= a) continue
+                val x0 = minOf(layout.getPrimaryHorizontal(a), layout.getPrimaryHorizontal(b))
+                val x1 = maxOf(layout.getPrimaryHorizontal(a), layout.getPrimaryHorizontal(b))
+                val top = layout.getLineTop(line).toDouble()
+                val box = Rect(rect.left + x0, rect.top + top, (x1 - x0).toDouble(), layout.getLineBottom(line) - top)
+                val annot = linkAnnotation(box, link.uri) ?: continue
+                tagger?.boxLink = n
+                tagger?.annotate(annot.cosObject)
+            }
+        }
+        tagger?.boxLink = -1
+    }
+
+    override val writesText: Boolean get() = true
+
+    override fun beginMark(mark: Mark) {
+        tagger?.begin(mark)
+    }
+
+    override fun endMark() {
+        tagger?.end()
+    }
+
+    /** Close the page's open marked content. Call once the page is painted, before its stream ends. */
+    fun endPage() {
+        tagger?.close()
+    }
+
+    private fun tag(kind: PageTagger.Kind = PageTagger.Kind.GRAPHIC, latex: String? = null) {
+        tagger?.draw(kind, stack.size, latex)
+    }
+
+    // A bullet is a glyph of its own, so selecting a list copies "•" where the dot is.
+    override fun drawBullet(center: Pt, radius: Double, baseline: Double, font: FontSpec, color: Rgba) {
+        val sizePx = font.pointSize * AndroidText.POINTS_TO_PX
+        val k = 1000.0 / sizePx
+        val r = radius * k
+        val cy = (baseline - center.y) * k
+        val key = "bullet ${PdfNumbers.format(r, 1)} ${PdfNumbers.format(cy, 1)}"
+        val glyph = ctx.text.markGlyph(key, "•", 2 * r, doubleArrayOf(0.0, cy - r, 2 * r, cy + r)) {
+            StringBuilder().also { ellipseOps(it, r, cy, r) }.append("f\n").toString()
+        }
+        tag(PageTagger.Kind.TEXT)
+        showRun(PdfText.Run(listOf(glyph), doubleArrayOf(0.0)), center.x - radius, baseline, sizePx, color)
+    }
+
+    // A checkbox glyph: its outline as an even-odd ring, plus the inner square when checked.
+    override fun drawCheckbox(box: Rect, stroke: Double, checked: Boolean, baseline: Double, font: FontSpec, color: Rgba) {
+        val sizePx = font.pointSize * AndroidText.POINTS_TO_PX
+        val k = 1000.0 / sizePx
+        val outer = box.outset(stroke / 2.0)
+        val inner = box.outset(-stroke / 2.0)
+        val mark = box.outset(-box.w * 0.25)
+        fun rect(sb: StringBuilder, rc: Rect) {
+            for (v in doubleArrayOf((rc.left - outer.left) * k, (baseline - rc.bottom) * k, rc.w * k, rc.h * k)) {
+                PdfNumbers.append(sb, v, 1)
+                sb.append(' ')
+            }
+            sb.append("re\n")
+        }
+        val key = "box ${PdfNumbers.format(box.w * k, 1)} ${PdfNumbers.format(stroke * k, 1)} " +
+            "${PdfNumbers.format((baseline - box.bottom) * k, 1)} $checked"
+        val bbox = doubleArrayOf(0.0, (baseline - outer.bottom) * k, outer.w * k, (baseline - outer.top) * k)
+        val glyph = ctx.text.markGlyph(key, if (checked) "☑" else "☐", outer.w * k, bbox) {
+            StringBuilder().also { sb ->
+                rect(sb, outer)
+                if (inner.w > 0.0 && inner.h > 0.0) rect(sb, inner)
+                if (checked) rect(sb, mark)
+                sb.append("f*\n")
+            }.toString()
+        }
+        tag(PageTagger.Kind.TEXT)
+        showRun(PdfText.Run(listOf(glyph), doubleArrayOf(0.0)), outer.left, baseline, sizePx, color)
+    }
+
+    /** A closed ellipse at ([cx], [cy]) with radii [rx] (and [ry]) in whatever space [sb] is in. */
+    private fun ellipseOps(sb: StringBuilder, rx: Double, cy: Double, ry: Double, cx: Double = rx) {
+        val k = 0.5522847498307936
+        fun p(x: Double, y: Double) {
+            PdfNumbers.append(sb, x, 1)
+            sb.append(' ')
+            PdfNumbers.append(sb, y, 1)
+            sb.append(' ')
+        }
+        p(cx + rx, cy); sb.append("m\n")
+        p(cx + rx, cy + ry * k); p(cx + rx * k, cy + ry); p(cx, cy + ry); sb.append("c\n")
+        p(cx - rx * k, cy + ry); p(cx - rx, cy + ry * k); p(cx - rx, cy); sb.append("c\n")
+        p(cx - rx, cy - ry * k); p(cx - rx * k, cy - ry); p(cx, cy - ry); sb.append("c\n")
+        p(cx + rx * k, cy - ry); p(cx + rx, cy - ry * k); p(cx + rx, cy); sb.append("c\nh\n")
+    }
+
+    // A formula is one glyph: vector outlines on the page, its LaTeX when copied.
+    override fun drawMath(latex: String, x: Double, baseline: Double, sizePt: Double, color: Rgba, display: Boolean) {
+        val glyph = ctx.text.formulaGlyph(latex, sizePt, color, display) ?: return
+        tag(PageTagger.Kind.TEXT, latex)
+        showRun(PdfText.Run(listOf(glyph), doubleArrayOf(0.0)), x, baseline, sizePt * AndroidText.POINTS_TO_PX, color)
+    }
+
+    /** Make [link]'s share of the flow open its address when clicked. */
+    fun addFlowLink(link: PlacedLink) {
+        val annot = linkAnnotation(link.rect, link.uri) ?: return
+        tagger?.annotateFlow(annot.cosObject, link.para, link.link)
+    }
+
+    /**
+     * Make [rect] (content space) open [uri] when clicked, drawing nothing: an address in the text
+     * looks exactly as it does on screen, and the link lies over it. Null for an empty [rect].
+     */
+    private fun linkAnnotation(rect: Rect, uri: String): PDAnnotationLink? {
+        if (rect.w <= 0.0 || rect.h <= 0.0) return null
+        val link = PDAnnotationLink()
+        link.rectangle = userRect(rect)
+        link.action = PDActionURI().apply { this.uri = uri }
+        link.border = COSArray().apply { repeat(3) { add(COSInteger.ZERO) } }
+        link.contents = uri
+        val annots = page.annotations
+        annots.add(link)
+        page.annotations = annots
+        return link
+    }
+
+    /** [rect] (content space) in the page's user space, where annotations are placed: [turn] doesn't reach them. */
+    private fun userRect(rect: Rect): PDRectangle {
+        if (turn == Affine.IDENTITY) return PDRectangle(ux(rect.left), uy(rect.bottom), (rect.w * abs(sx)).toFloat(), (rect.h * abs(sy)).toFloat())
+        val box = Rect.bounding(listOf(Pt(ox + rect.left * sx, oy + rect.top * sy), Pt(ox + rect.right * sx, oy + rect.bottom * sy)).map(turn::apply))
+        return PDRectangle(box.left.toFloat(), box.top.toFloat(), box.w.toFloat(), box.h.toFloat())
+    }
+
+    // Real text through the export's Type 3 fonts: each glyph pinned to the x the screen draws it at.
+    override fun drawTextRun(text: String, x: Double, baseline: Double, font: FontSpec, color: Rgba) {
+        if (text.isEmpty()) return
+        val run = ctx.text.shape(text, font)
+        if (run.glyphs.isEmpty()) return
+        tag(PageTagger.Kind.TEXT)
+        showRun(run, x, baseline, font.pointSize * AndroidText.POINTS_TO_PX, color)
+    }
+
+    /**
+     * Write [run] as one text object with its origin at ([x], [baseline]) in content space, in a
+     * font of [sizePx] content px. Glyphs of one run can live in several of the export's fonts, so
+     * the font is switched wherever the next glyph needs another; the pen carries across.
+     */
+    private fun showRun(run: PdfText.Run, x: Double, baseline: Double, sizePx: Double, color: Rgba) = translucent(color) {
+        val size = (sizePx * abs(sy)).toFloat()
+        cs.beginText()
+        setFill(color)
+        cs.setTextMatrix(Matrix((abs(sx) / abs(sy)).toFloat(), 0f, 0f, 1f, ux(x), uy(baseline)))
+        val widths = DoubleArray(run.glyphs.size) { run.glyphs[it].width }
+        val adj = GlyphPlacement.adjustments(widths, run.offsets, sizePx)
+        val sb = StringBuilder(run.glyphs.size * 4 + 16)
+        var font: Type3Font? = null
+        var inHex = false
+        for ((i, g) in run.glyphs.withIndex()) {
+            if (g.font !== font) {
+                if (font != null) {
+                    if (inHex) sb.append('>')
+                    sb.append("] TJ\n")
+                    cs.appendRawCommands(sb.toString())
+                    sb.setLength(0)
+                }
+                cs.setFont(g.font.pd, size)
+                font = g.font
+                sb.append('[')
+                inHex = false
+            }
+            if (adj[i] != 0.0) {
+                if (inHex) sb.append('>')
+                sb.append(' ')
+                PdfNumbers.append(sb, adj[i], 1)
+                sb.append(' ')
+                inHex = false
+            }
+            if (!inHex) sb.append('<')
+            inHex = true
+            sb.append(HEX[g.code shr 4]).append(HEX[g.code and 15])
+        }
+        if (inHex) sb.append('>')
+        sb.append("] TJ\n")
+        cs.appendRawCommands(sb.toString())
+        cs.endText()
     }
 
     private fun placeBitmap(bmp: Bitmap, dest: Rect, multiply: Boolean) {
@@ -228,7 +519,7 @@ class PdfBoxRenderer(
         val h = (dest.h * abs(sy)).toFloat()
         if (multiply) {
             cs.saveGraphicsState()
-            cs.setGraphicsStateParameters(PDExtendedGraphicsState().apply { blendMode = BlendMode.MULTIPLY })
+            cs.setGraphicsStateParameters(ctx.graphicsState(layerAlpha, BlendMode.MULTIPLY))
             cs.drawImage(img, llx, lly, w, h)
             cs.restoreGraphicsState()
         } else {
@@ -284,18 +575,11 @@ class PdfBoxRenderer(
         cs.closePath()
     }
 
-    private fun alphaState(alpha: Double, blend: BlendMode?): PDExtendedGraphicsState {
-        val a = alpha.coerceIn(0.0, 1.0).toFloat()
-        return PDExtendedGraphicsState().apply {
-            nonStrokingAlphaConstant = a
-            strokingAlphaConstant = a
-            if (blend != null) blendMode = blend
-        }
-    }
-
     companion object {
         /** Long-edge cap (px) for an exported image XObject: keeps detail without ballooning the PDF. */
         private const val EXPORT_CAP_PX = 4096
+
+        private const val HEX = "0123456789ABCDEF"
 
         // Vector images rasterize at 4 px per PDF point (288 dpi), a print-quality density.
         private const val VECTOR_EXPORT_SCALE = 4.0

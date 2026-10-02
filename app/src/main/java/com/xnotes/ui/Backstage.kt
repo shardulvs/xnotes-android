@@ -134,6 +134,7 @@ import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import com.xnotes.R
 import com.xnotes.core.model.Rgba
+import com.xnotes.platform.PdfOpenError
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.ui.platform.LocalContext
@@ -1868,7 +1869,9 @@ private fun ExplorerSection(
                         val uri = editor.commitImportAsync(root, pendingImport.parentDocId ?: currentDocId, n)
                         when {
                             uri != null -> refreshKey++
-                            editor.pendingImport != null -> fieldError = context.getString(R.string.err_save_that_note) // genuine failure; keep the prompt
+                            editor.pendingImport != null -> fieldError = context.getString( // genuine failure; keep the prompt
+                                if (editor.lastImportError == PdfOpenError.PASSWORD) R.string.err_pdf_password else R.string.err_save_that_note,
+                            )
                             // else: cancelled — the prompt already dismissed (pendingImport cleared)
                         }
                     }

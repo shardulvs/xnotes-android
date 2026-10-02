@@ -258,6 +258,16 @@ class MainActivity : ComponentActivity() {
         editor?.persist()
     }
 
+    @Suppress("DEPRECATION") // RUNNING_* still arrive below Android 14
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        // The canvas keeps its rendered pages, so PDFium's pages and glyph caches can go while the
+        // UI is hidden; they load again when something new is drawn.
+        if (level >= TRIM_MEMORY_UI_HIDDEN || level == TRIM_MEMORY_RUNNING_LOW || level == TRIM_MEMORY_RUNNING_CRITICAL) {
+            com.xnotes.platform.PdfiumDocument.trimAll()
+        }
+    }
+
     private fun applyFullscreen(fullscreen: Boolean) {
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         if (fullscreen) {
@@ -285,8 +295,10 @@ private fun EditorScreen(
     val mathMeasurer = rememberLatexMeasurer()
     val mathExporter = rememberLatexExporter()
     val mathDensity = LocalDensity.current
-    LaunchedEffect(mathMeasurer, mathExporter, mathDensity) {
-        com.xnotes.platform.MathRendering.install(mathMeasurer, mathExporter, mathDensity)
+    val mathText = androidx.compose.ui.text.rememberTextMeasurer()
+    val mathFonts = com.xnotes.platform.LatexInternals.defaultFonts()
+    LaunchedEffect(mathMeasurer, mathExporter, mathDensity, mathText, mathFonts) {
+        com.xnotes.platform.MathRendering.install(mathMeasurer, mathExporter, mathDensity, mathText, mathFonts)
         com.xnotes.core.model.TextItem.mathTypesetter = com.xnotes.platform.MathRendering
         editor.refreshFlowMath()
     }
@@ -1356,16 +1368,14 @@ private fun EditorPane(
                         com.xnotes.ui.TextStyleBar(editor)
                         com.xnotes.ui.LongPressMenu(editor, onInsertImageAt = { c -> actions.onInsertImage(editor, c) }, onTakePhotoAt = { c -> actions.onTakePhoto(editor, c) })
                         com.xnotes.ui.FlowEditMenu(editor)
+                        com.xnotes.ui.PdfSelectionMenu(editor)
+                        com.xnotes.ui.MarkupNotePeek(editor)
+                        com.xnotes.ui.MarkupMenu(editor)
+                        com.xnotes.ui.MarkupNoteDialog(editor)
                         com.xnotes.ui.SlashMenu(editor)
                         com.xnotes.ui.FlowTableMenu(editor)
                         com.xnotes.ui.TableChrome(editor)
-                        if (editor.findOpen) com.xnotes.ui.FindBar(
-                            editor.findQuery, editor::setFind,
-                            if (editor.findQuery.isBlank()) "" else if (editor.findHits.isEmpty()) "0 / 0" else "${editor.findIndex + 1} / ${editor.findHits.size}",
-                            { editor.findStep(false) }, { editor.findStep(true) }, { editor.toggleFind() },
-                        )
                         ZoomLockHint(editor)
-                        RefiningPdfHint(editor)
                         CanvasToastPill(editor)
                     }
                 }
@@ -1650,54 +1660,6 @@ private fun PdfImportBatchDialog(done: Int, total: Int, onCancel: () -> Unit) {
             androidx.compose.material3.TextButton(onClick = onCancel) {
                 Text(stringResource(R.string.cancel), color = palette.accent.toComposeColor())
             }
-        }
-    }
-}
-
-/**
- * Subtle, non-blocking hint shown bottom-right while a dark-mode PDF's embedded-image colours are
- * still being parsed by the up-front background sweep ([Editor.isRefiningPdf]). The pages are already
- * visible; this just shows a `k/N` progress bar so the user can keep scrolling and drawing while the
- * remaining pages' images snap to their true colours.
- */
-@Composable
-private fun BoxScope.RefiningPdfHint(editor: Editor) {
-    val palette = LocalPalette.current
-    AnimatedVisibility(
-        visible = editor.isRefiningPdf,
-        modifier = Modifier.align(Alignment.BottomEnd).padding(com.xnotes.ui.LocalToolbarCover.current).padding(12.dp),
-        enter = fadeIn(),
-        exit = fadeOut(),
-    ) {
-        val total = editor.refiningTotal
-        val done = editor.refiningDone
-        val fraction = if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else 0f
-        Column(
-            // Fixed width so the bar's fillMaxWidth tracks the chip (not the whole screen); the label
-            // wraps to two tidy lines under it.
-            modifier = Modifier
-                .width(190.dp)
-                .clip(MaterialTheme.shapes.small)
-                .background(palette.surface.toComposeColor())
-                .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.small)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-        ) {
-            androidx.compose.material3.LinearProgressIndicator(
-                progress = { fraction },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(2.dp)),
-                color = palette.accent.toComposeColor(),
-                trackColor = palette.border.toComposeColor(),
-                drawStopIndicator = {}, // no trailing dot
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                stringResource(R.string.refining_pdf_colours, done, total),
-                color = palette.textDim.toComposeColor(),
-                fontSize = 13.sp,
-            )
         }
     }
 }

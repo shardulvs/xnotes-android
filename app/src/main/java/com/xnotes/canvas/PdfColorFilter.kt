@@ -49,6 +49,17 @@ object PdfColorFilter {
         return m
     }
 
+    /** [c] through matrix [m], as a pixel of that colour comes out. */
+    fun apply(m: FloatArray, c: Rgba): Rgba {
+        fun channel(row: Int): Int =
+            (m[row * 5] * c.r + m[row * 5 + 1] * c.g + m[row * 5 + 2] * c.b + m[row * 5 + 3] * c.a + m[row * 5 + 4])
+                .toInt().coerceIn(0, 255)
+        return Rgba(channel(0), channel(1), channel(2), c.a)
+    }
+
+    /** Whether [m] turns black light, as an invert does: a multiply on the page then shows as a screen. */
+    fun lightensBlack(m: FloatArray): Boolean = (m[4] + m[9] + m[14]) / 3f > 127.5f
+
     /** Alpha is meaningless for a blend colour, so only the channels are compared. */
     private fun Rgba.rgbEquals(o: Rgba): Boolean = r == o.r && g == o.g && b == o.b
 

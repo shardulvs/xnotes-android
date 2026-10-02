@@ -95,6 +95,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         onCommitStroke = { commitStroke(it) },
         onEraseBegin = { EraseSession(document) },
         onEraseEnd = { commitErase(it) },
+        onEraseLifted = { maybeSwitchBackAfterErase() },
         onEraserCursor = { at, radius -> view.setEraserCursor(at, radius) },
         onPendingShape = { publishPendingShape(it) },
         onCommitShape = { commitItem(it) },
@@ -383,10 +384,58 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     // --- tools ---
 
+    /** The single tool armed before this one, for the tap-gesture toggles; null until a switch. */
+    private var previousTool: Tool? = null
+
+    /** The tools the eraser and the select tool replaced, for their "switch back" options. */
+    private var toolBeforeEraser: Tool? = null
+    private var toolBeforeSelect: Tool? = null
+
     fun armTool(next: Tool) {
         // Leaving the selection tools drops the selection, so its chrome cannot linger over ink.
         if (tool != next && (tool == Tool.SELECT || tool == Tool.LASSO)) interaction.clearSelection()
+        // After the clear, so a long-press grab's borrowed selection tool is never remembered.
+        if (tool != next) {
+            previousTool = tool
+            if (next == Tool.ERASER) toolBeforeEraser = tool
+            if (next == Tool.SELECT) toolBeforeSelect = tool
+        }
         adoptTool(next)
+    }
+
+    /**
+     * "Switch back after erasing", as on a note: a lifted drag of the armed eraser re-arms the pen
+     * it replaced. A stylus-tip or side-button erase never armed the eraser, so it is left alone.
+     */
+    private fun maybeSwitchBackAfterErase() {
+        if (tool != Tool.ERASER || !toolConfig(Tool.ERASER).switchBackAfterErase) return
+        toolBeforeEraser?.takeIf { it.isStroke }?.let { armTool(it) }
+    }
+
+    /**
+     * "Switch back after a selection action", as on a note: a move, resize, turn or menu action of
+     * the select tool re-arms the pen it replaced. A long-press grab gives its tool back by itself.
+     */
+    private fun maybeSwitchBackAfterSelect() {
+        if (interaction.grabbing) return
+        if (tool != Tool.SELECT || !toolConfig(Tool.SELECT).switchBackAfterSelect) return
+        toolBeforeSelect?.takeIf { it.isStroke }?.let { armTool(it) }
+    }
+
+    /** Run the action a finger or stylus tap is mapped to, as the paged editor does. */
+    fun dispatchTapGesture(action: String) {
+        when (action) {
+            "undo" -> undo()
+            "redo" -> redo()
+            "toggle_pan" -> toggleTool(Tool.PAN)
+            "toggle_eraser" -> toggleTool(Tool.ERASER)
+            "toggle_previous" -> previousTool?.let { armTool(it) }
+        }
+    }
+
+    /** Arm [target], or if it is already armed, return to the previous tool. */
+    private fun toggleTool(target: Tool) {
+        if (tool == target) previousTool?.let { armTool(it) } else armTool(target)
     }
 
     /** Show a tool the gesture layer armed by itself: a long-press grab, and its release. */
@@ -450,11 +499,17 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         interaction.clearSelection()
         markDirty()
         refresh()
+        maybeSwitchBackAfterSelect()
     }
 
     override fun copySelection() {
         if (selection.isEmpty) return
-        if (!suppressToast) showToast("Copied")
+        copyToClipboard()
+        showToast("Copied")
+        maybeSwitchBackAfterSelect()
+    }
+
+    private fun copyToClipboard() {
         clipboard.clear()
         clipboardFromCut = false
         selection.items.mapTo(clipboard) { it.deepCopy(textMeasurer) }
@@ -462,10 +517,10 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     override fun cutSelection() {
         if (selection.isEmpty) return
-        suppressToast = true
-        copySelection()
+        copyToClipboard()
         clipboardFromCut = true
-        deleteSelection()
+        suppressToast = true
+        deleteSelection() // also runs the select tool's switch-back, once
         suppressToast = false
         showToast("Cut")
     }
@@ -481,6 +536,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         markDirty()
         refresh()
         publishOverlay()
+        maybeSwitchBackAfterSelect()
     }
 
     /**
@@ -496,6 +552,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         markDirty()
         refresh()
         publishOverlay()
+        maybeSwitchBackAfterSelect()
     }
 
     // Tables are a paged-note feature; the infinite canvas has none.
@@ -599,12 +656,14 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         if (selection.isEmpty) return
         val before = document.items.toList()
         val after = com.xnotes.core.infinite.bringToFrontOrder(before, selection.items)
-        if (com.xnotes.core.infinite.sameOrder(before, after)) return
-        document.replaceAll(after)
-        history.push(ReplaceCanvasItems(document, before, after))
-        markDirty()
-        refresh()
-        publishOverlay()
+        if (!com.xnotes.core.infinite.sameOrder(before, after)) {
+            document.replaceAll(after)
+            history.push(ReplaceCanvasItems(document, before, after))
+            markDirty()
+            refresh()
+            publishOverlay()
+        }
+        maybeSwitchBackAfterSelect()
     }
 
     override fun selectionStyles(): List<DrawStyle> = selection.items.mapNotNull { DrawStyle.of(it) }
@@ -1125,6 +1184,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         history.push(command)
         markDirty()
         refresh()
+        maybeSwitchBackAfterSelect()
     }
 
     /** The shape being dragged out, drawn live over the committed geometry like a wet stroke. */

@@ -32,3 +32,7 @@
 # --- ONNX Runtime (handwritten maths add-on) ----------------------------------------------------
 # The native library calls back into its Java classes through JNI by name.
 -keep class ai.onnxruntime.** { *; }
+
+# --- PDFium JNI ---------------------------------------------------------------------------------
+# pdf_jni.cpp reads CancelToken.isCancelled by name while a render runs.
+-keepclassmembers class com.xnotes.platform.CancelToken { boolean isCancelled; }

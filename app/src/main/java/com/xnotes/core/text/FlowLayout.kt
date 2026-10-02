@@ -82,6 +82,7 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
         val runEnds: IntArray,
         val runMetrics: Array<LineMetrics>,
         val runFonts: Array<FontSpec>,
+        val emptyFont: FontSpec,
         val emptyMetrics: LineMetrics,
         /**
          * True for characters that *continue* a drawn formula. A line may still
@@ -193,6 +194,7 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
             text, adv, runEnds,
             @Suppress("UNCHECKED_CAST") (runMetrics as Array<LineMetrics>),
             @Suppress("UNCHECKED_CAST") (runFonts as Array<FontSpec>),
+            emptyFont,
             measurer.metrics(emptyFont),
             atom,
             mathShow,
@@ -734,7 +736,7 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
                 // spaces would hand the painter pieces of LaTeX to set separately.
                 val show = shape.mathShow[r]
                 if (show == MathShow.FORMULA) {
-                    segs.add(Seg(shape.text.substring(from, to), xs[from - bl.startChar], font, style, math = true))
+                    segs.add(Seg(shape.text.substring(from, to), xs[from - bl.startChar], font, style, math = true, start = from))
                     mathStarts += from
                     runStart = runEnd
                     continue
@@ -753,7 +755,7 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
                     var e = s
                     while (e < to && shape.text[e] != ' ') e++
                     if (spans == null) {
-                        segs.add(Seg(shape.text.substring(s, e), xs[s - bl.startChar], font, style))
+                        segs.add(Seg(shape.text.substring(s, e), xs[s - bl.startChar], font, style, start = s))
                     } else {
                         emitHighlighted(shape, spans, s, e, xs, bl.startChar, font, style, segs)
                     }
@@ -784,7 +786,15 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
             codeLeft = contentRect.left + indentPx,
             codeRight = contentRect.right,
             mathStarts = mathStarts.toIntArray(),
+            font = lineFont(shape, bl.startChar),
         )
+    }
+
+    /** The font of the run holding character [at], or the empty paragraph's when there is none. */
+    private fun lineFont(shape: ParaShape, at: Int): FontSpec {
+        if (shape.text.isEmpty()) return shape.emptyFont
+        for (r in shape.runEnds.indices) if (at < shape.runEnds[r]) return shape.runFonts[r]
+        return shape.runFonts.lastOrNull() ?: shape.emptyFont
     }
 
     /**
@@ -830,7 +840,7 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
                 minOf(to, spans.firstOrNull { it.start > i }?.start ?: to)
             }
             val st = if (covering != null) style.copy(color = covering.color) else style
-            segs.add(Seg(shape.text.substring(i, boundary), xs[i - blStart], font, st))
+            segs.add(Seg(shape.text.substring(i, boundary), xs[i - blStart], font, st, start = i))
             i = boundary
         }
     }

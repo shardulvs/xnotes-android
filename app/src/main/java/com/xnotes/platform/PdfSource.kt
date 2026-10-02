@@ -1,98 +1,84 @@
 package com.xnotes.platform
 
-import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
-import android.graphics.Matrix
 import android.graphics.Paint
-import android.graphics.Path
-import android.graphics.PointF
 import android.graphics.Rect
 import android.graphics.RectF
-import android.graphics.pdf.PdfRenderer
-import android.os.Build
-import android.os.ParcelFileDescriptor
-import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
-import com.tom_roush.pdfbox.contentstream.PDFGraphicsStreamEngine
-import com.tom_roush.pdfbox.contentstream.operator.Operator
-import com.tom_roush.pdfbox.contentstream.operator.OperatorName
-import com.tom_roush.pdfbox.contentstream.operator.OperatorProcessor
-import com.tom_roush.pdfbox.cos.COSBase
-import com.tom_roush.pdfbox.cos.COSName
-import com.tom_roush.pdfbox.io.MemoryUsageSetting
-import com.tom_roush.pdfbox.pdmodel.PDDocument
-import com.tom_roush.pdfbox.pdmodel.PDPage
-import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImage
 import com.xnotes.canvas.PdfPageFilter
+import com.xnotes.core.model.TextMarkup
+import com.xnotes.core.pdf.MarkupPainter
+import com.xnotes.core.pdf.PdfPageGeometry
+import com.xnotes.core.search.SearchText
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.roundToInt
 
 /**
- * A tappable link discovered on a PDF page. [frac] is the link's rectangle as a page fraction
- * (0..1, top-left origin, matching the rendered bitmap and the image-box cache). Exactly one
- * target is set: an external [url] (web/mailto), or an internal [destPage] (0-based source-PDF
- * page to jump to). Plain data only, so the cache survives closing the PdfBox model.
+ * A tappable link discovered on a PDF page. [rect] is the link's area in points as the page is
+ * displayed (top-left origin, /Rotate applied). Exactly one target is set: an external [url]
+ * (web/mailto), or an internal [destPage] (0-based source-PDF page to jump to).
  */
-data class PdfLink(val frac: RectF, val url: String?, val destPage: Int?)
+data class PdfLink(val rect: RectF, val url: String?, val destPage: Int?)
 
 /**
- * Reads and rasterizes a PDF via the framework [PdfRenderer] (PAL §14). Pages
- * are reported in PostScript points and rendered on demand into ARGB surfaces;
- * a [PdfPageFilter] applies the note's colour filters (invert/contrast/…) to
- * the rendered pixels.
+ * Reads and rasterizes a PDF through [PdfiumDocument] (PAL §14). Pages are
+ * reported in PostScript points and rendered on demand into ARGB surfaces; a
+ * [PdfPageFilter] applies the note's colour filters (invert/contrast/…) to the
+ * rendered pixels.
  *
  * When the filter inverts, [renderPage]/[renderRegion] can keep embedded images
  * in their original colours ([PdfPageFilter.stampImages]): the whole page is
- * filtered as usual, then the original pixels — through the filter chain minus
- * its invert stage — are re-stamped over each image's bounding box. Image boxes
- * come from parsing the PDF content stream with PdfBox-Android — used *only* to
- * read placements, never to rasterize. PdfBox is loaded lazily on first use, so
- * when the feature is off it is never touched.
+ * filtered as usual, then the original pixels are stamped back over each image's
+ * box, which PDFium reads from the page's objects with the render.
+ *
+ * Text markups are painted onto the raw raster before either, so they invert with the page and a
+ * highlight over a photo is stamped back with it.
  */
 class PdfSource private constructor(
-    private val appContext: Context,
-    /** The on-disk PDF this source reads (memory-mapped by the renderer). Owned by the caller, **not**
-     *  by this PdfSource — [close] never deletes it, so several sources can read one file safely. */
+    /** The on-disk PDF this source reads. Owned by the caller, **not** by this PdfSource — [close]
+     *  never deletes it, so several sources can read one file safely. */
     val file: File,
-    private val pfd: ParcelFileDescriptor,
-    private val renderer: PdfRenderer,
+    private val pdf: PdfiumDocument,
 ) {
-    /** Fixed for the document's life, so it is read once and never off a closed [renderer]. */
-    val pageCount: Int = renderer.pageCount
+    /** Pages in the PDF, 0 when it did not open. Waits for the open, so not on the main thread. */
+    val pageCount: Int get() = pdf.pageCount
 
-    /** PdfBox model, loaded lazily the first time image boxes are requested. Guarded by [pdfBoxLock]. */
-    @Volatile private var pdfBoxDoc: PDDocument? = null
-    private var pdfBoxLoadFailed = false
+    /** Why the PDF did not open, null when it did. Waits for the open. */
+    val openError: PdfOpenError? get() = pdf.error
 
-    /** Set once the image sweep finishes and [releasePdfBoxModel] closes [pdfBoxDoc] to reclaim its
-     *  heap; [pdfBoxDocument] won't reload it, since every page's image rects are already cached.
-     *  (Links don't use PdfBox at all — they read native annotations from the framework [renderer]
-     *  on API 35+; PdfBox here is image-only.) */
-    private var pdfBoxReleased = false
+    /** The text of the pages last touched, for selecting and copying. */
+    val text = PageTextCache { pdf.pageText(it, PdfPriority.INTERACTIVE) }
 
-    /**
-     * Monitor for all PdfBox state ([pdfBoxDoc], [pdfBoxLoadFailed], parsing). Deliberately separate
-     * from the instance monitor that serializes the non-thread-safe [PdfRenderer], so a slow first
-     * [PDDocument.load] on the prep worker can never block an on-screen page render.
-     */
-    private val pdfBoxLock = Any()
+    /** Page [index]'s text to search, from the held text when there is one; null once closed. Waits, so not on the main thread. */
+    fun searchText(index: Int): SearchText? {
+        if (closed) return null
+        text.peek(index)?.let { return SearchText.of(it) }
+        return pdf.searchText(index, PdfPriority.SEARCH)
+    }
 
-    /** Per-page image boxes as normalized page fractions (top-left origin); parsed once, cached. */
-    private val imageRects = ConcurrentHashMap<Int, List<RectF>>()
+    /** Page sizes in points already read, by page. */
+    private val pageSizes = ConcurrentHashMap<Int, Pair<Float, Float>>()
 
-    /** PDF hyperlinks are read straight from the framework [PdfRenderer] (pdfium), which only exposes
-     *  link annotations on Android 15+ (API 35). Below that the feature is **disabled**: there is no
-     *  PdfBox fallback, because the short-lived per-parse [PDDocument] reload it would need re-parses
-     *  the whole file on every page settle and drained battery (see svs_doc, "Post-mortem 2"). */
-    private val linksSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM
+    /** Page geometries already read, by page. */
+    private val geometries = ConcurrentHashMap<Int, PdfPageGeometry>()
 
-    /** Immutable snapshot of one page's parsed links (page fractions, top-left origin). */
+    /** How page [index]'s user space maps to its points as displayed; null once closed. Waits, so not on the main thread. */
+    fun pageGeometry(index: Int): PdfPageGeometry? {
+        geometries[index]?.let { return it }
+        if (closed) return null
+        return pdf.pageGeometry(index, PdfPriority.THUMBNAIL)?.also { geometries[index] = it }
+    }
+
+    /** Image boxes in points (l, t, r, b per image, top-left origin) already read, by page. */
+    private val imageRects = ConcurrentHashMap<Int, FloatArray>()
+
+    /** Immutable snapshot of one page's parsed links. */
     private class PageLinks(val index: Int, val links: List<PdfLink>)
 
     /** Only the **current** page's links are held, replaced as the canvas moves — so link memory is
@@ -106,107 +92,110 @@ class PdfSource private constructor(
     /** Single-flight guard for the warm pump, so a burst of [warmLinks] folds into one worker pass. */
     private val linkPumpActive = AtomicBoolean(false)
 
-    /** Single daemon worker for PdfBox parsing; created on first use, shut down in [close]. */
-    private var imagesExecutor: ExecutorService? = null
-
-    /** Separate daemon worker for link parsing, so coalesced warm parses never queue behind the
-     *  (possibly long) dark-mode image sweep on [imagesExecutor]; both still serialize PDDocument
-     *  access on [pdfBoxLock]. Created on first use, shut down in [close]. */
+    /** Daemon worker for link parsing. Created on first use, shut down in [close]. */
     private var linksExecutor: ExecutorService? = null
 
-    /** Guards [imagesExecutor]'s lifecycle. Kept off [pdfBoxLock] so scheduling a parse never waits
-     *  on a load already running on the worker. */
+    /** Guards [linksExecutor]'s lifecycle. */
     private val executorLock = Any()
 
     @Volatile private var closed = false
 
-    /**
-     * Invoked (on the prep worker thread) once a page's image rects have been parsed and are ready
-     * to stamp. The canvas wires this to refresh the page's background cache and repaint; the
-     * callback must hop to the main thread itself.
-     */
-    @Volatile var onImagesReady: ((index: Int) -> Unit)? = null
-
-    /**
-     * Invoked (on the prep worker) after each page is handled during the up-front [prepAllImages]
-     * sweep, with `(pagesParsed, totalPages)`, so the UI can drive a "Refining PDF colours k/N pages…"
-     * progress bar. The callback must hop to the main thread itself.
-     */
-    @Volatile var onImagesProgress: ((done: Int, total: Int) -> Unit)? = null
-
-    /** Latches true once [prepAllImages] has enqueued the whole-document sweep (once per source). */
-    @Volatile private var sweepRequested = false
-
-    /** Page size in points (1 pt = 1/72 inch). */
-    @Synchronized
-    fun pageSizePoints(index: Int): Pair<Int, Int>? {
-        if (closed || index !in 0 until pageCount) return null
-        val page = renderer.openPage(index)
-        val size = page.width to page.height
-        page.close()
-        return size
+    /** Page size in points (1 pt = 1/72 inch) as displayed, its /Rotate applied; 0x0 for a broken page. */
+    fun pageSizePoints(index: Int): Pair<Float, Float>? {
+        pageSizes[index]?.let { return it }
+        if (closed) return null
+        val s = pdf.pageSizes(index, 1, priority())?.takeIf { it.size == 2 } ?: return null
+        return (s[0] to s[1]).also { pageSizes[index] = it }
     }
 
-    @Synchronized
-    fun renderPage(index: Int, widthPx: Int, heightPx: Int, filter: PdfPageFilter = PdfPageFilter.NONE): AndroidRasterSurface? {
-        if (closed || index !in 0 until pageCount) return null
+    /** Every page's size in points, width then height, for importing a whole PDF. Read in slices, so
+     *  renders get their turn. */
+    fun allPageSizePoints(): FloatArray? {
+        val n = pageCount
+        val out = FloatArray(2 * n)
+        for (from in 0 until n step SIZES_PER_READ) {
+            if (closed) return null
+            val part = pdf.pageSizes(from, SIZES_PER_READ, priority()) ?: return null
+            part.copyInto(out, 2 * from)
+        }
+        return out
+    }
+
+    /** The whole page [index] fitted to [widthPx] × [heightPx], with [markups] on it. */
+    fun renderPage(
+        index: Int,
+        widthPx: Int,
+        heightPx: Int,
+        filter: PdfPageFilter = PdfPageFilter.NONE,
+        markups: List<TextMarkup> = emptyList(),
+    ): AndroidRasterSurface? {
         val w = widthPx.coerceIn(1, MAX_DIM)
         val h = heightPx.coerceIn(1, MAX_DIM)
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        bmp.eraseColor(Color.WHITE)
-        val page = renderer.openPage(index)
-        page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-        page.close()
-        val m = filter.pageMatrix ?: return AndroidRasterSurface(bmp)
-
-        val filtered = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        Canvas(filtered).drawBitmap(bmp, 0f, 0f, matrixPaint(m))
-        if (filter.stampImages) {
-            keepImageColors(index, filtered, bmp, fullWpx = w, fullHpx = h, offsetXpx = 0, offsetYpx = 0)
-        }
-        bmp.recycle()
-        return AndroidRasterSurface(filtered)
+        return render(index, w, h, 0, 0, w, h, filter, markups)
     }
 
     /**
      * Render only the sub-rectangle ([regionLeftPx], [regionTopPx], [regionWpx], [regionHpx]) of
-     * the page — coordinates in the page's own pixel space, where the whole page spans
-     * [fullWpx] × [fullHpx] — into a [regionWpx] × [regionHpx] bitmap. The page is never allocated
-     * at full size; only the region bitmap is, so a high-zoom viewport region can be rasterized at
-     * full resolution without a giant whole-page bitmap.
+     * page [index] drawn at [pxPerPt] pixels per point, in pixels from the page's top-left corner,
+     * into a [regionWpx] × [regionHpx] bitmap. The page is never allocated at full size; only the
+     * region bitmap is, so a high-zoom viewport region can be rasterized at full resolution
+     * without a giant whole-page bitmap. [markups] are drawn on it.
      */
-    @Synchronized
     fun renderRegion(
         index: Int,
-        fullWpx: Int,
-        fullHpx: Int,
+        pxPerPt: Double,
         regionLeftPx: Int,
         regionTopPx: Int,
         regionWpx: Int,
         regionHpx: Int,
         filter: PdfPageFilter = PdfPageFilter.NONE,
+        markups: List<TextMarkup> = emptyList(),
     ): AndroidRasterSurface? {
-        if (closed || index !in 0 until pageCount) return null
-        val w = regionWpx.coerceIn(1, MAX_DIM)
-        val h = regionHpx.coerceIn(1, MAX_DIM)
+        val (wPts, hPts) = pageSizePoints(index) ?: return null
+        val fullW = (wPts * pxPerPt).roundToInt()
+        val fullH = (hPts * pxPerPt).roundToInt()
+        if (fullW <= 0 || fullH <= 0) return null
+        return render(
+            index, fullW, fullH, regionLeftPx, regionTopPx,
+            regionWpx.coerceIn(1, MAX_DIM), regionHpx.coerceIn(1, MAX_DIM), filter, markups,
+        )
+    }
+
+    /** Renders the [w] × [h] region at ([left], [top]) of a [fullW] × [fullH] raster of page [index]. */
+    private fun render(
+        index: Int, fullW: Int, fullH: Int, left: Int, top: Int, w: Int, h: Int, filter: PdfPageFilter,
+        markups: List<TextMarkup>,
+    ): AndroidRasterSurface? {
+        if (closed) return null
+        // Read before the render, which then finds the page already loaded.
+        val images = if (filter.stampImages) imageRectsFor(index) else null
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        bmp.eraseColor(Color.WHITE)
-        val page = renderer.openPage(index)
-        val m = Matrix().apply {
-            setScale(fullWpx.toFloat() / page.width, fullHpx.toFloat() / page.height) // points → full-page px
-            postTranslate(-regionLeftPx.toFloat(), -regionTopPx.toFloat()) // shift the region's origin to (0,0)
+        if (!pdf.render(index, bmp, fullW, fullH, left, top, priority())) {
+            bmp.recycle()
+            return null
         }
-        page.render(bmp, null, m, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-        page.close()
-        val pm = filter.pageMatrix ?: return AndroidRasterSurface(bmp)
+        if (markups.isNotEmpty()) paintMarkups(bmp, markups, index, fullW, fullH, left, top)
+        val m = filter.pageMatrix ?: return AndroidRasterSurface(bmp)
 
         val filtered = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        Canvas(filtered).drawBitmap(bmp, 0f, 0f, matrixPaint(pm))
-        if (filter.stampImages) {
-            keepImageColors(index, filtered, bmp, fullWpx, fullHpx, offsetXpx = regionLeftPx, offsetYpx = regionTopPx)
+        Canvas(filtered).drawBitmap(bmp, 0f, 0f, matrixPaint(m))
+        val size = pageSizePoints(index)
+        if (images != null && images.isNotEmpty() && size != null && size.first > 0f && size.second > 0f) {
+            stampOriginalImages(filtered, bmp, images, fullW / size.first, fullH / size.second, left, top)
         }
         bmp.recycle()
         return AndroidRasterSurface(filtered)
+    }
+
+    /** Draws [markups] onto [bmp], the ([left], [top]) corner of page [index] rendered [fullW] × [fullH]. */
+    private fun paintMarkups(bmp: Bitmap, markups: List<TextMarkup>, index: Int, fullW: Int, fullH: Int, left: Int, top: Int) {
+        val (wPts, hPts) = pageSizePoints(index) ?: return
+        if (wPts <= 0f || hPts <= 0f) return
+        val r = AndroidRenderer(Canvas(bmp))
+        r.translate(-left.toDouble(), -top.toDouble())
+        // PDFium's own scale for this render, so the marks sit on its glyphs to the pixel.
+        r.scale(fullW / wPts.toDouble(), fullH / hPts.toDouble())
+        for (m in markups) MarkupPainter.paint(r, m)
     }
 
     /** A bitmap paint applying colour matrix [m]. */
@@ -215,53 +204,28 @@ class PdfSource private constructor(
     }
 
     /**
-     * Keep embedded images in their real colours over the filtered page: a pure consumer of the
-     * parsed-locations cache. Stamps when [index]'s image rects are already parsed; otherwise leaves
-     * the images filtered for this frame and parses nothing — only the linear [prepAllImages] sweep
-     * finds locations. The page snaps to colour on the re-render once the sweep reaches it and
-     * [onImagesReady] fires. One-shot callers that must be correct now (PNG export, recents preview)
-     * call [ensureImageRects] first, so the rects are already cached here and this stamps in one pass.
-     */
-    private fun keepImageColors(
-        index: Int,
-        filtered: Bitmap,
-        original: Bitmap,
-        fullWpx: Int,
-        fullHpx: Int,
-        offsetXpx: Int,
-        offsetYpx: Int,
-    ) {
-        if (imageRects.containsKey(index)) {
-            stampOriginalImages(filtered, original, index, fullWpx, fullHpx, offsetXpx, offsetYpx)
-        }
-        // Not parsed yet: leave the images filtered; the sweep will fill it in and trigger a re-render.
-    }
-
-    /**
-     * Copy the raw [original] pixels back over each image box of [index] so embedded images
-     * keep their real colours under any filter. Boxes are page fractions; they map onto the
-     * full page at [fullWpx] × [fullHpx], then are shifted by ([offsetXpx], [offsetYpx]) into
-     * this bitmap's space and clipped to it (so it works for both whole-page and region renders).
+     * Copy the raw [original] pixels back over each image box so embedded images keep their real
+     * colours under any filter. Boxes are in points; [sx] × [sy] pixels per point map them onto
+     * the full page, then ([offsetXpx], [offsetYpx]) shifts them into this bitmap and they are
+     * clipped to it (so it works for both whole-page and region renders).
      */
     private fun stampOriginalImages(
         filtered: Bitmap,
         original: Bitmap,
-        index: Int,
-        fullWpx: Int,
-        fullHpx: Int,
+        rects: FloatArray,
+        sx: Float,
+        sy: Float,
         offsetXpx: Int,
         offsetYpx: Int,
     ) {
-        val rects = imageRects[index] ?: return // not parsed yet — caller schedules prep; skip stamping
-        if (rects.isEmpty()) return
         val w = filtered.width
         val h = filtered.height
         val canvas = Canvas(filtered)
-        for (f in rects) {
-            val left = (Math.round(f.left * fullWpx) - offsetXpx).coerceIn(0, w)
-            val top = (Math.round(f.top * fullHpx) - offsetYpx).coerceIn(0, h)
-            val right = (Math.round(f.right * fullWpx) - offsetXpx).coerceIn(0, w)
-            val bottom = (Math.round(f.bottom * fullHpx) - offsetYpx).coerceIn(0, h)
+        for (i in 0 until rects.size / 4) {
+            val left = ((rects[4 * i] * sx).roundToInt() - offsetXpx).coerceIn(0, w)
+            val top = ((rects[4 * i + 1] * sy).roundToInt() - offsetYpx).coerceIn(0, h)
+            val right = ((rects[4 * i + 2] * sx).roundToInt() - offsetXpx).coerceIn(0, w)
+            val bottom = ((rects[4 * i + 3] * sy).roundToInt() - offsetYpx).coerceIn(0, h)
             if (right > left && bottom > top) {
                 val rect = Rect(left, top, right, bottom) // src == dst: stamp 1:1 over the filtered pixels
                 canvas.drawBitmap(original, rect, rect, null)
@@ -269,55 +233,30 @@ class PdfSource private constructor(
         }
     }
 
-    /**
-     * Normalized (0..1, top-left origin) bounding boxes of the embedded images on [index],
-     * parsed once via PdfBox and cached. Empty list ⇒ behave like a plain full-page invert
-     * (no PDF, parse failure, no images, or a rotated page we don't try to map).
-     */
-    private fun imageRectsFor(index: Int): List<RectF> = synchronized(pdfBoxLock) {
+    /** [index]'s image boxes, read once; empty when it has none or does not load. */
+    private fun imageRectsFor(index: Int): FloatArray {
         imageRects[index]?.let { return it }
-        val result = runCatching {
-            val doc = pdfBoxDocument() ?: return@runCatching emptyList()
-            if (index !in 0 until doc.numberOfPages) return@runCatching emptyList()
-            val page = doc.getPage(index)
-            if (page.rotation % 360 != 0) return@runCatching emptyList() // rotated page: don't risk a misplaced patch
-            val box = page.cropBox
-            ImageRectFinder(page, box.lowerLeftX, box.lowerLeftY, box.width, box.height)
-                .apply { processPage(page) }
-                .rects
-        }.getOrDefault(emptyList())
-        imageRects[index] = result
-        result
+        val rects = pdf.imageRects(index, priority()) ?: return FloatArray(0)
+        return rects.also { imageRects[index] = it }
     }
 
-    /** True once [index]'s image rects have been parsed (possibly to an empty list). */
-    fun hasImageRects(index: Int): Boolean = imageRects.containsKey(index)
+    /** The PDF's outline (bookmarks), empty when it has none. Waits, so not on the main thread. */
+    fun outline(): List<PdfOutlineEntry> =
+        if (closed) emptyList() else pdf.outline(MAX_OUTLINE, PdfPriority.THUMBNAIL).orEmpty()
 
-    /**
-     * Parse [index]'s image rects now (unless already cached), on the **calling** thread, taking only
-     * [pdfBoxLock] — never the render monitor. Only one-shot renderers that must be correct immediately
-     * (PNG export, the recents preview tile) call this *before* [renderPage], so the page draws with
-     * real image colours in one pass without holding the PdfRenderer monitor across the parse. The live
-     * sidebar and canvas never call it — they consume the sweep's cache and stay inverted until it
-     * fills. Idempotent and shares the cache with the sweep, so each page is parsed at most once.
-     */
-    fun ensureImageRects(index: Int) {
-        if (!closed) imageRectsFor(index)
-    }
-
-    // --- Links (read from the framework PdfRenderer's native annotation APIs; API 35+ only) ---
+    // --- Links ---
 
     /** True when [index] is the page whose links are currently held (possibly an empty list). */
     fun hasLinks(index: Int): Boolean = current?.index == index
 
-    /** The topmost link whose rect (page fraction, top-left origin) contains ([fx], [fy]), or null.
+    /** The topmost link whose area contains ([x], [y]), in points as displayed, or null.
      *  Non-blocking: returns null unless [index] is the currently-held page — call [requestLinks] to
      *  parse it off the main thread. Later annotations paint on top, so iterate back-to-front. */
-    fun linkAt(index: Int, fx: Float, fy: Float): PdfLink? {
+    fun linkAt(index: Int, x: Float, y: Float): PdfLink? {
         val c = current ?: return null
         if (c.index != index) return null
         for (i in c.links.indices.reversed()) {
-            if (c.links[i].frac.contains(fx, fy)) return c.links[i]
+            if (c.links[i].rect.contains(x, y)) return c.links[i]
         }
         return null
     }
@@ -327,7 +266,7 @@ class PdfSource private constructor(
      *  pages just overwrites the target, so only the page(s) the scroll settles on get parsed — never
      *  a per-page backlog. Fire-and-forget: it only fills the cache so a later tap finds it hot. */
     fun warmLinks(index: Int) {
-        if (closed || !linksSupported || index < 0) return
+        if (closed || index < 0) return
         desiredLinkPage = index
         if (current?.index != index) pumpLinks()
     }
@@ -362,7 +301,7 @@ class PdfSource private constructor(
      *  way a stale [warmLinks] request is), then invoke [onReady] on the worker thread (the caller hops
      *  to the main thread itself). Cache-checked, so it no-ops if warming already parsed the page. */
     fun requestLinks(index: Int, onReady: () -> Unit) {
-        if (closed || !linksSupported) return
+        if (closed) return
         if (current?.index == index) { onReady(); return }
         val executor = linksWorker() ?: return
         runCatching {
@@ -375,8 +314,7 @@ class PdfSource private constructor(
     }
 
     /** The single daemon worker for all link parsing (warm + guaranteed tap), created on first use;
-     *  null after [close]. Keeps link parsing off the UI thread; the native read itself serializes
-     *  with rasterizing on the instance monitor (one open [PdfRenderer] page at a time). */
+     *  null after [close]. Keeps link parsing off the UI thread. */
     private fun linksWorker(): ExecutorService? = synchronized(executorLock) {
         if (closed) return@synchronized null
         linksExecutor ?: Executors.newSingleThreadExecutor { r ->
@@ -386,241 +324,63 @@ class PdfSource private constructor(
 
     /**
      * Parse [index]'s links and make them the current page's links, replacing (evicting) the previous
-     * page's — only one page is ever held, so link memory stays O(1). The links are read straight from
-     * the framework [PdfRenderer] (see [parseNativeLinks]); on Android versions below API 35 the parse
-     * yields nothing and the feature is inert (entry points already gate on [linksSupported]).
+     * page's — only one page is ever held, so link memory stays O(1). Interactive priority even when
+     * warming: the page is usually loaded already for its render, so a read takes well under 1 ms.
      */
     private fun setCurrentLinks(index: Int): List<PdfLink> {
         current?.let { if (it.index == index) return it.links }
-        val result = runCatching { parseNativeLinks(index) }.getOrDefault(emptyList())
+        val result = pdf.links(index, PdfPriority.INTERACTIVE).orEmpty()
         current = PageLinks(index, result)
         return result
     }
 
-    /**
-     * Read [index]'s links from the framework [PdfRenderer]'s native annotation APIs (API 35+) as
-     * page-fraction rects (top-left origin) plus targets. This rides the renderer xnotes already holds
-     * open for rasterizing — pdfium keeps the document parsed, so opening one page is cheap and native,
-     * with **no** PdfBox model, no Java-heap object pool, and no full-file re-parse (the per-parse
-     * [PDDocument] reload that drained battery is gone). [PdfRenderer] is single-threaded and allows
-     * only one open page at a time, so this serializes with rasterizing on the instance monitor; the
-     * call is a quick native read off the UI thread. Bounds come back in the rendered (display) point
-     * space, so normalizing is just divide-by-page-size — no crop-box math and no y-flip.
-     */
-    @Synchronized
-    private fun parseNativeLinks(index: Int): List<PdfLink> {
-        if (closed || Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) return emptyList()
-        if (index !in 0 until pageCount) return emptyList()
-        val page = renderer.openPage(index)
-        try {
-            val w = page.width.toFloat()
-            val h = page.height.toFloat()
-            if (w <= 0f || h <= 0f) return emptyList()
-            val out = ArrayList<PdfLink>()
-            for (link in page.linkContents) {
-                val url = link.uri?.toString()
-                if (url.isNullOrBlank()) continue
-                for (b in link.bounds) addLinkRect(out, b, w, h, url, null)
-            }
-            for (gl in page.gotoLinks) {
-                val dest = gl.destination?.pageNumber ?: continue
-                if (dest < 0) continue
-                for (b in gl.bounds) addLinkRect(out, b, w, h, null, dest)
-            }
-            return out
-        } finally {
-            runCatching { page.close() }
-        }
-    }
-
-    /** Append one link rect to [out], converting its display-space point bounds [b] (top-left origin,
-     *  page = [w]×[h] points) to a clamped page fraction. Degenerate rects are dropped. */
-    private fun addLinkRect(out: MutableList<PdfLink>, b: RectF, w: Float, h: Float, url: String?, destPage: Int?) {
-        val fLeft = (b.left / w).coerceIn(0f, 1f)
-        val fTop = (b.top / h).coerceIn(0f, 1f)
-        val fRight = (b.right / w).coerceIn(0f, 1f)
-        val fBottom = (b.bottom / h).coerceIn(0f, 1f)
-        if (fRight > fLeft && fBottom > fTop) out.add(PdfLink(RectF(fLeft, fTop, fRight, fBottom), url, destPage))
-    }
-
-    /** The single PdfBox prep worker, created on first use; null after [close]. Runs the linear
-     *  [prepAllImages] sweep on one background thread, off the main and cache threads. (One-shot
-     *  callers parse on their own thread via [ensureImageRects]; [imageRectsFor] serializes both on
-     *  [pdfBoxLock].) */
-    private fun imagesWorker(): ExecutorService? = synchronized(executorLock) {
-        if (closed) return@synchronized null
-        imagesExecutor ?: Executors.newSingleThreadExecutor { r ->
-            Thread(r, "xnotes-pdfbox").apply { isDaemon = true }
-        }.also { imagesExecutor = it }
-    }
-
-    /**
-     * Parse **every** page's image rects up front on the single prep worker, strictly in page order
-     * 0..N-1, so a freshly opened dark-mode PDF resolves all embedded-image locations in one linear
-     * background pass. This is the **only** place locations are found for the live canvas and sidebar.
-     * Idempotent per source (enqueued once); already-parsed pages are skipped. Fires [onImagesReady]
-     * for each page it parses (so the canvas and side panel can snap that page from inverted to real
-     * colours) and [onImagesProgress] after every page (so the "Refining k/N" bar advances). A no-op
-     * after [close]; callers stay free to scroll and draw while it runs.
-     */
-    fun prepAllImages() {
-        if (closed || sweepRequested) return
-        sweepRequested = true
-        val total = pageCount
-        val executor = imagesWorker() ?: return
-        for (index in 0 until total) {
-            runCatching {
-                executor.execute {
-                    if (closed) return@execute
-                    if (!imageRects.containsKey(index)) {
-                        runCatching { imageRectsFor(index) }
-                        if (!closed) onImagesReady?.invoke(index)
-                    }
-                    if (!closed) onImagesProgress?.invoke(imageRects.size, total)
-                }
-            }
-        }
-        // After the last page is parsed (single FIFO worker, so this runs last), the live source no
-        // longer needs the PdfBox model: every rect is cached and the render path / ensureImageRects
-        // read straight from there. Close it to reclaim the heap it held across all pages.
-        runCatching { executor.execute { if (!closed) releasePdfBoxModel() } }
-    }
-
-    /** Pages whose image rects are parsed (cached) — the "done" count for the [prepAllImages] sweep. */
-    fun parsedPageCount(): Int = imageRects.size
-
-    /** The lazily-loaded PdfBox model. Always called under [pdfBoxLock]. */
-    private fun pdfBoxDocument(): PDDocument? {
-        if (closed) return null
-        if (pdfBoxDoc == null && !pdfBoxLoadFailed && !pdfBoxReleased) {
-            pdfBoxDoc = runCatching {
-                PDFBoxResourceLoader.init(appContext)
-                // Cap PdfBox's in-RAM scratch (used while decoding page content streams to locate image
-                // boxes) and spill the overflow to temp files, so a pathological PDF can't spike the heap.
-                PDDocument.load(file, MemoryUsageSetting.setupMixed(SCRATCH_MAIN_MEM_BYTES).setTempDir(appContext.cacheDir))
-            }.getOrElse { pdfBoxLoadFailed = true; null }
-        }
-        return pdfBoxDoc
-    }
-
-    /** Close the PdfBox model once the image sweep has cached every page's rects, reclaiming its heap
-     *  (the parsed object model and any cached resources). The framework [renderer] is independent and
-     *  stays open for rasterizing, and image rects read from their cache, so nothing reloads it. Links
-     *  don't use PdfBox at all — they read native annotations from the framework [renderer] (API 35+).
-     *  Runs on the prep worker after the last parse; serialized with parsing on [pdfBoxLock]. */
-    private fun releasePdfBoxModel() = synchronized(pdfBoxLock) {
-        runCatching { pdfBoxDoc?.close() }
-        pdfBoxDoc = null
-        pdfBoxReleased = true
-    }
-
     fun close() {
         closed = true
-        onImagesReady = null
-        onImagesProgress = null
         synchronized(executorLock) {
-            runCatching { imagesExecutor?.shutdownNow() }
             runCatching { linksExecutor?.shutdownNow() }
         }
-        runCatching { pdfBoxDoc?.close() }
-        // On the render monitor: [closed] is already set, so this only waits out a live raster.
-        synchronized(this) {
-            runCatching { renderer.close() }
-            runCatching { pfd.close() }
-        }
+        text.close()
+        pdf.close()
         // [file] is owned by the caller (Document / import staging); deleting it here is not our job.
-    }
-
-    /**
-     * Walks a page's content stream and records each drawn image's axis-aligned bounding box,
-     * normalized to page fractions with a top-left origin (matching the rendered bitmap). All
-     * non-image operators are ignored.
-     */
-    private class ImageRectFinder(
-        page: PDPage,
-        private val llx: Float,
-        private val lly: Float,
-        private val cropW: Float,
-        private val cropH: Float,
-    ) : PDFGraphicsStreamEngine(page) {
-        val rects = ArrayList<RectF>()
-
-        init {
-            // We only need image placements. PDFGraphicsStreamEngine registers the text operators, and
-            // "Tf" (set-font) resolves the font via PDResources.getFont, which parses the embedded font
-            // program — done for every font on every page, that is what ballooned the heap. Replace the
-            // font/text operators with no-ops; image CTMs come from cm/q/Q, never text, so the bounding
-            // boxes are unaffected.
-            for (op in arrayOf(
-                OperatorName.SET_FONT_AND_SIZE,        // Tf — triggers the font parse
-                OperatorName.SHOW_TEXT,                // Tj
-                OperatorName.SHOW_TEXT_ADJUSTED,       // TJ
-                OperatorName.SHOW_TEXT_LINE,           // '
-                OperatorName.SHOW_TEXT_LINE_AND_SPACE, // "
-            )) addOperator(NoOpOperator(op))
-        }
-
-        /** Replacement operator that does nothing, so a registered operator can be neutralised. */
-        private class NoOpOperator(private val op: String) : OperatorProcessor() {
-            override fun process(operator: Operator, operands: List<COSBase>) {}
-            override fun getName(): String = op
-        }
-
-        override fun drawImage(pdImage: PDImage) {
-            if (cropW <= 0f || cropH <= 0f) return
-            val ctm = graphicsState.currentTransformationMatrix // maps the unit square to user space
-            val c0 = ctm.transformPoint(0f, 0f)
-            val c1 = ctm.transformPoint(1f, 0f)
-            val c2 = ctm.transformPoint(1f, 1f)
-            val c3 = ctm.transformPoint(0f, 1f)
-            val minX = minOf(c0.x, c1.x, c2.x, c3.x)
-            val maxX = maxOf(c0.x, c1.x, c2.x, c3.x)
-            val minY = minOf(c0.y, c1.y, c2.y, c3.y)
-            val maxY = maxOf(c0.y, c1.y, c2.y, c3.y)
-            val ury = lly + cropH
-            val fLeft = ((minX - llx) / cropW).coerceIn(0f, 1f)
-            val fRight = ((maxX - llx) / cropW).coerceIn(0f, 1f)
-            val fTop = ((ury - maxY) / cropH).coerceIn(0f, 1f) // user-space y is up; bitmap y is down
-            val fBottom = ((ury - minY) / cropH).coerceIn(0f, 1f)
-            if (fRight > fLeft && fBottom > fTop) rects.add(RectF(fLeft, fTop, fRight, fBottom))
-        }
-
-        // Path/clip/shading operators are irrelevant to image placement — ignore them.
-        override fun appendRectangle(p0: PointF, p1: PointF, p2: PointF, p3: PointF) {}
-        override fun clip(windingRule: Path.FillType) {}
-        override fun moveTo(x: Float, y: Float) {}
-        override fun lineTo(x: Float, y: Float) {}
-        override fun curveTo(x1: Float, y1: Float, x2: Float, y2: Float, x3: Float, y3: Float) {}
-        override fun getCurrentPoint(): PointF = PointF(0f, 0f)
-        override fun closePath() {}
-        override fun endPath() {}
-        override fun strokePath() {}
-        override fun fillPath(windingRule: Path.FillType) {}
-        override fun fillAndStrokePath(windingRule: Path.FillType) {}
-        override fun shadingFill(shadingName: COSName) {}
     }
 
     companion object {
         private const val MAX_DIM = 4096
 
-        /** Cap on PdfBox's in-RAM scratch while parsing image boxes; overflow spills to temp files. */
-        private const val SCRATCH_MAIN_MEM_BYTES = 32L * 1024 * 1024
+        /** Bookmarks read at most, so a pathological outline can't flood the Contents tab. */
+        private const val MAX_OUTLINE = 2000
+
+        /** Page sizes read per job; a page dictionary takes up to a fraction of a ms. */
+        private const val SIZES_PER_READ = 128
+
+        private val callerPriority = ThreadLocal<PdfPriority>()
+
+        private fun priority(): PdfPriority = callerPriority.get() ?: PdfPriority.VISIBLE_RENDER
+
+        /** Runs [block] with the renders it asks for queued at [priority] instead of VISIBLE_RENDER. */
+        fun <T> withPriority(priority: PdfPriority, block: () -> T): T {
+            val outer = callerPriority.get()
+            callerPriority.set(priority)
+            try {
+                return block()
+            } finally {
+                if (outer == null) callerPriority.remove() else callerPriority.set(outer)
+            }
+        }
 
         /**
-         * Opens [file] as a PDF (memory-mapped, never read whole into RAM), or null if it cannot be
-         * opened. The file is **not** copied or owned: the caller keeps it alive for the source's
-         * lifetime and deletes it afterwards.
+         * Starts opening [file] as a PDF and returns at once, so the main thread may call it; a PDF
+         * that does not open just renders nothing. The file is **not** copied or owned: the caller
+         * keeps it alive for the source's lifetime and deletes it afterwards.
          */
-        fun create(context: Context, file: File): PdfSource? = try {
-            val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-            val renderer = PdfRenderer(pfd)
-            if (renderer.pageCount == 0) {
-                renderer.close(); pfd.close(); null
-            } else {
-                PdfSource(context.applicationContext, file, pfd, renderer)
-            }
-        } catch (_: Exception) {
-            null
+        fun open(file: File): PdfSource = PdfSource(file, PdfiumDocument.open(file))
+
+        /** Opens [file] and waits for it: null when it does not open or has no pages. Not on the main thread. */
+        fun create(file: File): PdfSource? {
+            val source = open(file)
+            if (source.pageCount > 0) return source
+            source.close()
+            return null
         }
     }
 }

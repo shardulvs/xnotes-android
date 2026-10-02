@@ -16,7 +16,7 @@ class SettingsTest {
 
     @Test fun emptyJsonYieldsDefaults() {
         val s = Settings.fromJson(JSONObject())
-        assertEquals(7, s.toolbarColors.size)
+        assertEquals(15, s.toolbarColors.size)
         assertEquals(5, s.toolbarColorCount)
         assertEquals(0, s.activeColor)
         assertEquals(1.0, s.renderScale, 1e-9)
@@ -82,6 +82,26 @@ class SettingsTest {
         assertTrue(back.prefs.hidePageBorders)
     }
 
+    @Test fun theMarkupToolsModeAndIntensityRoundTrip() {
+        val markup = com.xnotes.core.tools.ToolConfig(markupMode = com.xnotes.core.tools.MarkupMode.SQUIGGLY, markupIntensity = 0.8)
+        val back = Settings.fromJson(Settings(tools = mapOf(Tool.MARKUP to markup)).toJson())
+        assertEquals(com.xnotes.core.tools.MarkupMode.SQUIGGLY, back.configFor(Tool.MARKUP).markupMode)
+        assertEquals(0.8, back.configFor(Tool.MARKUP).markupIntensity, 1e-9)
+        val wild = Settings(tools = mapOf(Tool.MARKUP to markup)).toJson()
+        wild.getJSONObject("tools").getJSONObject("markup").put("markup_intensity", 7.0)
+        assertEquals(1.0, Settings.fromJson(wild).configFor(Tool.MARKUP).markupIntensity, 1e-9)
+    }
+
+    @Test fun theEraserTakesTextMarkupsUnlessSwitchedOff() {
+        assertTrue(Settings().configFor(Tool.ERASER).eraseMarkups)
+        val off = Settings().configFor(Tool.ERASER).copy(eraseMarkups = false)
+        val json = Settings(tools = mapOf(Tool.ERASER to off)).toJson()
+        assertFalse(Settings.fromJson(json).configFor(Tool.ERASER).eraseMarkups)
+        // Settings saved before the switch existed read as on.
+        json.getJSONObject("tools").getJSONObject("eraser").remove("erase_markups")
+        assertTrue(Settings.fromJson(json).configFor(Tool.ERASER).eraseMarkups)
+    }
+
     @Test fun everyTapGestureMappingRoundTrips() {
         val prefs = Preferences(
             twoFingerTap = "undo",
@@ -101,6 +121,12 @@ class SettingsTest {
         assertFalse(Settings.fromJson(JSONObject()).prefs.disableFrontBuffering)
         val back = Settings.fromJson(Settings(prefs = Preferences(disableFrontBuffering = true)).toJson()).prefs
         assertTrue(back.disableFrontBuffering)
+    }
+
+    @Test fun headingBookmarksAreOnUntilTurnedOff() {
+        assertTrue(Settings.fromJson(JSONObject()).prefs.pdfHeadingBookmarks)
+        val back = Settings.fromJson(Settings(prefs = Preferences(pdfHeadingBookmarks = false)).toJson()).prefs
+        assertFalse(back.pdfHeadingBookmarks)
     }
 
     @Test fun customPageSizeRoundTripsAndSizesANewPage() {
@@ -142,12 +168,12 @@ class SettingsTest {
         assertEquals("system", Settings.fromJson(o).prefs.uiAppearance)
     }
 
-    @Test fun toolbarColorsPaddedToSeven() {
+    @Test fun toolbarColorsPaddedToFifteen() {
         val o = JSONObject().put(
             "toolbar_colors",
             org.json.JSONArray().put(org.json.JSONArray().put(0).put(0).put(0).put(255)),
         )
-        assertEquals(7, Settings.fromJson(o).toolbarColors.size)
+        assertEquals(15, Settings.fromJson(o).toolbarColors.size)
     }
 
     @Test fun toolbarColorCountDefaultsToFive() {
@@ -155,9 +181,9 @@ class SettingsTest {
     }
 
     @Test fun toolbarColorCountRoundTripsAndClamps() {
-        assertEquals(7, Settings.fromJson(Settings(toolbarColorCount = 7).toJson()).toolbarColorCount)
+        assertEquals(15, Settings.fromJson(Settings(toolbarColorCount = 15).toJson()).toolbarColorCount)
         assertEquals(1, Settings.fromJson(Settings(toolbarColorCount = 0).toJson()).toolbarColorCount)
-        assertEquals(7, Settings.fromJson(Settings(toolbarColorCount = 99).toJson()).toolbarColorCount)
+        assertEquals(15, Settings.fromJson(Settings(toolbarColorCount = 99).toJson()).toolbarColorCount)
     }
 
     @Test fun rememberColorDedupesAndCaps() {

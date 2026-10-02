@@ -27,7 +27,7 @@ Xnotes is a great app, and I'm grateful that the developer puts so much work int
 - **File import**: create notes from PDFs, images, txt, md, rtf, html, epub, docx, xlsx and csv.
 - **Import and merge**: import a file into an existing note, merge notes, and add images or photos as pages.
 - **Read-only reader**: open md, docx, pptx, xlsx, csv and pdf files as they are, or convert them to notes.
-- **Find**: search text in notes, the reader and Preferences.
+- **Find**: search text in the reader and Preferences.
 - **Shape snapping**: held strokes snap to circles, squares, triangles, waves, parabolas, cubics, exponentials and logarithms, or become an editable curve; toggle it in the pen popup.
 - **Tables**: a table shape with row and column bars for selecting, resizing, adding and removing.
 - **Function curves**: x^n, roots, logs, exponentials, trig and inverse trig graphs with an editable formula and range.
@@ -50,6 +50,7 @@ Xnotes is a great app, and I'm grateful that the developer puts so much work int
 - **Update check**: check GitHub for a newer release from Preferences.
 - ~~**Create menu**: the new-note button is now a list to create a note, canvas, folder, or import a file.~~
 - ~~**Sort button**: moved sorting out into its own dedicated button.~~
+- ~~**Find in notes**: search the text of a note.~~
 
 Crossed-out items were later added to xnotes by its original developer.
 

@@ -1,0 +1,10 @@
+- Render PDFs with PDFium
+- Select and copy PDF text with a long press
+- Add a markup tool: highlight, underline, strike out or squiggle PDF text, with notes
+- Search a note from the side panel or with Ctrl+F
+- Tap web and email addresses in a PDF to open them
+- Exported PDFs now have selectable text, links and bookmarks
+- Two- and three-finger taps now work on the canvas
+- Allow up to 15 toolbar colours
+- Fix autosave making stray copies of notes
+- Minor fixes and improvements
