@@ -1,11 +1,5 @@
 <p align="center">
-  <img src="fastlane/metadata/android/en-US/images/icon.png" width="80" alt="xnotes icon" />
-</p>
-
-<h1 align="center">xnotes</h1>
-
-<p align="center">
-  A handwriting-first notebook for Android, built for pen and stylus
+  <img src="docs/readme-banner.png" width="100%" alt="xnotes: a handwriting-first notebook for Android" />
 </p>
 
 <p align="center">
@@ -14,12 +8,6 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-orange?style=flat-square" alt="License" /></a>
   <img src="https://img.shields.io/badge/Android-8.0%2B-3ddc84?style=flat-square&logo=android&logoColor=white" alt="Android 8.0+" />
   <a href="https://github.com/sponsors/shardulvs"><img src="https://img.shields.io/badge/sponsor-%E2%9D%A4-ec6cb9?style=flat-square&logo=githubsponsors&logoColor=white" alt="Sponsor" /></a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/shardulvs/xnotes-android/releases/latest">GitHub Releases</a> &bull;
-  <a href="https://f-droid.org/en/packages/com.xnotes">F-Droid</a> &bull;
-  <a href="https://play.google.com/store/apps/details?id=com.xnotes">Google Play</a>
 </p>
 
 <p align="center">
@@ -41,18 +29,33 @@
 
 ---
 
-## At a glance
+## Features
 
-- **Paged notes and an infinite canvas**: work in real pages when you want structure, or spread out on a canvas that never runs out of room.
-- **Pressure-sensitive ink**: a custom stroke engine turns raw stylus samples into a smooth, variable-width ribbon that swells and tapers with pen pressure, so handwriting and sketches feel natural instead of like a flat marker.
-- **Vector PDF, in and out**: drop in a PDF as a page background to annotate, then export your notes back to PDF as true vector: ink and text stay crisp at any zoom instead of being flattened to pixels.
-- **Razor-sharp deep zoom**: a background renderer redraws a high-resolution viewport off the main thread, so you can zoom far in and the ink stays sharp rather than turning blocky.
-- **Real highlighter blending**: highlighters are composited live every frame with a true multiply blend, so overlapping strokes deepen like real ink instead of painting over one another.
-- **Neon pen**: a glowing pen with a bright white core and saturated, luminous edges for accents that pop off the page.
-- **Smart PDF dark mode**: invert a PDF page for comfortable night reading while leaving embedded photos and images untouched.
-- **Nothing is ever flattened**: every stroke is stored as editable vector data in the open `.xnote` format, so you can re-select, move, restyle, or erase any mark at any time.
-- **Stylus-aware by design**: pen and finger are handled separately, so you can pan with a finger while you draw with the pen; on devices without a stylus, finger drawing turns on automatically.
-- **Private and open**: open source, no accounts, no telemetry, no network access at all. Files go through Android's Storage Access Framework, so the app needs no broad storage permission either.
+- **Ink that feels like a pen**: pressure-sensitive and low latency, with pens and highlighters.
+- **Neon glow**: make any pen glow.
+- **Disappearing ink**: ink that fades away on its own, great for teaching and presenting.
+- **Shape snapping**: draw a rough shape, hold, and it snaps clean.
+- **Sharp at any zoom**: ink and PDFs stay crisp however far you zoom in.
+- **Notebooks and an infinite canvas**: pages when you want structure, endless space when you don't.
+- **Book layouts**: single, double or cover pages, scrolling or page flips.
+- **PDF import**: bring in any PDF and write all over it.
+- **Room for side notes**: widen a PDF's margins on any edge and take notes on the side.
+- **PDF text markups**: highlight, underline and strike out text, add comments, search it.
+- **PDF colour filters**: invert, sepia, contrast, brightness, multiply and screen.
+- **Images stay untouched**: filter a PDF and its photos and images keep their true colours.
+- **Dark and OLED modes**: easy on the eyes at night, true black on OLED screens.
+- **Real PDF export**: sharp vector output with selectable text, links and bookmarks.
+- **Markdown**: write in markdown and it formats as you type.
+- **Typed notes**: tables, LaTeX equations and code highlighting, right on the page.
+- **20+ page templates**: Cornell, planners, music staves, isometric and more.
+- **Endless themes**: any accent colour, eight styles for each, dual tone and Material You.
+- **Make it yours**: rearrange the toolbar, float it or dock it on any edge, and pick its size.
+- **Split view**: two notes side by side.
+- **A real file explorer**: grid, gallery, list, column and timeline views, with plenty to customise.
+- **Your notes, your folders**: notes are saved as files in a folder you choose, not locked away in an app's database, so you stay in full control of them.
+- **Works with stylus pens**: S Pen and many others.
+- **Always editable**: nothing gets flattened, so every stroke can be moved, restyled or erased later.
+- **Private**: open source, no account, no ads, no tracking, no permissions.
 
 ## Install
 
@@ -62,16 +65,14 @@
 | [F-Droid](https://f-droid.org/en/packages/com.xnotes) | Built reproducibly from source |
 | [Google Play](https://play.google.com/store/apps/details?id=com.xnotes) | Automatic updates |
 
-GitHub Releases and F-Droid ship the same signed APK. F-Droid rebuilds from source and verifies it against the GitHub release, so you can switch between those two without reinstalling.
+GitHub and F-Droid ship the same signed APK, so you can switch between them without reinstalling.
 
 ## Build from source
 
-Requires **JDK 17** (the project pins Java 17):
+Needs JDK 17, NDK 27.0.12077973 and CMake 3.22.1.
 
 ```bash
 git clone https://github.com/shardulvs/xnotes-android.git
 cd xnotes-android
 JAVA_HOME=/path/to/jdk-17 ./gradlew assembleDebug
 ```
-
-Output: `app/build/outputs/apk/debug/app-debug.apk`

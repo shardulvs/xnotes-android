@@ -1,25 +1,27 @@
-xnotes is a handwriting-first notebook for phones and tablets, built for pen and stylus. Write, sketch and annotate with pressure-sensitive, variable-width ink, and nothing you draw is ever flattened.
+xnotes is a handwriting notebook for Android, built for the stylus. Take notes, sketch and annotate PDFs with ink that feels like a pen on paper.
 
-Highlights:
-
-* Paged notes and an infinite canvas: work in real pages when you want structure, or spread out on a canvas that never runs out of room.
-* Pressure-sensitive ink: a custom stroke engine turns raw stylus samples into a smooth, variable-width ribbon that swells and tapers with pen pressure, so handwriting and sketches feel natural instead of like a flat marker.
-* Vector PDF, in and out: drop in a PDF as a page background to annotate, then export your notes back to PDF as true vector — ink and text stay crisp at any zoom instead of being flattened to pixels.
-* Razor-sharp deep zoom: a background renderer redraws a high-resolution viewport off the main thread, so you can zoom far in and the ink stays sharp rather than turning blocky.
-* Real highlighter blending: highlighters are composited live every frame with a true multiply blend, so overlapping strokes deepen like real ink instead of painting over one another.
-* Neon pen: a glowing pen with a bright white core and saturated, luminous edges for accents that pop off the page.
-* Smart PDF dark mode: invert a PDF page for comfortable night reading while leaving embedded photos and images untouched.
-* Nothing is ever flattened: every stroke is stored as editable vector data in the open .xnote format, so you can re-select, move, restyle or erase any mark at any time.
-* Stylus-aware by design: pen and finger are handled separately, so you can pan with a finger while you draw with the pen; on devices without a stylus, finger drawing turns on automatically.
-* Private and open: open source, no accounts, no telemetry, no network access at all. Files go through Android's Storage Access Framework, so the app needs no broad storage permission either.
-
-Also includes:
-
-* Shapes, text boxes and image insertion
-* Stroke and object erasers, plus box and lasso selection with move and resize
-* Multi-page documents with several page sizes
-* A backstage file area: recent notes, a built-in folder explorer and quick sharing
-* A side panel with page thumbnails, contents and bookmarks
-* Undo and redo
-* Pinch to zoom and a configurable pen side-button action
-* Customisable theme, accent colour and page defaults
+* Ink that feels like a pen: pressure-sensitive and low latency, with pens and highlighters.
+* Neon glow: make any pen glow.
+* Disappearing ink: ink that fades away on its own, great for teaching and presenting.
+* Shape snapping: draw a rough shape, hold, and it snaps clean.
+* Sharp at any zoom: ink and PDFs stay crisp however far you zoom in.
+* Notebooks and an infinite canvas: pages when you want structure, endless space when you don't.
+* Book layouts: single, double or cover pages, scrolling or page flips.
+* PDF import: bring in any PDF and write all over it.
+* Room for side notes: widen a PDF's margins on any edge and take notes on the side.
+* PDF text markups: highlight, underline and strike out text, add comments, search it.
+* PDF colour filters: invert, sepia, contrast, brightness, multiply and screen.
+* Images stay untouched: filter a PDF and its photos and images keep their true colours.
+* Dark and OLED modes: easy on the eyes at night, true black on OLED screens.
+* Real PDF export: sharp vector output with selectable text, links and bookmarks.
+* Markdown: write in markdown and it formats as you type.
+* Typed notes: tables, LaTeX equations and code highlighting, right on the page.
+* 20+ page templates: Cornell, planners, music staves, isometric and more.
+* Endless themes: any accent colour, eight styles for each, dual tone and Material You.
+* Make it yours: rearrange the toolbar, float it or dock it on any edge, and pick its size.
+* Split view: two notes side by side.
+* A real file explorer: grid, gallery, list, column and timeline views, with plenty to customise.
+* Your notes, your folders: notes are saved as files in a folder you choose, not locked away in an app's database, so you stay in full control of them.
+* Works with stylus pens: S Pen and many others.
+* Always editable: nothing gets flattened, so every stroke can be moved, restyled or erased later.
+* Private: open source, no account, no ads, no tracking, no permissions.
