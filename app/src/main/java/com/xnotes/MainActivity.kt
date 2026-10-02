@@ -87,6 +87,7 @@ import androidx.core.content.IntentCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.xnotes.R
+import com.xnotes.platform.PdfOpenError
 import com.xnotes.ui.CanvasToastPill
 import com.xnotes.ui.Editor
 import com.xnotes.ui.Toolbar
@@ -475,7 +476,11 @@ private fun EditorScreen(
         val name = displayNameOf(resolver, uri) ?: "Document"
         val mime = runCatching { resolver.getType(uri) }.getOrNull() ?: ""
         scope.launch {
-            if (!pending.editor.importIntoOpenNote(uri.toString(), name, mime, pending.at)) editor.message = context.getString(R.string.err_read_file)
+            if (!pending.editor.importIntoOpenNote(uri.toString(), name, mime, pending.at)) {
+                editor.message = context.getString(
+                    if (pending.editor.lastImportError == PdfOpenError.PASSWORD) R.string.err_pdf_password else R.string.err_read_file,
+                )
+            }
         }
     }
 
@@ -486,7 +491,13 @@ private fun EditorScreen(
         val name = displayNameOf(resolver, uri) ?: "Document"
         val mime = runCatching { resolver.getType(uri) }.getOrNull() ?: ""
         scope.launch {
-            editor.message = context.getString(if (editor.importIntoNoteFile(note, uri.toString(), name, mime)) R.string.imported_into_note else R.string.err_read_file)
+            editor.message = context.getString(
+                when {
+                    editor.importIntoNoteFile(note, uri.toString(), name, mime) -> R.string.imported_into_note
+                    editor.lastImportError == PdfOpenError.PASSWORD -> R.string.err_pdf_password
+                    else -> R.string.err_read_file
+                },
+            )
         }
     }
 

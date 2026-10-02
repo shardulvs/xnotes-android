@@ -272,6 +272,7 @@ private fun PageContextMenu(
     onInsertPages: (PageInsert, Int) -> Unit,
 ) {
     val palette = LocalPalette.current
+    val scope = rememberCoroutineScope()
     var sub by remember { mutableStateOf(MENU_MAIN) }
     LaunchedEffect(expanded) { if (!expanded) sub = MENU_MAIN } // always reopen on the main page
     val one = listOf(index)
@@ -298,7 +299,7 @@ private fun PageContextMenu(
                 DropdownMenuItem(text = { Text(stringResource(R.string.copy)) }, leadingIcon = menuIcon(XnotesIcons.copy), onClick = { editor.copyPages(one); onDismiss() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.cut)) }, leadingIcon = menuIcon(XnotesIcons.cut), onClick = { editor.cutPages(one); onDismiss() })
                 if (editor.canPastePages) {
-                    DropdownMenuItem(text = { Text(stringResource(R.string.paste)) }, leadingIcon = menuIcon(XnotesIcons.paste), onClick = { editor.pastePagesAfter(index); onDismiss() })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.paste)) }, leadingIcon = menuIcon(XnotesIcons.paste), onClick = { scope.launch { editor.pastePagesAfter(index) }; onDismiss() })
                 }
                 DropdownMenuItem(text = { Text(stringResource(R.string.delete)) }, leadingIcon = menuIcon(XnotesIcons.trash), onClick = { editor.deletePages(one); onDismiss() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.erase_page)) }, leadingIcon = menuIcon(XnotesIcons.eraser), onClick = { editor.erasePage(index); onDismiss() })

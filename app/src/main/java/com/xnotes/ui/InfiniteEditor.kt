@@ -1080,8 +1080,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     private fun publishOverlay() {
         hasSelection = !selection.isEmpty
         refreshSelectionMenu()
-        // Fixed light blue, not the theme accent, so the chrome shows on light and dark paper alike.
-        val accent = com.xnotes.core.model.Rgba.SELECTION
+        val accent = palette?.accent ?: InkPalette.DEFAULT
         val zoom = viewport.zoom
         // A lasso drag owns the buffer on its own: it clears the selection when it starts and no
         // marquee can be out at the same time, so nothing else needs a place in the same publish.
@@ -1098,6 +1097,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
                 box, zoom, accent, StrokeTessellator.DEFAULT_TOLERANCE, devicePxPerDp,
                 points = selection.spline()?.controlPoints(),
                 moveGrip = selection.moveGrip(zoom, OverlayTessellator.GRIP_ARM_PX / zoom),
+                onAccent = palette?.onAccent ?: com.xnotes.core.model.Rgba(255, 255, 255, 255),
             )
             val b = OverlayTessellator.selectionBounds(box, zoom)
             bounds = bounds?.union(b) ?: b

@@ -640,7 +640,7 @@ class FlowTextController(
                 }
             }
             val w = (FlowFrame.CARET_WIDTH / state.zoom).coerceAtLeast(0.75)
-            r.fillRect(state.fromPageSpaceRect(pi, Rect(cr.left - w / 2.0, top, w, height)), Rgba.SELECTION)
+            r.fillRect(state.fromPageSpaceRect(pi, Rect(cr.left - w / 2.0, top, w, height)), Rgba.CARET)
         }
     }
 

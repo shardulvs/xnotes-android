@@ -171,6 +171,10 @@ class InteractionController(
      *  once it is ready. */
     var onLinkTap: ((pageIndex: Int, pageLocal: Pt) -> Boolean)? = null
 
+    /** Host hook for a finger tap on a canvas item's or the flow text's own hyperlink, tried before
+     *  selecting, markups and PDF links since those sit on top. True when it opened one. */
+    var onItemLinkTap: ((pageIndex: Int, pageLocal: Pt) -> Boolean)? = null
+
     /**
      * A tap that may open a markup, at viewport point [at]: a pan tap ([withLink], so a menu can offer
      * the link under it) or the markup tool's. True when a markup or its note icon took it.
@@ -895,7 +899,6 @@ class InteractionController(
                     when {
                         textCleared || linkHandled -> Unit
                         state.overscrollY > 0.0 -> releaseOverscroll()
-                        tap && tool == Tool.SELECT && fingerTapSelect(content) -> Unit
                         tap && hasSelection && selectionBoundsContent()?.contains(content) != true -> clearSelection()
                         !state.verticalScroll -> endPanPaginated()
                         else -> startPanFling()
@@ -947,12 +950,19 @@ class InteractionController(
         }
     }
 
-    /** Offer a finger tap at [content] to [onMarkupTap], then as a page + page-space point to [onLinkTap]. */
+    /**
+     * Offer a finger tap at [content], top layer first: to [onItemLinkTap], to [fingerTapSelect] with
+     * the Select tool, to [onMarkupTap], then as a page + page-space point to [onLinkTap].
+     */
     private fun tryLinkTap(content: Pt): Boolean {
+        val pageIndex = state.pageIndexAtContent(content)
+        val local = pageIndex?.let { state.toPageSpace(it, content) }
+        if (pageIndex != null && local != null && onItemLinkTap?.invoke(pageIndex, local) == true) return true
+        if (tool == Tool.SELECT && fingerTapSelect(content)) return true
         if (onMarkupTap?.invoke(state.contentToViewport(content), true) == true) return true
         val cb = onLinkTap ?: return false
-        val pageIndex = state.pageIndexAtContent(content) ?: return false
-        return cb(pageIndex, state.toPageSpace(pageIndex, content))
+        if (pageIndex == null || local == null) return false
+        return cb(pageIndex, local)
     }
 
     // --- DRAW ---
@@ -2225,7 +2235,7 @@ class InteractionController(
         if (c.bottom < outer.bottom) r.fillPolygon(quad(Rect(outer.left, c.bottom, outer.w, outer.bottom - c.bottom)), dim)
         if (c.left > outer.left) r.fillPolygon(quad(Rect(outer.left, c.top, c.left - outer.left, c.h)), dim)
         if (c.right < outer.right) r.fillPolygon(quad(Rect(c.right, c.top, outer.right - c.right, c.h)), dim)
-        val sel = com.xnotes.core.model.Rgba.SELECTION
+        val sel = state.palette.accent
         r.strokePolygon(quad(c), Pen(sel, 1.6, cosmetic = true))
         val side = HANDLE_SIZE / state.zoom
         for (h in ResizeMath.boxHandles(c)) {
@@ -2241,8 +2251,8 @@ class InteractionController(
         val pi = selection.firstOrNull()?.pageIndex ?: return
         if (state.pageRects.getOrNull(pi) == null) return
         val c = tableChrome(t)
-        val sel = com.xnotes.core.model.Rgba.SELECTION
-        val white = Rgba(255, 255, 255, 255)
+        val sel = state.palette.accent
+        val onSel = state.palette.onAccent
         fun at(p: Pt): Pt = state.fromPageSpace(pi, p).let { Pt(it.x + moveOffset.x, it.y + moveOffset.y) }
         val tick = HANDLE_SIZE * 0.3 / state.zoom
         val grip = HANDLE_SIZE * 0.42 / state.zoom
@@ -2259,7 +2269,7 @@ class InteractionController(
             val box = Rect(tl.x, tl.y, localRect.w, localRect.h)
             r.fillRect(box, sel)
             val pad = box.w * 0.28
-            val pen = Pen(white, 1.6, cosmetic = true)
+            val pen = Pen(onSel, 1.6, cosmetic = true)
             r.strokePolyline(listOf(Pt(box.left + pad, box.centerY), Pt(box.right - pad, box.centerY)), pen)
             if (plus) r.strokePolyline(listOf(Pt(box.centerX, box.top + pad), Pt(box.centerX, box.bottom - pad)), pen)
         }
@@ -3886,30 +3896,31 @@ class InteractionController(
             // Resize + rotate handles for the settled selection (single, multi, or mixed).
             if (selection.isNotEmpty() && mode != PointerMode.BAND && mode != PointerMode.LASSO_DRAW) {
                 val side = HANDLE_SIZE / state.zoom
+                val sel = state.palette.accent
                 // Rotate grip: a short stem out from the box's top edge up to a round handle.
                 selectionRotatePoint()?.let { rp ->
                     selObb?.let { obb ->
                         val base = ResizeMath.obbTopMid(obb)
                         val stemTop = Pt(base.x + moveOffset.x, base.y + moveOffset.y)
                         val grip = Pt(rp.x + moveOffset.x, rp.y + moveOffset.y)
-                        r.strokePolyline(listOf(grip, stemTop), Pen(com.xnotes.core.model.Rgba.SELECTION, 1.3, cosmetic = true))
-                        r.fillCircle(grip, side * 0.6, com.xnotes.core.model.Rgba.SELECTION)
+                        r.strokePolyline(listOf(grip, stemTop), Pen(sel, 1.3, cosmetic = true))
+                        r.fillCircle(grip, side * 0.6, sel)
                     }
                 }
                 for (h in selectionResizeHandles()) {
                     val c = Pt(h.content.x + moveOffset.x, h.content.y + moveOffset.y)
-                    r.fillRect(Rect(c.x - side / 2, c.y - side / 2, side, side), com.xnotes.core.model.Rgba.SELECTION)
+                    r.fillRect(Rect(c.x - side / 2, c.y - side / 2, side, side), sel)
                 }
                 singleSpline()?.let { sp ->
                     for (p in splineHandles(sp)) {
-                        r.fillCircle(Pt(p.x + moveOffset.x, p.y + moveOffset.y), side * 0.5, com.xnotes.core.model.Rgba.SELECTION)
+                        r.fillCircle(Pt(p.x + moveOffset.x, p.y + moveOffset.y), side * 0.5, sel)
                     }
                 }
                 drawTableChrome(r)
                 selectionMoveGrip()?.let { g ->
                     val c = Pt(g.x + moveOffset.x, g.y + moveOffset.y)
-                    r.fillCircle(c, side * 0.8, com.xnotes.core.model.Rgba.SELECTION)
-                    val glyph = Pen(com.xnotes.core.model.Rgba(255, 255, 255, 255), 1.6, cosmetic = true)
+                    r.fillCircle(c, side * 0.8, sel)
+                    val glyph = Pen(state.palette.onAccent, 1.6, cosmetic = true)
                     for (run in ResizeMath.moveGlyph(c, side * 0.5)) r.strokePolyline(run, glyph)
                 }
             }
@@ -3935,7 +3946,7 @@ class InteractionController(
      * in device px, which is what the conversion here produces.
      */
     private fun chromePen(width: Double): Pen = Pen(
-        com.xnotes.core.model.Rgba.SELECTION,
+        state.palette.accent,
         width,
         cosmetic = true,
         dashed = true,

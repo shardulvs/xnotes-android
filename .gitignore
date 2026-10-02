@@ -27,3 +27,4 @@ keystore.properties
 # --- Misc ---
 .DS_Store
 *.log
+/fastlane/

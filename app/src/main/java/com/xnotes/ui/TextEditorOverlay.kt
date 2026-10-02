@@ -208,7 +208,7 @@ fun TextEditorOverlay(editor: Editor, field: EditingField) {
                     com.xnotes.core.pal.HAlign.LEFT -> TextAlign.Start
                 },
             ),
-            cursorBrush = SolidColor(Rgba.SELECTION.toComposeColor()),
+            cursorBrush = SolidColor(Rgba.CARET.toComposeColor()),
         )
     }) { measurables, constraints ->
         val placeable = measurables[0].measure(Constraints())

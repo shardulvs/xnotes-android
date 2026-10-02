@@ -15,9 +15,9 @@ data class Rgba(val r: Int, val g: Int, val b: Int, val a: Int = 255) {
     fun toList(): List<Int> = listOf(r, g, b, a)
 
     companion object {
-        /** Selection/transform chrome (box, handles, marquee): a fixed light blue that stays visible
-         *  on both light and dark page backgrounds, where the theme accent (often white) does not. */
-        val SELECTION = Rgba(64, 156, 255)
+        /** The text caret: a fixed light blue that stays visible on both light and dark page
+         *  backgrounds, where the theme accent (often white) does not. */
+        val CARET = Rgba(64, 156, 255)
 
         fun fromArgb(argb: Int): Rgba =
             Rgba((argb shr 16) and 0xFF, (argb shr 8) and 0xFF, argb and 0xFF, (argb ushr 24) and 0xFF)

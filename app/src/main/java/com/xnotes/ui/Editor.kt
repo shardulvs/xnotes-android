@@ -1753,19 +1753,18 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         controller.clipboardHasImage = { clipboardImageUri() != null }
         controller.onMarkupTap = { at, withLink -> tapMarkup(at, withLink) }
         controller.onTap = { at -> tapClosesNotePeek(at) }
-        controller.onLinkTap = onLinkTap@{ pageIndex, pageLocal ->
-            // A canvas item with a hyperlink wins over a PDF link under the same point (it sits on top).
-            state.document.pages.getOrNull(pageIndex)?.items
-                ?.lastOrNull { it.link != null && it.contains(pageLocal) }
-                ?.link?.let { openUrl(it); return@onLinkTap true }
+        controller.onItemLinkTap = onItemLinkTap@{ pageIndex, pageLocal ->
+            val page = state.document.pages.getOrNull(pageIndex) ?: return@onItemLinkTap false
+            // A canvas item with a hyperlink wins over everything under the same point (it sits on top).
+            page.items.lastOrNull { it.link != null && it.contains(pageLocal) }
+                ?.link?.let { openUrl(it); return@onItemLinkTap true }
             // A hyperlink in the flow text body (under any items, over a PDF's own links).
-            publishedFlow?.let { pf ->
-                state.document.pages.getOrNull(pageIndex)?.let { page ->
-                    pf.indexOf[page]?.let { fi ->
-                        pf.frame.linkAt(fi, pageLocal)?.let { openUrl(it); return@onLinkTap true }
-                    }
-                }
-            }
+            val pf = publishedFlow ?: return@onItemLinkTap false
+            val fi = pf.indexOf[page] ?: return@onItemLinkTap false
+            pf.frame.linkAt(fi, pageLocal)?.let { openUrl(it); return@onItemLinkTap true }
+            false
+        }
+        controller.onLinkTap = onLinkTap@{ pageIndex, pageLocal ->
             val src = pdfSource ?: return@onLinkTap false
             val page = state.document.pages.getOrNull(pageIndex) ?: return@onLinkTap false
             val pdfIdx = page.pdfPage ?: return@onLinkTap false
@@ -4140,7 +4139,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         return when (kind) {
             ImportKind.PDF -> {
                 val file = keep(pdfDir, ".pdf")
-                val source = com.xnotes.platform.PdfSource.create(file) ?: return null
+                val source = com.xnotes.platform.PdfSource.open(file)
+                lastImportError = source.openError
+                if (source.pageCount == 0) {
+                    source.close()
+                    file.delete()
+                    return null
+                }
                 try { com.xnotes.platform.PdfImporter.import(source, state.document.dpi) } finally { source.close() }
             }
             ImportKind.IMAGE -> imageDocument(keep(imageDir, "." + sourceName.substringAfterLast('.', "img")))
@@ -4150,17 +4155,22 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** Where [appendDocument] finds the source's PDF pages: [file] becomes the note's PDF (the source's,
-     *  or both merged, the source's pages [offset] on), or else [flatten] is baked into images. */
-    private class PdfPlan(val file: java.io.File?, val offset: Int, val flatten: java.io.File?)
+     *  or both merged, the source's pages [offset] on). */
+    private class PdfPlan(val file: java.io.File?, val offset: Int)
 
-    /** Merge [src]'s PDF into [target]'s when both have one. IO. */
+    /** Merge [src]'s PDF into [target]'s when both have one; when that fails, bake [src]'s PDF pages into images. IO. */
     private fun planPdf(target: java.io.File?, src: Document): PdfPlan {
         val srcPdf = src.pdfFile
-        if (srcPdf == null || src.pages.none { it.pdfPage != null }) return PdfPlan(null, 0, null)
-        if (target == null) return PdfPlan(srcPdf, 0, null)
+        if (srcPdf == null || src.pages.none { it.pdfPage != null }) return PdfPlan(null, 0)
+        if (target == null) return PdfPlan(srcPdf, 0)
         val out = java.io.File.createTempFile("merged", ".pdf", pdfDir)
-        val offset = com.xnotes.platform.PdfMerge.merge(appContext, target, srcPdf, out) ?: return PdfPlan(null, 0, srcPdf)
-        return PdfPlan(out, offset, null)
+        val offset = com.xnotes.platform.PdfMerge.merge(appContext, target, srcPdf, out)
+        if (offset == null) {
+            out.delete()
+            flattenForeignPdfPages(src.pages, srcPdf)
+            return PdfPlan(null, 0)
+        }
+        return PdfPlan(out, offset)
     }
 
     /** Add the image read from [uri] (named [name]) as a page of its own before page [at], undoably. */
@@ -4185,6 +4195,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** Copy the picked file at [uri] in and build it as a note; null when it will not read. IO. */
     private fun readImport(uri: String, name: String, mime: String): Document? {
+        lastImportError = null
         val staged = runCatching {
             appContext.contentResolver.openInputStream(android.net.Uri.parse(uri))?.let { stageImport(it) }
         }.getOrNull() ?: return null
@@ -4287,7 +4298,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         src.pages.forEachIndexed { k, p ->
             val page = p.deepCopy(textMeasurer)
             page.style = page.style.over(src.style)
-            if (plan.flatten != null) flattenForeignPdfPage(page, plan.flatten) else page.pdfPage = page.pdfPage?.let { it + plan.offset }
+            page.pdfPage = page.pdfPage?.let { it + plan.offset }
             target.pages.add(insertAt + k, page)
             cmds.add(AddPage(target, page, insertAt + k))
         }
@@ -4345,7 +4356,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         colors = colors ?: base.colors,
     )
 
-    /** Why the last PDF given to [createPdfNoteFile] did not open, null when it did. */
+    /** Why the PDF of the last import did not open, null when it did or was not a PDF. */
     var lastImportError: com.xnotes.platform.PdfOpenError? = null
         private set
 
@@ -4394,6 +4405,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     fun commitImport(treeUri: String, parentDocId: String, rawName: String): String? {
         val pending = pendingImport ?: return null
         importCancelled.set(false)
+        lastImportError = null
         val staged = runCatching {
             appContext.contentResolver.openInputStream(android.net.Uri.parse(pending.uri))?.let { stageImport(it) }
         }.getOrNull()
@@ -6320,17 +6332,21 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** Insert fresh clones of the page clipboard right after [index]; selects nothing, reveals the first. */
-    fun pastePagesAfter(index: Int) {
+    suspend fun pastePagesAfter(index: Int) {
         if (pageClipboard.isEmpty()) return
-        val pages = state.document.pages
+        val doc = state.document
+        val clones = pageClipboard.map { it.deepCopy(textMeasurer) } // fresh clones each paste, so repeated pastes are independent
+        val srcPdf = PageClipboard.sourcePdfFile
+        // Same PDF note (duplicating within it): the pages keep their vector link.
+        if (srcPdf !== doc.pdfFile) withContext(Dispatchers.IO) { flattenForeignPdfPages(clones, srcPdf) }
+        if (state.document !== doc) return
+        val pages = doc.pages
         val firstAt = (index + 1).coerceIn(0, pages.size)
         var at = firstAt
         val cmds = ArrayList<Command>()
-        for (src in pageClipboard) {
-            val clone = src.deepCopy(textMeasurer) // fresh clone each paste, so repeated pastes are independent
-            flattenForeignPdfPage(clone)
+        for (clone in clones) {
             pages.add(at, clone)
-            cmds.add(AddPage(state.document, clone, at))
+            cmds.add(AddPage(doc, clone, at))
             at++
         }
         history.push(CompositeCommand(cmds))
@@ -6339,31 +6355,38 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /**
-     * If [page] is backed by a source PDF that the current note does not share (a cross-note paste),
-     * bake that PDF page into a background image and drop the [Page.pdfPage] link, so the pasted page
-     * stands alone. Same-PDF pastes (duplicating within a PDF note) keep the vector link untouched.
-     * On any failure the background is simply dropped, leaving a blank page with the copied items.
+     * Bake each of [pages] backed by [srcPdf], a PDF the current note does not share, into a background
+     * image with its markups, and drop the [Page.pdfPage] link so the page stands alone. A page that
+     * will not render just loses its background, leaving the copied items. IO.
      */
-    private fun flattenForeignPdfPage(page: Page, srcPdf: java.io.File? = PageClipboard.sourcePdfFile) {
-        val pi = page.pdfPage ?: return
-        if (srcPdf != null && srcPdf === state.document.pdfFile) return // same PDF note: keep the link
-        page.pdfPage = null
-        if (srcPdf == null) return
-        val bg = runCatching {
-            val src = com.xnotes.platform.PdfSource.create(srcPdf) ?: return@runCatching null
-            try {
-                val w = page.width.toInt().coerceAtLeast(1)
-                val h = page.height.toInt().coerceAtLeast(1)
-                val surface = src.renderPage(pi, w, h) ?: return@runCatching null
-                val bytes = java.io.ByteArrayOutputStream().use { out ->
-                    surface.bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
-                    out.toByteArray()
-                }
-                surface.recycle()
-                bytes
-            } finally {
-                src.close()
+    private fun flattenForeignPdfPages(pages: List<Page>, srcPdf: java.io.File?) {
+        val linked = pages.filter { it.pdfPage != null }
+        if (linked.isEmpty()) return
+        val src = srcPdf?.let { runCatching { com.xnotes.platform.PdfSource.create(it) }.getOrNull() }
+        try {
+            for (page in linked) {
+                val pi = page.pdfPage ?: continue
+                val markups = page.markups
+                page.pdfPage = null
+                page.markups = emptyList()
+                if (src != null) bakePdfBackground(page, src, pi, markups)
             }
+        } finally {
+            src?.close()
+        }
+    }
+
+    private fun bakePdfBackground(page: Page, src: com.xnotes.platform.PdfSource, pi: Int, markups: List<TextMarkup>) {
+        val bg = runCatching {
+            val w = page.width.toInt().coerceAtLeast(1)
+            val h = page.height.toInt().coerceAtLeast(1)
+            val surface = src.renderPage(pi, w, h, markups = markups) ?: return@runCatching null
+            val bytes = java.io.ByteArrayOutputStream().use { out ->
+                surface.bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+                out.toByteArray()
+            }
+            surface.recycle()
+            bytes
         }.getOrNull() ?: return
         val file = runCatching {
             java.io.File.createTempFile("pdfpg", null, imageDir).apply { writeBytes(bg) }

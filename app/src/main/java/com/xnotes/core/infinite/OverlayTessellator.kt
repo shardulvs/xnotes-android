@@ -44,7 +44,7 @@ object OverlayTessellator {
 
     /**
      * The selection box, its eight handles and the rotate grip and its stem. A lone spline swaps the
-     * handles and grip for its [points]; a [moveGrip] adds the pan glyph in a disc below a small box.
+     * handles and grip for its [points]; a [moveGrip] adds the pan glyph, in [onAccent], in a disc below a small box.
      */
     fun selection(
         box: Obb,
@@ -54,6 +54,7 @@ object OverlayTessellator {
         devicePxPerDp: Double = 1.0,
         points: List<Pt>? = null,
         moveGrip: Pt? = null,
+        onAccent: Rgba = Rgba(255, 255, 255, 255),
     ): List<MeshPart> {
         if (zoom <= 0.0) return emptyList()
         val outline = MeshBuilder()
@@ -89,7 +90,7 @@ object OverlayTessellator {
         val parts = ArrayList<MeshPart>(3)
         if (!outline.isEmpty) parts.add(MeshPart(outline.build(), accent, InkPass.OPAQUE))
         if (!marks.isEmpty) parts.add(MeshPart(marks.build(), accent, InkPass.OPAQUE))
-        if (!glyph.isEmpty) parts.add(MeshPart(glyph.build(), Rgba(255, 255, 255, 255), InkPass.OPAQUE))
+        if (!glyph.isEmpty) parts.add(MeshPart(glyph.build(), onAccent, InkPass.OPAQUE))
         return parts
     }
 
