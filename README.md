@@ -44,6 +44,7 @@ Xnotes is a great app, and I'm grateful that the developer puts so much work int
 - **Whole or partial selection**: select only fully enclosed items or anything touched.
 - **Finger tap to select**: a finger tap selects, a finger drag still pans.
 - **Move grip**: drag small selections without hitting the resize handles.
+- **Readable selection**: the selection colour darkens on light pages and lightens on dark ones so it always stands out.
 - **Rotation snapping**: optionally snap rotation to 90 degrees.
 - **Sidebar layout**: pinned notes, Sync now and optional sections in a reorganised sidebar.
 - **Home swipes**: swipe right on Home to open the sidebar.

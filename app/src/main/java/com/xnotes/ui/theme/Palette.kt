@@ -3,6 +3,7 @@ package com.xnotes.ui.theme
 import com.xnotes.core.model.Rgba
 import com.xnotes.settings.Preferences
 import kotlin.math.abs
+import kotlin.math.pow
 
 /** The design tokens for one appearance (spec 11 §1), built from a Material 3 scheme. */
 data class Palette(
@@ -23,6 +24,15 @@ data class Palette(
     fun accentAlpha(alpha: Int): Rgba = accent.withAlpha(alpha)
 
     val onAccent: Rgba get() = materialColors.onPrimary
+
+    /** The selection chrome's colour on [bg]: the accent, pushed darker on light paper or lighter on dark. */
+    fun selectionAccent(bg: Rgba): Rgba = ColorMath.contrastingOn(accent, bg)
+
+    /** The glyphs drawn on [selectionAccent], kept readable once the accent has been pushed. */
+    fun onSelectionAccent(bg: Rgba): Rgba {
+        val sel = selectionAccent(bg)
+        return if (sel == accent) onAccent else ColorMath.readableOn(sel)
+    }
     val selectionBackground: Rgba get() = materialColors.primaryContainer
     val selectionForeground: Rgba get() = materialColors.onPrimaryContainer
 
@@ -113,6 +123,42 @@ object ColorMath {
         return Rgba(ch(c.r), ch(c.g), ch(c.b), c.a)
     }
 
+
+    /** WCAG relative luminance, 0 for black up to 1 for white. */
+    fun relativeLuminance(c: Rgba): Double {
+        fun lin(v: Int): Double = (v / 255.0).let { if (it <= 0.04045) it / 12.92 else ((it + 0.055) / 1.055).pow(2.4) }
+        return 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
+    }
+
+    /** WCAG contrast ratio between [a] and [b], 1 to 21. */
+    fun contrastRatio(a: Rgba, b: Rgba): Double {
+        val la = relativeLuminance(a)
+        val lb = relativeLuminance(b)
+        return (maxOf(la, lb) + 0.05) / (minOf(la, lb) + 0.05)
+    }
+
+    /**
+     * [c] mixed toward black on a light [bg] or toward white on a dark one, just far enough to reach
+     * [minRatio] contrast against it; colours that already stand out pass through.
+     */
+    fun contrastingOn(c: Rgba, bg: Rgba, minRatio: Double = 3.0): Rgba {
+        if (contrastRatio(c, bg) >= minRatio) return c
+        val target = if (relativeLuminance(bg) > DARK_LIGHT_SPLIT) Rgba(0, 0, 0, c.a) else Rgba(255, 255, 255, c.a)
+        var t = 0.0
+        var out = c
+        while (t < 1.0 && contrastRatio(out, bg) < minRatio) {
+            t += 0.05
+            out = mix(c, target, t)
+        }
+        return out
+    }
+
+    /** Black or white, whichever contrasts more with [c]. */
+    fun readableOn(c: Rgba): Rgba =
+        if (relativeLuminance(c) > DARK_LIGHT_SPLIT) Rgba(0, 0, 0, 255) else Rgba(255, 255, 255, 255)
+
+    /** The luminance where black and white contrast equally. */
+    private const val DARK_LIGHT_SPLIT = 0.179
 
     /** Darken toward black by [amount] (0..1). */
     fun darken(c: Rgba, amount: Double): Rgba {

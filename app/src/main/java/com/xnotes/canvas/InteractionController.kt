@@ -2239,7 +2239,7 @@ class InteractionController(
         if (c.bottom < outer.bottom) r.fillPolygon(quad(Rect(outer.left, c.bottom, outer.w, outer.bottom - c.bottom)), dim)
         if (c.left > outer.left) r.fillPolygon(quad(Rect(outer.left, c.top, c.left - outer.left, c.h)), dim)
         if (c.right < outer.right) r.fillPolygon(quad(Rect(c.right, c.top, outer.right - c.right, c.h)), dim)
-        val sel = state.palette.accent
+        val sel = state.selectionAccent(pi)
         r.strokePolygon(quad(c), Pen(sel, 1.6, cosmetic = true))
         val side = HANDLE_SIZE / state.zoom
         for (h in ResizeMath.boxHandles(c)) {
@@ -2255,8 +2255,8 @@ class InteractionController(
         val pi = selection.firstOrNull()?.pageIndex ?: return
         if (state.pageRects.getOrNull(pi) == null) return
         val c = tableChrome(t)
-        val sel = state.palette.accent
-        val onSel = state.palette.onAccent
+        val sel = state.selectionAccent(pi)
+        val onSel = state.onSelectionAccent(pi)
         fun at(p: Pt): Pt = state.fromPageSpace(pi, p).let { Pt(it.x + moveOffset.x, it.y + moveOffset.y) }
         val tick = HANDLE_SIZE * 0.3 / state.zoom
         val grip = HANDLE_SIZE * 0.42 / state.zoom
@@ -3900,7 +3900,7 @@ class InteractionController(
             // Resize + rotate handles for the settled selection (single, multi, or mixed).
             if (selection.isNotEmpty() && mode != PointerMode.BAND && mode != PointerMode.LASSO_DRAW) {
                 val side = HANDLE_SIZE / state.zoom
-                val sel = state.palette.accent
+                val sel = state.selectionAccent(selectionPageIndex())
                 // Rotate grip: a short stem out from the box's top edge up to a round handle.
                 selectionRotatePoint()?.let { rp ->
                     selObb?.let { obb ->
@@ -3924,7 +3924,7 @@ class InteractionController(
                 selectionMoveGrip()?.let { g ->
                     val c = Pt(g.x + moveOffset.x, g.y + moveOffset.y)
                     r.fillCircle(c, side * 0.8, sel)
-                    val glyph = Pen(state.palette.onAccent, 1.6, cosmetic = true)
+                    val glyph = Pen(state.onSelectionAccent(selectionPageIndex()), 1.6, cosmetic = true)
                     for (run in ResizeMath.moveGlyph(c, side * 0.5)) r.strokePolyline(run, glyph)
                 }
             }
@@ -3943,6 +3943,9 @@ class InteractionController(
         if (ruler.visible) drawRuler(r)
     }
 
+    /** The page the selection sits on, or null (the current page) when nothing is selected. */
+    private fun selectionPageIndex(): Int? = selection.firstOrNull()?.pageIndex
+
     /**
      * A marquee pen: dashed, so chrome reads as chrome rather than as ink, off the same dp runs
      * the infinite canvas tessellates its own from, so a band, a lasso and a selection box look
@@ -3950,7 +3953,7 @@ class InteractionController(
      * in device px, which is what the conversion here produces.
      */
     private fun chromePen(width: Double): Pen = Pen(
-        state.palette.accent,
+        state.selectionAccent(selectionPageIndex()),
         width,
         cosmetic = true,
         dashed = true,

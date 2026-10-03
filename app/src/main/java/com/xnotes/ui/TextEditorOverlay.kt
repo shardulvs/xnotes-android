@@ -43,7 +43,6 @@ import com.xnotes.canvas.EditingField
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.pal.FontFace
 import com.xnotes.platform.FontCatalog
-import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -108,7 +107,6 @@ private class NoBringIntoViewNode : Modifier.Node(), BringIntoViewModifierNode {
 @Composable
 fun TextEditorOverlay(editor: Editor, field: EditingField) {
     val density = LocalDensity.current
-    val palette = LocalPalette.current
     var value by remember { mutableStateOf(TextFieldValue(field.text, TextRange(field.text.length))) }
     var coords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     val focusRequester = remember { FocusRequester() }
@@ -155,7 +153,7 @@ fun TextEditorOverlay(editor: Editor, field: EditingField) {
                 // No fill: the edited box is lifted out of the ink cache, so a transparent field lets the
                 // page/PDF underneath show through while typing (true WYSIWYG). The border marks the
                 // bounds; its width is pre-divided so it stays 1dp after the layer scale.
-                .border(Dp(1f / z), palette.accent.toComposeColor())
+                .border(Dp(1f / z), editor.state.selectionAccent().toComposeColor())
                 .focusRequester(focusRequester)
                 .onGloballyPositioned { coords = it }
                 .pointerInput(Unit) {

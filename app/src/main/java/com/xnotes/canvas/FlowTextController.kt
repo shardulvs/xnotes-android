@@ -614,15 +614,15 @@ class FlowTextController(
     fun drawOverlay(r: com.xnotes.core.pal.Renderer) {
         if (!active) return
         val f = frame() ?: return
-        val accent = state.palette.accent
         if (!selection.collapsed) {
-            for ((pi, rect) in f.selectionRects(selection)) {
+            val rects = f.selectionRects(selection)
+            for ((pi, rect) in rects) {
                 if (state.pageRects.getOrNull(pi) == null) continue
-                r.fillRect(state.fromPageSpaceRect(pi, rect), accent.withAlpha(70))
+                r.fillRect(state.fromPageSpaceRect(pi, rect), state.selectionAccent(pi).withAlpha(70))
             }
             val norm = selection.normalized()
-            handleCenter(norm.start, isStart = true)?.let { handles.draw(r, it, isStart = true, accent) }
-            handleCenter(norm.end, isStart = false)?.let { handles.draw(r, it, isStart = false, accent) }
+            handleCenter(norm.start, isStart = true)?.let { handles.draw(r, it, isStart = true, state.selectionAccent(rects.firstOrNull()?.first)) }
+            handleCenter(norm.end, isStart = false)?.let { handles.draw(r, it, isStart = false, state.selectionAccent(rects.lastOrNull()?.first)) }
         } else {
             val (pi, cr) = f.caretRect(selection.end) ?: return
             if (state.pageRects.getOrNull(pi) == null) return

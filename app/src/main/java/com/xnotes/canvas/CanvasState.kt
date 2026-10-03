@@ -681,6 +681,15 @@ class CanvasState(
 
     fun paperColor(page: Page): Rgba = effectivePageColor(page) ?: palette.paper
 
+    private fun paperAt(pageIndex: Int?): Rgba =
+        document.pages.getOrNull(pageIndex ?: currentPageIndex())?.let(::paperColor) ?: palette.paper
+
+    /** The selection chrome's colour on page [pageIndex] (the current page when null), set off from its paper. */
+    fun selectionAccent(pageIndex: Int? = null): Rgba = palette.selectionAccent(paperAt(pageIndex))
+
+    /** The glyphs drawn on [selectionAccent] for page [pageIndex]. */
+    fun onSelectionAccent(pageIndex: Int? = null): Rgba = palette.onSelectionAccent(paperAt(pageIndex))
+
     /**
      * The pages the view may draw (and touch). Vertical mode shows everything the viewport
      * reaches. The paginated view shows exactly one row at any moment: [currentRow]
