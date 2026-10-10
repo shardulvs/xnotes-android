@@ -4373,6 +4373,29 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
     }
 
+    private val porter by lazy {
+        com.xnotes.platform.NotePorter(appContext, imageCodec, textMeasurer, tempDir("port"), java.io.File(appContext.getExternalFilesDir(null) ?: appContext.filesDir, "port-backups"))
+    }
+
+    /** The notes under the browse root that still hold shapes from earlier n-notes versions; null without a root. */
+    suspend fun scanForkShapes(): List<com.xnotes.platform.NotePorter.Found>? {
+        val root = browseRoot ?: return null
+        return withContext(Dispatchers.IO) { porter.scan(root) }
+    }
+
+    /** Rewrite [found] in today's shape kinds, leaving alone what [isOpen] says is open somewhere. */
+    suspend fun portForkShapes(
+        found: List<com.xnotes.platform.NotePorter.Found>,
+        isOpen: (String) -> Boolean,
+        onProgress: (Int, Int) -> Unit,
+    ): com.xnotes.platform.NotePorter.Result = withContext(Dispatchers.IO) { porter.port(found, isOpen, onProgress) }
+
+    /** True when this editor shows the note or canvas at [uri]. */
+    fun hasOpen(uri: String): Boolean {
+        val shown = if (canvasOpen) infiniteOrNull?.document?.path else state.document.path.takeIf { noteOpen }
+        return shown != null && isSameDocument(shown, uri)
+    }
+
     private fun readNote(uri: String): Document? = runCatching {
         appContext.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { codec.read(it, pdfDir, imageDir) }
     }.getOrNull()

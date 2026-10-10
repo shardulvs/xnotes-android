@@ -766,6 +766,8 @@ fun PreferencesPane(
             HorizontalDivider(color = palette.border.toComposeColor())
             Box(Modifier.onPlaced { syncTop = it.positionInParent().y.roundToInt() }.searchAnchor(stringResource(R.string.search_keywords_sync)).sectionAnchor("Filen sync")) { FilenSyncSection(editor) }
             HorizontalDivider(color = palette.border.toComposeColor())
+            Box(Modifier.searchAnchor(stringResource(R.string.search_keywords_port))) { PortSection(editor) }
+            HorizontalDivider(color = palette.border.toComposeColor())
             Box(Modifier.searchAnchor(stringResource(R.string.search_keywords_update)).sectionAnchor("Updates")) { UpdateSection() }
             Spacer(Modifier.size(8.dp))
         }
@@ -915,6 +917,60 @@ private fun BackupSection(editor: Editor) {
             },
             dismissButton = { TextButton(onClick = { confirmImport = null }) { Text(stringResource(R.string.cancel)) } },
         )
+    }
+}
+
+/** Find and rewrite the notes that still hold shapes from earlier n-notes versions. */
+@Composable
+private fun PortSection(editor: Editor) {
+    val palette = LocalPalette.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var found by remember { mutableStateOf<List<com.xnotes.platform.NotePorter.Found>?>(null) }
+    var status by remember { mutableStateOf<String?>(null) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        SectionTitle(stringResource(R.string.pref_port))
+        Text(stringResource(R.string.pref_port_help), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
+        Row {
+            TextButton(enabled = !busy, onClick = {
+                busy = true
+                status = context.getString(R.string.port_scanning)
+                scope.launch {
+                    val scanned = runCatching { editor.scanForkShapes() }.getOrNull()
+                    found = scanned
+                    status = when {
+                        scanned == null -> context.getString(R.string.port_no_root)
+                        scanned.isEmpty() -> context.getString(R.string.port_none)
+                        else -> context.getString(R.string.port_found, scanned.size, scanned.sumOf { it.shapes })
+                    }
+                    busy = false
+                }
+            }) { Text(stringResource(R.string.port_scan), fontSize = 13.sp) }
+            val todo = found
+            if (!todo.isNullOrEmpty()) {
+                TextButton(enabled = !busy, onClick = {
+                    busy = true
+                    scope.launch {
+                        val result = editor.portForkShapes(
+                            todo,
+                            isOpen = { uri -> editor.hasOpen(uri) || editor.secondary?.hasOpen(uri) == true },
+                            onProgress = { done, total -> scope.launch { status = context.getString(R.string.port_progress, done, total) } },
+                        )
+                        status = listOfNotNull(
+                            context.getString(R.string.port_done, result.ported.size, result.failed.size, result.skipped.size),
+                            result.failed.takeIf { it.isNotEmpty() }?.let { context.getString(R.string.port_failed_list, it.joinToString(", ")) },
+                            result.skipped.takeIf { it.isNotEmpty() }?.let { context.getString(R.string.port_skipped_list, it.joinToString(", ")) },
+                            result.backupDir?.let { context.getString(R.string.port_backups, it.path) },
+                        ).joinToString("\n")
+                        found = null
+                        busy = false
+                        editor.relistTree()
+                    }
+                }) { Text(stringResource(R.string.port_run), fontSize = 13.sp) }
+            }
+        }
+        status?.let { Text(it, color = palette.textDim.toComposeColor(), fontSize = 12.sp) }
     }
 }
 
