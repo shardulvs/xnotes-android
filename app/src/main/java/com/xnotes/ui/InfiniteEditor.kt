@@ -962,6 +962,11 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     override val hostShapeConfig: ShapeConfig get() = shapeConfig
 
+    /** The app's hidden shape chips and pages, read live from the preferences the paged editor holds. */
+    var hiddenShapes: () -> Set<String> = { emptySet() }
+
+    override val hostHiddenShapes: Set<String> get() = hiddenShapes()
+
     override fun updateShapeConfig(config: ShapeConfig) {
         val marked = interaction.connecting
         shapeConfig = config

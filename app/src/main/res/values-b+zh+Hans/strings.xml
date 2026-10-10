@@ -120,6 +120,7 @@
     <string name="title_shape">形状</string>
     <string name="shape_line">直线</string>
     <string name="shape_arrow">箭头</string>
+    <string name="shape_spline">平滑曲线</string>
     <string name="shape_rectangle">矩形</string>
     <string name="shape_ellipse">椭圆</string>
     <string name="shape_circle">圆形</string>
@@ -373,6 +374,8 @@
     <string name="pref_next_note_named">下一个笔记将命名为 %1$s</string>
     <string name="pref_side_margin_px">"侧边距  %1$d px"</string>
     <string name="pref_max_cache_px">"最大缓存分辨率  %1$d px"</string>
+    <string name="pref_hidden_shapes">形状工具中的形状</string>
+    <string name="pref_hidden_shapes_help">取消勾选某页可隐藏该页全部形状，点按某个形状可只隐藏它。</string>
     <string name="pref_toolbar_colours_n">"工具栏颜色  %1$d"</string>
 
     <!-- Home screen and explorer -->

@@ -133,6 +133,7 @@
     <string name="title_shape">Shape</string>
     <string name="shape_line">Line</string>
     <string name="shape_arrow">Arrow</string>
+    <string name="shape_spline">Smooth curve</string>
     <string name="shape_rectangle">Rectangle</string>
     <string name="shape_ellipse">Ellipse</string>
     <string name="shape_circle">Circle</string>
@@ -387,6 +388,8 @@
     <string name="pref_next_note_named">The next note would be named %1$s</string>
     <string name="pref_side_margin_px">"Side margin  %1$d px"</string>
     <string name="pref_max_cache_px">"Max cache resolution  %1$d px"</string>
+    <string name="pref_hidden_shapes">Shapes in the shape tool</string>
+    <string name="pref_hidden_shapes_help">Untick a page to hide all of its shapes, or tap a shape to hide just that one.</string>
     <string name="pref_toolbar_colours_n">"Colours on the toolbar  %1$d"</string>
 
     <!-- Home screen and explorer -->

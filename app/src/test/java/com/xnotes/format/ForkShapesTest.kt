@@ -7,6 +7,7 @@ import com.xnotes.core.infinite.InfiniteDocument
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.shapes.ShapeKind
 import com.xnotes.core.shapes.SolidMathKinds
+import com.xnotes.core.shapes.catmullRom
 import com.xnotes.core.vector.VectorSeg
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -52,7 +53,7 @@ class ForkShapesTest {
 
     @Test fun theCurveTracesTheForkSplineExactly() {
         val c = listOf(Pt(0.0, 0.0), Pt(40.0, 90.0), Pt(120.0, 10.0), Pt(160.0, 70.0), Pt(200.0, 0.0))
-        val contour = ForkShapes.curve(c)
+        val contour = catmullRom(c)
         assertEquals(c.size - 1, contour.segments.size)
         var from = contour.start
         for ((i, seg) in contour.segments.withIndex()) {
@@ -86,19 +87,24 @@ class ForkShapesTest {
         val (axes, line, curve, graph) = doc.items.map { it as ShapeItem }
         assertEquals(SolidMathKinds.AXES_2D, axes.shape)
         assertEquals(0.5, axes.rotation, 1e-9)
+        val origin = axes.toLocal(axes.knobDots().single())
+        assertEquals("the fork's axes crossed mid-box", 50.0, origin.x, 1e-9)
+        assertEquals(40.0, origin.y, 1e-9)
         assertEquals(SolidMathKinds.NUMBER_LINE, line.shape)
         assertEquals(atan2(200.0, 0.0), line.rotation, 1e-9)
         assertEquals(Pt(0.0, 100.0), line.box.center)
         assertEquals(200.0, line.box.w, 1e-9)
-        assertEquals(ShapeKind.CURVE, curve.shape)
-        assertTrue(curve.path!!.single().segments.all { it is VectorSeg.Cubic })
+        assertEquals(ShapeKind.SPLINE, curve.shape)
+        assertEquals(listOf(Pt(0.0, 0.0), Pt(40.0, 90.0), Pt(120.0, 10.0), Pt(200.0, 70.0)), curve.vertexDots().map { it.at })
         assertEquals(ShapeKind.FUNCTION, graph.shape)
         assertEquals("tan(x)", graph.function!!.expr)
         assertEquals("tan breaks at its two poles", 3, graph.path!!.size)
 
         val back = roundTrip(doc)
         assertEquals(0, codec.forkShapesRead)
-        assertEquals(listOf(SolidMathKinds.AXES_2D, SolidMathKinds.NUMBER_LINE, ShapeKind.CURVE, ShapeKind.FUNCTION), back.items.map { (it as ShapeItem).shape })
+        assertEquals(listOf(SolidMathKinds.AXES_2D, SolidMathKinds.NUMBER_LINE, ShapeKind.SPLINE, ShapeKind.FUNCTION), back.items.map { (it as ShapeItem).shape })
+        assertTrue((back.items[0] as ShapeItem).adj.contentEquals(doubleArrayOf(0.5, 0.5)))
+        assertEquals(4, (back.items[2] as ShapeItem).vertexDots().size)
         val graphBack = back.items[3] as ShapeItem
         assertEquals("tan(x)", graphBack.function!!.expr)
         assertEquals(3, graphBack.path!!.size)

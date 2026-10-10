@@ -128,10 +128,10 @@ class BasicKindsTest {
         assertEquals(ShapeKind.POLYGON, tri.shape)
     }
 
-    @Test fun theBasicPageHasItsTwentyFourChipsInOrder() {
+    @Test fun theBasicPageHasItsTwentyFiveChipsInOrder() {
         val keys = ShapePresets.basic.presets.map { it.key }
-        assertEquals(24, keys.size)
-        assertEquals(listOf("line", "arrow", "rectangle", "rounded_rect", "square", "capsule"), keys.take(6))
+        assertEquals(25, keys.size)
+        assertEquals(listOf("line", "arrow", "spline", "rectangle", "rounded_rect", "square"), keys.take(6))
         assertEquals(listOf("heart", "cloud", "ring", "pie", "arc", ShapePresets.FREE_POLYGON), keys.takeLast(6))
         assertEquals(6, ShapePresets.byKey("hexagon")!!.n)
     }

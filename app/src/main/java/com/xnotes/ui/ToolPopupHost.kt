@@ -55,6 +55,9 @@ interface ToolPopupHost : SwatchHost {
     /** Recolour swatch [index] and arm it, live while the picker is open. */
     fun setSwatchColor(index: Int, color: Rgba)
 
+    /** Shape chips and picker pages, by key, that Preferences hides from the shape popup. */
+    val hostHiddenShapes: Set<String> get() = emptySet()
+
     /** Whether the open note has a PDF, whose text markups the eraser can take. */
     val hostHasPdf: Boolean get() = false
 }

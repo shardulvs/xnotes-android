@@ -24,7 +24,7 @@ class ShapePage(val key: String, val presets: List<ShapePreset>)
 /** The chips the shape picker offers, page by page. */
 object ShapePresets {
 
-    const val ROWS = 4
+    const val ROWS = 5
     const val COLUMNS = 6
 
     /** The key of the chip that places a polygon corner by corner rather than by dragging a box. */
@@ -35,6 +35,7 @@ object ShapePresets {
         listOf(
             ShapePreset("line", ShapeKind.LINE),
             ShapePreset("arrow", ShapeKind.ARROW),
+            ShapePreset("spline", ShapeKind.SPLINE),
             ShapePreset("rectangle", ShapeKind.RECTANGLE),
             ShapePreset("rounded_rect", ShapeKind.ROUNDED_RECT),
             ShapePreset("square", ShapeKind.SQUARE),
@@ -170,6 +171,11 @@ object ShapePresets {
 
     /** The chip a setting written before chips existed names by its bare kind. */
     fun forKind(kind: ShapeKind): ShapePreset = all.firstOrNull { it.kind == kind } ?: byKey.getValue("rectangle")
+
+    /** The pages left once the [hidden] chips and pages (by key) are taken out, each without its hidden chips. */
+    fun shown(hidden: Set<String>): List<ShapePage> =
+        if (hidden.isEmpty()) pages
+        else pages.filter { it.key !in hidden }.map { page -> ShapePage(page.key, page.presets.filter { it.key !in hidden }) }.filter { it.presets.isNotEmpty() }
 
     /** The page [preset] sits on. */
     fun pageOf(preset: ShapePreset): Int = pages.indexOfFirst { preset in it.presets }.coerceAtLeast(0)

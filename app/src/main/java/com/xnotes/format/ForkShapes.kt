@@ -8,8 +8,6 @@ import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.shapes.FreePath
 import com.xnotes.core.shapes.ShapeKind
 import com.xnotes.core.shapes.SolidMathKinds
-import com.xnotes.core.vector.VectorContour
-import com.xnotes.core.vector.VectorSeg
 import kotlin.math.atan2
 import kotlin.math.max
 import kotlin.math.min
@@ -47,9 +45,13 @@ internal object ForkShapes {
         val a = start ?: points?.firstOrNull { !it.x.isNaN() } ?: return null
         val b = end ?: points?.lastOrNull { !it.x.isNaN() } ?: return null
         return when (id) {
-            "axes" -> ShapeItem(SolidMathKinds.AXES_2D, a, b, stroke, width, rotation = angle.takeIf { it.isFinite() } ?: 0.0, n = AXES_TICKS)
+            // The fork's axes crossed in the middle of their box.
+            "axes" -> ShapeItem(
+                SolidMathKinds.AXES_2D, a, b, stroke, width,
+                rotation = angle.takeIf { it.isFinite() } ?: 0.0, adj = doubleArrayOf(0.5, 0.5), n = AXES_TICKS,
+            )
             "numberline" -> numberLine(a, b, stroke, width)
-            "spline" -> ShapeItem.free(ShapeKind.CURVE, listOf(curve(points?.filterNot { it.x.isNaN() }?.takeIf { it.size >= 2 } ?: listOf(a, (a + b) * 0.5, b))), stroke, width)
+            "spline" -> ShapeItem.poly(ShapeKind.SPLINE, points?.filterNot { it.x.isNaN() }?.takeIf { it.size >= 2 } ?: listOf(a, (a + b) * 0.5, b), stroke, width)
             else -> graph(a, b, points, function, stroke, width)
         }
     }
@@ -66,19 +68,6 @@ internal object ForkShapes {
             SolidMathKinds.NUMBER_LINE, Pt(c.x - len / 2.0, c.y - h / 2.0), Pt(c.x + len / 2.0, c.y + h / 2.0), stroke, width,
             rotation = atan2(b.y - a.y, b.x - a.x), n = NUMBER_LINE_TICKS,
         )
-    }
-
-    /** The fork's uniform Catmull-Rom spline through [c], as the cubic Béziers that trace it exactly. */
-    internal fun curve(c: List<Pt>): VectorContour {
-        val segs = ArrayList<VectorSeg>(c.size - 1)
-        for (i in 0 until c.size - 1) {
-            val p0 = c[max(i - 1, 0)]
-            val p1 = c[i]
-            val p2 = c[i + 1]
-            val p3 = c[min(i + 2, c.size - 1)]
-            segs.add(VectorSeg.Cubic(p1 + (p2 - p0) * (1.0 / 6.0), p2 - (p3 - p1) * (1.0 / 6.0), p2))
-        }
-        return VectorContour(c.first(), segs, false)
     }
 
     /** A graph replotted from its [function] in the box [a] to [b]; else its saved runs as a plain line. */

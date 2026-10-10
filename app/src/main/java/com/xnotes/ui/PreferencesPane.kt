@@ -87,6 +87,7 @@ import com.xnotes.core.model.Orientation
 import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.Rgba
 import com.xnotes.settings.ExplorerLayout
+import com.xnotes.core.shapes.ShapePresets
 import com.xnotes.core.tools.InkPalette
 import com.xnotes.core.tools.ToolbarItem
 import com.xnotes.core.tools.ToolbarLayout
@@ -269,13 +270,16 @@ fun PreferencesPane(
         search.density = androidx.compose.ui.platform.LocalDensity.current.density
         val currentSection by remember {
             derivedStateOf {
-                val line = scrollState.value + 24f * search.density
+                val line = sectionLine(scrollState.value, scrollState.maxValue, viewport.height, 24f * search.density)
                 search.sections.entries.filter { it.value <= line }.maxByOrNull { it.value }?.key
             }
         }
         val sectionsPanel = @Composable {
             PrefSectionsPanel(search.sections.entries.sortedBy { it.value }.map { it.key }, currentSection) { title ->
-                search.sections[title]?.let { y -> searchScope.launch { scrollState.animateScrollTo(y) } }
+                search.sections[title]?.let { y ->
+                    val to = scrollForSection(y, scrollState.maxValue, viewport.height, 24f * search.density)
+                    searchScope.launch { scrollState.animateScrollTo(to) }
+                }
                 if (compact) sectionsOpen = false
             }
         }
@@ -761,6 +765,21 @@ fun PreferencesPane(
                     sectionDropTarget = null
                 },
             )
+            FieldLabel(stringResource(R.string.pref_hidden_shapes))
+            Text(stringResource(R.string.pref_hidden_shapes_help), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
+            fun toggleHidden(key: String) {
+                val hidden = prefs.hiddenShapes
+                updateHome(prefs.copy(hiddenShapes = if (key in hidden) hidden - key else hidden + key))
+            }
+            for (page in ShapePresets.pages) {
+                val pageShown = page.key !in prefs.hiddenShapes
+                CheckRow(stringResource(pageLabel(page)), pageShown) { toggleHidden(page.key) }
+                if (pageShown) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        for (p in page.presets) KindChip(ShapeIcons.of(p), chipLabel(p), selected = p.key !in prefs.hiddenShapes) { toggleHidden(p.key) }
+                    }
+                }
+            }
             HorizontalDivider(color = palette.border.toComposeColor())
             BackupSection(editor)
             HorizontalDivider(color = palette.border.toComposeColor())
@@ -973,6 +992,19 @@ private fun PortSection(editor: Editor) {
         status?.let { Text(it, color = palette.textDim.toComposeColor(), fontSize = 12.sp) }
     }
 }
+
+/**
+ * The content y the sections panel marks the section above: [top] below the top of the view, until
+ * the last screenful, where it slides down to the bottom as fast as the page scrolls, so the short
+ * sections at the end, which can never reach the top, still each get marked, the last at the very end.
+ */
+internal fun sectionLine(scroll: Int, maxScroll: Int, height: Float, top: Float): Float =
+    scroll + top + (height - top - (maxScroll - scroll)).coerceAtLeast(0f)
+
+/** The scroll at which [sectionLine] reaches a section starting at [y]: [y] itself, or less near the end. */
+internal fun scrollForSection(y: Int, maxScroll: Int, height: Float, top: Float): Int =
+    if (maxScroll - y >= height - top) y
+    else ((y + maxScroll - height + top) / 2f).roundToInt().coerceIn(0, maxScroll)
 
 @Composable
 private fun SectionTitle(text: String) {

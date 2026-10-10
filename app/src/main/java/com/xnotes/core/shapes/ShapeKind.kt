@@ -148,6 +148,9 @@ abstract class ShapeKind internal constructor(val id: String) {
         val PIE: ShapeKind = SliceKind("pie", pie = true)
         val ARC: ShapeKind = SliceKind("arc", pie = false)
 
+        /** A smooth curve through points a drag moves, adds or removes. */
+        val SPLINE: ShapeKind = SplineKind("spline")
+
         /** The graph of a function, sampled into its own outline (breaking at poles). */
         val FUNCTION: ShapeKind = FunctionKind("function")
 
@@ -162,7 +165,7 @@ abstract class ShapeKind internal constructor(val id: String) {
             listOf(
                 LINE, ARROW, RECTANGLE, ELLIPSE, CIRCLE, TRIANGLE, POLYGON, POLYLINE, CURVE,
                 ROUNDED_RECT, SQUARE, CAPSULE, RIGHT_TRIANGLE, DIAMOND, PARALLELOGRAM, TRAPEZOID,
-                REGULAR_POLYGON, STAR, CROSS, HEART, CLOUD, RING, PIE, ARC, GLYPHS, FUNCTION,
+                REGULAR_POLYGON, STAR, CROSS, HEART, CLOUD, RING, PIE, ARC, GLYPHS, FUNCTION, SPLINE,
             ) + FlowchartKinds.all + ArrowKinds.all + SolidMathKinds.all
         }
 

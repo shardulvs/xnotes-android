@@ -431,11 +431,12 @@ class DocumentCodec(
             j.endArray()
         }
         if (standIn != null || glyphs) {
-            if (!s.isFree || s.shape == ShapeKind.FUNCTION) j.name("geom").value(s.shape.id)
+            if (!s.isFree || s.shape == ShapeKind.FUNCTION || s.shape == ShapeKind.SPLINE) j.name("geom").value(s.shape.id)
             val f = s.box
             j.name("rect").beginArray().value(f.x).value(f.y).value(f.w).value(f.h).endArray()
             if (s.rotation != 0.0) j.name("angle").value(s.rotation)
-            s.path?.takeIf { s.isFree && (glyphs || !FreePath.isVertexList(it)) }?.let { j.name("path").value(FreePath.toSvg(it)) }
+            // A spline's points are not the line its stand-in draws, so they are always written.
+            s.path?.takeIf { s.isFree && (glyphs || s.shape == ShapeKind.SPLINE || !FreePath.isVertexList(it)) }?.let { j.name("path").value(FreePath.toSvg(it)) }
         }
         if (s.n != s.shape.defaultN) j.name("n").value(s.n)
         if (s.headStart != s.shape.defaultHeadStart) j.name("head_start").value(s.headStart.id)

@@ -129,6 +129,8 @@ data class Preferences(
     val readerDark: Boolean? = null,
     /** Whether an exported PDF gets a bookmark for each heading of the note's text. */
     val pdfHeadingBookmarks: Boolean = true,
+    /** Shape chips and picker pages, by key, left out of the shape popup. */
+    val hiddenShapes: Set<String> = emptySet(),
 ) {
     /**
      * A new note's page size in document pixels. A named size is laid out under
@@ -229,6 +231,7 @@ data class Preferences(
         .put("hide_dot_items", hideDotItems)
         .apply { readerDark?.let { put("reader_dark", it) } }
         .put("pdf_heading_bookmarks", pdfHeadingBookmarks)
+        .apply { if (hiddenShapes.isNotEmpty()) put("hidden_shapes", org.json.JSONArray(hiddenShapes.sorted())) }
 
     companion object {
         val DEFAULT_ACCENT = Rgba(0, 230, 118, 255)
@@ -352,6 +355,7 @@ data class Preferences(
                 hideDotItems = o.optBoolean("hide_dot_items", true),
                 readerDark = if (o.has("reader_dark")) o.optBoolean("reader_dark") else null,
                 pdfHeadingBookmarks = o.optBoolean("pdf_heading_bookmarks", true),
+                hiddenShapes = o.optJSONArray("hidden_shapes")?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).ifEmpty { null } }.toSet() }.orEmpty(),
             )
         }
     }

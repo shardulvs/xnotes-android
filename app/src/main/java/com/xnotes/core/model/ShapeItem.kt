@@ -19,6 +19,7 @@ import com.xnotes.core.shapes.ShapeKind
 import com.xnotes.core.shapes.ShapePainter
 import com.xnotes.core.shapes.ShapeParams
 import com.xnotes.core.shapes.ShapePath
+import com.xnotes.core.shapes.SplineKind
 import com.xnotes.core.shapes.VertexEdit
 import com.xnotes.core.vector.PathFlattener
 import com.xnotes.core.vector.VectorContour
@@ -81,6 +82,7 @@ class ShapeItem(
     init {
         // A graph always plots something, so it can be drawn, hit and written like any free shape.
         if (shape == ShapeKind.FUNCTION && path == null) setFunction(FunctionSpec.PRESETS.first())
+        if (shape == ShapeKind.SPLINE && path == null) path = SplineKind.DEFAULT
     }
 
     /** The typed label: centred in a closed kind's text rect and turning with it, or upright on an open kind's line; null for none. */
@@ -380,12 +382,13 @@ class ShapeItem(
         if (!editable()) return emptyList()
         // An open shape's label sits on its line; a dot it covers moves to where the line shows.
         val gap = if (shape.isOpen) label?.let { l -> labelRect()?.outset(l.lineHeight * LABEL_GAP_LINES) } else null
+        val curve = splineCurve()
         return editOutline().flatMapIndexed { ci, c ->
             c.segments.indices.mapNotNull { si ->
                 val from = VertexEdit.vertexAt(c, si)
                 val seg = c.segments[si]
                 if (from.distanceTo(seg.end) < minLength) return@mapNotNull null
-                val mid = VertexEdit.midpoint(c, si)
+                val mid = VertexEdit.midpoint(curve ?: c, si)
                 val at = if (gap != null && seg is VectorSeg.Line) ConnectorPaths.clearOf(from, seg.end, mid, gap) else mid
                 EditDot(toPage(at), PathSpot(ci, si))
             }
@@ -416,13 +419,19 @@ class ShapeItem(
     fun splitEdge(spot: PathSpot): PathSpot? {
         if (!isFree) return null
         val (contours, added) = VertexEdit.split(editOutline(), spot)
-        edited(contours)
+        // A curve's new point goes where the curve already runs, so adding it changes nothing yet.
+        edited(splineCurve()?.let { VertexEdit.moveVertex(contours, added, VertexEdit.midpoint(it, spot.index)) } ?: contours)
         return added
     }
+
+    /** A spline's drawn curve in the unturned frame, one cubic per span between its points; null for every other kind. */
+    private fun splineCurve(): VectorContour? =
+        if (shape == ShapeKind.SPLINE) localGeometry().paths.first().contours.firstOrNull() else null
 
     /** Delete a free outline's vertex [spot]; false when too few would be left. */
     fun deleteVertex(spot: PathSpot): Boolean {
         if (!isFree) return false
+        if (shape == ShapeKind.SPLINE && editOutline().sumOf { VertexEdit.vertices(it).size } <= SplineKind.MIN_POINTS) return false
         edited(VertexEdit.delete(editOutline(), spot) ?: return false)
         return true
     }
@@ -651,8 +660,8 @@ class ShapeItem(
 
     /** The legacy kind id a file writes for this shape: its own, or the polygon/polyline of its stand-in. */
     fun legacyId(): String = when {
-        // A graph is free but no older reader knows it: it stands in as the line it draws.
-        shape == ShapeKind.FUNCTION -> ShapeKind.POLYLINE.id
+        // A graph or a spline is free but no older reader knows it: it stands in as the line it draws.
+        shape == ShapeKind.FUNCTION || shape == ShapeKind.SPLINE -> ShapeKind.POLYLINE.id
         legacyOutline() == null || isFree -> shape.id
         shape.isClosed -> ShapeKind.POLYGON.id
         else -> ShapeKind.POLYLINE.id

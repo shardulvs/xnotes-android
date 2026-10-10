@@ -48,6 +48,8 @@ Xnotes is a great app, and I'm grateful that the developer puts so much work int
 - **Hide dot files**: hide .obsidian, .git and other dot files from the explorer.
 - **Update check**: check GitHub for a newer release from Preferences.
 - **Port old notes**: rewrite notes that still hold the fork's old axes, number line, curve and function shapes in today's shapes, with a backup of each file.
+- **Smooth curve**: a curve shape next to the arrow that runs smoothly through its points; drag a point to move it, drag a dot on the curve to add one, double-tap a point to remove it.
+- **Hide shapes**: hide single shapes or whole pages of the shape picker in Preferences > Toolbar.
 - ~~**Create menu**: the new-note button is now a list to create a note, canvas, folder, or import a file.~~
 - ~~**Sort button**: moved sorting out into its own dedicated button.~~
 - ~~**Find in notes**: search the text of a note.~~
