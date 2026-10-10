@@ -1,2 +1,0 @@
-- Fix lagginess caused by highlighters
-- Add support for Lenovo stylus side button

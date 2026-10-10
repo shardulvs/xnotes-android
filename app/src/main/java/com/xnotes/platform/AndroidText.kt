@@ -27,9 +27,15 @@ object AndroidText {
     fun layout(text: CharSequence, widthPx: Int, paint: TextPaint, flags: TextFlags = TextFlags()): StaticLayout =
         StaticLayout.Builder
             .obtain(text, 0, text.length, paint, widthPx.coerceAtLeast(1))
-            .setAlignment(if (flags.alignLeft) android.text.Layout.Alignment.ALIGN_NORMAL else android.text.Layout.Alignment.ALIGN_CENTER)
+            .setAlignment(alignmentOf(flags))
             .setIncludePad(false)
             .build()
+
+    private fun alignmentOf(flags: TextFlags): android.text.Layout.Alignment = when {
+        !flags.alignLeft || flags.hAlign == com.xnotes.core.pal.HAlign.CENTER -> android.text.Layout.Alignment.ALIGN_CENTER
+        flags.hAlign == com.xnotes.core.pal.HAlign.RIGHT -> android.text.Layout.Alignment.ALIGN_OPPOSITE
+        else -> android.text.Layout.Alignment.ALIGN_NORMAL
+    }
 
     /** The height [text] actually occupies laid out at [widthPx]: one line height per wrapped line. */
     fun blockHeight(text: CharSequence, widthPx: Int, font: FontSpec): Double =

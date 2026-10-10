@@ -1,5 +1,0 @@
-- Add toolbar customisation
-- Add Disappearing Ink
-- Improve automatic shape snapping
-- Add screenshot tool to copy a region as an image
-- Lower minimum eraser size

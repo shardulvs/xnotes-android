@@ -1,7 +1,0 @@
-- Redesign home and the file explorer: grid, gallery, list, columns and timeline views
-- Pin folders and name colours in a sidebar that folds into a rail
-- Reopen recent files, restore from Trash, resume in the last folder
-- Show page counts and PDF badges without opening each note
-- Keep a note's created date inside the file
-- Add Simplified Chinese
-- Fix disappearing ink blinking out at pen up

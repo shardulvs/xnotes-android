@@ -87,6 +87,8 @@ import androidx.core.content.IntentCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.xnotes.R
+import com.xnotes.platform.PdfOpenError
+import com.xnotes.ui.CanvasToastPill
 import com.xnotes.ui.Editor
 import com.xnotes.ui.Toolbar
 import com.xnotes.ui.ToolbarAround
@@ -157,6 +159,8 @@ class MainActivity : ComponentActivity() {
             val context = LocalContext.current
             val ed = remember { Editor(context).also { editor = it } }
             LaunchedEffect(ed.fullscreen) { applyFullscreen(ed.fullscreen) }
+            // Re-arm the Filen periodic sync to match the saved preferences.
+            LaunchedEffect(Unit) { com.xnotes.sync.filen.FilenSyncManager.reschedule(context) }
             var ready by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) {
                 val start = android.os.SystemClock.uptimeMillis()
@@ -183,6 +187,7 @@ class MainActivity : ComponentActivity() {
                         ) {
                             com.xnotes.ui.XnotesLoader()
                         }
+                        com.xnotes.ui.EyedropperOverlay()
                     }
                 }
             }
@@ -245,6 +250,11 @@ class MainActivity : ComponentActivity() {
         if (hasFocus && editor?.fullscreen == true) applyFullscreen(true) // re-hide transient bars after they swipe in
     }
 
+    override fun onStart() {
+        super.onStart()
+        com.xnotes.sync.filen.FilenSyncManager.syncOnAppOpen(this)
+    }
+
     override fun onPause() {
         super.onPause()
         editor?.persist()
@@ -293,6 +303,7 @@ private fun EditorScreen(
         // The fonts come a moment before the bytes that measure them exactly; setting formulas between would set them twice.
         if (mathFonts.mainBytes == null) kotlinx.coroutines.delay(MATH_FONT_WAIT_MS)
         com.xnotes.platform.MathRendering.install(mathDensity, mathText, mathFonts)
+        com.xnotes.core.model.TextItem.mathTypesetter = com.xnotes.platform.MathRendering
         editor.refreshFlowMath()
     }
     // Backstage is the root of the stack; the editor is pushed on top only when a note is open
@@ -304,6 +315,10 @@ private fun EditorScreen(
     // The pane an image was picked for, and where a long-press menu asked it to land. Held together
     // so the picker's result lands in the pane that opened it, whatever the focus does meanwhile.
     var pendingInsert by remember { mutableStateOf<PendingInsert?>(null) }
+    var pendingPageInsert by remember { mutableStateOf<PendingPageInsert?>(null) }
+    var pendingImagePage by remember { mutableStateOf<PendingPageInsert?>(null) }
+    var pendingPhoto by remember { mutableStateOf<PendingPhoto?>(null) }
+    var pendingImportInto by remember { mutableStateOf<String?>(null) }
     // The same, for the infinite canvas.
     var pendingCanvasInsert by remember { mutableStateOf<PendingInsert?>(null) }
     // The pane and page a side-panel "Insert PDF" picked a file for.
@@ -324,6 +339,9 @@ private fun EditorScreen(
     val resolver = context.contentResolver
     val rwFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
 
+    // Read-only files open over everything; following a [[link]] stacks another, Back pops one.
+    val readerStack = remember { androidx.compose.runtime.mutableStateListOf<com.xnotes.ui.ReaderFile>() }
+
     // Which pane a "Save as" writes: the focused one at the moment the picker opened.
     var savePane by remember { mutableStateOf(editor) }
     val createLauncher = rememberLauncherForActivityResult(
@@ -338,22 +356,44 @@ private fun EditorScreen(
         }
     }
 
-    // "Import PDF" takes one file or many. One keeps the old flow: remember the pick and show the name
-    // dialog at once, with the (possibly large) copy happening at Save under the "Importing PDF…" loader.
-    // Many skips naming altogether (each note takes its source file's name) and the explorer imports
-    // them one at a time, so the picked list never becomes a list of open PDFs.
+    // "Import file" takes one file or many. One remembers the pick and shows the name dialog at once, with
+    // the (possibly large) copy + conversion happening at Save under the "Importing…" loader. Many skips
+    // naming (each note takes its source file's name) and the explorer imports them one at a time. The
+    // format (pdf / image / text) is classified from each picked file here.
     val importPdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        fun stemOf(u: android.net.Uri) = com.xnotes.core.util.Paths.stem(displayNameOf(resolver, u) ?: "Document")
+        fun pendingOf(u: android.net.Uri): com.xnotes.ui.PendingImport {
+            val name = displayNameOf(resolver, u) ?: "Document"
+            val mime = runCatching { resolver.getType(u) }.getOrNull() ?: ""
+            val kind = com.xnotes.ui.ImportKind.classify(name, mime)
+            return com.xnotes.ui.PendingImport(kind, com.xnotes.core.util.Paths.stem(name), u.toString(), name, mime)
+        }
         when {
             uris.isEmpty() -> Unit
-            uris.size == 1 -> editor.requestImport(stemOf(uris[0]), uris[0].toString())
-            else -> editor.requestImports(uris.map { com.xnotes.ui.PendingImport(stemOf(it), it.toString()) })
+            uris.size == 1 -> pendingOf(uris[0]).let { editor.requestImport(it.kind, it.defaultName, it.uri, it.sourceName, it.mime) }
+            else -> editor.requestImports(uris.map(::pendingOf))
         }
         if (uris.isNotEmpty()) {
             backstageView = com.xnotes.ui.BackstageView.HOME
             editor.goHomeAll() // land on backstage to name the single pick, or to run the batch
         }
     }
+    // Exact MIME types the "Import file" picker offers, so it only shows files we can actually
+    // import (an explicit allowlist rather than image/* + text/* wildcards, which some pickers
+    // expand to unrelated files).
+    val importMimeTypes = arrayOf(
+        "application/pdf",
+        // images
+        "image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp",
+        "image/svg+xml", "image/heic", "image/heif",
+        // plain text / markdown / csv / html / rtf
+        "text/plain", "text/markdown", "text/x-markdown",
+        "text/csv", "text/comma-separated-values", "application/csv",
+        "text/html", "text/rtf", "application/rtf",
+        // ebook / office
+        "application/epub+zip",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
     // A PDF "Save as" destination. The note is already rendered into [pendingExportTemp]
     // (off-thread, behind the progress dialog), so the picker just chooses where to copy it —
     // shared by the open-note export, the explorer-file export, and side-panel page saves.
@@ -438,6 +478,77 @@ private fun EditorScreen(
     val insertPdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val pending = pendingPdfInsert; pendingPdfInsert = null
         if (uri != null && pending != null) scope.launch { pending.editor.insertPdfAfter(pending.after, uri.toString()) }
+    }
+
+    // A file whose pages go into the open note, from a page's menu in the side panel.
+    val insertPagesLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val pending = pendingPageInsert; pendingPageInsert = null
+        if (uri == null || pending == null) return@rememberLauncherForActivityResult
+        val name = displayNameOf(resolver, uri) ?: "Document"
+        val mime = runCatching { resolver.getType(uri) }.getOrNull() ?: ""
+        scope.launch {
+            if (!pending.editor.importIntoOpenNote(uri.toString(), name, mime, pending.at)) {
+                editor.message = context.getString(
+                    if (pending.editor.lastImportError == PdfOpenError.PASSWORD) R.string.err_pdf_password else R.string.err_read_file,
+                )
+            }
+        }
+    }
+
+    // A file appended to a note chosen in the explorer.
+    val importIntoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val note = pendingImportInto; pendingImportInto = null
+        if (uri == null || note == null) return@rememberLauncherForActivityResult
+        val name = displayNameOf(resolver, uri) ?: "Document"
+        val mime = runCatching { resolver.getType(uri) }.getOrNull() ?: ""
+        scope.launch {
+            editor.message = context.getString(
+                when {
+                    editor.importIntoNoteFile(note, uri.toString(), name, mime) -> R.string.imported_into_note
+                    editor.lastImportError == PdfOpenError.PASSWORD -> R.string.err_pdf_password
+                    else -> R.string.err_read_file
+                },
+            )
+        }
+    }
+
+    // A picked image as a page of its own.
+    val imagePageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val pending = pendingImagePage; pendingImagePage = null
+        if (uri == null || pending == null) return@rememberLauncherForActivityResult
+        val name = displayNameOf(resolver, uri) ?: "image"
+        scope.launch {
+            if (!pending.editor.insertImagePage(uri, name, pending.at)) editor.message = context.getString(R.string.err_read_image)
+        }
+    }
+
+    // A photo from the camera app, written straight into a cache file we hand it.
+    val takePhotoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { taken ->
+        val pending = pendingPhoto; pendingPhoto = null
+        if (pending == null) return@rememberLauncherForActivityResult
+        if (!taken || pending.file.length() == 0L) { pending.file.delete(); return@rememberLauncherForActivityResult }
+        scope.launch {
+            val target = pending.editor
+            when {
+                pending.page != null -> target.insertImagePage(android.net.Uri.fromFile(pending.file), pending.file.name, pending.page)
+                target.canvasOpen -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { pending.file.readBytes() }
+                    .let { target.infinite.insertImage(it, pending.at) }
+                else -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { pending.file.readBytes() }
+                    .let { target.insertImageAt(it, pending.at) }
+            }
+            pending.file.delete()
+        }
+    }
+    fun takePhoto(target: Editor, at: com.xnotes.core.geometry.Pt?, page: Int?) {
+        val dir = java.io.File(context.cacheDir, "camera").apply { mkdirs() }
+        val file = java.io.File.createTempFile("photo", ".jpg", dir)
+        val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        pendingPhoto = PendingPhoto(target, file, at, page)
+        runCatching { takePhotoLauncher.launch(uri) }.onFailure {
+            pendingPhoto = null
+            file.delete()
+            editor.message = context.getString(R.string.err_no_camera)
+        }
     }
 
     // Images picked for the sticker library (multi-select), stored on disk by the editor.
@@ -785,7 +896,7 @@ private fun EditorScreen(
         val stem = com.xnotes.core.util.Paths.stem(displayNameOf(resolver, src) ?: "Document")
         guardedAll {
             if (editor.browseRoot == null) editor.useInternalStorage()
-            editor.requestImport(stem, src.toString())
+            editor.requestImport(com.xnotes.ui.ImportKind.PDF, stem, src.toString())
             backstageView = com.xnotes.ui.BackstageView.HOME
             editor.goHomeAll()
         }
@@ -811,8 +922,12 @@ private fun EditorScreen(
                 onExitApp = { (context as? android.app.Activity)?.finish() },
                 onImportCodeTheme = { importCodeThemeLauncher.launch(arrayOf("*/*")) },
                 onImportFont = { importFontLauncher.launch(arrayOf("*/*")) },
-                onImportPdf = { importPdfLauncher.launch(arrayOf("application/pdf")) },
-                onOpenFile = { uri -> guarded(editor) { openTreeFile(uri) } },
+                onImportPdf = { importPdfLauncher.launch(importMimeTypes) },
+                onOpenFile = { uri ->
+                    val name = displayNameOf(resolver, Uri.parse(uri)).orEmpty()
+                    if (com.xnotes.core.util.ReaderKind.isReadable(name)) readerStack.add(com.xnotes.ui.ReaderFile(uri, name))
+                    else guarded(editor) { openTreeFile(uri) }
+                },
                 onPickRoot = { pickRootLauncher.launch(null) },
                 onShareFile = { uri -> pendingShareUri = uri; showShareChooser = true },
                 onSaveCopyFile = { uri -> pendingSaveCopyUri = uri; saveCopyLauncher.launch("${stemOf(uri)}${kindOf(uri).suffix}") },
@@ -823,6 +938,10 @@ private fun EditorScreen(
                 },
                 onOpenSplit = { first, second -> guardedAll { openSplit(first, second) } },
                 onShareFiles = { uris -> shareFiles(uris) },
+                onImportIntoNote = { note ->
+                    pendingImportInto = note
+                    importIntoLauncher.launch(importMimeTypes + arrayOf("application/octet-stream"))
+                },
                 onOpenBeside = { uri ->
                     editor.currentUri?.takeIf { !editor.isSameDocument(it, uri) }?.let { first -> { guardedAll { openSplit(first, uri) } } }
                 },
@@ -841,6 +960,8 @@ private fun EditorScreen(
                 BackHandler(enabled = focused.editingField == null && !focused.flowEditingActive) {
                     guarded(focused) { focused.goHome() }
                 }
+                // Reader mode is left before the note is.
+                BackHandler(enabled = focused.readerMode) { focused.exitReader() }
             }
 
             val actions = PaneActions(
@@ -867,8 +988,47 @@ private fun EditorScreen(
                     pendingPdfInsert = PendingPdfInsert(pane, after)
                     insertPdfLauncher.launch(arrayOf("application/pdf"))
                 },
+                onInsertPages = { pane, kind, at ->
+                    when (kind) {
+                        com.xnotes.ui.PageInsert.FILE -> {
+                            pendingPageInsert = PendingPageInsert(pane, at)
+                            insertPagesLauncher.launch(importMimeTypes + arrayOf("application/octet-stream"))
+                        }
+                        com.xnotes.ui.PageInsert.IMAGE -> {
+                            pendingImagePage = PendingPageInsert(pane, at)
+                            imagePageLauncher.launch(arrayOf("image/*"))
+                        }
+                        com.xnotes.ui.PageInsert.PHOTO -> takePhoto(pane, null, at)
+                    }
+                },
+                onTakePhoto = { pane, at -> takePhoto(pane, at, null) },
+                onImagePage = { pane ->
+                    pendingImagePage = PendingPageInsert(pane, pane.pageIndex + 1)
+                    imagePageLauncher.launch(arrayOf("image/*"))
+                },
             )
             SplitHost(editor, actions)
+
+            readerStack.lastOrNull()?.let { file ->
+                androidx.compose.runtime.key(file.uri) {
+                    com.xnotes.ui.ReaderScreen(
+                        editor = editor,
+                        file = file,
+                        onClose = { readerStack.removeLastOrNull() },
+                        onWikiLink = { target ->
+                            scope.launch {
+                                val root = editor.browseRoot
+                                val hit = root?.let { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { editor.findLinkedFile(it, target) } }
+                                when {
+                                    hit == null -> editor.say(context.getString(R.string.reader_link_missing, target))
+                                    com.xnotes.core.util.ReaderKind.isReadable(hit.name) -> readerStack.add(com.xnotes.ui.ReaderFile(hit.documentUri, hit.name))
+                                    else -> { readerStack.clear(); guarded(editor) { openTreeFile(hit.documentUri) } }
+                                }
+                            }
+                        },
+                    )
+                }
+            }
         }
     }
     if (showShareChooser) {
@@ -942,7 +1102,7 @@ private fun EditorScreen(
         // A batch counts files, so it gets a determinate ring; a single import has nothing to count.
         val batch = importer.importProgress
         if (batch != null) PdfImportBatchDialog(batch.done, batch.total) { importer.cancelImportInProgress() }
-        else PdfImportDialog(onCancel = { importer.cancelImportInProgress() }) // the stream-copy stops at its next buffer
+        else PdfImportDialog(isPdf = importer.pendingImport?.kind != com.xnotes.ui.ImportKind.OPEN, onCancel = { importer.cancelImportInProgress() }) // the stream-copy stops at its next buffer
     }
     // Tapping a note reads it off-thread (editor.opening). Only show the spinner once the read has run
     // long enough to matter, so opening a small note never flashes a dialog; a big PDF gets the loader.
@@ -974,6 +1134,12 @@ private class GuardRequest(val editor: Editor, val action: () -> Unit)
 
 /** A picked image on its way into [editor], at [at] when a long-press chose the spot. */
 private class PendingInsert(val editor: Editor, val at: com.xnotes.core.geometry.Pt?)
+
+/** Pages about to go into [editor] before page [at], once a picker or the camera returns. */
+private class PendingPageInsert(val editor: Editor, val at: Int)
+
+/** A photo being taken into [file]: for [editor]'s page [page] when set, else placed at [at]. */
+private class PendingPhoto(val editor: Editor, val file: java.io.File, val at: com.xnotes.core.geometry.Pt?, val page: Int?)
 
 /** Side-panel pages of [editor] waiting on a SAF "Save as" destination. */
 private class PendingPages(val editor: Editor, val pages: List<Int>)
@@ -1014,6 +1180,11 @@ private class PaneActions(
     val onSavePagesAsPdf: (Editor, List<Int>) -> Unit,
     val onSavePagesAsImages: (Editor, List<Int>) -> Unit,
     val onInsertPdf: (Editor, Int) -> Unit,
+    val onInsertPages: (Editor, com.xnotes.ui.PageInsert, Int) -> Unit,
+    /** Take a photo and place it at the content point, or the page centre when null. */
+    val onTakePhoto: (Editor, com.xnotes.core.geometry.Pt?) -> Unit,
+    /** Pick an image and add it as a page after the current one. */
+    val onImagePage: (Editor) -> Unit,
 )
 
 /** Neither pane of a split may be squeezed below this share of the split axis. */
@@ -1172,6 +1343,7 @@ private fun EditorPane(
                     canvas,
                     onOpenBackstage = actions.onOpenBackstage,
                     onInsertImage = { actions.onInsertCanvasImage(editor, null) },
+                    onTakePhoto = { actions.onTakePhoto(editor, null) },
                     onClosePane = onClose,
                 )
             }
@@ -1188,8 +1360,9 @@ private fun EditorPane(
                     floatingBar()
                     com.xnotes.ui.SelectionMenu(canvas)
                     com.xnotes.ui.TextStyleBar(canvas)
-                    com.xnotes.ui.LongPressMenu(canvas, onInsertImageAt = { c -> actions.onInsertCanvasImage(editor, c) })
+                    com.xnotes.ui.LongPressMenu(canvas, onInsertImageAt = { c -> actions.onInsertCanvasImage(editor, c) }, onTakePhotoAt = { c -> actions.onTakePhoto(editor, c) })
                     com.xnotes.ui.CanvasDebugOverlay(canvas)
+                    CanvasToastPill(canvas)
                 }
             }
         } else {
@@ -1202,6 +1375,8 @@ private fun EditorPane(
                     onAddStickers = actions.onAddStickers,
                     onClosePane = onClose,
                     onImportTemplate = actions.onImportTemplate,
+                    onTakePhoto = { actions.onTakePhoto(editor, null) },
+                    onImagePage = { actions.onImagePage(editor) },
                 )
             }
             ToolbarAround(bar, onCover = editor::setToolbarCover) { floatingBar ->
@@ -1213,6 +1388,7 @@ private fun EditorPane(
                             onSavePagesAsPdf = { pages -> actions.onSavePagesAsPdf(editor, pages) },
                             onSavePagesAsImages = { pages -> actions.onSavePagesAsImages(editor, pages) },
                             onInsertPdf = { after -> actions.onInsertPdf(editor, after) },
+                            onInsertPages = { kind, at -> actions.onInsertPages(editor, kind, at) },
                         )
                     }
                     Box(modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
@@ -1227,8 +1403,9 @@ private fun EditorPane(
                         floatingBar()
                         com.xnotes.ui.SelectionMenu(editor)
                         com.xnotes.ui.ScreenshotMenu(editor)
+                        com.xnotes.ui.CropMenu(editor)
                         com.xnotes.ui.TextStyleBar(editor)
-                        com.xnotes.ui.LongPressMenu(editor, onInsertImageAt = { c -> actions.onInsertImage(editor, c) })
+                        com.xnotes.ui.LongPressMenu(editor, onInsertImageAt = { c -> actions.onInsertImage(editor, c) }, onTakePhotoAt = { c -> actions.onTakePhoto(editor, c) })
                         com.xnotes.ui.FlowEditMenu(editor)
                         com.xnotes.ui.PdfSelectionMenu(editor)
                         com.xnotes.ui.MarkupNotePeek(editor)
@@ -1238,11 +1415,14 @@ private fun EditorPane(
                         com.xnotes.ui.FlowTableMenu(editor)
                         com.xnotes.ui.TableChrome(editor)
                         ZoomLockHint(editor)
+                        CanvasToastPill(editor)
                     }
                 }
             }
-            // Last child of the resized column: rides directly above the soft keyboard.
+            // Last children of the resized column: ride directly above the soft keyboard.
             com.xnotes.ui.TextFormatBar(editor)
+            com.xnotes.ui.MathKeyboardPanel(editor)
+            com.xnotes.ui.TextBoxFormatBar(editor)
         }
     }
 }
@@ -1406,7 +1586,7 @@ private fun PdfExportDialog(done: Int, total: Int, counting: String, onCancel: (
  * [PdfExportDialog].
  */
 @Composable
-private fun SpinnerDialog(title: String, onCancel: () -> Unit) {
+internal fun SpinnerDialog(title: String, onCancel: () -> Unit) {
     val palette = LocalPalette.current
     androidx.compose.ui.window.Dialog(onDismissRequest = onCancel) {
         Column(
@@ -1476,7 +1656,8 @@ private fun SavingDialog() {
  * cost is copying the (possibly large) source bytes — so it shows an animated spinner.
  */
 @Composable
-private fun PdfImportDialog(onCancel: () -> Unit) = SpinnerDialog(stringResource(R.string.importing_pdf), onCancel)
+private fun PdfImportDialog(isPdf: Boolean, onCancel: () -> Unit) =
+    SpinnerDialog(if (isPdf) "Importing…" else "Importing note…", onCancel)
 
 /**
  * Determinate "Importing PDFs…" dialog for a multi-file import: a ring filled by files finished plus

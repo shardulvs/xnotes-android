@@ -1,2 +1,0 @@
-- Fix app crash when using multiple large images
-- Open the pages sidebar on the current page

@@ -41,6 +41,9 @@ interface ToolPopupHost : SwatchHost {
     /** Apply and persist a tool's style. */
     fun updateToolConfig(tool: Tool, config: ToolConfig)
 
+    /** Global "snap held strokes to shapes" (dwell shape detection), shared across every stroke tool. */
+    var snapHeldToShapes: Boolean
+
     /** The shape tool's style. */
     val hostShapeConfig: ShapeConfig
 

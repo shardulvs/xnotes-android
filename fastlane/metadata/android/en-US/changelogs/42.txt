@@ -1,2 +1,0 @@
-- Fix disappearing ink
-- Improve Calligraphy pen

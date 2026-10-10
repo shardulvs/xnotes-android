@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- n-notes launcher foreground: an angular lowercase "n" with a chamfered top-right corner,
+     hard miter joins and butt caps for a tech/cyberpunk read. Centered in the adaptive safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="432"
+    android:viewportHeight="432">
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="46"
+        android:strokeLineCap="butt"
+        android:strokeLineJoin="miter"
+        android:strokeMiterLimit="10"
+        android:pathData="M162 292 L162 150 L246 150 L278 182 L278 292" />
+</vector>

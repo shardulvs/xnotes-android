@@ -35,12 +35,17 @@ import androidx.compose.material.icons.filled.FormatListNumbered
 import androidx.compose.material.icons.filled.Functions
 import androidx.compose.material.icons.filled.FormatStrikethrough
 import androidx.compose.material.icons.filled.FormatUnderlined
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.outlined.CheckBox
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material.icons.outlined.TableChart
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -120,6 +125,7 @@ fun TextFormatBar(editor: Editor) {
             BarIcon(Icons.Filled.FormatItalic, stringResource(R.string.italic), active = style.italic, shortcut = Keys.ITALIC) { editor.flowToggleItalic() }
             BarIcon(Icons.Filled.FormatUnderlined, stringResource(R.string.underline), active = style.underline, shortcut = Keys.UNDERLINE) { editor.flowToggleUnderline() }
             BarIcon(Icons.Filled.FormatStrikethrough, stringResource(R.string.strikethrough), active = style.strike, shortcut = Keys.STRIKE) { editor.flowToggleStrike() }
+            LinkButton(editor, style.link)
             BarDivider()
             HeadingButton(editor, para?.headingLevel ?: 0, enabled = !inCell)
             BarIcon(Icons.Filled.FormatListNumbered, stringResource(R.string.ordered_list), active = para?.list == ListKind.ORDERED, enabled = !inCell) {
@@ -294,6 +300,39 @@ private fun CodeBlockButton(editor: Editor, lang: String?, enabled: Boolean) {
                 )
             }
         }
+    }
+}
+
+/** Hyperlink: applies a URL to the selection, or edits/removes the link the caret sits on.
+ *  With no selection and no existing link it inserts the URL itself as linked text. */
+@Composable
+private fun LinkButton(editor: Editor, current: String?) {
+    var open by remember { mutableStateOf(false) }
+    BarIcon(Icons.Filled.Link, "Link", active = current != null) { open = true }
+    if (open) {
+        var text by remember { mutableStateOf(current ?: "") }
+        AlertDialog(
+            onDismissRequest = { open = false },
+            title = { Text("Link") },
+            text = {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    singleLine = true,
+                    placeholder = { Text("https://example.com") },
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { editor.flowSetCharLink(text.trim()); open = false }) { Text("Save") }
+            },
+            dismissButton = {
+                if (current != null) {
+                    TextButton(onClick = { editor.flowSetCharLink(null); open = false }) { Text("Remove") }
+                } else {
+                    TextButton(onClick = { open = false }) { Text("Cancel") }
+                }
+            },
+        )
     }
 }
 

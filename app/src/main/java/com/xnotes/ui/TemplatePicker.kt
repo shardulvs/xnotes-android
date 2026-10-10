@@ -72,7 +72,7 @@ private val TILE_W = 62.dp
 
 /**
  * A row of template previews drawn at the current page's proportions, the [selected] one outlined,
- * ending in an Import tile. A long press on an imported template offers to remove it, and on one
+ * ending in an Import tile when there is an [onImport]. A long press on an imported template offers to remove it, and on one
  * only this note carries, to add it to the library.
  */
 @OptIn(ExperimentalFoundationApi::class)
@@ -85,7 +85,7 @@ internal fun TemplateStrip(
     accent: Rgba,
     paper: Rgba,
     onSelect: (String) -> Unit,
-    onImport: () -> Unit,
+    onImport: (() -> Unit)?,
     onRemove: (String) -> Unit,
     onKeep: (String) -> Unit,
 ) {
@@ -138,7 +138,7 @@ internal fun TemplateStrip(
                 }
             }
         }
-        Column(
+        if (onImport != null) Column(
             Modifier
                 .width(TILE_W)
                 .clip(MaterialTheme.shapes.extraSmall)

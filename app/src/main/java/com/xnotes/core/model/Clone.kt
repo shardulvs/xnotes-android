@@ -11,7 +11,7 @@ import com.xnotes.core.pal.TextMeasurer
 fun CanvasItem.deepCopy(measurer: TextMeasurer): CanvasItem = when (this) {
     is Stroke -> Stroke(this)
     is ImageItem -> ImageItem(image, rect, orientation, angle)
-    is TextItem -> TextItem(pos, width, height, text, rgba, pointSize, face, measurer)
+    is TextItem -> TextItem(pos, width, height, text, rgba, pointSize, face, measurer, bold, italic, underline, strike, align, math)
     is ShapeItem ->
         ShapeItem(
             shape, start, end, strokeRgba, strokeWidth, fillRgba, neon, neonStrength, path,
@@ -19,6 +19,7 @@ fun CanvasItem.deepCopy(measurer: TextMeasurer): CanvasItem = when (this) {
         ).also {
             it.label = label
             it.labelAt = labelAt
+            it.function = function
         }
     is ConnectorItem ->
         ConnectorItem(routing, start, end, strokeRgba, strokeWidth, headStart, headEnd, dashed, dashLength, dashGap, neon, neonStrength).also {
@@ -27,10 +28,12 @@ fun CanvasItem.deepCopy(measurer: TextMeasurer): CanvasItem = when (this) {
             it.label = label
             it.labelAt = labelAt
         }
+    is TableItem ->
+        TableItem(rect, colFractions.toList(), rowFractions.toList(), strokeRgba, strokeWidth)
     else -> this
     // Carried, not reset: autosave snapshots the document through this, so dropping the lock here
     // would quietly unlock everything on the next save.
-}.also { it.locked = locked }
+}.also { it.locked = locked; it.link = link }
 
 /**
  * Deep copies of these items that keep their joins among themselves: a connector copied with what it

@@ -1,2 +1,0 @@
-- Enabled R8 optimization
-- Better colour palette

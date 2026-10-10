@@ -23,24 +23,35 @@ object SelectionMath {
      * meet [band]. The paged overloads below are the same test with a page-space translation in
      * front of it; sharing the rule is the point, so the two canvases select alike.
      */
-    fun bandMembers(items: List<CanvasItem>, band: Rect): List<CanvasItem> =
-        items.filter { !it.locked && it.bounds().intersects(band) }
+    fun bandMembers(items: List<CanvasItem>, band: Rect, whole: Boolean = false): List<CanvasItem> =
+        items.filter { !it.locked && inBand(it.bounds(), band, whole) }
 
-    /** Lasso selection over a flat item list: every item whose centroid lies inside [polygon]. */
-    fun lassoMembers(items: List<CanvasItem>, polygon: List<Pt>): List<CanvasItem> {
+    /** Lasso selection over a flat item list: see [inLasso]. */
+    fun lassoMembers(items: List<CanvasItem>, polygon: List<Pt>, whole: Boolean = false): List<CanvasItem> {
         if (polygon.size < 3) return emptyList()
-        return items.filter { !it.locked && Geometry.pointInPolygon(polygon, it.centroid()) }
+        return items.filter { !it.locked && inLasso(polygon, it.centroid(), it.outlinePoints(), whole) }
     }
 
+    /** [whole]: the band holds the item's bounds entirely; otherwise touching them is enough. */
+    private fun inBand(bounds: Rect, band: Rect, whole: Boolean): Boolean =
+        if (whole) band.contains(bounds.topLeft) && band.contains(Pt(bounds.right, bounds.bottom))
+        else bounds.intersects(band)
+
+    /** [whole]: every outline point lies inside the loop; otherwise one of them, or the centroid, is enough. */
+    private fun inLasso(polygon: List<Pt>, centroid: Pt, outline: List<Pt>, whole: Boolean): Boolean =
+        if (whole) outline.isNotEmpty() && outline.all { Geometry.pointInPolygon(polygon, it) }
+        else Geometry.pointInPolygon(polygon, centroid) || outline.any { Geometry.pointInPolygon(polygon, it) }
+
     /**
-     * Band selection: every item whose content-space bounds intersect [band]. [toContentRect]
-     * maps an item's page-space bounds on page i into content space (a plain page-rect
-     * translation, plus the display rotation when the view is rotated).
+     * Band selection: every item whose content-space bounds meet [band] (or lie inside it, when
+     * [whole]). [toContentRect] maps an item's page-space bounds on page i into content space (a
+     * plain page-rect translation, plus the display rotation when the view is rotated).
      */
     fun bandMembers(
         pages: List<Page>,
         pageRects: List<Rect>,
         band: Rect,
+        whole: Boolean = false,
         toContentRect: (Int, Rect) -> Rect = { i, r -> r.translate(pageRects[i].left, pageRects[i].top) },
     ): List<Selected> {
         val out = ArrayList<Selected>()
@@ -53,7 +64,7 @@ object SelectionMath {
             if (!pr.outset(OFF_PAGE_SLACK).intersects(band)) continue
             for (item in pages[i].items) {
                 if (item.locked) continue
-                if (toContentRect(i, item.bounds()).intersects(band)) out.add(Selected(i, item))
+                if (inBand(toContentRect(i, item.bounds()), band, whole)) out.add(Selected(i, item))
             }
         }
         return out
@@ -64,22 +75,25 @@ object SelectionMath {
     const val OFF_PAGE_SLACK = 64.0
 
     /**
-     * Lasso selection: every item whose content-space centroid lies inside [polygon] (even-odd).
-     * [toContent] maps a page-space point on page i into content space, like [bandMembers].
+     * Lasso selection: see [inLasso], tested in content space (even-odd). [toContent] maps a
+     * page-space point on page i into content space, like [bandMembers].
      */
     fun lassoMembers(
         pages: List<Page>,
         pageRects: List<Rect>,
         polygon: List<Pt>,
+        whole: Boolean = false,
         toContent: (Int, Pt) -> Pt = { i, p -> Pt(p.x + pageRects[i].left, p.y + pageRects[i].top) },
     ): List<Selected> {
         if (polygon.size < 3) return emptyList()
+        val reach = Rect.bounding(polygon)
         val out = ArrayList<Selected>()
         for (i in pages.indices) {
-            if (pageRects.getOrNull(i) == null) continue
+            val pr = pageRects.getOrNull(i) ?: continue
+            if (!pr.outset(OFF_PAGE_SLACK).intersects(reach)) continue
             for (item in pages[i].items) {
                 if (item.locked) continue
-                if (Geometry.pointInPolygon(polygon, toContent(i, item.centroid()))) {
+                if (inLasso(polygon, toContent(i, item.centroid()), item.outlinePoints().map { toContent(i, it) }, whole)) {
                     out.add(Selected(i, item))
                 }
             }

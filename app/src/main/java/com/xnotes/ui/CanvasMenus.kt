@@ -3,6 +3,10 @@ package com.xnotes.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.border
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.focus.focusRequester
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +20,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -27,8 +33,10 @@ import androidx.compose.material.icons.outlined.TableChart
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -50,8 +58,22 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupProperties
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.window.DialogProperties
+import com.hrm.latex.renderer.Latex
+import com.hrm.latex.renderer.model.LatexConfig
+import com.hrm.latex.renderer.model.LatexTheme
 import com.xnotes.R
 import com.xnotes.core.model.DrawStyle
+import com.xnotes.core.model.FunctionCurve
+import com.xnotes.core.model.FunctionSpec
 import com.xnotes.core.model.Rgba
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
@@ -79,6 +101,51 @@ interface SelectionMenuHost : SwatchHost {
 
     /** Pin the selection where it is and put it away; a held finger over it offers to release it. */
     fun lockSelection()
+
+    /** What the lone selected function curve plots, or null when the selection is not one. */
+    val selectionFunction: FunctionSpec?
+
+    /** Replot the selected function curve; false when [spec] does not parse or has no values. */
+    fun setSelectionFunction(spec: FunctionSpec): Boolean
+
+    /** True when the selection is a single image (shows the Crop action). */
+    val selectionIsImage: Boolean
+
+    /** Enter crop mode for the selected image. */
+    fun cropSelection()
+
+    /** True when the selection is a single text box (shows the Edit action). */
+    val selectionIsText: Boolean
+
+    /** Reopen the text editor on the selected text box. */
+    fun editSelectionText()
+
+    /** The LaTeX of the lone selected formula box, or null when the selection is not one. */
+    val selectionMath: String?
+
+    /** Replace the selected formula's LaTeX; false when it does not set. */
+    fun setSelectionMath(latex: String): Boolean
+
+    /** True when exactly one item is selected (it can carry a hyperlink). */
+    val selectionCanLink: Boolean
+
+    /** The selected item's hyperlink, or null when none / not a single item. */
+    val selectionLink: String?
+
+    /** Set (or clear, when null) the selected item's hyperlink. */
+    fun setSelectionLink(url: String?)
+
+    /** True when the selection contains handwriting (shows the Convert to text action). */
+    val selectionHasInk: Boolean
+
+    /** Recognize the selected handwriting and replace it with a text box (async). */
+    fun convertSelectionToText()
+
+    /** True when the handwritten-maths add-on is downloaded (shows Convert to math). */
+    val canConvertToMath: Boolean
+
+    /** Recognize the selected handwriting as a formula and replace it with a formula box (async). */
+    fun convertSelectionToMath()
 
     /** The colour and width of every selected stroke/shape, for the restyle popup to open on. */
     fun selectionStyles(): List<DrawStyle>
@@ -132,6 +199,9 @@ fun SelectionMenu(host: SelectionMenuHost) {
     val density = LocalDensity.current
     var overflowOpen by remember { mutableStateOf(false) }
     var styleOpen by remember { mutableStateOf(false) }
+    var linkDialogOpen by remember { mutableStateOf(false) }
+    var functionDialogOpen by remember { mutableStateOf(false) }
+    var mathDialogOpen by remember { mutableStateOf(false) }
 
     val barHeightPx = with(density) { 48.dp.toPx() }
     val barWidthPx = with(density) { (6 * 46).dp.toPx() }
@@ -175,6 +245,43 @@ fun SelectionMenu(host: SelectionMenuHost) {
                         enabled = styles.isNotEmpty(),
                         onClick = { overflowOpen = false; styleOpen = true },
                     )
+                    if (host.selectionFunction != null) {
+                        DropdownMenuItem(
+                            text = { Text("Edit function") },
+                            onClick = { overflowOpen = false; functionDialogOpen = true },
+                        )
+                    }
+                    if (host.selectionIsText) {
+                        DropdownMenuItem(
+                            text = { Text("Edit") },
+                            // A formula is edited as its LaTeX source, not in the text box editor.
+                            onClick = { overflowOpen = false; if (host.selectionMath != null) mathDialogOpen = true else host.editSelectionText() },
+                        )
+                    }
+                    if (host.selectionIsImage) {
+                        DropdownMenuItem(
+                            text = { Text("Crop") },
+                            onClick = { overflowOpen = false; host.cropSelection() },
+                        )
+                    }
+                    if (host.selectionHasInk) {
+                        DropdownMenuItem(
+                            text = { Text("Convert to text") },
+                            onClick = { overflowOpen = false; host.convertSelectionToText() },
+                        )
+                        if (host.canConvertToMath) {
+                            DropdownMenuItem(
+                                text = { Text("Convert to math") },
+                                onClick = { overflowOpen = false; host.convertSelectionToMath() },
+                            )
+                        }
+                    }
+                    if (host.selectionCanLink) {
+                        DropdownMenuItem(
+                            text = { Text(if (host.selectionLink != null) "Edit link" else "Add link") },
+                            onClick = { overflowOpen = false; linkDialogOpen = true },
+                        )
+                    }
                     if (host.canLabelSelection()) {
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.shape_label)) },
@@ -196,9 +303,253 @@ fun SelectionMenu(host: SelectionMenuHost) {
                     // Closing settles any preview the slider left open.
                     SelectionStylePopup(host) { host.restyleSelection(null, null); styleOpen = false }
                 }
+                val latex = host.selectionMath
+                if (mathDialogOpen && latex != null) {
+                    LatexDialog(
+                        initial = latex,
+                        onConfirm = { if (host.setSelectionMath(it)) mathDialogOpen = false },
+                        onDismiss = { mathDialogOpen = false },
+                    )
+                }
+                val function = host.selectionFunction
+                if (functionDialogOpen && function != null) {
+                    FunctionDialog(
+                        initial = function,
+                        onConfirm = { if (host.setSelectionFunction(it)) functionDialogOpen = false },
+                        onDismiss = { functionDialogOpen = false },
+                    )
+                }
+                if (linkDialogOpen) {
+                    LinkDialog(
+                        initial = host.selectionLink ?: "",
+                        onConfirm = { host.setSelectionLink(it); linkDialogOpen = false },
+                        onRemove = { host.setSelectionLink(null); linkDialogOpen = false },
+                        onDismiss = { linkDialogOpen = false },
+                    )
+                }
             }
         }
     }
+}
+
+/**
+ * Retype what a function curve plots, e.g. sin(2x) or x^3 - x, and over which x range. The range
+ * fields take expressions too, so "2pi" works. Save stays disabled until the curve can be drawn.
+ */
+@Composable
+private fun FunctionDialog(initial: FunctionSpec, onConfirm: (FunctionSpec) -> Unit, onDismiss: () -> Unit) {
+    var expr by remember { mutableStateOf(initial.expr) }
+    var from by remember { mutableStateOf(formatBound(initial.from)) }
+    var to by remember { mutableStateOf(formatBound(initial.to)) }
+    val spec = run {
+        val a = FunctionCurve.constant(from) ?: return@run null
+        val b = FunctionCurve.constant(to) ?: return@run null
+        FunctionSpec(expr.trim(), a, b).takeIf { it.normalizedSamples() != null }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Function") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = expr,
+                    onValueChange = { expr = it },
+                    singleLine = true,
+                    label = { Text("y =") },
+                    isError = spec == null,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = from,
+                        onValueChange = { from = it },
+                        singleLine = true,
+                        label = { Text("x from") },
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = to,
+                        onValueChange = { to = it },
+                        singleLine = true,
+                        label = { Text("x to") },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = spec != null, onClick = { spec?.let(onConfirm) }) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
+/** Put [template] at the cursor, wrapping the selection at its `#`, and leave the cursor there. */
+private fun insertLatex(value: TextFieldValue, template: String): TextFieldValue {
+    val sel = value.selection
+    val (inserted, cursor) = latexInsertion(value.text.substring(0, sel.min), value.text.substring(sel.min, sel.max), template)
+    val text = value.text.substring(0, sel.min) + inserted + value.text.substring(sel.max)
+    return TextFieldValue(text, TextRange(sel.min + cursor))
+}
+
+/**
+ * Edit a formula box's LaTeX: a live preview over the source, typed on the maths keyboard (numbers
+ * and functions, as in flowing text) with the soft keyboard kept down until ABC asks for it. On a
+ * tablet the dialog and its keys grow to use the room. Save stays on the dialog when the renderer
+ * cannot set the result.
+ */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+@Composable
+private fun LatexDialog(initial: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+    val palette = LocalPalette.current
+    val wide = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= COMPACT_WIDTH_DP
+    var value by remember { mutableStateOf(TextFieldValue(initial, TextRange(initial.length))) }
+    var mathKeys by remember { mutableStateOf(true) }
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    val shape = MaterialTheme.shapes.large
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier
+                .fillMaxWidth(if (wide) 0.86f else 1f)
+                .widthIn(max = 1100.dp)
+                .padding(if (wide) 0.dp else 12.dp)
+                .clip(shape)
+                .background(palette.menuBg.toComposeColor())
+                .border(1.dp, palette.border.toComposeColor(), shape)
+                .padding(if (wide) 24.dp else 16.dp),
+        ) {
+            Text("Formula", style = MaterialTheme.typography.headlineSmall, color = palette.text.toComposeColor())
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = if (wide) 120.dp else 72.dp)
+                        .clip(MaterialTheme.shapes.medium)
+                        .background(palette.surface.toComposeColor())
+                        .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium)
+                        .horizontalScroll(rememberScrollState())
+                        .padding(16.dp),
+                ) {
+                    Latex(
+                        latex = "\\displaystyle " + value.text,
+                        config = LatexConfig(fontSize = if (wide) 30.sp else 22.sp, theme = latexTheme()),
+                    )
+                }
+                // While the maths keys are up the field keeps its caret but asks for no soft keyboard.
+                androidx.compose.ui.platform.InterceptPlatformTextInput(
+                    interceptor = { request, next -> if (mathKeys) kotlinx.coroutines.awaitCancellation() else next.startInputMethod(request) },
+                ) {
+                    OutlinedTextField(
+                        value = value,
+                        onValueChange = { value = it },
+                        label = { Text("LaTeX") },
+                        minLines = if (wide) 2 else 3,
+                        maxLines = 6,
+                        modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            fontSize = if (wide) 18.sp else 15.sp,
+                            color = palette.text.toComposeColor(),
+                        ),
+                    )
+                }
+                if (mathKeys) {
+                    MathKeys(
+                        MathKeyActions(
+                            onKey = { value = insertLatex(value, it) },
+                            onAbc = {
+                                mathKeys = false
+                                // The field restarts its input with the interceptor out of the way.
+                                scope.launch {
+                                    focusManager.clearFocus()
+                                    kotlinx.coroutines.delay(30)
+                                    runCatching { focus.requestFocus() }
+                                    keyboard?.show()
+                                }
+                            },
+                            onMove = { value = moveLatexCursor(value, it) },
+                            onDelete = { value = deleteLatexBack(value) },
+                            onEnter = { value = insertLatex(value, "\n") },
+                        ),
+                    )
+                } else {
+                    TextButton(onClick = { keyboard?.hide(); mathKeys = true }) { Text("Maths keys") }
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+                TextButton(enabled = value.text.isNotBlank(), onClick = { onConfirm(value.text.trim()) }) { Text("Save") }
+            }
+        }
+    }
+}
+
+private fun moveLatexCursor(value: TextFieldValue, by: Int): TextFieldValue {
+    val at = (if (by < 0) value.selection.min else value.selection.max) + by
+    return value.copy(selection = TextRange(at.coerceIn(0, value.text.length)))
+}
+
+private fun deleteLatexBack(value: TextFieldValue): TextFieldValue {
+    val sel = value.selection
+    val from = if (sel.collapsed) (sel.min - 1).coerceAtLeast(0) else sel.min
+    if (from == sel.max) return value
+    return TextFieldValue(value.text.removeRange(from, sel.max), TextRange(from))
+}
+
+/** A range bound as the user would type it: multiples of pi as "2pi", the rest trimmed. */
+private fun formatBound(v: Double): String {
+    val k = v / Math.PI
+    val rounded = Math.round(k * 2) / 2.0
+    if (v != 0.0 && kotlin.math.abs(k - rounded) < 1e-9) {
+        return when (rounded) {
+            1.0 -> "pi"
+            -1.0 -> "-pi"
+            else -> "${rounded.toString().removeSuffix(".0")}pi"
+        }
+    }
+    return v.toString().removeSuffix(".0")
+}
+
+/**
+ * Add/edit a hyperlink on the selected item. A blank field with Save clears the link; the Remove
+ * button (shown only when one exists) does the same. Only http/https/mailto actually open on tap
+ * (the opener rejects the rest), so no scheme validation is forced here.
+ */
+@Composable
+private fun LinkDialog(initial: String, onConfirm: (String) -> Unit, onRemove: () -> Unit, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Link") },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true,
+                placeholder = { Text("https://example.com") },
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(text.trim()) }) { Text("Save") }
+        },
+        dismissButton = {
+            if (initial.isNotEmpty()) {
+                TextButton(onClick = onRemove) { Text("Remove") }
+            } else {
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
+    )
 }
 
 /**
@@ -364,6 +715,31 @@ private fun StepDot(glyph: String, label: String, enabled: Boolean, onClick: () 
     }
 }
 
+/** Crop mode's floating bar, above the image being cropped: Cancel and Apply. */
+@Composable
+fun CropMenu(editor: Editor) {
+    val rect = editor.cropMenu ?: return
+    val palette = LocalPalette.current
+    val density = LocalDensity.current
+    val barHeightPx = with(density) { 44.dp.toPx() }
+    val barWidthPx = with(density) { 150.dp.toPx() }
+    val gap = with(density) { 10.dp.toPx() }
+    val centerX = ((rect.left + rect.right) / 2.0).toFloat()
+    val xPx = (centerX - barWidthPx / 2f).coerceAtLeast(with(density) { 8.dp.toPx() })
+    val yPx = if (rect.top.toFloat() - barHeightPx - gap > 0f) rect.top.toFloat() - barHeightPx - gap
+    else rect.bottom.toFloat() + gap
+    Row(
+        modifier = Modifier
+            .offset(with(density) { xPx.toDp() }, with(density) { yPx.toDp() })
+            .clip(RoundedCornerShape(10.dp))
+            .background(palette.menuBg.toComposeColor())
+            .border(1.dp, palette.border.toComposeColor(), RoundedCornerShape(10.dp)),
+    ) {
+        ActionIcon(XnotesIcons.close, "Cancel crop") { editor.cancelCrop() }
+        ActionIcon(XnotesIcons.check, "Apply crop") { editor.applyActiveCrop() }
+    }
+}
+
 /**
  * The screenshot tool's floating action, shown above the frozen capture rectangle: a single
  * "Copy as image" button that renders the region and puts it on the system clipboard.
@@ -410,9 +786,13 @@ fun ScreenshotMenu(editor: Editor) {
 }
 
 @Composable
-private fun ActionIcon(icon: ImageVector, desc: String, enabled: Boolean = true, shortcut: String? = null, onClick: () -> Unit) {
+private fun ActionIcon(icon: ImageVector, desc: String, enabled: Boolean = true, active: Boolean = false, shortcut: String? = null, onClick: () -> Unit) {
     val palette = LocalPalette.current
-    val tint = palette.text.toComposeColor().let { if (enabled) it else it.copy(alpha = 0.35f) }
+    val tint = when {
+        !enabled -> palette.text.toComposeColor().copy(alpha = 0.35f)
+        active -> palette.accent.toComposeColor()
+        else -> palette.text.toComposeColor()
+    }
     Tooltip(desc, shortcut = shortcut) {
         IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(46.dp)) {
             Icon(icon, contentDescription = desc, tint = tint, modifier = Modifier.size(22.dp))
@@ -449,7 +829,11 @@ interface LongPressMenuHost {
  * nothing else can be done with one and there is no other way back.
  */
 @Composable
-fun LongPressMenu(host: LongPressMenuHost, onInsertImageAt: (com.xnotes.core.geometry.Pt) -> Unit) {
+fun LongPressMenu(
+    host: LongPressMenuHost,
+    onInsertImageAt: (com.xnotes.core.geometry.Pt) -> Unit,
+    onTakePhotoAt: (com.xnotes.core.geometry.Pt) -> Unit = {},
+) {
     val target = host.contextMenu ?: return
     val density = LocalDensity.current
     val xDp = with(density) { target.viewportX.toFloat().toDp() }
@@ -476,6 +860,9 @@ fun LongPressMenu(host: LongPressMenuHost, onInsertImageAt: (com.xnotes.core.geo
             }
             DropdownMenuItem(text = { Text(stringResource(R.string.insert_image_ellipsis)) }, onClick = {
                 onInsertImageAt(target.content); host.dismissContextMenu()
+            })
+            DropdownMenuItem(text = { Text(stringResource(R.string.take_photo)) }, onClick = {
+                onTakePhotoAt(target.content); host.dismissContextMenu()
             })
         }
     }

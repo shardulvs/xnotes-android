@@ -14,9 +14,14 @@ import com.xnotes.core.history.TransformItems
 import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.Carry
 import com.xnotes.core.model.ConnectorItem
+import com.xnotes.core.model.FunctionSpec
 import com.xnotes.core.model.GeometrySnapshot
 import com.xnotes.core.model.GlueFollow
 import com.xnotes.core.model.ShapeItem
+import com.xnotes.core.shapes.ShapeKind
+
+/** Half-width of the sticky zone around each 90-degree step when snap-rotation is on. */
+private val SNAP_STICK_RAD = Math.toRadians(6.0)
 
 /**
  * What is selected on the canvas, and the arithmetic of moving, scaling and rotating it.
@@ -41,6 +46,9 @@ class CanvasSelection(private val doc: InfiniteDocument) {
         private set
 
     val isEmpty: Boolean get() = items.isEmpty()
+
+    /** When set, a rotate drag snaps the box angle to the nearest 90 degrees. */
+    var snapRotation90: Boolean = false
 
     /** Gesture-start geometry, captured by [beginTransform] and restored every frame of a drag. */
     private var startSnapshots: List<GeometrySnapshot> = emptyList()
@@ -120,6 +128,23 @@ class CanvasSelection(private val doc: InfiniteDocument) {
     fun rotateGrip(arm: Double, screenMargin: Double = 0.0): Pt? =
         chromeBox(screenMargin)?.let { ResizeMath.obbRotateGrip(it, arm) }
 
+    /** The move grip under a selection too small to grab by its body, seen at [zoom], or null. */
+    fun moveGrip(zoom: Double, arm: Double, screenMargin: Double = 0.0): Pt? =
+        chromeBox(screenMargin)?.let { ResizeMath.obbMoveGrip(it, zoom, arm) }
+
+    /** The lone selected function curve, or null. */
+    fun function(): ShapeItem? = (items.singleOrNull() as? ShapeItem)?.takeIf { it.shape == ShapeKind.FUNCTION }
+
+    /** Replot the lone function curve, returning the undo step, or null when [spec] cannot be drawn. */
+    fun editFunction(spec: FunctionSpec): Command? {
+        val fn = function() ?: return null
+        val before = fn.snapshotGeometry()
+        if (!fn.setFunction(spec)) return null
+        doc.itemsChanged(items)
+        refreshBox()
+        return OnCanvas(doc, TransformItems(items, listOf(before), listOf(fn.snapshotGeometry())), items)
+    }
+
     /** Which handle [p] lands on, within [tolerance] content pixels, or null. */
     fun hitHandle(p: Pt, tolerance: Double, screenMargin: Double = 0.0): HandleId? =
         ResizeMath.hitHandle(handles(screenMargin), p, tolerance)
@@ -141,6 +166,13 @@ class CanvasSelection(private val doc: InfiniteDocument) {
         val centre = box?.center
         startGrabAngle = if (grabAt == null || centre == null) null
         else kotlin.math.atan2(grabAt.y - centre.y, grabAt.x - centre.x)
+    }
+
+    /** Put every item back where the drag began, for a press that turned out to be a tap. */
+    fun restoreStart() {
+        for (i in items.indices) items[i].restoreGeometry(startSnapshots[i])
+        doc.itemsChanged(items)
+        refreshBox()
     }
 
     /**
@@ -254,7 +286,7 @@ class CanvasSelection(private val doc: InfiniteDocument) {
      */
     fun rotateLive(pointer: Pt) {
         val from = startBox ?: return
-        val swept = sweptAngle(from, pointer)
+        val swept = snapSwept(from, sweptAngle(from, pointer))
         box = from.copy(angle = from.angle + swept)
         applyLive(Affine.rotateAbout(from.center, swept))
     }
@@ -266,7 +298,7 @@ class CanvasSelection(private val doc: InfiniteDocument) {
      */
     fun previewRotate(pointer: Pt): Double {
         val from = startBox ?: return 0.0
-        val swept = sweptAngle(from, pointer)
+        val swept = snapSwept(from, sweptAngle(from, pointer))
         box = from.copy(angle = from.angle + swept)
         return swept
     }
@@ -275,6 +307,19 @@ class CanvasSelection(private val doc: InfiniteDocument) {
     fun itemChanged(item: CanvasItem) {
         doc.itemsChanged(listOf(item))
         refreshBox()
+    }
+
+    /**
+     * Give each 90-degree step a small sticky zone, if enabled: the box clings to the nearest
+     * quarter turn only while it is within [SNAP_STICK_RAD] of it, and rotates freely otherwise.
+     * Not a hard quantiser, so angles between the steps stay reachable.
+     */
+    private fun snapSwept(from: Obb, swept: Double): Double {
+        if (!snapRotation90) return swept
+        val quarter = Math.PI / 2.0
+        val target = from.angle + swept
+        val nearest = Math.round(target / quarter) * quarter
+        return if (Math.abs(target - nearest) <= SNAP_STICK_RAD) nearest - from.angle else swept
     }
 
     /** Put the box back where the drag started, for a gesture that was cancelled rather than ended. */

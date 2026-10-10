@@ -29,6 +29,11 @@ interface CanvasItem {
      */
     var locked: Boolean
 
+    /** An optional hyperlink (http/https/mailto); tapping the item with the pan tool opens it. None by default. */
+    var link: String?
+        get() = null
+        set(_) {}
+
     /** Draw the item; [r] is already translated to the page origin and scaled. */
     fun paint(r: Renderer)
 
@@ -46,6 +51,11 @@ interface CanvasItem {
 
     /** A representative page-local point (lasso membership). */
     fun centroid(): Pt
+
+    /** Page-local points tracing the item's footprint; the lasso tests them for whole or partial membership. */
+    fun outlinePoints(): List<Pt> = bounds().let {
+        listOf(it.topLeft, Pt(it.right, it.top), Pt(it.right, it.bottom), Pt(it.left, it.bottom))
+    }
 
     /** Does the eraser circle (page-local) touch the item? */
     fun intersectsCircle(cx: Double, cy: Double, radius: Double): Boolean

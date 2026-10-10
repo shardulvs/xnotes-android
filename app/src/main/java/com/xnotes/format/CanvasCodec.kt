@@ -8,6 +8,7 @@ import com.xnotes.core.infinite.Waypoint
 import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.ConnectorEnd
 import com.xnotes.core.model.ConnectorItem
+import com.xnotes.core.model.FunctionSpec
 import com.xnotes.core.model.ImageData
 import com.xnotes.core.model.ImageItem
 import com.xnotes.core.model.PagePattern
@@ -279,7 +280,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             j.endArray()
         }
         if (standIn != null || glyphs) {
-            if (!s.isFree) j.name("geom").value(s.shape.id)
+            if (!s.isFree || s.shape == ShapeKind.FUNCTION) j.name("geom").value(s.shape.id)
             val f = s.box
             j.name("rect").beginArray().value(f.x).value(f.y).value(f.w).value(f.h).endArray()
             if (s.rotation != 0.0) j.name("angle").value(s.rotation)
@@ -312,6 +313,15 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             if (l.style.face != TextItem.DEFAULT_FACE) j.name("font_face").value(l.style.face.id)
             if (s.labelAt != 0.5) j.name("at").value(s.labelAt)
             j.endObject()
+        }
+        s.function?.let {
+            j.name("function").value(it.expr)
+            j.name("function_from").value(it.from)
+            j.name("function_to").value(it.to)
+            if (it.yMin != null && it.yMax != null) {
+                j.name("function_ymin").value(it.yMin)
+                j.name("function_ymax").value(it.yMax)
+            }
         }
         if (s.locked) j.name("locked").value(true)
         j.endObject()
@@ -397,12 +407,17 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
 
     // --- streaming json -> model ---
 
+    /** How many shapes the last [read] took from the fork's own kinds onto upstream's. */
+    var forkShapesRead = 0
+        private set
+
     /**
      * Read a `.xcanvas` from [input]. When [imageDir] is non-null the inserted images are streamed
      * out to fresh temp files there (never held in RAM) and the caller owns their lifetime; a null
      * dir skips them, which is what a validation-only read wants.
      */
     fun read(input: InputStream, imageDir: File? = null): InfiniteDocument {
+        forkShapesRead = 0
         var manifest: ParsedManifest? = null
         val imageFiles = HashMap<String, File>()
         ZipInputStream(input).use { zis ->
@@ -650,6 +665,11 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         var dashed = false
         var dashLength = 10.0
         var dashGap = 8.0
+        var function: String? = null
+        var functionFrom = 0.0
+        var functionTo = 0.0
+        var functionYMin: Double? = null
+        var functionYMax: Double? = null
     }
 
     /** Stroke config fields as written; null = absent, so defaults resolve exactly as before. */
@@ -710,6 +730,11 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                 "dashed" -> s.dashed = boolOr(p, false)
                 "dash_length" -> s.dashLength = doubleOr(p, 10.0)
                 "dash_gap" -> s.dashGap = doubleOr(p, 8.0)
+                "function" -> s.function = stringOr(p, "")
+                "function_from" -> s.functionFrom = doubleOr(p, 0.0)
+                "function_to" -> s.functionTo = doubleOr(p, 0.0)
+                "function_ymin" -> s.functionYMin = doubleOr(p, 0.0)
+                "function_ymax" -> s.functionYMax = doubleOr(p, 0.0)
                 "locked" -> s.locked = boolOr(p, false)
                 else -> p.skipValue()
             }
@@ -910,11 +935,22 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
     private fun buildDrawnShape(s: ItemScratch): ShapeItem {
         val kind = ShapeKind.fromId(s.shape)
         val strokeRgba = s.strokeRgba ?: DEFAULT_SHAPE_STROKE
+        val spec = s.function?.let { FunctionSpec(it, s.functionFrom, s.functionTo, s.functionYMin, s.functionYMax) }
+        ForkShapes.build(s.shape, s.start, s.end, s.points, s.angle, spec, s.rect, strokeRgba, s.strokeWidth)?.let { shape ->
+            forkShapesRead++
+            shape.fillRgba = s.fillRgba?.takeIf { shape.shape.isClosed }
+            shape.neon = s.neon
+            shape.neonStrength = s.neonStrength
+            shape.dashed = s.dashed
+            shape.dashLength = s.dashLength
+            shape.dashGap = s.dashGap
+            return shape
+        }
         s.points?.let { verts ->
             return ShapeItem.poly(
                 kind, verts, strokeRgba, s.strokeWidth, s.fillRgba, s.neon, s.neonStrength,
                 s.dashed, s.dashLength, s.dashGap,
-            )
+            ).also { shape -> shape.function = spec }
         }
         return ShapeItem(
             shape = kind,
@@ -1120,9 +1156,11 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         }
         val out = ArrayList<Pt>()
         p.beginArray()
-        while (p.hasNext()) ptOrNull(p)?.let { out.add(it) }
+        while (p.hasNext()) out.add(ptOrNull(p) ?: FunctionSpec.BREAK)
         p.endArray()
-        return if (out.size >= 2) out else null
+        while (out.isNotEmpty() && out.last().x.isNaN()) out.removeAt(out.size - 1)
+        while (out.isNotEmpty() && out.first().x.isNaN()) out.removeAt(0)
+        return if (out.count { !it.x.isNaN() } >= 2) out else null
     }
 
     companion object {

@@ -376,9 +376,11 @@ internal fun ViewOptionsContent(
     view: ExplorerView,
     layouts: List<ExplorerLayout>,
     everyFolder: Boolean,
+    hideDotItems: Boolean,
     onChange: (ExplorerView) -> Unit,
     onReset: () -> Unit,
     onEveryFolder: (Boolean) -> Unit,
+    onHideDotItems: (Boolean) -> Unit,
     onClose: () -> Unit,
 ) {
     val palette = LocalPalette.current
@@ -497,16 +499,23 @@ internal fun ViewOptionsContent(
             }
         }
         HorizontalDivider(color = palette.border.toComposeColor())
-        Row(
-            Modifier.fillMaxWidth().clip(MaterialTheme.shapes.extraSmall).clickable { onEveryFolder(!everyFolder) }.padding(vertical = 2.dp),
-            verticalAlignment = Alignment.Top,
-        ) {
-            RowCheck(everyFolder, Modifier.padding(top = 3.dp))
-            Spacer(Modifier.width(12.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(stringResource(R.string.view_every_folder), color = palette.text.toComposeColor(), fontSize = 14.sp)
-                Text(stringResource(R.string.view_every_folder_hint), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
-            }
+        CheckOption(everyFolder, stringResource(R.string.view_every_folder), stringResource(R.string.view_every_folder_hint)) { onEveryFolder(!everyFolder) }
+        CheckOption(hideDotItems, stringResource(R.string.view_hide_dot_items), stringResource(R.string.view_hide_dot_items_hint)) { onHideDotItems(!hideDotItems) }
+    }
+}
+
+@Composable
+private fun CheckOption(on: Boolean, title: String, hint: String, onClick: () -> Unit) {
+    val palette = LocalPalette.current
+    Row(
+        Modifier.fillMaxWidth().clip(MaterialTheme.shapes.extraSmall).clickable(onClick = onClick).padding(vertical = 2.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        RowCheck(on, Modifier.padding(top = 3.dp))
+        Spacer(Modifier.width(12.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, color = palette.text.toComposeColor(), fontSize = 14.sp)
+            Text(hint, color = palette.textDim.toComposeColor(), fontSize = 12.sp)
         }
     }
 }

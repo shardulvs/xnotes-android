@@ -1,6 +1,0 @@
-- Improve Pen experience
-- Improve text box
-- Import PDFs shared or opened from other apps
-- Move notes by dragging them onto folders
-- Add zoom-lock preferences
-- Other minor fixes and improvements

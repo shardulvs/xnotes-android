@@ -137,6 +137,19 @@ class ItemTransformTest {
         assertFalse(img.contains(Pt(90.0, 25.0)))
     }
 
+    @Test fun edgeScaleRotatedImageStretchesAlongItsOwnAxis() {
+        // A widen (single-axis scale) of a 45deg-turned image is a world-space shear; the image must
+        // stretch along its OWN width axis (x2, height unchanged), not grow near-uniformly in world axes.
+        val img = ImageItem(ImageData(java.io.File("test-image"), 10, 10), Rect(0.0, 0.0, 100.0, 50.0), angle = PI / 4)
+        val center = img.rect.center
+        img.applyTransform(Affine.scaleAlongAxes(center, PI / 4, 2.0, 1.0))
+        assertEquals(200.0, img.rect.w, 1e-9)
+        assertEquals(50.0, img.rect.h, 1e-9)
+        assertEquals(PI / 4, img.angle, 1e-9) // a pure axis scale adds no turn
+        assertEquals(center.x, img.rect.centerX, 1e-9)
+        assertEquals(center.y, img.rect.centerY, 1e-9)
+    }
+
     @Test fun imageSnapshotRestoresAngle() {
         val img = ImageItem(ImageData(java.io.File("test-image"), 10, 10), Rect(0.0, 0.0, 100.0, 50.0))
         val snap = img.snapshotGeometry()

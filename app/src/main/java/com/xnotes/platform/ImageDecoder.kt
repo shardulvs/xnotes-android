@@ -61,6 +61,33 @@ object ImageDecoder {
         return scaled
     }
 
+    /**
+     * Like [decodeSampledFile] but returns a **shared, cached** bitmap the caller must never recycle
+     * or mutate. Decoded at the power-of-two sample-size bucket for the box (the renderer scales it
+     * into place), so a selected image being dragged or resized reuses one decode across frames
+     * instead of re-reading the file every frame. Raster only; vectors fall back to the plain decode.
+     */
+    fun decodeSharedForDraw(path: String, maxWidth: Int, maxHeight: Int): Bitmap? {
+        val mw = maxWidth.coerceAtLeast(1)
+        val mh = maxHeight.coerceAtLeast(1)
+        if (isVector(path)) return decodeSampledFile(path, mw, mh)
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(path, bounds)
+        val sw = bounds.outWidth
+        val sh = bounds.outHeight
+        if (sw <= 0 || sh <= 0) return null
+        val ss = sampleSize(sw, sh, mw, mh)
+        val key = "$path|${runCatching { File(path).lastModified() }.getOrDefault(0L)}|$ss"
+        rasterCache.get(key)?.let { if (!it.isRecycled) return it }
+        val opts = BitmapFactory.Options().apply {
+            inSampleSize = ss
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        val bmp = BitmapFactory.decodeFile(path, opts) ?: return null
+        rasterCache.put(key, bmp)
+        return bmp
+    }
+
     /** True when [path] holds a vector (SVG) source with no native pixel resolution.
      *  Memoized: the sniff opens the file, and a lifted image is re-drawn every frame. */
     fun isVector(path: String): Boolean =
@@ -283,6 +310,16 @@ object ImageDecoder {
     // Rasterized SVGs by path + bucket. Byte-bounded against the heap; entries are never recycled
     // (callers may still be drawing them), eviction leaves them to the GC.
     private val svgBitmapCache = object : LruCache<String, Bitmap>(
+        ((Runtime.getRuntime().maxMemory() / 6).coerceAtMost(96L shl 20) shr 10).toInt(),
+    ) {
+        override fun sizeOf(key: String, value: Bitmap) = value.byteCount / 1024
+    }
+
+    // Decoded raster bitmaps by path + mtime + sample-size bucket. A lifted (selected) image is
+    // redrawn every frame while it's moved or resized; without this each frame re-decoded the whole
+    // JPEG from disk, so a drag lagged and the image trailed its transform box. Same byte-bounded,
+    // never-recycled discipline as [svgBitmapCache] (a cached bitmap may still be mid-draw).
+    private val rasterCache = object : LruCache<String, Bitmap>(
         ((Runtime.getRuntime().maxMemory() / 6).coerceAtMost(96L shl 20) shr 10).toInt(),
     ) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount / 1024

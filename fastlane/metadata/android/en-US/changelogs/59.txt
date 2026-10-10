@@ -1,7 +1,0 @@
-- Float the toolbar as a pill over the page, or keep it docked
-- Put the toolbar on any edge, in Compact, Regular or Comfortable size
-- Add a Corners setting: Sharp, Rounded or Soft
-- Add a contrast slider for custom colour palettes
-- Material is now the only colour palette
-- Empty folders offer to create a note or canvas, or import a PDF
-- Minor fixes and improvements

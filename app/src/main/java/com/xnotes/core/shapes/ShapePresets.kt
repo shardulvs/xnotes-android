@@ -1,6 +1,7 @@
 package com.xnotes.core.shapes
 
 import com.xnotes.core.geometry.Pt
+import com.xnotes.core.model.FunctionSpec
 
 /** A chip in the shape picker: a kind, with its own point count, knob values and heads. */
 class ShapePreset(
@@ -149,7 +150,17 @@ object ShapePresets {
         ),
     )
 
-    val pages: List<ShapePage> = listOf(basic, flowchart, arrows, solidsMath)
+    /** What a function chip's key starts with; the rest is the expression it plots. */
+    const val FUNCTION_PREFIX = "fn:"
+
+    val functions = ShapePage(
+        "functions",
+        FunctionSpec.PRESETS.map { spec ->
+            ShapePreset(FUNCTION_PREFIX + spec.expr, ShapeKind.FUNCTION, iconPath = spec.normalizedRuns()?.map { FreePath.lines(it, false) })
+        },
+    )
+
+    val pages: List<ShapePage> = listOf(basic, flowchart, arrows, solidsMath, functions)
 
     val all: List<ShapePreset> = pages.flatMap { it.presets }
 

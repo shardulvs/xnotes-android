@@ -1,9 +1,0 @@
-- Add a Material You palette style with dynamic color
-- Support SVG images with clipboard paste and PDF export
-- Add a stamps library to the image menu
-- Color code notes from the full swatch matrix
-- Draw dashed shapes
-- Snap the ruler to horizontal and vertical
-- Jump to a page from the toolbar page counter
-- Add user min and max zoom limits
-- Minor fixes and improvements

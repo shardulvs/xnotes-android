@@ -1244,6 +1244,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
             override val kind = "wet"
             override val resizable = false
             override var locked = false
+            override var link: String? = null
             override fun paint(r: com.xnotes.core.pal.Renderer) = Unit
             override fun bounds() = Rect(0.0, 0.0, 0.0, 0.0)
             override fun translate(dx: Double, dy: Double) = Unit

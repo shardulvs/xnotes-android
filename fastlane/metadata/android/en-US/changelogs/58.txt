@@ -1,4 +1,0 @@
-- Add maths to inline text: type $x^2$ or $$...$$, or pick /equation
-- Add page templates: Cornell, planners, staves, isometric, polar and more
-- Fix typing jumping ahead after backspace on some keyboards
-- Minor fixes and improvements

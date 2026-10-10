@@ -55,6 +55,7 @@ class Stroke(
     override val kind = KIND
     override val resizable = false
     override var locked = false
+    override var link: String? = null
 
     /**
      * The samples, frozen (see [Samples]). Volatile, and every edit publishes a whole new tuple in
@@ -611,6 +612,11 @@ class Stroke(
             if (dx * dx + dy * dy <= h * h) return true
         }
         return g.bodyContains(p)
+    }
+
+    override fun outlinePoints(): List<Pt> {
+        val s = pts
+        return List(s.n) { Pt(s.ox + s.xa[it], s.oy + s.ya[it]) }
     }
 
     /** Mean of the sample positions. */

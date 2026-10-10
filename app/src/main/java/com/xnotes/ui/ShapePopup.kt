@@ -112,7 +112,7 @@ private fun ShapePager(config: ShapeConfig, onPage: (Int) -> Unit, onPick: (Shap
     ChipPager(pages.size, config.shapePage, { pageLabel(pages[it]) }, ShapePresets.ROWS, onPage) { page ->
         for (row in pages[page].presets.chunked(ShapePresets.COLUMNS)) {
             Row(horizontalArrangement = Arrangement.spacedBy(GAP.dp)) {
-                for (p in row) KindChip(ShapeIcons.of(p), stringResource(presetLabel(p.key)), selected = p.key == config.preset) { onPick(p) }
+                for (p in row) KindChip(ShapeIcons.of(p), chipLabel(p), selected = p.key == config.preset) { onPick(p) }
             }
         }
     }
@@ -311,8 +311,15 @@ private fun pageLabel(page: ShapePage): Int = when (page.key) {
     "flowchart" -> R.string.shape_page_flowchart
     "arrows" -> R.string.shape_page_arrows
     "solids_math" -> R.string.shape_page_solids_math
+    "functions" -> R.string.shape_page_functions
     else -> R.string.shape_page_basic
 }
+
+/** A chip's name: a function chip names what it plots, every other chip its kind. */
+@Composable
+private fun chipLabel(p: ShapePreset): String =
+    if (p.key.startsWith(ShapePresets.FUNCTION_PREFIX)) functionLabel(p.key.removePrefix(ShapePresets.FUNCTION_PREFIX))
+    else stringResource(presetLabel(p.key))
 
 @StringRes
 internal fun presetLabel(key: String): Int = when (key) {

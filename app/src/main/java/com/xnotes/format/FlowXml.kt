@@ -120,6 +120,7 @@ object FlowXml {
         if (s.underline) append(" style:text-underline-style=\"solid\"")
         if (s.strike) append(" style:text-line-through-style=\"solid\"")
         if (s.code) append(" xnotes:code=\"true\"")
+        s.link?.let { append(" xnotes:link=\"${escapeAttr(it)}\"") }
         // The run's text is the LaTeX itself, so a reader that ignores this still
         // shows the source rather than losing the equation.
         if (s.math) append(" xnotes:math=\"true\"")
@@ -447,6 +448,7 @@ object FlowXml {
         highlight = parseHex(attr(props, "background-color")),
         sizePt = attr(props, "font-size")?.removeSuffix("pt")?.toDoubleOrNull(),
         face = attr(props, "font-name")?.takeIf { it.isNotEmpty() }?.let { FontFace(it) },
+        link = attr(props, "link")?.takeIf { it.isNotEmpty() },
     )
 
     private fun parseParaProps(props: Element): Pair<ParaAlign, Int> {

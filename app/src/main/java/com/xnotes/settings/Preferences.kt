@@ -39,6 +39,10 @@ data class Preferences(
     val zoomLockPan: String = "single",
     /** Whether holding a freehand ink stroke still snaps it to a recognized shape. */
     val detectShapes: Boolean = false,
+    /** Whether rotating a selection snaps to the nearest 90 degrees. */
+    val snapRotation90: Boolean = false,
+    /** Language for handwriting-to-text (Convert to text): BCP-47 tag, "cs" (Czech) | "en" (English). */
+    val ocrLanguage: String = "cs",
     /** Tool the stylus side button activates while held; "none" disables it. */
     val penButtonTool: String = "eraser",
     /** Whether the side-button tool also activates during hover (no contact needed); eraser/pan only. */
@@ -54,10 +58,6 @@ data class Preferences(
      *  key press rather than a held state, e.g. HONOR Magic-Pencil whose click arrives as keycode
      *  333); "none" (default) disables it. */
     val stylusButtonTap: String = "none",
-    /** Action mapped to the first page-key side button (keycode 92); "none" disables it. */
-    val stylusButton1Tap: String = "none",
-    /** Action mapped to the second page-key side button (keycode 93); "none" disables it. */
-    val stylusButton2Tap: String = "none",
     /** Horizontal margin (px) on each side of the page column; 0 ⇒ fit-width fills the screen. */
     val sideMargin: Double = 16.0,
     /** Whether the hairline outline around every page is left undrawn. */
@@ -86,6 +86,17 @@ data class Preferences(
     val defaultCodeLanguage: String = "cpp",
     /** Language the format bar's code toggle last applied; "" until a language is picked. */
     val lastCodeLanguage: String = "",
+    // Filen cloud sync (opt-in). Credentials live in the encrypted FilenSecureStore, not here.
+    val filenSyncEnabled: Boolean = false,
+    val filenFolderUuid: String = "",
+    val filenFolderName: String = "",
+    val filenAutoSync: Boolean = true,
+    val filenWifiOnly: Boolean = false,
+    val filenSyncIntervalMinutes: Int = 60,
+    val filenSyncOnNoteExit: Boolean = false,
+    val filenSyncOnAppOpen: Boolean = false,
+    /** Which way notes flow: "both", "up" (local to Filen), "down" (Filen to local), "off". */
+    val filenSyncDirection: String = "both",
     /** Whether typed markdown markers (# - ** `) convert the text as you write. */
     val markdownInput: Boolean = true,
     /** Whether typing "/" at a word start opens the command menu. */
@@ -96,6 +107,9 @@ data class Preferences(
     val sidebarPinned: Boolean = true,
     val sidebarColours: Boolean = true,
     val sidebarTrash: Boolean = true,
+    val sidebarFiles: Boolean = true,
+    val sidebarSync: Boolean = true,
+    val sidebarAbout: Boolean = true,
     /** Where Home opens: "top" (the notes folder), "last" (the folder last shown) or "shelves" (the notes folder under Recent and Pinned). */
     val homeOpensTo: String = "top",
     /** How the explorer writes dates: "relative" (2 days ago), "day" (Wed 17:30) or "date" (16 Sep 2026). */
@@ -109,19 +123,23 @@ data class Preferences(
     val showCreateButton: Boolean = true,
     val showFolderCounts: Boolean = true,
     val showExtensions: Boolean = false,
+    /** Hides files and folders whose name starts with a dot (.obsidian, .git) from the explorer. */
+    val hideDotItems: Boolean = true,
+    /** The reader's light/dark choice; null follows the app theme. Never written to the file. */
+    val readerDark: Boolean? = null,
     /** Whether an exported PDF gets a bookmark for each heading of the note's text. */
     val pdfHeadingBookmarks: Boolean = true,
 ) {
     /**
      * A new note's page size in document pixels. A named size is laid out under
-     * [defaultPageOrientation]; a custom one is taken as typed, since the two fields already say
+     * [orientation]; a custom one is taken as typed, since the two fields already say
      * which way round the page goes.
      */
-    fun newPagePixels(dpi: Int = PageSize.DEFAULT_DPI): Pair<Double, Double> =
+    fun newPagePixels(dpi: Int = PageSize.DEFAULT_DPI, orientation: Orientation = defaultPageOrientation): Pair<Double, Double> =
         if (defaultPageSize == PageSize.CUSTOM) {
             PageSize.mmToPx(customPageWidthMm, dpi) to PageSize.mmToPx(customPageHeightMm, dpi)
         } else {
-            defaultPageSize.pixels(defaultPageOrientation, dpi)
+            defaultPageSize.pixels(orientation, dpi)
         }
 
     fun toJson(): JSONObject = JSONObject()
@@ -138,14 +156,14 @@ data class Preferences(
         .put("finger_draws", fingerDraws)
         .put("zoom_lock_pan", zoomLockPan)
         .put("detect_shapes", detectShapes)
+        .put("snap_rotation_90", snapRotation90)
+        .put("ocr_language", ocrLanguage)
         .put("pen_button_tool", penButtonTool)
         .put("pen_button_hover", penButtonHover)
         .put("two_finger_tap", twoFingerTap)
         .put("three_finger_tap", threeFingerTap)
         .put("stylus_double_tap", stylusDoubleTap)
         .put("stylus_button_tap", stylusButtonTap)
-        .put("stylus_button_1_tap", stylusButton1Tap)
-        .put("stylus_button_2_tap", stylusButton2Tap)
         .put("side_margin", sideMargin)
         .put("hide_page_borders", hidePageBorders)
         .put("min_zoom_enabled", minZoomEnabled)
@@ -180,6 +198,15 @@ data class Preferences(
             codeThemeName?.let { put("code_theme_name", it) }
             put("default_code_language", defaultCodeLanguage)
             lastCodeLanguage.takeIf { it.isNotEmpty() }?.let { put("last_code_language", it) }
+            put("filen_sync_enabled", filenSyncEnabled)
+            put("filen_folder_uuid", filenFolderUuid)
+            put("filen_folder_name", filenFolderName)
+            put("filen_auto_sync", filenAutoSync)
+            put("filen_wifi_only", filenWifiOnly)
+            put("filen_sync_interval_minutes", filenSyncIntervalMinutes)
+            put("filen_sync_on_note_exit", filenSyncOnNoteExit)
+            put("filen_sync_on_app_open", filenSyncOnAppOpen)
+            put("filen_sync_direction", filenSyncDirection)
             put("markdown_input", markdownInput)
             put("slash_commands", slashCommands)
         }
@@ -188,6 +215,9 @@ data class Preferences(
         .put("sidebar_pinned", sidebarPinned)
         .put("sidebar_colours", sidebarColours)
         .put("sidebar_trash", sidebarTrash)
+        .put("sidebar_files", sidebarFiles)
+        .put("sidebar_sync", sidebarSync)
+        .put("sidebar_about", sidebarAbout)
         .put("home_opens_to", homeOpensTo)
         .put("date_style", dateStyle)
         .put("tap_previews", tapPreviews)
@@ -196,6 +226,8 @@ data class Preferences(
         .put("show_create_button", showCreateButton)
         .put("show_folder_counts", showFolderCounts)
         .put("show_extensions", showExtensions)
+        .put("hide_dot_items", hideDotItems)
+        .apply { readerDark?.let { put("reader_dark", it) } }
         .put("pdf_heading_bookmarks", pdfHeadingBookmarks)
 
     companion object {
@@ -263,14 +295,14 @@ data class Preferences(
                 fingerDraws = o.optBoolean("finger_draws", false),
                 zoomLockPan = zoomLockPan,
                 detectShapes = o.optBoolean("detect_shapes", false),
+                snapRotation90 = o.optBoolean("snap_rotation_90", false),
+                ocrLanguage = o.optString("ocr_language", "cs").ifEmpty { "cs" },
                 penButtonTool = o.optString("pen_button_tool", "eraser").ifEmpty { "eraser" },
                 penButtonHover = o.optBoolean("pen_button_hover", false),
                 twoFingerTap = tapAction("two_finger_tap"),
                 threeFingerTap = tapAction("three_finger_tap"),
                 stylusDoubleTap = tapAction("stylus_double_tap"),
                 stylusButtonTap = tapAction("stylus_button_tap"),
-                stylusButton1Tap = tapAction("stylus_button_1_tap"),
-                stylusButton2Tap = tapAction("stylus_button_2_tap"),
                 sideMargin = o.optDouble("side_margin", 16.0).coerceIn(0.0, 80.0),
                 hidePageBorders = o.optBoolean("hide_page_borders", false),
                 minZoomEnabled = o.optBoolean("min_zoom_enabled", false),
@@ -287,6 +319,16 @@ data class Preferences(
                 defaultCodeLanguage = o.optString("default_code_language", "cpp")
                     .lowercase().trim().ifEmpty { "cpp" },
                 lastCodeLanguage = o.optString("last_code_language").lowercase().trim(),
+                filenSyncEnabled = o.optBoolean("filen_sync_enabled", false),
+                filenFolderUuid = o.optString("filen_folder_uuid"),
+                filenFolderName = o.optString("filen_folder_name"),
+                filenAutoSync = o.optBoolean("filen_auto_sync", true),
+                filenWifiOnly = o.optBoolean("filen_wifi_only", false),
+                filenSyncIntervalMinutes = o.optInt("filen_sync_interval_minutes", 60).coerceIn(15, 1440),
+                filenSyncOnNoteExit = o.optBoolean("filen_sync_on_note_exit", false),
+                filenSyncOnAppOpen = o.optBoolean("filen_sync_on_app_open", false),
+                filenSyncDirection = o.optString("filen_sync_direction", "both")
+                    .let { if (it == "up" || it == "down" || it == "off") it else "both" },
                 markdownInput = o.optBoolean("markdown_input", true),
                 slashCommands = o.optBoolean("slash_commands", true),
                 switcherLayouts = o.optJSONArray("switcher_layouts")?.let { a ->
@@ -296,6 +338,9 @@ data class Preferences(
                 sidebarPinned = o.optBoolean("sidebar_pinned", true),
                 sidebarColours = o.optBoolean("sidebar_colours", true),
                 sidebarTrash = o.optBoolean("sidebar_trash", true),
+                sidebarFiles = o.optBoolean("sidebar_files", true),
+                sidebarSync = o.optBoolean("sidebar_sync", true),
+                sidebarAbout = o.optBoolean("sidebar_about", true),
                 homeOpensTo = o.optString("home_opens_to", "top").let { if (it == "last" || it == "shelves") it else "top" },
                 dateStyle = o.optString("date_style", "day").let { if (it == "relative" || it == "date") it else "day" },
                 tapPreviews = o.optBoolean("tap_previews", false),
@@ -304,6 +349,8 @@ data class Preferences(
                 showCreateButton = o.optBoolean("show_create_button", true),
                 showFolderCounts = o.optBoolean("show_folder_counts", true),
                 showExtensions = o.optBoolean("show_extensions", false),
+                hideDotItems = o.optBoolean("hide_dot_items", true),
+                readerDark = if (o.has("reader_dark")) o.optBoolean("reader_dark") else null,
                 pdfHeadingBookmarks = o.optBoolean("pdf_heading_bookmarks", true),
             )
         }

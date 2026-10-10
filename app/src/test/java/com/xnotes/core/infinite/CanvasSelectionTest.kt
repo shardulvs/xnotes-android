@@ -65,6 +65,18 @@ class CanvasSelectionTest {
         assertEquals(listOf<CanvasItem>(inside), hits)
     }
 
+    @Test fun aWholeItemsBandSkipsAnItemItOnlyClips() {
+        val straddling = box(90.0, 10.0)
+        assertTrue(SelectionMath.bandMembers(listOf(straddling), Rect(0.0, 0.0, 100.0, 100.0), whole = true).isEmpty())
+    }
+
+    @Test fun aLassoCrossingAStrokeTakesItOnlyWhenPartialIsEnough() {
+        val stroke = line(80.0, 50.0) // runs from x=80 to x=120, the loop ends at x=100
+        val loop = listOf(Pt(0.0, 0.0), Pt(100.0, 0.0), Pt(100.0, 100.0), Pt(0.0, 100.0))
+        assertEquals(listOf<CanvasItem>(stroke), SelectionMath.lassoMembers(listOf(stroke), loop, whole = false))
+        assertTrue(SelectionMath.lassoMembers(listOf(stroke), loop, whole = true).isEmpty())
+    }
+
     @Test fun aDegenerateLassoSelectsNothing() {
         assertTrue(SelectionMath.lassoMembers(listOf(box(0.0, 0.0)), listOf(Pt(0.0, 0.0), Pt(1.0, 1.0))).isEmpty())
     }

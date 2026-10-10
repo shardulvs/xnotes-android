@@ -127,6 +127,13 @@ class FlowInput(
         showIme(restart = true)
     }
 
+    /** While set, the soft keyboard stays down (a maths keyboard types instead); the session carries on. */
+    var imeSuppressed = false
+        set(on) {
+            field = on
+            if (on) imm()?.hideSoftInputFromWindow(view.windowToken, 0) else showIme(restart = true)
+        }
+
     fun endSession() {
         imm()?.restartInput(view)
         imm()?.hideSoftInputFromWindow(view.windowToken, 0)
@@ -138,6 +145,7 @@ class FlowInput(
      * dismissed: every caret tap routes here.
      */
     private fun showIme(restart: Boolean) {
+        if (imeSuppressed) return
         view.isFocusable = true
         view.isFocusableInTouchMode = true
         view.post {

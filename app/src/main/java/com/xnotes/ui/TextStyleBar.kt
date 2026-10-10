@@ -3,16 +3,31 @@ package com.xnotes.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FormatAlignCenter
+import androidx.compose.material.icons.filled.FormatAlignLeft
+import androidx.compose.material.icons.filled.FormatAlignRight
+import androidx.compose.material.icons.filled.FormatBold
+import androidx.compose.material.icons.filled.FormatItalic
+import androidx.compose.material.icons.filled.FormatStrikethrough
+import androidx.compose.material.icons.filled.FormatUnderlined
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,12 +42,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xnotes.R
+import com.xnotes.core.model.Rgba
 import com.xnotes.core.pal.FontFace
+import com.xnotes.core.pal.HAlign
 import com.xnotes.platform.FontCatalog
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
@@ -44,11 +63,13 @@ import kotlin.math.roundToInt
  * selected one). Anchored above the box; colour is driven by the toolbar swatches,
  * so this carries only the family picker and a point-size stepper. When the box is
  * merely selected (not editing) the generic selection menu also sits above it, so
- * this bar stacks one row higher.
+ * this bar stacks one row higher. A note's box being edited is styled from the bottom
+ * [TextBoxFormatBar] instead.
  */
 @Composable
 fun TextStyleBar(editor: TextEditHost) {
     val bar = editor.textBar ?: return
+    if (bar.editing && editor is Editor) return
     val palette = LocalPalette.current
     val density = LocalDensity.current
 
@@ -114,6 +135,107 @@ fun TextStyleBar(editor: TextEditHost) {
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * The bottom styling strip for a text box being edited, docked as the last child of the
+ * editor column so the adjustResize window floats it directly above the soft keyboard, the
+ * same slot the inline text tool's [TextFormatBar] uses. Carries font colour, family, size,
+ * and a commit (✓) button.
+ */
+@Composable
+fun TextBoxFormatBar(editor: Editor) {
+    val bar = editor.textBar ?: return
+    if (!bar.editing) return
+    val palette = LocalPalette.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp)
+            .background(palette.panel.toComposeColor())
+            .horizontalScroll(rememberScrollState()),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TextColorButton(editor, bar.rgba)
+        BarSeparator()
+        FacePicker(current = bar.face) { editor.setTextFace(it) }
+        BarSeparator()
+        SizeStepper(size = bar.pointSize, onDelta = { editor.setTextPointSize(bar.pointSize + it) })
+        BarSeparator()
+        StyleToggle(Icons.Filled.FormatBold, "Bold", bar.bold) { editor.toggleTextBold() }
+        StyleToggle(Icons.Filled.FormatItalic, "Italic", bar.italic) { editor.toggleTextItalic() }
+        StyleToggle(Icons.Filled.FormatUnderlined, "Underline", bar.underline) { editor.toggleTextUnderline() }
+        StyleToggle(Icons.Filled.FormatStrikethrough, "Strikethrough", bar.strike) { editor.toggleTextStrike() }
+        StyleToggle(alignIcon(bar.align), "Alignment", bar.align != HAlign.LEFT) { editor.cycleTextAlign() }
+        BarSeparator()
+        Box(
+            modifier = Modifier.size(44.dp).clickable { editor.commitText() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                XnotesIcons.check,
+                contentDescription = stringResource(R.string.done),
+                tint = palette.text.toComposeColor(),
+                modifier = Modifier.size(22.dp),
+            )
+        }
+    }
+}
+
+private fun alignIcon(align: HAlign): ImageVector = when (align) {
+    HAlign.LEFT -> Icons.Filled.FormatAlignLeft
+    HAlign.CENTER -> Icons.Filled.FormatAlignCenter
+    HAlign.RIGHT -> Icons.Filled.FormatAlignRight
+}
+
+@Composable
+private fun StyleToggle(icon: ImageVector, description: String, active: Boolean, onClick: () -> Unit) {
+    val palette = LocalPalette.current
+    IconButton(onClick = onClick, modifier = Modifier.size(44.dp)) {
+        Icon(
+            icon,
+            contentDescription = description,
+            tint = (if (active) palette.accent else palette.textDim).toComposeColor(),
+            modifier = Modifier.size(22.dp),
+        )
+    }
+}
+
+@Composable
+private fun BarSeparator() {
+    Box(
+        Modifier.width(1.dp).height(28.dp)
+            .background(LocalPalette.current.border.toComposeColor()),
+    )
+}
+
+@Composable
+private fun TextColorButton(editor: Editor, current: Rgba) {
+    val palette = LocalPalette.current
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Box(
+            Modifier.size(44.dp).clip(CircleShape).clickable { open = true },
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("A", color = palette.text.toComposeColor(), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Box(
+                    Modifier.width(16.dp).height(3.dp)
+                        .clip(RoundedCornerShape(1.5.dp))
+                        .background(current.toComposeColor()),
+                )
+            }
+        }
+        if (open) {
+            ColorPickerPopup(
+                initial = current,
+                recents = editor.recentColors,
+                onDismiss = { open = false },
+                onPick = { editor.setTextColor(it); open = false },
+            )
         }
     }
 }

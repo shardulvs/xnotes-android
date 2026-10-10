@@ -33,6 +33,7 @@ import com.xnotes.core.infinite.ItemMesher
 import com.xnotes.core.infinite.Waypoint
 import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.DrawStyle
+import com.xnotes.core.model.FunctionSpec
 import com.xnotes.core.model.ImageData
 import com.xnotes.core.model.ImageItem
 import com.xnotes.core.model.deepCopyAll
@@ -65,7 +66,7 @@ import com.xnotes.ui.theme.Palette
  * ones, so a second object doing the same would delete the open note's live files.
  */
 @Stable
-class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongPressMenuHost, TextEditHost {
+class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongPressMenuHost, TextEditHost, ToastHost {
 
     private val appContext = context.applicationContext
 
@@ -213,6 +214,20 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     /** True while anything is selected, so the chrome can offer the actions that need one. */
     var hasSelection by mutableStateOf(false)
         private set
+
+    override var toastText by mutableStateOf<String?>(null)
+        private set
+    override var toastToken by mutableStateOf(0)
+        private set
+
+    /** Flash a brief themed pill at the bottom of the canvas (delete/copy/cut/paste feedback). */
+    fun showToast(text: String) {
+        toastText = text
+        toastToken++
+    }
+
+    /** Set while cut composes copy+delete internally, so only the "Cut" pill shows. */
+    private var suppressToast = false
 
     /** The GL-side mirror of the document. Fed by [modelListener]; never reads the model itself. */
     private val scene = CanvasScene()
@@ -476,7 +491,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         // radius above the box. Without this the bar lands on the grip and buries it. The bottom
         // stays put, so the fallback placement below the selection is unchanged.
         val clearance = OverlayTessellator.GRIP_ARM_PX + OverlayTessellator.GRIP_PX / 2.0
-        selectionMenuRect = Rect(bounds.x, bounds.y - clearance, bounds.w, bounds.h + clearance)
+        // The move grip under a small selection sits the same distance below, so the fallback clears it too.
+        val below = if (selection.moveGrip(viewport.zoom, OverlayTessellator.GRIP_ARM_PX / viewport.zoom) != null) clearance else 0.0
+        selectionMenuRect = Rect(bounds.x, bounds.y - clearance, bounds.w, bounds.h + clearance + below)
     }
 
     override fun dismissSelectionMenu() {
@@ -487,6 +504,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     override fun deleteSelection() {
         val items = selection.items
         if (items.isEmpty()) return
+        if (!suppressToast) showToast("Deleted")
         val command = EraseCanvasItems.capture(document, items)
         document.removeAll(items)
         history.push(command)
@@ -499,6 +517,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     override fun copySelection() {
         if (selection.isEmpty) return
         copyToClipboard()
+        showToast("Copied")
         maybeSwitchBackAfterSelect()
     }
 
@@ -512,7 +531,10 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         if (selection.isEmpty) return
         copyToClipboard()
         clipboardFromCut = true
+        suppressToast = true
         deleteSelection() // also runs the select tool's switch-back, once
+        suppressToast = false
+        showToast("Cut")
     }
 
     /** Clone the selection a nudge down and right, and leave the copies selected. */
@@ -545,6 +567,39 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         maybeSwitchBackAfterSelect()
     }
 
+    // Tables are a paged-note feature; the infinite canvas has none.
+
+    override val selectionFunction: FunctionSpec? get() = selection.function()?.function
+
+    override fun setSelectionFunction(spec: FunctionSpec): Boolean {
+        val command = selection.editFunction(spec) ?: return false
+        history.push(command)
+        markDirty()
+        refresh()
+        publishOverlay()
+        return true
+    }
+
+    // Crop is a paged-note image action; not offered on the infinite canvas.
+    override val selectionIsImage: Boolean get() = false
+    override fun cropSelection() {}
+
+    // Text boxes and convert-to-text are paged-note actions for now; not offered on the infinite canvas.
+    override val selectionIsText: Boolean get() = false
+    override fun editSelectionText() {}
+
+    // Hyperlinks on items are a paged-note action for now; not offered on the infinite canvas.
+    override val selectionCanLink: Boolean get() = false
+    override val selectionLink: String? get() = null
+    override fun setSelectionLink(url: String?) {}
+
+    override val selectionHasInk: Boolean get() = false
+    override fun convertSelectionToText() {}
+    override val canConvertToMath: Boolean get() = false
+    override val selectionMath: String? get() = null
+    override fun setSelectionMath(latex: String): Boolean = false
+    override fun convertSelectionToMath() {}
+
     override fun unlockItem(item: CanvasItem) {
         if (!item.locked) return
         item.locked = false
@@ -572,6 +627,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         for (clone in clones) clone.translate(dx, dy)
         document.addAll(clones)
         history.push(AddCanvasItems(document, clones))
+        showToast("Inserted")
         if (clipboardFromCut) {
             clipboard.clear()
             clipboardFromCut = false
@@ -604,6 +660,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     override fun pasteClipboardImageAt(content: Pt) {
         val bytes = com.xnotes.platform.SystemClipboard.imageBytes(appContext) ?: return
         insertImage(bytes, content)
+        showToast("Inserted")
     }
 
     /** Put the selection on top. On a flat canvas that is purely a reorder of the item list. */
@@ -687,6 +744,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     override var textBar by mutableStateOf<com.xnotes.canvas.TextBar?>(null)
         private set
+    override val editAccent: com.xnotes.core.model.Rgba get() = palette?.selectionAccent(view.paperColor) ?: InkPalette.DEFAULT
 
     /** The type a new label starts in, following the last one styled. */
     private var textFace: FontFace = TextItem.DEFAULT_FACE
@@ -797,7 +855,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             centred = true,
         )
         editingField = f
-        textBar = com.xnotes.canvas.TextBar(f.screenBounds(), l.style.face, l.style.pointSize, editing = true)
+        textBar = com.xnotes.canvas.TextBar(f.screenBounds(), l.style.face, l.style.pointSize, l.style.rgba, editing = true)
     }
 
     override fun setSelectionCount(n: Int) {
@@ -894,6 +952,13 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         toolConfigs[tool] = config
         onToolStyleChanged?.invoke()
     }
+
+    override var snapHeldToShapes: Boolean
+        get() = detectShapes
+        set(v) { detectShapes = v; onDetectShapesChanged?.invoke(v) }
+
+    /** Fired when the snap-to-shapes toggle changed here, so the host can persist it. */
+    var onDetectShapesChanged: ((Boolean) -> Unit)? = null
 
     override val hostShapeConfig: ShapeConfig get() = shapeConfig
 
@@ -1237,7 +1302,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     private fun publishOverlay() {
         hasSelection = !selection.isEmpty
         refreshSelectionMenu()
-        val accent = palette?.accent ?: InkPalette.DEFAULT
+        val accent = palette?.selectionAccent(view.paperColor) ?: InkPalette.DEFAULT
         val zoom = viewport.zoom
         // A lasso drag owns the buffer on its own: it clears the selection when it starts and no
         // marquee can be out at the same time, so nothing else needs a place in the same publish.
@@ -1280,6 +1345,8 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
                 vertexDots = shape?.vertexDots()?.map { it.at }.orEmpty(),
                 edgeDots = shape?.edgeDots(OverlayTessellator.EDGE_DOT_MIN_PX / zoom)?.map { it.at }.orEmpty(),
                 knobs = shape?.knobDots().orEmpty(),
+                moveGrip = selection.moveGrip(zoom, OverlayTessellator.GRIP_ARM_PX / zoom, margin),
+                onAccent = palette?.onSelectionAccent(view.paperColor) ?: com.xnotes.core.model.Rgba(255, 255, 255, 255),
             )
             val b = OverlayTessellator.selectionBounds(box, zoom)
             bounds = bounds?.union(b) ?: b
@@ -1640,12 +1707,23 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     }
 
     /** Adopt the app's pen preferences, so the canvas and the paged note behave the same. */
-    fun applyInputPrefs(fingerDraws: Boolean, penButtonTool: Tool?, zoomLockPan: String, detectShapes: Boolean) {
+    fun applyInputPrefs(
+        fingerDraws: Boolean,
+        penButtonTool: Tool?,
+        zoomLockPan: String,
+        detectShapes: Boolean,
+        snapRotation90: Boolean = false,
+    ) {
         interaction.fingerDraws = fingerDraws
         interaction.penButtonTool = penButtonTool
         interaction.zoomLockPan = zoomLockPan
         this.detectShapes = detectShapes
+        selection.snapRotation90 = snapRotation90
+        this.snapRotation90 = snapRotation90
     }
+
+    /** Mirrors prefs.snapRotation90; re-applied to each freshly built selection. */
+    private var snapRotation90 = false
 
     fun toggleZoomLock() {
         zoomLocked = !zoomLocked
@@ -1731,7 +1809,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         document.listener = null
         document = next
         next.listener = modelListener
-        selection = CanvasSelection(next)
+        selection = CanvasSelection(next).also { it.snapRotation90 = snapRotation90 }
         hasSelection = false
         history.clear()
         interaction.resetGestureState()

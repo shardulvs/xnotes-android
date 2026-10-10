@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.sp
 import com.xnotes.R
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.util.DocumentKind
+import com.xnotes.core.util.ReaderKind
 import com.xnotes.platform.DocMetaStore
 import com.xnotes.settings.ExplorerSortKey
 import com.xnotes.settings.ExplorerView
@@ -103,6 +104,8 @@ internal class EntryActions(
     val saveCopy: (BrowseEntry) -> Unit,
     val exportPdf: (BrowseEntry) -> Unit,
     val preview: (BrowseEntry) -> Unit,
+    val convertToNote: (BrowseEntry) -> Unit,
+    val importInto: (BrowseEntry) -> Unit,
 )
 
 /** Everything an explorer layout draws from: the view, what's in it, and how to describe each item. */
@@ -155,6 +158,7 @@ internal class ExplorerBody(
 internal fun entryKind(e: BrowseEntry, meta: DocMetaStore.Meta?): EntryKind = when {
     e.isDir -> EntryKind.FOLDER
     DocumentKind.ofName(e.name) == DocumentKind.CANVAS -> EntryKind.CANVAS
+    ReaderKind.isReadable(e.name) -> EntryKind.FILE
     meta?.pdf == true -> EntryKind.PDF
     else -> EntryKind.NOTE
 }
@@ -164,6 +168,7 @@ internal fun kindIcon(k: EntryKind): ImageVector = when (k) {
     EntryKind.NOTE -> XnotesIcons.file
     EntryKind.PDF -> XnotesIcons.pdf
     EntryKind.CANVAS -> XnotesIcons.canvas
+    EntryKind.FILE -> XnotesIcons.lock
 }
 
 @Composable
@@ -172,13 +177,14 @@ internal fun kindLabel(k: EntryKind): String = when (k) {
     EntryKind.NOTE -> stringResource(R.string.kind_note)
     EntryKind.PDF -> stringResource(R.string.kind_pdf_note)
     EntryKind.CANVAS -> stringResource(R.string.kind_canvas)
+    EntryKind.FILE -> stringResource(R.string.kind_read_only_file)
 }
 
 /** A document's first page: the top cropped to fill [shape]'s square, or the whole page fitted in. */
 @Composable
 internal fun EntryThumb(editor: Editor, entry: BrowseEntry, shape: ThumbShape, modifier: Modifier = Modifier) {
     val whole = shape == ThumbShape.PAGE
-    ThumbImage(rememberThumb(editor, entry, whole), whole, modifier)
+    ThumbImage(rememberThumb(editor, entry, whole), whole, modifier, ReaderKind.ofName(entry.name)?.label)
 }
 
 /** The top of [entry]'s first page as a square, or with [whole] the page entire; seeded from memory, null until loaded. */
@@ -204,9 +210,9 @@ internal fun pageRatio(img: ImageBitmap?, fallback: Float): Float = img?.let { i
 internal fun pageFit(ratio: Float, maxW: Dp, maxH: Dp): DpSize =
     if (maxW / maxH > ratio) DpSize(maxH * ratio, maxH) else DpSize(maxW, maxW / ratio)
 
-/** A thumbnail on the page colour: cropped to its top, or with [whole] fitted in entire; a file icon until it loads. */
+/** A thumbnail on the page colour: cropped to its top, or with [whole] fitted in entire; a file icon (or [placeholder] text) until it loads. */
 @Composable
-internal fun ThumbImage(img: ImageBitmap?, whole: Boolean, modifier: Modifier = Modifier) {
+internal fun ThumbImage(img: ImageBitmap?, whole: Boolean, modifier: Modifier = Modifier, placeholder: String? = null) {
     val palette = LocalPalette.current
     Box(modifier.background(palette.paper.toComposeColor())) {
         if (img != null) {
@@ -216,6 +222,8 @@ internal fun ThumbImage(img: ImageBitmap?, whole: Boolean, modifier: Modifier = 
                 alignment = if (whole) Alignment.Center else Alignment.TopCenter,
                 modifier = Modifier.fillMaxSize(),
             )
+        } else if (placeholder != null) {
+            Text(placeholder, color = palette.textDim.toComposeColor(), fontSize = 20.sp, fontWeight = FontWeight.Medium, modifier = Modifier.align(Alignment.Center))
         } else {
             Icon(XnotesIcons.file, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(28.dp).align(Alignment.Center))
         }
@@ -229,6 +237,9 @@ internal fun ThumbBadges(b: ExplorerBody, e: BrowseEntry, inset: Dp = 8.dp) {
         val kind = b.kind(e)
         if (b.view.showKind && (kind == EntryKind.PDF || kind == EntryKind.CANVAS)) {
             TileBadge(kindIcon(kind), if (kind == EntryKind.PDF) "PDF" else stringResource(R.string.kind_canvas), Modifier.align(Alignment.BottomStart))
+        }
+        if (b.view.showKind && kind == EntryKind.FILE) {
+            TileBadge(kindIcon(kind), ReaderKind.ofName(e.name)?.label.orEmpty(), Modifier.align(Alignment.BottomStart))
         }
         val pages = b.pages(e)
         if (b.view.showPages && pages > 1) TileBadge(XnotesIcons.pages, "$pages", Modifier.align(Alignment.BottomEnd))
@@ -252,10 +263,12 @@ private fun EntryMenuButton(b: ExplorerBody, e: BrowseEntry, tint: Color, size: 
 @Composable
 internal fun EntryMenuFor(b: ExplorerBody, e: BrowseEntry, expanded: Boolean, onDismiss: () -> Unit) {
     val m = b.host.menu
+    // Reader files have no share/copy/export block: those flows name and render editable documents.
+    val readOnly = ReaderKind.isReadable(e.name)
     EntryMenu(
         expanded, onDismiss,
         onRename = { m.rename(e) }, onCopy = { m.copy(e) }, onCut = { m.cut(e) }, onDelete = { m.delete(e) },
-        onShare = if (e.isDir) null else ({ m.share(e) }),
+        onShare = if (e.isDir || readOnly) null else ({ m.share(e) }),
         onSaveCopy = { m.saveCopy(e) },
         onExportPdf = { m.exportPdf(e) },
         onColor = { c -> m.color(e, c) },
@@ -263,7 +276,9 @@ internal fun EntryMenuFor(b: ExplorerBody, e: BrowseEntry, expanded: Boolean, on
         onTogglePin = if (e.isDir) ({ m.togglePin(e) }) else null,
         onNameColor = e.color?.let { c -> { m.nameColor(c) } },
         onMoveTo = { m.moveTo(e) },
-        onPreview = if (e.isDir) null else ({ m.preview(e) }),
+        onPreview = if (e.isDir || readOnly) null else ({ m.preview(e) }),
+        onConvertToNote = if (readOnly) ({ m.convertToNote(e) }) else null,
+        onImportInto = if (DocumentKind.ofName(e.name) == DocumentKind.NOTE) ({ m.importInto(e) }) else null,
         deleteLabel = b.deleteLabel,
     )
 }
@@ -483,7 +498,7 @@ internal fun ListRow(b: ExplorerBody, e: BrowseEntry, wide: Boolean) {
                 Icon(kindIcon(kind), null, tint = dim, modifier = Modifier.size(16.dp))
                 Text(kindLabel(kind), color = dim, fontSize = 13.sp, maxLines = 1)
             }
-            Text(if (e.isDir || kind == EntryKind.CANVAS) "–" else b.pages(e).takeIf { it > 0 }?.toString() ?: "", color = fg, fontSize = 13.sp, textAlign = TextAlign.End, modifier = Modifier.width(LIST_PAGES_W))
+            Text(if (e.isDir || kind == EntryKind.CANVAS || kind == EntryKind.FILE) "–" else b.pages(e).takeIf { it > 0 }?.toString() ?: "", color = fg, fontSize = 13.sp, textAlign = TextAlign.End, modifier = Modifier.width(LIST_PAGES_W))
             Text(
                 if (e.isDir) b.counts[e.documentUri]?.let { itemsLabel(b.words, it) } ?: "" else formatSize(e.size),
                 color = if (e.isDir) dim else fg, fontSize = 13.sp, textAlign = TextAlign.End, maxLines = 1,
@@ -528,7 +543,7 @@ internal fun GalleryItem(b: ExplorerBody, e: BrowseEntry, shelf: Dp) {
                 if (pages > 8) Box(Modifier.offset(8.dp, 0.dp).size(pageW, pageH).clip(sheet).background(palette.paper.toComposeColor()).border(1.dp, edge, sheet))
                 if (pages > 1) Box(Modifier.offset(4.dp, 4.dp).size(pageW, pageH).clip(sheet).background(palette.paper.toComposeColor()).border(1.dp, edge, sheet))
                 Box(Modifier.offset(0.dp, 8.dp).size(pageW, pageH).clip(sheet).border(if (selected) 2.dp else 1.dp, edge, sheet)) {
-                    ThumbImage(img, whole = true, Modifier.fillMaxSize())
+                    ThumbImage(img, whole = true, Modifier.fillMaxSize(), ReaderKind.ofName(e.name)?.label)
                     if (selected) Box(Modifier.fillMaxSize().background(palette.selectionBackground.withAlpha(77).toComposeColor()))
                     if (selecting) CheckRing(selected, Modifier.align(Alignment.TopStart).padding(6.dp))
                 }

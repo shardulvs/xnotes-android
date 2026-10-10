@@ -29,6 +29,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -94,6 +96,8 @@ fun Toolbar(
     onAddStickers: () -> Unit,
     onClosePane: (() -> Unit)? = null,
     onImportTemplate: () -> Unit = {},
+    onTakePhoto: () -> Unit = {},
+    onImagePage: () -> Unit = {},
 ) {
     // The five stroke tools use the designed vector drawables (res/drawable/ic_stroke_*),
     // tinted at the call site like every other icon; the rest use the built-in line set.
@@ -112,33 +116,63 @@ fun Toolbar(
         Tool.SHAPE to XnotesIcons.shape,
         Tool.TEXT to XnotesIcons.text,
         Tool.TEXT_BOX to XnotesIcons.textBox,
+        Tool.TABLE to XnotesIcons.table,
         Tool.MARKUP to XnotesIcons.markup,
     )
     var configForTool by remember { mutableStateOf<Tool?>(null) }
     var switcherIndex by remember { mutableStateOf<Int?>(null) }
     var renaming by remember { mutableStateOf(false) }
-    // Pinned outside the scrolling strip so closing a split pane is always one tap away.
-    ToolbarFrame(armed = editor.tool, trailing = onClosePane?.let { { ClosePaneButton(it) } }) {
-        // The bar is driven by the user-customisable layout; separators sit between non-empty
-        // sections, and each item dispatches to its renderer (see ToolbarItemView).
-        editor.toolbarLayout.visibleSections.forEachIndexed { si, section ->
-            if (si > 0) Separator()
-            section.visibleEntries.forEach { entry ->
-                ToolbarItemView(
-                    editor = editor,
-                    item = entry.item,
-                    toolIcons = toolIcons,
-                    configForTool = configForTool,
-                    setConfigForTool = { configForTool = it },
-                    switcherIndex = switcherIndex,
-                    setSwitcherIndex = { switcherIndex = it },
-                    onRename = { renaming = true },
-                    onOpenBackstage = onOpenBackstage,
-                    onInsertImage = onInsertImage,
-                    onAddStickers = onAddStickers,
-                    onToggleFullscreen = onToggleFullscreen,
-                    onImportTemplate = onImportTemplate,
-                )
+    @Composable
+    fun Item(item: ToolbarItem) = ToolbarItemView(
+        editor = editor,
+        item = item,
+        toolIcons = toolIcons,
+        configForTool = configForTool,
+        setConfigForTool = { configForTool = it },
+        switcherIndex = switcherIndex,
+        setSwitcherIndex = { switcherIndex = it },
+        onRename = { renaming = true },
+        onOpenBackstage = onOpenBackstage,
+        onInsertImage = onInsertImage,
+        onTakePhoto = onTakePhoto,
+        onImagePage = onImagePage,
+        onAddStickers = onAddStickers,
+        onToggleFullscreen = onToggleFullscreen,
+        onImportTemplate = onImportTemplate,
+    )
+    if (editor.readerMode) {
+        // The file reader's bar for a note: where you are and how you see it, and the way back to editing.
+        ToolbarFrame(
+            armed = null,
+            trailing = {
+                ToolbarIcon(Icons.Outlined.AutoStories, stringResource(R.string.reader_exit), active = true) { editor.exitReader() }
+                onClosePane?.let { ClosePaneButton(it) }
+            },
+        ) {
+            Item(ToolbarItem.HOME)
+            Item(ToolbarItem.TITLE)
+            Separator()
+            Item(ToolbarItem.SIDEBAR)
+            Separator()
+            Icon(XnotesIcons.lock, null, tint = LocalPalette.current.textDim.toComposeColor(), modifier = Modifier.padding(4.dp).size(16.dp))
+            if (!LocalBar.current.vertical) Label(stringResource(R.string.reader_read_only))
+            Separator()
+            Item(ToolbarItem.PAGE_NAV)
+            Item(ToolbarItem.SEARCH)
+            Separator()
+            Item(ToolbarItem.ZOOM)
+            Item(ToolbarItem.FIT)
+            Separator()
+            Item(ToolbarItem.FULLSCREEN)
+        }
+    } else {
+        // Pinned outside the scrolling strip so closing a split pane is always one tap away.
+        ToolbarFrame(armed = editor.tool, trailing = onClosePane?.let { { ClosePaneButton(it) } }) {
+            // The bar is driven by the user-customisable layout; separators sit between non-empty
+            // sections, and each item dispatches to its renderer (see ToolbarItemView).
+            editor.toolbarLayout.visibleSections.forEachIndexed { si, section ->
+                if (si > 0) Separator()
+                section.visibleEntries.forEach { entry -> Item(entry.item) }
             }
         }
     }
@@ -169,6 +203,8 @@ private fun ToolbarItemView(
     onRename: () -> Unit,
     onOpenBackstage: () -> Unit,
     onInsertImage: () -> Unit,
+    onTakePhoto: () -> Unit,
+    onImagePage: () -> Unit,
     onAddStickers: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onImportTemplate: () -> Unit,
@@ -188,13 +224,15 @@ private fun ToolbarItemView(
                     .clickable { onRename() },
             )
         }
+        ToolbarItem.READER ->
+            ToolbarIcon(Icons.Outlined.AutoStories, stringResource(R.string.tool_reader)) { editor.enterReader() }
         ToolbarItem.SIDEBAR ->
             ToolbarIcon(XnotesIcons.sidebar, stringResource(R.string.side_panel), active = editor.sidebarVisible, shortcut = Keys.SIDEBAR) { editor.toggleSidebar() }
 
         ToolbarItem.PEN, ToolbarItem.DASHED, ToolbarItem.CALLIGRAPHY, ToolbarItem.SPEED,
         ToolbarItem.TAPER, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER, ToolbarItem.PAN,
         ToolbarItem.SELECT, ToolbarItem.LASSO, ToolbarItem.SCREENSHOT, ToolbarItem.SHAPE,
-        ToolbarItem.TEXT, ToolbarItem.TEXT_BOX -> {
+        ToolbarItem.TEXT, ToolbarItem.TEXT_BOX, ToolbarItem.TABLE -> {
             val tool = Tool.fromId(item.id)
             if (tool != null) ToolButton(editor, tool, toolIcons[tool], configForTool, setConfigForTool)
         }
@@ -208,7 +246,7 @@ private fun ToolbarItemView(
         ToolbarItem.RULER ->
             ToolbarIcon(XnotesIcons.ruler, stringResource(R.string.tool_ruler), active = editor.rulerVisible) { editor.toggleRuler() }
 
-        ToolbarItem.IMAGE -> ImageMenu(editor, onInsertImage, onAddStickers)
+        ToolbarItem.IMAGE -> ImageMenu(editor, onInsertImage, onTakePhoto, onImagePage, onAddStickers)
 
         ToolbarItem.UNDO -> ToolbarIcon(XnotesIcons.undo, stringResource(R.string.undo), enabled = editor.canUndo, shortcut = Keys.UNDO) { editor.undo() }
         ToolbarItem.REDO -> ToolbarIcon(XnotesIcons.redo, stringResource(R.string.redo), enabled = editor.canRedo, shortcut = Keys.REDO) { editor.redo() }
@@ -229,6 +267,12 @@ private fun ToolbarItemView(
                 if (jumpOpen) PageJumpPopup(editor) { jumpOpen = false }
             }
             ToolbarIcon(XnotesIcons.next, stringResource(R.string.next_page), shortcut = Keys.NEXT_PAGE) { editor.nextPage() }
+        }
+        ToolbarItem.SEARCH -> {
+            val open = editor.sidebarVisible && editor.sidePanelTab == SidePanelTab.SEARCH
+            ToolbarIcon(XnotesIcons.search, stringResource(R.string.search), active = open) {
+                if (open) editor.sidebarVisible = false else editor.openSearch()
+            }
         }
         ToolbarItem.STYLES -> StylesButton(editor, onImportTemplate)
         ToolbarItem.MARGINS -> MarginsButton(editor)
@@ -283,7 +327,7 @@ private fun ToolButton(
 ) {
     if (icon == null) return
     val armed = editor.tool == tool
-    val configurable = tool.isStroke || tool == Tool.SHAPE || tool == Tool.ERASER || tool == Tool.SELECT || tool == Tool.TEXT || tool == Tool.MARKUP
+    val configurable = tool.isStroke || tool == Tool.SHAPE || tool == Tool.ERASER || tool == Tool.SELECT || tool == Tool.LASSO || tool == Tool.TEXT || tool == Tool.TABLE || tool == Tool.MARKUP
     Box {
         ToolbarIcon(
             icon,
@@ -303,8 +347,9 @@ private fun ToolButton(
         if (configForTool == tool) {
             when {
                 tool == Tool.SHAPE -> ShapeConfigPopup(editor) { setConfigForTool(null) }
+                tool == Tool.TABLE -> TableConfigPopup(editor) { setConfigForTool(null) }
                 tool == Tool.ERASER -> EraserConfigPopup(editor) { setConfigForTool(null) }
-                tool == Tool.SELECT -> SelectConfigPopup(editor) { setConfigForTool(null) }
+                tool == Tool.SELECT || tool == Tool.LASSO -> SelectConfigPopup(editor, tool) { setConfigForTool(null) }
                 tool == Tool.TEXT -> TextToolConfigPopup(editor) { setConfigForTool(null) }
                 tool == Tool.MARKUP -> MarkupToolPopup(editor) { setConfigForTool(null) }
                 else -> ToolConfigPopup(editor, tool) { setConfigForTool(null) }
@@ -538,8 +583,8 @@ internal fun Swatch(color: androidx.compose.ui.graphics.Color, active: Boolean, 
         modifier = Modifier
             .then(if (LocalBar.current.vertical) Modifier.padding(vertical = 3.dp) else Modifier.padding(horizontal = 3.dp))
             .size(LocalBar.current.swatch)
-            // The selection ring takes the swatch's own colour, not the theme accent.
-            .then(if (active) Modifier.border(2.dp, color, CircleShape) else Modifier)
+            // The selection ring is white on a dark theme and black on a light one, so it shows whatever the swatch.
+            .then(if (active) Modifier.border(2.dp, if (LocalPalette.current.isDark) androidx.compose.ui.graphics.Color.White else androidx.compose.ui.graphics.Color.Black, CircleShape) else Modifier)
             .padding(4.dp)
             .clip(CircleShape)
             .background(color)
@@ -590,7 +635,7 @@ private fun PageCounter(current: Int, count: Int, modifier: Modifier) {
 }
 
 @Composable
-private fun ImageMenu(editor: Editor, onInsertImage: () -> Unit, onAddStickers: () -> Unit) {
+private fun ImageMenu(editor: Editor, onInsertImage: () -> Unit, onTakePhoto: () -> Unit, onImagePage: () -> Unit, onAddStickers: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     var stickersOpen by remember { mutableStateOf(false) }
     Box {
@@ -598,6 +643,8 @@ private fun ImageMenu(editor: Editor, onInsertImage: () -> Unit, onAddStickers: 
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(text = { Text(stringResource(R.string.paste_image)) }, onClick = { editor.pasteImage(); expanded = false })
             DropdownMenuItem(text = { Text(stringResource(R.string.insert_image_ellipsis)) }, onClick = { onInsertImage(); expanded = false })
+            DropdownMenuItem(text = { Text(stringResource(R.string.take_photo)) }, onClick = { onTakePhoto(); expanded = false })
+            DropdownMenuItem(text = { Text(stringResource(R.string.image_as_page)) }, onClick = { onImagePage(); expanded = false })
             DropdownMenuItem(text = { Text(stringResource(R.string.stickers)) }, onClick = { expanded = false; stickersOpen = true })
         }
         if (stickersOpen) StickersMenu(editor, onAddStickers) { stickersOpen = false }

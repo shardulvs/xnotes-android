@@ -176,6 +176,24 @@ class FlowEditor(private val flow: TextFlow) {
         return styleForInsert(para, pos.offset.coerceIn(0, para.length))
     }
 
+    /**
+     * The contiguous single-paragraph range around [pos] whose characters all carry the same
+     * hyperlink, or null when the caret is not on a link. Lets an "Edit link" action target the
+     * whole link even from a collapsed caret. The link probed is the one a caret there would type.
+     */
+    fun linkRangeAt(pos: FlowPos): FlowRange? {
+        val para = flow.paragraphs.getOrNull(pos.para) ?: return null
+        val len = para.length
+        if (len == 0) return null
+        val probe = (pos.offset.coerceIn(0, len).let { if (it > 0) it - 1 else 0 })
+        val link = styleOfCharAt(para, probe)?.link ?: return null
+        var start = probe
+        while (start > 0 && styleOfCharAt(para, start - 1)?.link == link) start--
+        var end = probe + 1
+        while (end < len && styleOfCharAt(para, end)?.link == link) end++
+        return FlowRange(FlowPos(pos.para, start), FlowPos(pos.para, end))
+    }
+
     /** The style of the first character inside [range] (what a format bar reports for selections). */
     fun styleAtRangeStart(range: FlowRange): CharStyle {
         val r = range.normalized()

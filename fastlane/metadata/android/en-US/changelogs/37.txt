@@ -1,6 +1,0 @@
-- Type text directly on the page with the new inline text tool
-- Format text with rich styles, sizes, lists and code blocks
-- Choose from bundled fonts or import your own
-- Paste markdown with formatting preserved
-- Highlight pasted code in seven languages, with importable themes
-- Other minor fixes and improvements

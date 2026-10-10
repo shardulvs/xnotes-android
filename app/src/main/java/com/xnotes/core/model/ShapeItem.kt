@@ -73,6 +73,15 @@ class ShapeItem(
     override val kind = KIND
     override val resizable = true
     override var locked = false
+    override var link: String? = null
+
+    /** What a [ShapeKind.FUNCTION] plots; its sampled curve lives in [path]. */
+    var function: FunctionSpec? = null
+
+    init {
+        // A graph always plots something, so it can be drawn, hit and written like any free shape.
+        if (shape == ShapeKind.FUNCTION && path == null) setFunction(FunctionSpec.PRESETS.first())
+    }
 
     /** The typed label: centred in a closed kind's text rect and turning with it, or upright on an open kind's line; null for none. */
     override var label: ShapeLabel? = null
@@ -445,6 +454,10 @@ class ShapeItem(
 
     override fun centroid(): Pt = bounds().center
 
+    override fun outlinePoints(): List<Pt> =
+        if (shape.isEndpointShape) listOf(start, end)
+        else localGeometry().paths.flatMap { p -> p.contours.flatMap { PathFlattener.flatten(it, BOUNDS_FLATTEN) } }.map(::toPage)
+
     /**
      * True when page point [p] lands on the shape itself: within [tolerance] of a stroked edge (or
      * half the outline's width, if wider), anywhere in a fill, or on its label. The empty middle of
@@ -500,7 +513,7 @@ class ShapeItem(
         }
     }
 
-    override fun snapshotGeometry(): GeometrySnapshot = ShapeSnapshot(shape, start, end, path, rotation, adj.copyOf(), n, labelAt)
+    override fun snapshotGeometry(): GeometrySnapshot = ShapeSnapshot(shape, start, end, path, rotation, adj.copyOf(), n, labelAt, function)
 
     override fun restoreGeometry(snap: GeometrySnapshot) {
         if (snap !is ShapeSnapshot) return
@@ -512,6 +525,15 @@ class ShapeItem(
         adj = snap.adj.copyOf()
         n = snap.n
         labelAt = snap.labelAt
+        function = snap.function
+    }
+
+    /** Plot [spec] in the current box instead; false (and unchanged) when it cannot be drawn. */
+    fun setFunction(spec: FunctionSpec): Boolean {
+        val runs = spec.normalizedRuns() ?: return false
+        function = spec
+        path = runs.map { FreePath.lines(it, false) }
+        return true
     }
 
     /**
@@ -629,6 +651,8 @@ class ShapeItem(
 
     /** The legacy kind id a file writes for this shape: its own, or the polygon/polyline of its stand-in. */
     fun legacyId(): String = when {
+        // A graph is free but no older reader knows it: it stands in as the line it draws.
+        shape == ShapeKind.FUNCTION -> ShapeKind.POLYLINE.id
         legacyOutline() == null || isFree -> shape.id
         shape.isClosed -> ShapeKind.POLYGON.id
         else -> ShapeKind.POLYLINE.id
@@ -795,11 +819,12 @@ private class ShapeSnapshot(
     val adj: DoubleArray,
     val n: Int,
     val labelAt: Double,
+    val function: FunctionSpec?,
 ) : GeometrySnapshot {
     // Value equality, so a drag that changed nothing records nothing.
     override fun equals(other: Any?): Boolean = other is ShapeSnapshot && shape == other.shape &&
         start == other.start && end == other.end && path === other.path && rotation == other.rotation &&
-        adj.contentEquals(other.adj) && n == other.n && labelAt == other.labelAt
+        adj.contentEquals(other.adj) && n == other.n && labelAt == other.labelAt && function == other.function
 
     override fun hashCode(): Int = start.hashCode() * 31 + end.hashCode()
 }

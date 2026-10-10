@@ -1,5 +1,0 @@
-- Show a PDF's outline in the Contents tab
-- Color-code notes and folders in the explorer
-- Add sort options to the explorer
-- Add configurable two and three finger tap gestures
-- Other minor fixes and improvements
