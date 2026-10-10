@@ -29,13 +29,10 @@ Xnotes is a great app, and I'm grateful that the developer puts so much work int
 - **Read-only reader**: open md, docx, pptx, xlsx, csv and pdf files as they are, or convert them to notes.
 - **Reader mode**: a toolbar button that locks a note for reading, with only navigation, search and zoom left in the bar.
 - **Find**: search text in the reader and Preferences.
-- **Shape snapping**: held strokes snap to circles, squares, triangles, waves, parabolas, cubics, exponentials and logarithms, or become an editable curve; toggle it in the pen popup.
+- **Shape snapping**: held strokes also snap to true circles, squares, upright triangles, waves, parabolas, cubics, exponentials and logarithms; toggle it in the pen popup.
 - **Tables**: a table shape with row and column bars for selecting, resizing, adding and removing.
-- **Function curves**: x^n, roots, logs, exponentials, trig and inverse trig graphs with an editable formula and range.
-- **Curve shape**: a smooth line through points you can add, move and remove.
-- **Axes shapes**: rotatable x-y axes and a single number line.
+- **Function curves**: a Functions page in the shape picker with x^n, roots, logs, exponentials, trig and inverse trig graphs and an editable formula and range.
 - **Circles from the centre**: circles grow out from where the drag starts.
-- **New shapes stay selected**: move or resize a shape right after drawing it.
 - **Mixed page orientation**: mix portrait and landscape pages in one note, kept in PDF export.
 - **Default page style**: pick any template (Cornell, checklist, planners and more) and its settings for new notes in Preferences or the new-note dialog, in portrait or landscape.
 - **Hyperlinks**: add tappable links to canvas items and text.
@@ -50,9 +47,13 @@ Xnotes is a great app, and I'm grateful that the developer puts so much work int
 - **Home swipes**: swipe right on Home to open the sidebar.
 - **Hide dot files**: hide .obsidian, .git and other dot files from the explorer.
 - **Update check**: check GitHub for a newer release from Preferences.
+- **Port old notes**: rewrite notes that still hold the fork's old axes, number line, curve and function shapes in today's shapes, with a backup of each file.
 - ~~**Create menu**: the new-note button is now a list to create a note, canvas, folder, or import a file.~~
 - ~~**Sort button**: moved sorting out into its own dedicated button.~~
 - ~~**Find in notes**: search the text of a note.~~
+- ~~**Curve shape**: a smooth line through points you can add, move and remove.~~
+- ~~**Axes shapes**: rotatable x-y axes and a single number line.~~
+- ~~**New shapes stay selected**: move or resize a shape right after drawing it.~~
 
 Crossed-out items were later added to xnotes by its original developer.
 
