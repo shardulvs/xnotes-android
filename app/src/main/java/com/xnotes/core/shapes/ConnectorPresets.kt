@@ -54,6 +54,11 @@ object ConnectorPresets {
 
     fun byKey(key: String?): ConnectorPreset? = key?.let { byKey[it] }
 
+    /** The pages left once the [hidden] chips and pages (by key) are taken out, each without its hidden chips. */
+    fun shown(hidden: Set<String>): List<ConnectorPage> =
+        if (hidden.isEmpty()) pages
+        else pages.filter { it.key !in hidden }.map { page -> ConnectorPage(page.key, page.presets.filter { it.key !in hidden }) }.filter { it.presets.isNotEmpty() }
+
     /** The page [preset] sits on. */
     fun pageOf(preset: ConnectorPreset): Int = pages.indexOfFirst { preset in it.presets }.coerceAtLeast(0)
 }

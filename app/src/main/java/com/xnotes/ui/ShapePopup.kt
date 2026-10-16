@@ -68,7 +68,7 @@ fun ShapeConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
         Column(Modifier.width(284.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
             PopupTitle(stringResource(R.string.title_shape))
             ShapePager(config, editor.hostHiddenShapes, onPage = { emit(config.copy(shapePage = it)) }, onPick = { emit(config.choose(it)) })
-            ConnectorPager(config, onPage = { emit(config.copy(connectorPage = it)) }, onPick = { emit(config.choose(it)) })
+            ConnectorPager(config, editor.hostHiddenShapes, onPage = { emit(config.copy(connectorPage = it)) }, onPick = { emit(config.choose(it)) })
             if (!connecting && chip.counted) CountRow(config) { emit(config.copy(n = it)) }
             if (!connecting && !config.placesCorners) {
                 ToggleRow(stringResource(R.string.caption_perfect), config.perfect) { emit(config.copy(perfect = it)) }
@@ -119,17 +119,20 @@ private fun ShapePager(config: ShapeConfig, hidden: Set<String>, onPage: (Int) -
     ChipPager(pages.size, initial, { pageLabel(pages[it]) }, rows, { onPage(all.indexOf(pages[it].key)) }) { page ->
         for (row in pages[page].presets.chunked(ShapePresets.COLUMNS)) {
             Row(horizontalArrangement = Arrangement.spacedBy(GAP.dp)) {
-                for (p in row) KindChip(ShapeIcons.of(p), chipLabel(p), selected = p.key == config.preset) { onPick(p) }
+                for (p in row) KindChip(ShapeIcons.of(p), chipLabel(p), selected = p.key == config.preset, latex = chipLatex(p)) { onPick(p) }
             }
         }
     }
 }
 
-/** The connector chips, [ConnectorPresets.COLUMNS] to a row, two rows to a page. */
+/** The connector chips, [ConnectorPresets.COLUMNS] to a row, two rows to a page, without those Preferences hides. */
 @Composable
-private fun ConnectorPager(config: ShapeConfig, onPage: (Int) -> Unit, onPick: (ConnectorPreset) -> Unit) {
-    val pages = ConnectorPresets.pages
-    ChipPager(pages.size, config.connectorPage, { connectorPageLabel(pages[it]) }, ConnectorPresets.ROWS, onPage) { page ->
+private fun ConnectorPager(config: ShapeConfig, hidden: Set<String>, onPage: (Int) -> Unit, onPick: (ConnectorPreset) -> Unit) {
+    val pages = ConnectorPresets.shown(hidden)
+    if (pages.isEmpty()) return
+    val all = ConnectorPresets.pages.map { it.key }
+    val initial = pages.indexOfFirst { it.key == all.getOrNull(config.connectorPage) }.coerceAtLeast(0)
+    ChipPager(pages.size, initial, { connectorPageLabel(pages[it]) }, ConnectorPresets.ROWS, { onPage(all.indexOf(pages[it].key)) }) { page ->
         for (row in pages[page].presets.chunked(ConnectorPresets.COLUMNS)) {
             Row(horizontalArrangement = Arrangement.spacedBy(GAP.dp)) {
                 for (p in row) KindChip(ShapeIcons.connector(p), stringResource(connectorLabel(p.key)), selected = p.key == config.preset) { onPick(p) }
@@ -282,7 +285,7 @@ private fun StepButton(glyph: String, label: String, enabled: Boolean, onClick: 
 }
 
 @StringRes
-private fun connectorPageLabel(page: ConnectorPage): Int =
+internal fun connectorPageLabel(page: ConnectorPage): Int =
     if (page.key == "uml") R.string.conn_page_uml else R.string.conn_page_connectors
 
 @StringRes

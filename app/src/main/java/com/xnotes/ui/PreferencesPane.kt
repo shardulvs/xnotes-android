@@ -87,6 +87,7 @@ import com.xnotes.core.model.Orientation
 import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.Rgba
 import com.xnotes.settings.ExplorerLayout
+import com.xnotes.core.shapes.ConnectorPresets
 import com.xnotes.core.shapes.ShapePresets
 import com.xnotes.core.tools.InkPalette
 import com.xnotes.core.tools.ToolbarItem
@@ -236,22 +237,21 @@ fun PreferencesPane(
                         Icon(XnotesIcons.prev, stringResource(R.string.back_to_home), tint = palette.text.toComposeColor(), modifier = Modifier.size(24.dp))
                     }
                 }
-                Spacer(Modifier.width(4.dp))
             } else if (!sidebarOpen) {
                 Tooltip(stringResource(R.string.show_sidebar)) {
                     IconButton(onClick = onShowSidebar) {
                         Icon(XnotesIcons.menu, stringResource(R.string.show_sidebar), tint = palette.text.toComposeColor(), modifier = Modifier.size(24.dp))
                     }
                 }
-                Spacer(Modifier.width(4.dp))
             }
+            IconButton(onClick = { sectionsOpen = !sectionsOpen }) {
+                Icon(XnotesIcons.sidebar, stringResource(R.string.side_panel), tint = (if (sectionsOpen) palette.accent else palette.text).toComposeColor(), modifier = Modifier.size(22.dp))
+            }
+            Spacer(Modifier.width(4.dp))
             Text(stringResource(R.string.preferences), color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 20.sp)
             Spacer(Modifier.weight(1f))
             IconButton(onClick = { search.open = !search.open; if (!search.open) search.query = "" }) {
                 Icon(XnotesIcons.search, stringResource(R.string.search_settings), tint = palette.text.toComposeColor(), modifier = Modifier.size(22.dp))
-            }
-            IconButton(onClick = { sectionsOpen = !sectionsOpen }) {
-                Icon(XnotesIcons.sidebar, stringResource(R.string.side_panel), tint = (if (sectionsOpen) palette.accent else palette.text).toComposeColor(), modifier = Modifier.size(22.dp))
             }
         }
         if (search.open) {
@@ -775,7 +775,16 @@ fun PreferencesPane(
                 CheckRow(stringResource(pageLabel(page)), pageShown) { toggleHidden(page.key) }
                 if (pageShown) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        for (p in page.presets) KindChip(ShapeIcons.of(p), chipLabel(p), selected = p.key !in prefs.hiddenShapes) { toggleHidden(p.key) }
+                        for (p in page.presets) KindChip(ShapeIcons.of(p), chipLabel(p), selected = p.key !in prefs.hiddenShapes, latex = chipLatex(p)) { toggleHidden(p.key) }
+                    }
+                }
+            }
+            for (page in ConnectorPresets.pages) {
+                val pageShown = page.key !in prefs.hiddenShapes
+                CheckRow(stringResource(connectorPageLabel(page)), pageShown) { toggleHidden(page.key) }
+                if (pageShown) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        for (p in page.presets) KindChip(ShapeIcons.connector(p), stringResource(connectorLabel(p.key)), selected = p.key !in prefs.hiddenShapes) { toggleHidden(p.key) }
                     }
                 }
             }

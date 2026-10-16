@@ -23,10 +23,12 @@ class SplineShapeTest {
 
     private fun points(s: ShapeItem) = s.vertexDots().map { it.at }
 
-    @Test fun aNewSplineIsAHumpThroughThreePoints() {
+    @Test fun aNewSplineIsASlightWaveRisingLeftToRight() {
         val s = ShapeItem(ShapeKind.SPLINE, Pt(0.0, 0.0), Pt(100.0, 50.0), ink)
-        assertEquals(listOf(Pt(0.0, 50.0), Pt(50.0, 0.0), Pt(100.0, 50.0)), points(s))
-        assertTrue(s.contains(Pt(50.0, 0.0)))
+        val want = listOf(Pt(0.0, 50.0), Pt(30.0, 30.0), Pt(70.0, 20.0), Pt(100.0, 0.0))
+        assertEquals(want.size, points(s).size)
+        want.zip(points(s)).forEach { (w, p) -> assertEquals(0.0, w.distanceTo(p), 1e-9) }
+        assertTrue(s.contains(Pt(30.0, 30.0)))
     }
 
     @Test fun theCurvePassesThroughEveryPoint() {

@@ -410,8 +410,8 @@ internal class SplineKind(id: String) : ShapeKind(id) {
         /** Fewer points and the curve is a straight line, which a line already is. */
         const val MIN_POINTS = 3
 
-        /** A new curve's points, normalized to its box: a low hump, the arc's shape. */
-        val DEFAULT = listOf(FreePath.lines(listOf(Pt(0.0, 1.0), Pt(0.5, 0.0), Pt(1.0, 1.0)), closed = false))
+        /** A new curve's points, normalized to its box: nearly straight bottom-left to top-right, with a slight wave. */
+        val DEFAULT = listOf(FreePath.lines(listOf(Pt(0.0, 1.0), Pt(0.3, 0.6), Pt(0.7, 0.4), Pt(1.0, 0.0)), closed = false))
     }
 }
 

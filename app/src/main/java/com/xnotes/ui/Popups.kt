@@ -1,5 +1,13 @@
 package com.xnotes.ui
 
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import com.hrm.latex.renderer.Latex
+import com.hrm.latex.renderer.model.LatexConfig
+import com.hrm.latex.renderer.model.LatexTheme
+import com.xnotes.core.shapes.ShapePreset
+import com.xnotes.core.shapes.ShapePresets
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -1133,6 +1141,15 @@ internal fun SliderRow(
     }
 }
 
+/** A chip's LaTeX: what a function chip plots, null for every other chip. */
+internal fun chipLatex(p: ShapePreset): String? =
+    if (!p.key.startsWith(ShapePresets.FUNCTION_PREFIX)) null
+    else when (val expr = p.key.removePrefix(ShapePresets.FUNCTION_PREFIX)) {
+        "x^(1/2)" -> "\\sqrt{x}"
+        "ln(x)", "sin(x)", "cos(x)", "tan(x)", "cot(x)", "arcsin(x)", "arccos(x)", "arctan(x)" -> "\\" + expr.removeSuffix("(x)") + " x"
+        else -> expr
+    }
+
 /** How a function chip names what it plots. */
 internal fun functionLabel(expr: String): String = when (expr) {
     "x^2" -> "x\u00B2"
@@ -1152,8 +1169,9 @@ internal fun functionLabel(expr: String): String = when (expr) {
 
 
 @Composable
-internal fun KindChip(icon: ImageVector, label: String, selected: Boolean, onClick: () -> Unit) {
+internal fun KindChip(icon: ImageVector, label: String, selected: Boolean, latex: String? = null, onClick: () -> Unit) {
     val palette = LocalPalette.current
+    val tint = if (selected) palette.selectionForeground.toComposeColor() else palette.text.toComposeColor()
     Tooltip(label) {
         Box(
             Modifier
@@ -1161,15 +1179,26 @@ internal fun KindChip(icon: ImageVector, label: String, selected: Boolean, onCli
                 .background(if (selected) palette.selectionBackground.toComposeColor() else palette.surface.toComposeColor())
                 .border(1.dp, if (selected) palette.accent.toComposeColor() else palette.border.toComposeColor(), MaterialTheme.shapes.extraSmall)
                 .clickable(onClick = onClick)
-                .padding(8.dp),
+                // A LaTeX chip trades side padding for width so it stays as wide as an icon chip.
+                .padding(horizontal = if (latex == null) 8.dp else 1.dp, vertical = 8.dp),
         ) {
-            Icon(
-                icon,
-                contentDescription = label,
-                tint = if (selected) palette.selectionForeground.toComposeColor() else palette.text.toComposeColor(),
-                modifier = Modifier.size(20.dp),
-            )
+            if (latex == null) {
+                Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(20.dp))
+            } else {
+                Box(Modifier.size(34.dp, 20.dp).semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
+                    Latex(latex, Modifier.scaleDownToFit(), LatexConfig(fontSize = 13.sp, theme = LatexTheme.light(tint, Color.Transparent)))
+                }
+            }
         }
+    }
+}
+
+/** Measures the content at its natural size and shrinks it, centred, until it fits the space given. */
+private fun Modifier.scaleDownToFit() = layout { measurable, constraints ->
+    val p = measurable.measure(Constraints())
+    val s = minOf(1f, constraints.maxWidth.toFloat() / p.width.coerceAtLeast(1), constraints.maxHeight.toFloat() / p.height.coerceAtLeast(1))
+    layout(constraints.maxWidth, constraints.maxHeight) {
+        p.placeWithLayer((constraints.maxWidth - p.width) / 2, (constraints.maxHeight - p.height) / 2) { scaleX = s; scaleY = s }
     }
 }
 
