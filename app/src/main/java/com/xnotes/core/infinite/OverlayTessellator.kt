@@ -23,13 +23,13 @@ object OverlayTessellator {
     const val OUTLINE_PX = 1.6
 
     /** Handle square edge, in device pixels. */
-    const val HANDLE_PX = 11.0
+    const val HANDLE_PX = 16.5
 
     /** Rotate grip diameter, in device pixels. */
-    const val GRIP_PX = 13.0
+    const val GRIP_PX = 19.5
 
     /** How far the rotate grip sits past the box's top edge, in device pixels. */
-    const val GRIP_ARM_PX = 34.0
+    const val GRIP_ARM_PX = 50.0
 
     /** Band and lasso outline thickness, in device pixels. */
     const val MARQUEE_PX = 1.4
@@ -72,7 +72,8 @@ object OverlayTessellator {
     /**
      * The selection box, its handles (all eight unless [handles] names fewer), the rotate grip and
      * its stem, and over a lone shape the dots that edit its points: faint ones halfway along each
-     * edge, solid ones on the vertices.
+     * edge, solid ones on the vertices. A [moveGrip] adds the pan glyph, in [onAccent], in a disc
+     * below a small box.
      */
     fun selection(
         box: Obb,
@@ -84,6 +85,8 @@ object OverlayTessellator {
         vertexDots: List<Pt> = emptyList(),
         edgeDots: List<Pt> = emptyList(),
         knobs: List<Pt> = emptyList(),
+        moveGrip: Pt? = null,
+        onAccent: Rgba = Rgba(255, 255, 255, 255),
     ): List<MeshPart> {
         if (zoom <= 0.0) return emptyList()
         val outline = MeshBuilder()
@@ -104,9 +107,19 @@ object OverlayTessellator {
         }
         marks.circle(grip.x, grip.y, GRIP_PX / zoom / 2.0, tolerance)
 
-        val parts = ArrayList<MeshPart>(5)
+        val glyph = MeshBuilder()
+        if (moveGrip != null) {
+            val r = GRIP_PX / zoom
+            marks.circle(moveGrip.x, moveGrip.y, r * 0.8, tolerance)
+            for (run in com.xnotes.canvas.ResizeMath.moveGlyph(moveGrip, r * 0.5)) {
+                glyph.polylineRibbon(run, half, closed = false, tolerance = tolerance)
+            }
+        }
+
+        val parts = ArrayList<MeshPart>(6)
         if (!outline.isEmpty) parts.add(MeshPart(outline.build(), accent, InkPass.OPAQUE))
         if (!marks.isEmpty) parts.add(MeshPart(marks.build(), accent, InkPass.OPAQUE))
+        if (!glyph.isEmpty) parts.add(MeshPart(glyph.build(), onAccent, InkPass.OPAQUE))
         if (edgeDots.isNotEmpty()) {
             val faint = MeshBuilder()
             for (d in edgeDots) faint.circle(d.x, d.y, EDGE_DOT_PX / zoom / 2.0, tolerance)

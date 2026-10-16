@@ -1,7 +1,0 @@
-- Add tables to inline text: insert, restyle, resize, move rows and columns
-- Markdown shortcuts as you type: headings, lists, tasks, quotes, code, emphasis
-- Type / for a quick menu of headings, lists, tables, sizes, colours and dates
-- Import several PDFs at once
-- Fit width, height and page now follow the margin preference
-- Fix a crash on accent keys of international keyboards
-- Minor fixes and improvements

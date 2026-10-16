@@ -48,6 +48,7 @@ fun InfiniteToolbar(
     editor: InfiniteEditor,
     onOpenBackstage: () -> Unit,
     onInsertImage: () -> Unit = {},
+    onTakePhoto: () -> Unit = {},
     onClosePane: (() -> Unit)? = null,
 ) {
     // The stroke tools use the same designed drawables the paged toolbar does, so a pen looks like
@@ -70,7 +71,7 @@ fun InfiniteToolbar(
     var shapeOpen by remember { mutableStateOf(false) }
     var waypointsOpen by remember { mutableStateOf(false) }
     var penOpen by remember { mutableStateOf<Tool?>(null) }
-    var selectOpen by remember { mutableStateOf(false) }
+    var selectOpen by remember { mutableStateOf<Tool?>(null) }
     // Which swatch has the colour picker open, as on the paged bar: tapping the armed swatch again
     // opens it, so the five colours are both the ink and the way to change it.
     var switcherIndex by remember { mutableStateOf<Int?>(null) }
@@ -104,7 +105,7 @@ fun InfiniteToolbar(
                                     when {
                                         tool == Tool.ERASER && editor.tool == tool -> eraserOpen = true
                                         tool == Tool.SHAPE && editor.tool == tool -> shapeOpen = true
-                                        tool == Tool.SELECT && editor.tool == tool -> selectOpen = true
+                                        (tool == Tool.SELECT || tool == Tool.LASSO) && editor.tool == tool -> selectOpen = tool
                                         tool.isStroke && editor.tool == tool -> penOpen = tool
                                         else -> editor.armTool(tool)
                                     }
@@ -113,7 +114,7 @@ fun InfiniteToolbar(
                                 // controls, same wording, same ranges, and they cannot drift apart.
                                 if (tool == Tool.ERASER && eraserOpen) EraserConfigPopup(editor) { eraserOpen = false }
                                 if (tool == Tool.SHAPE && shapeOpen) ShapeConfigPopup(editor) { shapeOpen = false }
-                                if (tool == Tool.SELECT && selectOpen) SelectConfigPopup(editor) { selectOpen = false }
+                                if (selectOpen == tool) SelectConfigPopup(editor, tool) { selectOpen = null }
                                 if (penOpen == tool) ToolConfigPopup(editor, tool) { penOpen = null }
                             }
                         }
@@ -125,7 +126,20 @@ fun InfiniteToolbar(
                         active = editor.wandEnabled,
                     ) { editor.toggleWand() }
 
-                    ToolbarItem.IMAGE -> ToolbarIcon(XnotesIcons.image, stringResource(R.string.insert_image)) { onInsertImage() }
+                    ToolbarItem.IMAGE -> Box {
+                        var imageMenu by remember { mutableStateOf(false) }
+                        ToolbarIcon(XnotesIcons.image, stringResource(R.string.insert_image)) { imageMenu = true }
+                        androidx.compose.material3.DropdownMenu(expanded = imageMenu, onDismissRequest = { imageMenu = false }) {
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { androidx.compose.material3.Text(stringResource(R.string.insert_image_ellipsis)) },
+                                onClick = { imageMenu = false; onInsertImage() },
+                            )
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { androidx.compose.material3.Text(stringResource(R.string.take_photo)) },
+                                onClick = { imageMenu = false; onTakePhoto() },
+                            )
+                        }
+                    }
 
                     ToolbarItem.COLORS ->
                         editor.toolbarColors.take(editor.toolbarColorCount).forEachIndexed { i, color ->

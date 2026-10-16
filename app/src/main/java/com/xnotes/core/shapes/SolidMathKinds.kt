@@ -327,6 +327,18 @@ internal object SolidMathKinds {
         }
     }
 
+    /**
+     * Ticks from [o] back towards [end], spaced as the [count] ticks out to [ahead] are, as many as
+     * fit short of [end] and never more than [count]: none when the axes cross near the corner.
+     */
+    private fun backTicks(o: Pt, end: Pt, ahead: Pt, count: Int, half: Double): List<VectorContour> {
+        val step = o.distanceTo(ahead) / (count + 1)
+        val room = o.distanceTo(end)
+        if (step < 1e-9 || room < 1e-9) return emptyList()
+        val fit = min(count, kotlin.math.floor(room / step - 1.0).toInt())
+        return if (fit <= 0) emptyList() else ticks(o, o + (end - o) * ((fit + 1) * step / room), fit, half)
+    }
+
     /** [count] ticks spread evenly between [from] and [to], neither end ticked. */
     private fun ticks(from: Pt, to: Pt, count: Int, half: Double): List<VectorContour> {
         if (count <= 0) return emptyList()
@@ -340,19 +352,38 @@ internal object SolidMathKinds {
         }
     }
 
+    /** Where the axes cross: the knob's shares of the box from its left and its bottom. */
+    private fun origin(b: Rect, adj: DoubleArray) =
+        Pt(b.left + (adj.getOrNull(0) ?: 0.12).coerceIn(0.0, 0.8) * b.w, b.bottom - (adj.getOrNull(1) ?: 0.12).coerceIn(0.0, 0.8) * b.h)
+
     val AXES_2D: ShapeKind = NotationKind(
         "math_axes_2d", 1.0, defaultN = 5, nRange = 0..20, countKind = CountKind.TICKS, staysInBox = false,
         dragFlips = Flip.NONE,
+        defaultAdj = doubleArrayOf(0.12, 0.12),
+        knobs = listOf(
+            KnobDef(
+                position = { b, adj, _ -> origin(b, adj) },
+                drag = { to, b, _, _ ->
+                    doubleArrayOf(
+                        if (b.w > 0.0) ((to.x - b.left) / b.w).coerceIn(0.0, 0.8) else 0.12,
+                        if (b.h > 0.0) ((b.bottom - to.y) / b.h).coerceIn(0.0, 0.8) else 0.12,
+                    )
+                },
+            ),
+        ),
     ) { b, p ->
-        val o = Pt(b.left + 0.12 * b.w, b.bottom - 0.12 * b.h)
+        val o = origin(b, p.adj)
         val tick = 0.025 * min(b.w, b.h)
         val head = Head.length(p.width)
         val yTip = Pt(o.x, b.top)
         val xTip = Pt(b.right, o.y)
+        val yEnd = Pt(o.x, b.top + head)
+        val xEnd = Pt(b.right - head, o.y)
         listOf(
             ShapePath(
                 listOf(ShapePath.lines(listOf(Pt(o.x, b.bottom), yTip), false), ShapePath.lines(listOf(Pt(b.left, o.y), xTip), false)) +
-                    ticks(o, Pt(o.x, b.top + head), p.n, tick) + ticks(o, Pt(b.right - head, o.y), p.n, tick),
+                    ticks(o, yEnd, p.n, tick) + ticks(o, xEnd, p.n, tick) +
+                    backTicks(o, Pt(o.x, b.bottom), yEnd, p.n, tick) + backTicks(o, Pt(b.left, o.y), xEnd, p.n, tick),
                 PathRole.STROKE_ONLY,
             ),
         ) + Head.OPEN.paths(yTip, Pt(0.0, -1.0), p.width) + Head.OPEN.paths(xTip, Pt(1.0, 0.0), p.width)

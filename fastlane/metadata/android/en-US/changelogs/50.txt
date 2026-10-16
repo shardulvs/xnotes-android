@@ -1,9 +1,0 @@
-- Add page margins, per edge, for all pages or the current page
-- Draw an SVG as sharp vector art at any zoom on the infinite canvas
-- Rasterize a heavy SVG on the GPU, and only the part you can see
-- Lock an item so nothing can select or erase it
-- Add disappearing ink to the infinite canvas toolbar
-- Carry a stroke onto the page the pen walks onto
-- Add Legal and a custom default page size
-- Drop the page menu from the toolbar
-- Fix a tap inside a selection clearing it

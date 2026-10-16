@@ -44,6 +44,8 @@ data class CharStyle(
     val highlight: Rgba? = null,
     val sizePt: Double? = null,
     val face: FontFace? = null,
+    /** Non-null makes the run a tappable hyperlink (rendered link-coloured + underlined). */
+    val link: String? = null,
     /** Marks a run whose text is LaTeX, drawn as the formula it sets. */
     val math: Boolean = false,
     /** A [math] run set as display rather than inline: bigger operators, its own line. */

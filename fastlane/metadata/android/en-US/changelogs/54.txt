@@ -1,7 +1,0 @@
-- Export a canvas to PDF, cut to fit its content, ink still vector
-- Add a switch for panels that mishandle front buffered ink
-- Add screen, multiply PDF color filters in View menu
-- Share or copy a canvas out under its own extension
-- Stop a side-button pan exactly where the pen lifts
-- Grab a settled canvas selection with the pen instead of losing it
-- Minor fixes and enhancements

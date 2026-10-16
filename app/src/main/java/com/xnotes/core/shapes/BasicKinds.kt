@@ -387,6 +387,47 @@ internal class SliceKind(id: String, private val pie: Boolean) : ShapeKind(id) {
     }
 }
 
+/**
+ * A smooth curve through its control points (uniform Catmull-Rom, as the fork drew it). The points
+ * are stored as a polyline in [ShapeParams.path], so they are the vertex dots a drag moves; an edge
+ * dot sits on the curve itself and adds a point there.
+ */
+internal class SplineKind(id: String) : ShapeKind(id) {
+    override val isClosed get() = false
+    override val isFree get() = true
+    // The curve swings past its points between them.
+    override val staysInBox get() = false
+    override val iconAspect get() = 1.5
+    override val flips get() = Flip.NONE
+
+    override fun build(box: Rect, p: ShapeParams): ShapeGeometry {
+        val points = FreePath.place(p.path ?: DEFAULT, box).firstOrNull()?.let(FreePath::vertices).orEmpty()
+        val curve = if (points.size >= 2) listOf(catmullRom(points)) else emptyList()
+        return ShapeGeometry(listOf(ShapePath(curve, PathRole.STROKE_ONLY)), points, points.map { ConnectionPoint(it, emptyList()) }, ShapeKind.inset(box))
+    }
+
+    companion object {
+        /** Fewer points and the curve is a straight line, which a line already is. */
+        const val MIN_POINTS = 3
+
+        /** A new curve's points, normalized to its box: a low hump, the arc's shape. */
+        val DEFAULT = listOf(FreePath.lines(listOf(Pt(0.0, 1.0), Pt(0.5, 0.0), Pt(1.0, 1.0)), closed = false))
+    }
+}
+
+/** The uniform Catmull-Rom spline through [c] as the cubic Beziers that trace it exactly. */
+internal fun catmullRom(c: List<Pt>): VectorContour {
+    val segs = ArrayList<VectorSeg>(c.size - 1)
+    for (i in 0 until c.size - 1) {
+        val p0 = c[max(i - 1, 0)]
+        val p1 = c[i]
+        val p2 = c[i + 1]
+        val p3 = c[min(i + 2, c.size - 1)]
+        segs.add(VectorSeg.Cubic(p1 + (p2 - p0) * (1.0 / 6.0), p2 - (p3 - p1) * (1.0 / 6.0), p2))
+    }
+    return VectorContour(c.first(), segs, false)
+}
+
 /** A point on the unit circle at angle [a], at radius [r]. */
 private fun unitPoint(a: Double, r: Double) = Pt(r * cos(a), r * sin(a))
 

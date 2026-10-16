@@ -177,7 +177,7 @@ object FlowPainter {
         // after it: a reader copies in content order, so trailing them all behind would scramble it.
         var next = line.startChar
         for (seg in line.segs) {
-            val color = seg.style.color ?: frame.defaultColor
+            val color = inkColor(seg.style, frame)
             if (tag) {
                 for (k in next until seg.start) {
                     r.beginMark(Mark.FlowText(para, k, k + 1))
@@ -219,8 +219,9 @@ object FlowPainter {
         val descent = line.bottom - line.baseline
         val thickness = (line.height / 14.0).coerceAtLeast(1.0)
         for (deco in line.decos) {
-            val color = deco.style.color ?: frame.defaultColor
-            if (deco.style.underline) {
+            val color = inkColor(deco.style, frame)
+            // A hyperlink is underlined even without the explicit underline style.
+            if (deco.style.underline || deco.style.link != null) {
                 r.fillRect(Rect(deco.x0, line.baseline + descent * 0.35, deco.x1 - deco.x0, thickness), color)
             }
             if (deco.style.strike) {
@@ -251,6 +252,10 @@ object FlowPainter {
         }
     }
 
+    /** A run's ink colour: its own colour, else the link colour for a hyperlink, else the flow default. */
+    private fun inkColor(style: CharStyle, frame: FlowFrame): Rgba =
+        style.color ?: if (style.link != null) LINK_COLOR else frame.defaultColor
+
     private fun paintMarker(r: Renderer, frame: FlowFrame, line: PlacedLine, m: Marker) {
         val color = frame.defaultColor
         val ascent = line.baseline - line.top
@@ -278,6 +283,9 @@ object FlowPainter {
     /** Code line/chip backgrounds: neutral translucent grey, legible on light and dark paper. */
     val CODE_BG = Rgba(128, 128, 128, 42)
     val CHIP_BG = Rgba(128, 128, 128, 56)
+
+    /** Hyperlink ink: an azure that reads on both light and dark paper. */
+    val LINK_COLOR = Rgba(90, 156, 255, 255)
 
     /**
      * Chips behind a formula showing its source. Both are translucent tints so

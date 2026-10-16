@@ -33,6 +33,7 @@ internal object EnglishWords : ExplorerWords {
         EntryKind.NOTE -> "Notes"
         EntryKind.PDF -> "PDF notes"
         EntryKind.CANVAS -> "Canvases"
+        EntryKind.FILE -> "Read-only files"
     }
     override fun hue(h: Hue) = h.name.lowercase().replaceFirstChar { it.uppercase() }
     override val noColour = "No colour"

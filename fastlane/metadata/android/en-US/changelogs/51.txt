@@ -1,6 +1,0 @@
-- Cut pen latency: wet ink goes into the buffer the screen is scanning out
-- Ink no longer waits for a frame, so the line stays under the nib
-- Fix the caret snapping back to the last word on predictive keyboards
-- Remove live presenting; the app now asks for no permissions at all
-- Fork a note instead of overwriting one a sync app changed underneath it
-- Show the saving overlay when closing a canvas

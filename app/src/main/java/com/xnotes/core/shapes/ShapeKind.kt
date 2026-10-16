@@ -168,6 +168,12 @@ abstract class ShapeKind internal constructor(val id: String) {
         val PIE: ShapeKind = SliceKind("pie", pie = true)
         val ARC: ShapeKind = SliceKind("arc", pie = false)
 
+        /** A smooth curve through points a drag moves, adds or removes. */
+        val SPLINE: ShapeKind = SplineKind("spline")
+
+        /** The graph of a function, sampled into its own outline (breaking at poles). */
+        val FUNCTION: ShapeKind = FunctionKind("function")
+
         /** A label an eraser left behind as drawn text: its letters as filled outlines. */
         val GLYPHS: ShapeKind = GlyphsKind("glyphs")
 
@@ -179,7 +185,7 @@ abstract class ShapeKind internal constructor(val id: String) {
             listOf(
                 LINE, ARROW, RECTANGLE, ELLIPSE, CIRCLE, TRIANGLE, POLYGON, POLYLINE, CURVE,
                 ROUNDED_RECT, SQUARE, CAPSULE, RIGHT_TRIANGLE, DIAMOND, PARALLELOGRAM, TRAPEZOID,
-                REGULAR_POLYGON, STAR, CROSS, HEART, CLOUD, RING, PIE, ARC, GLYPHS,
+                REGULAR_POLYGON, STAR, CROSS, HEART, CLOUD, RING, PIE, ARC, GLYPHS, FUNCTION, SPLINE,
             ) + FlowchartKinds.all + ArrowKinds.all + SolidMathKinds.all
         }
 
@@ -325,4 +331,15 @@ private class FreeKind(id: String, private val closed: Boolean) : ShapeKind(id) 
         }
         return ShapeGeometry(listOf(ShapePath(contours, role)), corners, connections, inset(box))
     }
+}
+
+/** A plotted function: the stored runs of its graph, only stroked, and replotted rather than point-edited. */
+private class FunctionKind(id: String) : ShapeKind(id) {
+    override val isClosed get() = false
+    override val isFree get() = true
+    override val pointEditable get() = false
+    override val takesLabel get() = false
+    override val flips get() = Flip.NONE
+    override fun build(box: Rect, p: ShapeParams): ShapeGeometry =
+        ShapeGeometry(listOf(ShapePath(FreePath.place(p.path.orEmpty(), box), PathRole.STROKE_ONLY)), textRect = box)
 }

@@ -118,16 +118,12 @@ class SettingsTest {
             threeFingerTap = "redo",
             stylusDoubleTap = "toggle_eraser",
             stylusButtonTap = "toggle_pan",
-            stylusButton1Tap = "toggle_previous",
-            stylusButton2Tap = "undo",
         )
         val back = Settings.fromJson(Settings(prefs = prefs).toJson()).prefs
         assertEquals("undo", back.twoFingerTap)
         assertEquals("redo", back.threeFingerTap)
         assertEquals("toggle_eraser", back.stylusDoubleTap)
         assertEquals("toggle_pan", back.stylusButtonTap)
-        assertEquals("toggle_previous", back.stylusButton1Tap)
-        assertEquals("undo", back.stylusButton2Tap)
     }
 
     @Test fun frontBufferingIsOnUntilItIsTurnedOff() {
@@ -165,6 +161,13 @@ class SettingsTest {
         val (w, h) = prefs.newPagePixels(150)
         assertEquals(PageSize.mmToPx(355.6, 150), w, 1e-6)
         assertEquals(PageSize.mmToPx(215.9, 150), h, 1e-6)
+    }
+
+    @Test fun anExplicitOrientationOverridesTheDefault() {
+        val prefs = Preferences(defaultPageSize = PageSize.A4, defaultPageOrientation = Orientation.PORTRAIT)
+        val (w, h) = prefs.newPagePixels(150, Orientation.LANDSCAPE)
+        assertEquals(PageSize.mmToPx(297.0, 150), w, 1e-6)
+        assertEquals(PageSize.mmToPx(210.0, 150), h, 1e-6)
     }
 
     @Test fun anOutOfRangeCustomSideIsPulledBackIn() {

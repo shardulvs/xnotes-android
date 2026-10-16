@@ -1,1 +1,0 @@
-- Fix a bug that could empty a note on save

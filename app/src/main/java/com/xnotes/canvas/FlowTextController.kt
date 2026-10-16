@@ -11,6 +11,7 @@ import com.xnotes.core.history.FlowEditParagraph
 import com.xnotes.core.history.History
 import com.xnotes.core.history.ParaSnapshot
 import com.xnotes.core.model.Page
+import com.xnotes.core.model.Rgba
 import com.xnotes.core.text.CellIndex
 import com.xnotes.core.text.caretPreviewSpan
 import com.xnotes.core.text.CharStyle
@@ -613,15 +614,15 @@ class FlowTextController(
     fun drawOverlay(r: com.xnotes.core.pal.Renderer) {
         if (!active) return
         val f = frame() ?: return
-        val accent = state.palette.accent
         if (!selection.collapsed) {
-            for ((pi, rect) in f.selectionRects(selection)) {
+            val rects = f.selectionRects(selection)
+            for ((pi, rect) in rects) {
                 if (state.pageRects.getOrNull(pi) == null) continue
-                r.fillRect(state.fromPageSpaceRect(pi, rect), accent.withAlpha(70))
+                r.fillRect(state.fromPageSpaceRect(pi, rect), state.selectionAccent(pi).withAlpha(70))
             }
             val norm = selection.normalized()
-            handleCenter(norm.start, isStart = true)?.let { handles.draw(r, it, isStart = true, accent) }
-            handleCenter(norm.end, isStart = false)?.let { handles.draw(r, it, isStart = false, accent) }
+            handleCenter(norm.start, isStart = true)?.let { handles.draw(r, it, isStart = true, state.selectionAccent(rects.firstOrNull()?.first)) }
+            handleCenter(norm.end, isStart = false)?.let { handles.draw(r, it, isStart = false, state.selectionAccent(rects.lastOrNull()?.first)) }
         } else {
             val (pi, cr) = f.caretRect(selection.end) ?: return
             if (state.pageRects.getOrNull(pi) == null) return
@@ -639,7 +640,7 @@ class FlowTextController(
                 }
             }
             val w = (FlowFrame.CARET_WIDTH / state.zoom).coerceAtLeast(0.75)
-            r.fillRect(state.fromPageSpaceRect(pi, Rect(cr.left - w / 2.0, top, w, height)), accent)
+            r.fillRect(state.fromPageSpaceRect(pi, Rect(cr.left - w / 2.0, top, w, height)), Rgba.CARET)
         }
     }
 

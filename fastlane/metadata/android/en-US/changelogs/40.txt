@@ -1,8 +1,0 @@
-- Add a view settings menu, with per-note and global tabs, which contains
-  - Double and Cover page layouts
-  - A paginated mode with edge-flip page turns
-  - Filters for imported PDFs
-  - A draggable scrollbar
-- Rotate individual pages while keeping them editable
-- Fix ink briefly vanishing while the page sharpened
-- Other minor fixes and improvements

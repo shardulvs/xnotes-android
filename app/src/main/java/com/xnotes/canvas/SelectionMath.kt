@@ -35,16 +35,16 @@ object SelectionMath {
      * are the same test with a page-space translation in front of it; sharing the rule is the
      * point, so the two canvases select alike.
      */
-    fun bandMembers(items: List<CanvasItem>, band: Rect): List<CanvasItem> {
+    fun bandMembers(items: List<CanvasItem>, band: Rect, whole: Boolean = false): List<CanvasItem> {
         val ring = Ring(corners(band))
-        return items.filter { !it.locked && ring.meets(it) }
+        return items.filter { !it.locked && ring.takes(it, whole) }
     }
 
     /** Lasso selection over a flat item list: the band's rule, with the loop as the ring. */
-    fun lassoMembers(items: List<CanvasItem>, polygon: List<Pt>): List<CanvasItem> {
+    fun lassoMembers(items: List<CanvasItem>, polygon: List<Pt>, whole: Boolean = false): List<CanvasItem> {
         if (polygon.size < 3) return emptyList()
         val ring = Ring(polygon)
-        return items.filter { !it.locked && ring.meets(it) }
+        return items.filter { !it.locked && ring.takes(it, whole) }
     }
 
     /**
@@ -56,21 +56,23 @@ object SelectionMath {
         pages: List<Page>,
         pageRects: List<Rect>,
         band: Rect,
+        whole: Boolean = false,
         toPage: (Int, Pt) -> Pt = { i, p -> Pt(p.x - pageRects[i].left, p.y - pageRects[i].top) },
-    ): List<Selected> = members(pages, pageRects, corners(band), toPage)
+    ): List<Selected> = members(pages, pageRects, corners(band), whole, toPage)
 
     /** Lasso selection across pages: the band's rule, with the loop as the ring. */
     fun lassoMembers(
         pages: List<Page>,
         pageRects: List<Rect>,
         polygon: List<Pt>,
+        whole: Boolean = false,
         toPage: (Int, Pt) -> Pt = { i, p -> Pt(p.x - pageRects[i].left, p.y - pageRects[i].top) },
     ): List<Selected> {
         if (polygon.size < 3) return emptyList()
-        return members(pages, pageRects, polygon, toPage)
+        return members(pages, pageRects, polygon, whole, toPage)
     }
 
-    private fun members(pages: List<Page>, pageRects: List<Rect>, ring: List<Pt>, toPage: (Int, Pt) -> Pt): List<Selected> {
+    private fun members(pages: List<Page>, pageRects: List<Rect>, ring: List<Pt>, whole: Boolean, toPage: (Int, Pt) -> Pt): List<Selected> {
         val reach = Rect.bounding(ring)
         val out = ArrayList<Selected>()
         for (i in pages.indices) {
@@ -79,7 +81,7 @@ object SelectionMath {
             if (!pr.outset(OFF_PAGE_SLACK).intersects(reach)) continue
             val local = Ring(ring.map { toPage(i, it) })
             for (item in pages[i].items) {
-                if (!item.locked && local.meets(item)) out.add(Selected(i, item))
+                if (!item.locked && local.takes(item, whole)) out.add(Selected(i, item))
             }
         }
         return out
@@ -113,6 +115,16 @@ object SelectionMath {
     /** A band or a lasso as the closed ring it draws, inside by the even-odd rule. */
     private class Ring(private val pts: List<Pt>) {
         private val box = Rect.bounding(pts)
+
+        /** [whole]: everything [item] draws lies inside the ring; otherwise [meets]. */
+        fun takes(item: CanvasItem, whole: Boolean): Boolean = if (whole) holds(item) else meets(item)
+
+        private fun holds(item: CanvasItem): Boolean {
+            val drawn = drawnOf(item)
+            val area = boundsOf(drawn) ?: return false
+            if (!area.intersects(box)) return false
+            return drawn.lines.all { line -> line.pts.all { Geometry.pointInPolygon(pts, it) } }
+        }
 
         /** True when some of what [item] draws lies inside the ring or within its ink's reach of the ring's line. */
         fun meets(item: CanvasItem): Boolean {

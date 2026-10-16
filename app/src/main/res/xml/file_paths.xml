@@ -4,4 +4,6 @@
     <cache-path name="shared" path="share/" />
     <!-- Screenshot-tool captures are written here before going on the system clipboard. -->
     <cache-path name="clipboard" path="clipboard/" />
+    <!-- Photos the camera app writes for "Take photo", read back into the note. -->
+    <cache-path name="camera" path="camera/" />
 </paths>

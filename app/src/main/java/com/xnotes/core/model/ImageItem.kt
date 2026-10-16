@@ -6,6 +6,7 @@ import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.pal.Renderer
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.sin
 
 /**
@@ -30,6 +31,7 @@ class ImageItem(
     override val kind = KIND
     override val resizable = true
     override var locked = false
+    override var link: String? = null
 
     override fun paint(r: Renderer) = r.drawImage(image, rect, orientation, angle, flip)
 
@@ -51,7 +53,7 @@ class ImageItem(
     }
 
     /** [p] brought back into the upright rect's frame, so hit tests stay plain rectangle maths. */
-    private fun unturn(p: Pt): Pt {
+    fun unturn(p: Pt): Pt {
         if (angle == 0.0) return p
         val cs = cos(angle)
         val sn = sin(angle)
@@ -59,6 +61,17 @@ class ImageItem(
         val dx = p.x - c.x
         val dy = p.y - c.y
         return Pt(c.x + dx * cs + dy * sn, c.y - dx * sn + dy * cs)
+    }
+
+    /** The inverse of [unturn]: an upright-frame point turned back to where it is drawn. */
+    fun turn(p: Pt): Pt {
+        if (angle == 0.0) return p
+        val cs = cos(angle)
+        val sn = sin(angle)
+        val c = rect.center
+        val dx = p.x - c.x
+        val dy = p.y - c.y
+        return Pt(c.x + dx * cs - dy * sn, c.y + dx * sn + dy * cs)
     }
 
     override fun translate(dx: Double, dy: Double) {
@@ -90,14 +103,21 @@ class ImageItem(
 
     /**
      * Scale the upright box about its mapped centre and add the transform's own turn to [angle].
-     * The scale factors are the world axes' — an image already turned is stretched along its own
-     * axes rather than sheared, since a bitmap has no shear to be drawn with. A mirror flips the
-     * picture in its box and turns the box the other way.
+     * The scale is measured along the image's OWN axes, not the world axes: a single-axis resize
+     * of a turned box is a world-space shear, whose column norms (t.scaleX/scaleY) would grow both
+     * sides near-uniformly and let the bitmap drift out of its transform box. Projecting the linear
+     * part onto the image's current width/height directions recovers the true per-side factors, and
+     * reduces to t.scaleX/scaleY at angle 0. A bitmap has no shear to be drawn with. A mirror flips
+     * the picture in its box and turns the box the other way.
      */
     override fun applyTransform(t: Affine) {
         val c = t.apply(rect.center)
-        val w = rect.w * t.scaleX
-        val h = rect.h * t.scaleY
+        val ca = cos(angle)
+        val sa = sin(angle)
+        val wScale = hypot(t.a * ca + t.c * sa, t.b * ca + t.d * sa)
+        val hScale = hypot(-t.a * sa + t.c * ca, -t.b * sa + t.d * ca)
+        val w = rect.w * wScale
+        val h = rect.h * hScale
         rect = Rect(c.x - w / 2.0, c.y - h / 2.0, w, h)
         if (t.determinant >= 0.0) {
             angle += t.rotationAngle

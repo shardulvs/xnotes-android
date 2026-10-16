@@ -20,6 +20,7 @@ import com.xnotes.core.shapes.ShapeKind
 import com.xnotes.core.shapes.ShapePainter
 import com.xnotes.core.shapes.ShapeParams
 import com.xnotes.core.shapes.ShapePath
+import com.xnotes.core.shapes.SplineKind
 import com.xnotes.core.shapes.VertexEdit
 import com.xnotes.core.vector.PathFlattener
 import com.xnotes.core.vector.VectorContour
@@ -74,9 +75,19 @@ class ShapeItem(
     override val kind = KIND
     override val resizable = true
     override var locked = false
+    override var link: String? = null
 
-    /** Drawn text is words, which a mirror would turn backwards. */
-    override val mirrorable: Boolean get() = shape != ShapeKind.GLYPHS
+    /** What a [ShapeKind.FUNCTION] plots; its sampled curve lives in [path]. */
+    var function: FunctionSpec? = null
+
+    init {
+        // A graph always plots something, so it can be drawn, hit and written like any free shape.
+        if (shape == ShapeKind.FUNCTION && path == null) setFunction(FunctionSpec.PRESETS.first())
+        if (shape == ShapeKind.SPLINE && path == null) path = SplineKind.DEFAULT
+    }
+
+    /** Drawn text is words, which a mirror would turn backwards; a graph is its formula, which a mirror would not follow. */
+    override val mirrorable: Boolean get() = shape != ShapeKind.GLYPHS && shape != ShapeKind.FUNCTION
 
     /** How the kind's drawing is mirrored inside the box, before [rotation] turns it; always none for line, arrow and free outlines. */
     var flip: Flip = Flip.NONE
@@ -383,12 +394,13 @@ class ShapeItem(
         if (!editable()) return emptyList()
         // An open shape's label sits on its line; a dot it covers moves to where the line shows.
         val gap = if (shape.isOpen) label?.let { l -> labelRect()?.outset(l.lineHeight * LABEL_GAP_LINES) } else null
+        val curve = splineCurve()
         return editOutline().flatMapIndexed { ci, c ->
             c.segments.indices.mapNotNull { si ->
                 val from = VertexEdit.vertexAt(c, si)
                 val seg = c.segments[si]
                 if (from.distanceTo(seg.end) < minLength) return@mapNotNull null
-                val mid = VertexEdit.midpoint(c, si)
+                val mid = VertexEdit.midpoint(curve ?: c, si)
                 val at = if (gap != null && seg is VectorSeg.Line) ConnectorPaths.clearOf(from, seg.end, mid, gap) else mid
                 EditDot(toPage(at), PathSpot(ci, si))
             }
@@ -419,13 +431,19 @@ class ShapeItem(
     fun splitEdge(spot: PathSpot): PathSpot? {
         if (!isFree) return null
         val (contours, added) = VertexEdit.split(editOutline(), spot)
-        edited(contours)
+        // A curve's new point goes where the curve already runs, so adding it changes nothing yet.
+        edited(splineCurve()?.let { VertexEdit.moveVertex(contours, added, VertexEdit.midpoint(it, spot.index)) } ?: contours)
         return added
     }
+
+    /** A spline's drawn curve in the unturned frame, one cubic per span between its points; null for every other kind. */
+    private fun splineCurve(): VectorContour? =
+        if (shape == ShapeKind.SPLINE) localGeometry().paths.first().contours.firstOrNull() else null
 
     /** Delete a free outline's vertex [spot]; false when too few would be left. */
     fun deleteVertex(spot: PathSpot): Boolean {
         if (!isFree) return false
+        if (shape == ShapeKind.SPLINE && editOutline().sumOf { VertexEdit.vertices(it).size } <= SplineKind.MIN_POINTS) return false
         edited(VertexEdit.delete(editOutline(), spot) ?: return false)
         return true
     }
@@ -510,7 +528,7 @@ class ShapeItem(
         }
     }
 
-    override fun snapshotGeometry(): GeometrySnapshot = ShapeSnapshot(shape, start, end, path, rotation, adj.copyOf(), n, labelAt, flip)
+    override fun snapshotGeometry(): GeometrySnapshot = ShapeSnapshot(shape, start, end, path, rotation, adj.copyOf(), n, labelAt, flip, function)
 
     override fun restoreGeometry(snap: GeometrySnapshot) {
         if (snap !is ShapeSnapshot) return
@@ -523,6 +541,15 @@ class ShapeItem(
         n = snap.n
         labelAt = snap.labelAt
         flip = snap.flip
+        function = snap.function
+    }
+
+    /** Plot [spec] in the current box instead; false (and unchanged) when it cannot be drawn. */
+    fun setFunction(spec: FunctionSpec): Boolean {
+        val runs = spec.normalizedRuns() ?: return false
+        function = spec
+        path = runs.map { FreePath.lines(it, false) }
+        return true
     }
 
     /**
@@ -647,6 +674,8 @@ class ShapeItem(
 
     /** The legacy kind id a file writes for this shape: its own, or the polygon/polyline of its stand-in. */
     fun legacyId(): String = when {
+        // A graph or a spline is free but no older reader knows it: it stands in as the line it draws.
+        shape == ShapeKind.FUNCTION || shape == ShapeKind.SPLINE -> ShapeKind.POLYLINE.id
         legacyOutline() == null || isFree -> shape.id
         shape.isClosed -> ShapeKind.POLYGON.id
         else -> ShapeKind.POLYLINE.id
@@ -814,11 +843,12 @@ private class ShapeSnapshot(
     val n: Int,
     val labelAt: Double,
     val flip: Flip,
+    val function: FunctionSpec?,
 ) : GeometrySnapshot {
     // Value equality, so a drag that changed nothing records nothing.
     override fun equals(other: Any?): Boolean = other is ShapeSnapshot && shape == other.shape &&
         start == other.start && end == other.end && path === other.path && rotation == other.rotation &&
-        adj.contentEquals(other.adj) && n == other.n && labelAt == other.labelAt && flip == other.flip
+        adj.contentEquals(other.adj) && n == other.n && labelAt == other.labelAt && flip == other.flip && function == other.function
 
     override fun hashCode(): Int = start.hashCode() * 31 + end.hashCode()
 }

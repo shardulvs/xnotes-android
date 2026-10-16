@@ -1,4 +1,0 @@
-- Resize and rotate any selection with on-screen handles
-- Open notes without freezing, behind a loading spinner
-- Add a switch-back option to the select tool
-- Add a fullscreen setting in Preferences

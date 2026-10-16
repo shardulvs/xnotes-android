@@ -343,6 +343,7 @@ data class Settings(
             .put("erase_markups", c.eraseMarkups)
             .put("scribble_erase", c.scribbleErase)
             .put("switch_back_after_select", c.switchBackAfterSelect)
+            .put("select_whole_items", c.selectWholeItems)
             .put("straight_line", c.straightLine)
             .put("scale", c.scale)
             .put("highlighter_alpha", c.highlighterAlpha)
@@ -372,6 +373,7 @@ data class Settings(
                 eraseMarkups = o.optBoolean("erase_markups", d.eraseMarkups),
                 scribbleErase = o.optBoolean("scribble_erase", d.scribbleErase),
                 switchBackAfterSelect = o.optBoolean("switch_back_after_select", d.switchBackAfterSelect),
+                selectWholeItems = o.optBoolean("select_whole_items", d.selectWholeItems),
                 straightLine = o.optBoolean("straight_line", d.straightLine),
                 scale = o.optBoolean("scale", d.scale),
                 highlighterAlpha = o.optDouble("highlighter_alpha", d.highlighterAlpha),

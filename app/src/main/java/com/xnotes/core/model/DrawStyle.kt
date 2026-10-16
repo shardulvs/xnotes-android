@@ -37,6 +37,10 @@ data class DrawStyle(val color: Rgba, val width: Double) {
                 item.strokeRgba = color
                 item.strokeWidth = width
             }
+            is TableItem -> {
+                item.strokeRgba = color
+                item.strokeWidth = width
+            }
             else -> Unit
         }
     }
@@ -47,6 +51,7 @@ data class DrawStyle(val color: Rgba, val width: Double) {
             is Stroke -> DrawStyle(item.config.rgba, item.config.baseWidth)
             is ShapeItem -> DrawStyle(item.strokeRgba, item.strokeWidth)
             is ConnectorItem -> DrawStyle(item.strokeRgba, item.strokeWidth)
+            is TableItem -> DrawStyle(item.strokeRgba, item.strokeWidth)
             else -> null
         }
 

@@ -31,9 +31,15 @@ data class FontSpec(
     val italic: Boolean = false,
 )
 
+/** Horizontal alignment of a wrapped text block. */
+enum class HAlign { LEFT, CENTER, RIGHT }
+
 /** Text layout flags (spec 01 §1 `draw_text`). Text boxes use the defaults. */
 data class TextFlags(
     val wordWrap: Boolean = true,
     val alignLeft: Boolean = true,
     val alignTop: Boolean = true,
+    val underline: Boolean = false,
+    val strike: Boolean = false,
+    val hAlign: HAlign = HAlign.LEFT,
 )

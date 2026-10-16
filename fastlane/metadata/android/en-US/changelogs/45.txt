@@ -1,2 +1,0 @@
-- Add support for the OnePlus Stylo side button
-- Fix strokes drawn with the S-Pen button held on older Samsung tablets

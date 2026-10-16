@@ -124,7 +124,7 @@ class InfiniteInteraction(
 
     companion object {
         /** How near a handle a press has to land to grab it, in device pixels. */
-        const val HANDLE_TOUCH_PX = 22.0
+        const val HANDLE_TOUCH_PX = 33.0
 
         /** Least on-screen distance between lasso vertices, so a slow drag stays cheap. */
         const val LASSO_MIN_STEP_PX = 3.0
@@ -628,10 +628,9 @@ class InfiniteInteraction(
             (mode == CanvasPointerMode.PINCH && pinchPanAllowed())
         // A finger tap off the selection puts it away; a tap is the only way to say so with a
         // finger, since a drag there is a pan.
-        if (mode == CanvasPointerMode.PAN && panMayDismiss &&
-            panWasTap(e.getX(0).toDouble(), e.getY(0).toDouble())
-        ) {
-            clearSelection()
+        if (mode == CanvasPointerMode.PAN && panWasTap(e.getX(0).toDouble(), e.getY(0).toDouble())) {
+            val picked = tool == Tool.SELECT && tapSelect(viewport.viewportToContent(Pt(e.getX(0).toDouble(), e.getY(0).toDouble())))
+            if (!picked && panMayDismiss) clearSelection()
         }
         panMayDismiss = false
         if (mode == CanvasPointerMode.PAN && panMayCommit && panWasTap(e.getX(0).toDouble(), e.getY(0).toDouble())) onCommitText()
@@ -849,6 +848,7 @@ class InfiniteInteraction(
         val margin = frameMargin()
         val grip = sel.rotateGrip(OverlayTessellator.GRIP_ARM_PX / viewport.zoom, margin)
         if (grip != null && at.distanceTo(grip) <= tolerance) return true
+        sel.moveGrip(viewport.zoom, OverlayTessellator.GRIP_ARM_PX / viewport.zoom, margin)?.let { if (at.distanceTo(it) <= tolerance) return true }
         if (sel.hitHandle(at, tolerance, margin) != null) return true
         // A dot can sit outside the box: a knob out on a callout's tail, a thin line's middle.
         val reach = OverlayTessellator.DOT_TOUCH_PX / viewport.zoom
@@ -926,6 +926,11 @@ class InfiniteInteraction(
             sel.beginTransform(at, rigid = true)
             beginLiftedTransform(sel, at, resize = false)
             mode = CanvasPointerMode.ROTATE
+            return true
+        }
+        val moveGrip = sel.moveGrip(viewport.zoom, OverlayTessellator.GRIP_ARM_PX / viewport.zoom, margin)
+        if (moveGrip != null && at.distanceTo(moveGrip) <= tolerance) {
+            beginMoveAt(sel, at)
             return true
         }
         val handle = sel.hitHandle(at, tolerance, margin)
@@ -1007,6 +1012,19 @@ class InfiniteInteraction(
         onSelectionChanged()
     }
 
+    /** A finger tap with the select tool picks the item under it; a drag still pans. */
+    private fun tapSelect(at: Pt): Boolean {
+        val sel = selection() ?: return false
+        val slop = TAP_SLOP_PX / viewport.zoom
+        val hit = grabbableAt(at)
+            ?: itemsIn(Rect(at.x - slop, at.y - slop, slop * 2, slop * 2)).lastOrNull { !it.locked && it.intersectsCircle(at.x, at.y, slop) }
+            ?: return false
+        sel.select(listOf(hit))
+        onSelectionChanged()
+        requestRender()
+        return true
+    }
+
     /** Start dragging the selection from [at], the tail of every press that grabs one. */
     private fun beginMoveAt(sel: CanvasSelection, at: Pt) {
         // A lone connector dragged by its line lets go of what it joined; anything else keeps it.
@@ -1046,7 +1064,7 @@ class InfiniteInteraction(
         val rect = bandRect
         bandRect = null
         if (sel != null && rect != null && (rect.w > 1e-6 || rect.h > 1e-6)) {
-            sel.select(SelectionMath.bandMembers(itemsIn(rect), rect))
+            sel.select(SelectionMath.bandMembers(itemsIn(rect), rect, configFor(Tool.SELECT).selectWholeItems))
         }
         onSelectionChanged()
         requestRender()
@@ -1079,7 +1097,7 @@ class InfiniteInteraction(
         val sel = selection()
         if (sel != null && lassoPoints.size >= 3) {
             val bounds = Rect.bounding(lassoPoints)
-            sel.select(SelectionMath.lassoMembers(itemsIn(bounds), lassoPoints.toList()))
+            sel.select(SelectionMath.lassoMembers(itemsIn(bounds), lassoPoints.toList(), configFor(Tool.LASSO).selectWholeItems))
         }
         lassoPoints.clear()
         onSelectionChanged()
@@ -1463,17 +1481,31 @@ class InfiniteInteraction(
         val cfg = shapeConfig()
         val at = viewport.viewportToContent(Pt(vx, vy))
         pendingShape = cfg.startShape(at, inkColor(), cfg.strokeWidth * InteractionController.SHAPE_PEN_PARITY)
+        shapeAnchor = at
+        shapeAspect = pendingShape?.function?.naturalAspect()?.takeIf { it > 1e-9 }?.let { 1.0 / it }
         mode = CanvasPointerMode.SHAPE
         setInteractive(false, false)
         onPendingShape(pendingShape)
         requestRender()
     }
 
+    // Where the shape drag began (a circle's centre) and a function's true width over height.
+    private var shapeAnchor = Pt.ZERO
+    private var shapeAspect: Double? = null
+
     private fun extendShape(vx: Double, vy: Double) {
         val shape = pendingShape ?: return
-        val cfg = shapeConfig()
-        shape.end = ResizeMath.drawnEnd(shape, viewport.viewportToContent(Pt(vx, vy)), cfg.perfect)
-        cfg.followDrag(shape)
+        val raw = viewport.viewportToContent(Pt(vx, vy))
+        if (shape.shape == ShapeKind.CIRCLE) {
+            // A circle grows out from its centre, so the drag ends on the rim.
+            val (s, e) = ResizeMath.circleFromCentre(shapeAnchor, raw)
+            shape.start = s
+            shape.end = e
+        } else {
+            // A function graph keeps equal x and y scales while drawn; its handles stretch it later.
+            shape.end = shapeAspect?.let { ResizeMath.aspectCorner(shape.start, raw, it) } ?: ResizeMath.drawnEnd(shape, raw, shapeConfig().perfect)
+        }
+        shapeConfig().followDrag(shape)
         onPendingShape(shape)
         requestRender()
     }

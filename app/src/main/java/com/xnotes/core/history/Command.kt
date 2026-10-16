@@ -4,8 +4,11 @@ import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.Document
 import com.xnotes.core.model.DrawStyle
 import com.xnotes.core.model.GeoHandle
+import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.GeometrySnapshot
 import com.xnotes.core.model.Labelled
+import com.xnotes.core.model.ImageData
+import com.xnotes.core.model.ImageItem
 import com.xnotes.core.model.Page
 import com.xnotes.core.model.Resizable
 import com.xnotes.core.model.Rgba
@@ -172,6 +175,20 @@ class ResizeItem(
         (item as? CanvasItem)?.let { pagedItems(listOf(it), locate) }
 }
 
+/** Replace an image's bitmap + rect (used by Crop), reversibly. */
+class ReplaceImage(
+    private val item: ImageItem,
+    private val oldImage: ImageData,
+    private val oldRect: Rect,
+    private val newImage: ImageData,
+    private val newRect: Rect,
+) : Command {
+    override fun redo() { item.image = newImage; item.rect = newRect }
+    override fun undo() { item.image = oldImage; item.rect = oldRect }
+
+    override fun touched(locate: (CanvasItem) -> Page?) = pagedItems(listOf(item), locate)
+}
+
 /**
  * Scale or rotate a selection: each item swaps between its before/after geometry snapshots. Used by
  * the unified resize/rotate handles, which can change a shape's kind (a rotated box shape becomes a
@@ -329,6 +346,24 @@ class AddPage(
 
     override fun undo() {
         document.pages.removeRef(page)
+    }
+}
+
+/** Swap the note's source PDF (another note's PDF merged in); [onSwap] reloads what draws it. */
+class SetPdfFile(
+    private val document: Document,
+    private val before: java.io.File?,
+    private val after: java.io.File?,
+    private val onSwap: () -> Unit,
+) : Command {
+    override fun redo() {
+        document.pdfFile = after
+        onSwap()
+    }
+
+    override fun undo() {
+        document.pdfFile = before
+        onSwap()
     }
 }
 

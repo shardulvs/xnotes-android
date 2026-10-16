@@ -1,7 +1,0 @@
-- Save a large note in a fraction of the time, and never on the main thread
-- Save a stroke into a PDF note without rewriting the whole PDF
-- Open a big handwriting note several times faster
-- Undo on a dense note repaints only what changed instead of hanging
-- Fix ink blinking out when one stroke starts right after another
-- Fix a crash closing a PDF note mid-render, and an out of memory on save
-- Fix a canvas autosave silently dropping a write you drew during

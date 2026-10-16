@@ -1,6 +1,0 @@
-- Add a System theme that follows your device's dark mode
-- Set a default text colour for the text tool
-- Set one size across a mixed-size selection with the size stepper
-- Keep your place through split-screen and keyboard changes
-- Fix pulling past the last page adding two pages at once
-- Refine the menus and themed surfaces

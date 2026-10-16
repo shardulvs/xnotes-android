@@ -13,6 +13,10 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -36,11 +40,21 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.IntrinsicMeasurable
+import androidx.compose.ui.layout.IntrinsicMeasureScope
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.Measurable
+import androidx.compose.ui.layout.MeasurePolicy
+import androidx.compose.ui.layout.MeasureResult
+import androidx.compose.ui.layout.MeasureScope
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,9 +64,9 @@ import com.xnotes.canvas.PdfColorFilter
 import com.xnotes.canvas.ViewOverrides
 import com.xnotes.canvas.ViewSettings
 import com.xnotes.canvas.ViewingMode
+import com.xnotes.core.model.FunctionSpec
 import com.xnotes.core.model.PageEdge
 import com.xnotes.core.model.PageMargins
-import com.xnotes.core.model.PagePattern
 import com.xnotes.core.model.PageTemplates
 import com.xnotes.core.model.PageStyle
 import com.xnotes.core.model.Rgba
@@ -96,6 +110,7 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
     var intensity by remember { mutableStateOf(ToolConversions.highlighterAlphaToIntensity(base.highlighterAlpha).toFloat()) }
     var inverse by remember { mutableStateOf(base.highlighterInverse) }
     var colorOverride by remember { mutableStateOf(base.colorOverride) }
+    var snapShapes by remember { mutableStateOf(editor.snapHeldToShapes) }
 
     fun emit() {
         val m = ToolConversions.sensitivityToMinFactor(sensitivity.toDouble())
@@ -166,6 +181,10 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
             SliderRow(stringResource(R.string.caption_width), width, range.start.toFloat()..range.endInclusive.toFloat()) { width = it; emit() }
             // SCALE off: ink keeps a constant on-screen thickness whatever zoom you draw at.
             ToggleRow(stringResource(R.string.caption_scale), scale) { scale = it; emit() }
+            // Global dwell shape detection (holding the pen still). Off for the highlighter, which never dwells.
+            if (tool.isStroke && tool != Tool.HIGHLIGHTER) {
+                ToggleRow(stringResource(R.string.caption_snap_to_shapes), snapShapes) { snapShapes = it; editor.snapHeldToShapes = it }
+            }
             if (tool == Tool.DASHED) {
                 SliderRow(stringResource(R.string.caption_dash), dashLen, 2f..40f) { dashLen = it; emit() }
                 SliderRow(stringResource(R.string.caption_gap), gapLen, 2f..40f) { gapLen = it; emit() }
@@ -326,6 +345,31 @@ fun StylesPopup(editor: Editor, onImportTemplate: () -> Unit = {}, onDismiss: ()
     }
 }
 
+/** The new-note dialog's page style: page colour, then the template and its settings ([TemplateControls]). */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun PageStyleControls(editor: Editor, style: PageStyle, pageMm: Pair<Double, Double>, onChange: (PageStyle) -> Unit) {
+    StyleCaption(stringResource(R.string.caption_page_colour))
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        ModeChip(stringResource(R.string.default_choice), style.pageColor == null) { onChange(style.copy(pageColor = null)) }
+        pageColorPresets.forEach { c ->
+            ColorDot(c.toComposeColor(), style.pageColor == c) { onChange(style.copy(pageColor = c)) }
+        }
+        ColorPickerDot(
+            style.pageColor,
+            custom = style.pageColor != null && style.pageColor !in pageColorPresets,
+            onPick = { onChange(style.copy(pageColor = it)) },
+            dismissOnPick = false,
+        ) { d, p -> PageColorGridPopup(style.pageColor, d, p) }
+    }
+
+    Spacer(Modifier.size(12.dp))
+    TemplateControls(editor, style, pageMm, onChange)
+}
+
 /**
  * The Styles popup's second page: [t] (keyed [key]) on a style level ([tab] as in [StylesPopup]),
  * with a live preview, its pattern and accent colours, and every parameter it declares. Reset
@@ -367,58 +411,7 @@ private fun TemplateCustomizer(
             Text(it, color = palette.textDim.toComposeColor(), fontSize = 12.sp)
         }
 
-        Spacer(Modifier.size(12.dp))
-        val numbers = HashMap<String, Double>()
-        lower?.params?.let(numbers::putAll)
-        style.params?.let(numbers::putAll)
-        val spacing = t.spacingParam
-        (style.spacing ?: lower?.spacing)?.let { px -> if (spacing != null) numbers[spacing.name] = px * 25.4 / dpi }
-        val colors = (lower?.colors ?: emptyMap()) + (style.colors ?: emptyMap())
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            TemplatePreview(
-                t, key, editor.currentPageMm, look.ink, look.accent, look.paper,
-                com.xnotes.core.template.TemplateValues(numbers, colors), 112.dp,
-            )
-        }
-
-        Spacer(Modifier.size(12.dp))
-        StyleCaption(stringResource(R.string.caption_pattern_colour))
-        Spacer(Modifier.size(4.dp))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            ModeChip(stringResource(R.string.default_choice), style.patternColor == null) { apply(style.copy(patternColor = null)) }
-            ColorPickerDot(
-                style.patternColor?.copy(a = 255), // show the hue at full strength; OPACITY sets the alpha
-                custom = style.patternColor != null,
-                onPick = { apply(style.copy(patternColor = it.copy(a = look.ink.a))) }, // keep current opacity
-                dismissOnPick = false,
-            ) { d, p -> PageColorGridPopup(style.patternColor?.copy(a = 255), d, p) }
-        }
-        Spacer(Modifier.size(12.dp))
-        val opacityPct = look.ink.a * 100f / 255f
-        StyleCaption(stringResource(R.string.caption_opacity_percent, opacityPct.roundToInt()))
-        Slider(
-            value = opacityPct,
-            onValueChange = { pct ->
-                apply(style.copy(patternColor = look.ink.copy(a = (pct / 100f * 255f).roundToInt().coerceIn(0, 255))))
-            },
-            valueRange = 0f..100f,
-        )
-        if (t.usesAccent) {
-            Spacer(Modifier.size(4.dp))
-            StyleCaption(stringResource(R.string.caption_accent_colour))
-            Spacer(Modifier.size(4.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                ModeChip(stringResource(R.string.default_choice), style.accentColor == null) { apply(style.copy(accentColor = null)) }
-                ColorPickerDot(
-                    style.accentColor?.copy(a = 255),
-                    custom = style.accentColor != null,
-                    onPick = { apply(style.copy(accentColor = it.copy(a = look.accent.a))) },
-                    dismissOnPick = false,
-                ) { d, p -> PageColorGridPopup(style.accentColor?.copy(a = 255), d, p) }
-            }
-        }
-
-        TemplateParamControls(t, style, lower, dpi, apply)
+        TemplateSettings(t, key, style, lower, look, editor.currentPageMm, dpi, apply)
 
         Spacer(Modifier.size(12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -427,6 +420,109 @@ private fun TemplateCustomizer(
             }
         }
     }
+}
+
+/** [t]'s live preview, pattern and accent colours and every parameter it declares, as [style] sets them over [lower]. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TemplateSettings(
+    t: com.xnotes.core.template.Template,
+    key: String,
+    style: PageStyle,
+    lower: PageStyle?,
+    look: TemplateLook,
+    pageMm: Pair<Double, Double>,
+    dpi: Int,
+    apply: (PageStyle) -> Unit,
+) {
+    Spacer(Modifier.size(12.dp))
+    val numbers = HashMap<String, Double>()
+    lower?.params?.let(numbers::putAll)
+    style.params?.let(numbers::putAll)
+    val spacing = t.spacingParam
+    (style.spacing ?: lower?.spacing)?.let { px -> if (spacing != null) numbers[spacing.name] = px * 25.4 / dpi }
+    val colors = (lower?.colors ?: emptyMap()) + (style.colors ?: emptyMap())
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        TemplatePreview(
+            t, key, pageMm, look.ink, look.accent, look.paper,
+            com.xnotes.core.template.TemplateValues(numbers, colors), 112.dp,
+        )
+    }
+
+    Spacer(Modifier.size(12.dp))
+    StyleCaption(stringResource(R.string.caption_pattern_colour))
+    Spacer(Modifier.size(4.dp))
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        ModeChip(stringResource(R.string.default_choice), style.patternColor == null) { apply(style.copy(patternColor = null)) }
+        ColorPickerDot(
+            style.patternColor?.copy(a = 255), // show the hue at full strength; OPACITY sets the alpha
+            custom = style.patternColor != null,
+            onPick = { apply(style.copy(patternColor = it.copy(a = look.ink.a))) }, // keep current opacity
+            dismissOnPick = false,
+        ) { d, p -> PageColorGridPopup(style.patternColor?.copy(a = 255), d, p) }
+    }
+    Spacer(Modifier.size(12.dp))
+    val opacityPct = look.ink.a * 100f / 255f
+    StyleCaption(stringResource(R.string.caption_opacity_percent, opacityPct.roundToInt()))
+    Slider(
+        value = opacityPct,
+        onValueChange = { pct ->
+            apply(style.copy(patternColor = look.ink.copy(a = (pct / 100f * 255f).roundToInt().coerceIn(0, 255))))
+        },
+        valueRange = 0f..100f,
+    )
+    if (t.usesAccent) {
+        Spacer(Modifier.size(4.dp))
+        StyleCaption(stringResource(R.string.caption_accent_colour))
+        Spacer(Modifier.size(4.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            ModeChip(stringResource(R.string.default_choice), style.accentColor == null) { apply(style.copy(accentColor = null)) }
+            ColorPickerDot(
+                style.accentColor?.copy(a = 255),
+                custom = style.accentColor != null,
+                onPick = { apply(style.copy(accentColor = it.copy(a = look.accent.a))) },
+                dismissOnPick = false,
+            ) { d, p -> PageColorGridPopup(style.accentColor?.copy(a = 255), d, p) }
+        }
+    }
+
+    TemplateParamControls(t, style, lower, dpi, apply)
+}
+
+/**
+ * The new-note template: Default, None or any library template, and under a picked one its colours
+ * and parameters as the Styles popup's Customize page has them. [pageMm] sizes the previews.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun TemplateControls(editor: Editor, style: PageStyle, pageMm: Pair<Double, Double>, onChange: (PageStyle) -> Unit) {
+    StyleCaption(stringResource(R.string.caption_template))
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        ModeChip(stringResource(R.string.default_choice), style.template == null) { onChange(style.withTemplate(null, PageTemplates.NONE)) }
+        ModeChip(stringResource(R.string.none), style.template == PageTemplates.NONE) { onChange(style.withTemplate(PageTemplates.NONE, PageTemplates.NONE)) }
+    }
+    Spacer(Modifier.size(6.dp))
+    val look = TemplateLook.of(style, null, LocalPalette.current.paper)
+    val libraryVersion = TemplateLibraryUi.version
+    val choices = remember(libraryVersion) { com.xnotes.platform.TemplateLibrary.all() }
+    TemplateStrip(
+        entries = choices,
+        selected = style.template,
+        pageMm = pageMm,
+        ink = look.ink,
+        accent = look.accent,
+        paper = look.paper,
+        onSelect = { onChange(style.withTemplate(it, PageTemplates.NONE)) },
+        onImport = null,
+        onRemove = { editor.removeTemplate(it) },
+        onKeep = {},
+    )
+    val key = style.template?.takeIf { it != PageTemplates.NONE } ?: return
+    val shown = com.xnotes.platform.TemplateLibrary.entry(key)?.template ?: return
+    TemplateSettings(shown, key, style, null, look, pageMm, com.xnotes.core.model.PageSize.DEFAULT_DPI, onChange)
 }
 
 /**
@@ -874,20 +970,45 @@ fun EraserConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
     }
 }
 
-/** Select-tool configuration popup: just a SWITCH BACK toggle, mirroring the eraser's. */
+/** Select/lasso configuration popup: whether a selection needs items fully inside it, plus the select tool's SWITCH BACK. */
 @Composable
-fun SelectConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
-    val base = remember { editor.toolConfig(Tool.SELECT) }
+fun SelectConfigPopup(editor: ToolPopupHost, tool: Tool = Tool.SELECT, onDismiss: () -> Unit) {
+    val base = remember { editor.toolConfig(tool) }
     var switchBack by remember { mutableStateOf(base.switchBackAfterSelect) }
+    var whole by remember { mutableStateOf(base.selectWholeItems) }
 
-    fun emit() = editor.updateToolConfig(Tool.SELECT, base.copy(switchBackAfterSelect = switchBack))
+    fun emit() = editor.updateToolConfig(tool, base.copy(switchBackAfterSelect = switchBack, selectWholeItems = whole))
 
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
         Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
-            PopupTitle(stringResource(R.string.title_select))
+            PopupTitle(stringResource(if (tool == Tool.LASSO) R.string.tool_lasso else R.string.title_select))
+            ToggleRow(stringResource(R.string.caption_select_whole_items), whole) { whole = it; emit() }
             // Re-arm the previous pen/highlighter once a selection action (move, resize, delete,
             // cut, copy, duplicate) finishes, so a quick edit doesn't strand you in select.
-            ToggleRow(stringResource(R.string.caption_switch_back), switchBack) { switchBack = it; emit() }
+            if (tool == Tool.SELECT) {
+                ToggleRow(stringResource(R.string.caption_switch_back), switchBack) { switchBack = it; emit() }
+            }
+        }
+    }
+}
+
+/**
+ * Table-tool configuration popup: the column/row counts and line thickness for the next table.
+ * The table itself is drawn on the page by dragging, like the shape tool; these are just its
+ * defaults. An existing table's columns/rows are edited in table edit mode, its width via the
+ * selection's Change-style slider.
+ */
+@Composable
+fun TableConfigPopup(editor: Editor, onDismiss: () -> Unit) {
+    var cols by remember { mutableStateOf(editor.tableToolCols) }
+    var rows by remember { mutableStateOf(editor.tableToolRows) }
+    var width by remember { mutableStateOf(editor.tableToolWidth.toFloat()) }
+    DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
+        Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
+            PopupTitle(stringResource(R.string.title_table))
+            TableStepperRow(stringResource(R.string.caption_columns), cols, 1, 20) { cols = it; editor.tableToolCols = it }
+            TableStepperRow(stringResource(R.string.caption_rows), rows, 1, 20) { rows = it; editor.tableToolRows = it }
+            SliderRow(stringResource(R.string.caption_width), width, 1f..12f) { width = it; editor.tableToolWidth = it.toDouble() }
         }
     }
 }
@@ -918,6 +1039,33 @@ fun MarkupToolPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
             }
         }
     }
+}
+
+/** A −/value/+ integer stepper row, used by [TableConfigPopup]. */
+@Composable
+private fun TableStepperRow(label: String, value: Int, min: Int, max: Int, onChange: (Int) -> Unit) {
+    val palette = LocalPalette.current
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+        Text(
+            "$label  $value",
+            color = palette.text.toComposeColor(),
+            fontFamily = FontFamily.Monospace,
+            fontSize = 12.sp,
+            modifier = Modifier.weight(1f),
+        )
+        TableStepButton("−") { onChange((value - 1).coerceAtLeast(min)) }
+        Spacer(Modifier.size(8.dp))
+        TableStepButton("+") { onChange((value + 1).coerceAtMost(max)) }
+    }
+}
+
+@Composable
+private fun TableStepButton(label: String, onClick: () -> Unit) {
+    val palette = LocalPalette.current
+    Box(
+        Modifier.size(32.dp).clip(MaterialTheme.shapes.extraSmall).background(palette.surface.toComposeColor()).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { Text(label, color = palette.text.toComposeColor(), fontSize = 16.sp) }
 }
 
 private fun markupIcon(mode: MarkupMode): ImageVector = when (mode) {
@@ -983,6 +1131,23 @@ internal fun SliderRow(
             enabled = enabled,
         )
     }
+}
+
+/** How a function chip names what it plots. */
+internal fun functionLabel(expr: String): String = when (expr) {
+    "x^2" -> "x\u00B2"
+    "x^3" -> "x\u00B3"
+    "x^(1/2)" -> "\u221Ax"
+    "ln(x)" -> "ln x"
+    "e^x" -> "e\u02E3"
+    "sin(x)" -> "sin x"
+    "cos(x)" -> "cos x"
+    "tan(x)" -> "tan x"
+    "cot(x)" -> "cot x"
+    "arcsin(x)" -> "arcsin x"
+    "arccos(x)" -> "arccos x"
+    "arctan(x)" -> "arctan x"
+    else -> expr
 }
 
 

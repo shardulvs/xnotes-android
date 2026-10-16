@@ -1,8 +1,0 @@
-- Add over 90 shapes: flowchart, block arrows, callouts, 3D and math
-- Add connectors that stay attached to shapes
-- Reshape, label and fill shapes, and put heads on either end of lines
-- Snap held strokes to capsules and tilted ovals
-- Insert a PDF after any page from the side panel
-- Show tooltips when the pen hovers
-- LaTeX no longer slows typing or scrolling
-- Minor fixes and improvements

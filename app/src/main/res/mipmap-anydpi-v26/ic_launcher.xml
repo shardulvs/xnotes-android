@@ -1,11 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  XNotes adaptive launcher icon (Android 8.0+ / API 26+).
-  Composed of a solid black background + the glitch-X foreground.
-  Includes <monochrome> for Material You themed icons (Android 13+).
+  n-notes adaptive launcher icon (Android 8.0+ / API 26+).
+  A lowercase "n" foreground on a solid black background, with a matching themed layer.
 -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background" />
-    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
     <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
 </adaptive-icon>

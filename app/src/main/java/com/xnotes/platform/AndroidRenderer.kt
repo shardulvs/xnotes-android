@@ -330,7 +330,9 @@ class AndroidRenderer(private val canvas: Canvas) : Renderer {
         val turned = o == 90 || o == 270
         val reqW = (if (turned) devH else devW).coerceIn(1, DECODE_CAP_PX)
         val reqH = (if (turned) devW else devH).coerceIn(1, DECODE_CAP_PX)
-        val bmp = ImageDecoder.decodeSampledFile(image.file.path, reqW, reqH) ?: return
+        // Shared/cached decode: a selected image redraws every frame while dragged or resized, so
+        // re-reading the file each frame is what made moves lag and the image trail its box.
+        val bmp = ImageDecoder.decodeSharedForDraw(image.file.path, reqW, reqH) ?: return
         val uw = (if (turned) dest.h else dest.w).toFloat()
         val uh = (if (turned) dest.w else dest.h).toFloat()
         canvas.save()
@@ -388,6 +390,8 @@ class AndroidRenderer(private val canvas: Canvas) : Renderer {
     override fun drawText(text: String, rect: Rect, font: FontSpec, color: Rgba, flags: TextFlags) {
         if (text.isEmpty()) return
         val paint = AndroidText.textPaint(font, color.toArgb())
+        paint.isUnderlineText = flags.underline
+        paint.isStrikeThruText = flags.strike
         val layout = AndroidText.layout(text, rect.w.toInt(), paint, flags)
         canvas.save()
         canvas.translate(rect.left.toFloat(), rect.top.toFloat())

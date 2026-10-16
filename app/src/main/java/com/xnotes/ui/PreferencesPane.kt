@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -27,22 +28,29 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,6 +64,10 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -66,6 +78,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -74,10 +87,12 @@ import com.xnotes.core.model.Orientation
 import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.Rgba
 import com.xnotes.settings.ExplorerLayout
+import com.xnotes.core.shapes.ShapePresets
 import com.xnotes.core.tools.InkPalette
 import com.xnotes.core.tools.ToolbarItem
 import com.xnotes.core.tools.ToolbarLayout
 import com.xnotes.core.util.NameTemplate
+import com.xnotes.platform.MathOcr
 import com.xnotes.settings.Preferences
 import com.xnotes.settings.MaterialStyle
 import com.xnotes.settings.CornerStyle
@@ -87,7 +102,9 @@ import com.xnotes.settings.MaterialColourMode
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 internal val pageColorPresets = listOf(
     Rgba(22, 22, 22), Rgba(13, 13, 13), Rgba(255, 255, 255), Rgba(247, 243, 233), Rgba(232, 232, 232),
@@ -123,6 +140,8 @@ fun PreferencesPane(
     onBackToHome: () -> Unit,
     onImportCodeTheme: () -> Unit = {},
     onImportFont: () -> Unit = {},
+    focusSync: Boolean = false,
+    onSyncFocused: () -> Unit = {},
 ) {
     val palette = LocalPalette.current
     val focusManager = LocalFocusManager.current
@@ -142,6 +161,21 @@ fun PreferencesPane(
     LaunchedEffect(editor.prefsVersion) { prefs = editor.preferences }
 
     val scrollState = rememberScrollState()
+    val search = remember { PrefSearch() }
+    val searchScope = androidx.compose.runtime.rememberCoroutineScope()
+    fun showHit(i: Int) {
+        val hits = search.hits()
+        if (hits.isEmpty()) return
+        search.current = ((i % hits.size) + hits.size) % hits.size
+        val y = hits[search.current].second
+        searchScope.launch { scrollState.animateScrollTo((y - 24f * search.density).roundToInt().coerceAtLeast(0)) }
+    }
+    var sectionsOpen by rememberSaveable { mutableStateOf(!compact) }
+    var syncTop by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(focusSync, syncTop) {
+        val top = syncTop ?: return@LaunchedEffect
+        if (focusSync) { scrollState.animateScrollTo(top); onSyncFocused() }
+    }
     // Which bar the toolbar section is arranging. The two are separate layouts, so the drag state
     // below always belongs to whichever is on screen.
     var canvasTab by remember { mutableStateOf(false) }
@@ -213,9 +247,49 @@ fun PreferencesPane(
             }
             Text(stringResource(R.string.preferences), color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 20.sp)
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { update(Preferences()) }) { Text(stringResource(R.string.reset_to_defaults), fontSize = 13.sp) }
+            IconButton(onClick = { search.open = !search.open; if (!search.open) search.query = "" }) {
+                Icon(XnotesIcons.search, stringResource(R.string.search_settings), tint = palette.text.toComposeColor(), modifier = Modifier.size(22.dp))
+            }
+            IconButton(onClick = { sectionsOpen = !sectionsOpen }) {
+                Icon(XnotesIcons.sidebar, stringResource(R.string.side_panel), tint = (if (sectionsOpen) palette.accent else palette.text).toComposeColor(), modifier = Modifier.size(22.dp))
+            }
+        }
+        if (search.open) {
+            val hits = search.hits()
+            FindBar(
+                search.query,
+                { search.query = it; search.current = 0; showHit(0) },
+                if (search.query.isBlank()) "" else if (hits.isEmpty()) "0 / 0" else "${search.current + 1} / ${hits.size}",
+                { showHit(search.current - 1) },
+                { showHit(search.current + 1) },
+                { search.open = false; search.query = "" },
+            )
         }
         Spacer(Modifier.height(12.dp))
+        search.toContentY = { rootY -> rootY - viewport.top + scrollState.value }
+        search.density = androidx.compose.ui.platform.LocalDensity.current.density
+        val currentSection by remember {
+            derivedStateOf {
+                val line = sectionLine(scrollState.value, scrollState.maxValue, viewport.height, 24f * search.density)
+                search.sections.entries.filter { it.value <= line }.maxByOrNull { it.value }?.key
+            }
+        }
+        val sectionsPanel = @Composable {
+            PrefSectionsPanel(search.sections.entries.sortedBy { it.value }.map { it.key }, currentSection) { title ->
+                search.sections[title]?.let { y ->
+                    val to = scrollForSection(y, scrollState.maxValue, viewport.height, 24f * search.density)
+                    searchScope.launch { scrollState.animateScrollTo(to) }
+                }
+                if (compact) sectionsOpen = false
+            }
+        }
+        Row(Modifier.fillMaxSize()) {
+        if (sectionsOpen && !compact) {
+            sectionsPanel()
+            Spacer(Modifier.width(16.dp))
+        }
+        Box(Modifier.weight(1f)) {
+        CompositionLocalProvider(LocalPrefSearch provides search) {
         Column(
             // Ending at the keyboard's edge scrolls a focused field up out from under it.
             Modifier.fillMaxSize().imePadding().verticalScroll(scrollState)
@@ -256,6 +330,7 @@ fun PreferencesPane(
                 }
             }
             CheckRow(stringResource(R.string.pref_start_fullscreen), editor.fullscreen) { editor.setFullscreenPref(it) }
+            TextButton(onClick = { update(Preferences()) }) { Text(stringResource(R.string.reset_to_defaults), fontSize = 13.sp) }
 
             HorizontalDivider(color = palette.border.toComposeColor())
             SectionTitle(stringResource(R.string.pref_input))
@@ -270,6 +345,14 @@ fun PreferencesPane(
                 Chip(stringResource(R.string.pan_none), prefs.zoomLockPan == "none") { update(prefs.copy(zoomLockPan = "none")) }
             }
             CheckRow(stringResource(R.string.pref_detect_shapes), prefs.detectShapes) { update(prefs.copy(detectShapes = it)) }
+            FieldLabel("Snap rotation to 90 degrees")
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Chip("On", prefs.snapRotation90) { update(prefs.copy(snapRotation90 = true)) }
+                Chip("Off", !prefs.snapRotation90) { update(prefs.copy(snapRotation90 = false)) }
+            }
             FieldLabel(stringResource(R.string.pref_pen_button_hold))
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -293,17 +376,19 @@ fun PreferencesPane(
             OptionDropdown(tapOptions, prefs.stylusDoubleTap) { update(prefs.copy(stylusDoubleTap = it)) }
             FieldLabel(stringResource(R.string.pref_stylus_button_tap))
             OptionDropdown(tapOptions, prefs.stylusButtonTap) { update(prefs.copy(stylusButtonTap = it)) }
-            FieldLabel(stringResource(R.string.pref_redmi_buttons))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(stringResource(R.string.pen_button_1), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
-                    OptionDropdown(tapOptions, prefs.stylusButton1Tap) { update(prefs.copy(stylusButton1Tap = it)) }
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(stringResource(R.string.pen_button_2), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
-                    OptionDropdown(tapOptions, prefs.stylusButton2Tap) { update(prefs.copy(stylusButton2Tap = it)) }
-                }
+
+            HorizontalDivider(color = palette.border.toComposeColor())
+            SectionTitle("OCR")
+            FieldLabel("Handwriting recognition language (Convert to text)")
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Chip("Czech", prefs.ocrLanguage == "cs") { update(prefs.copy(ocrLanguage = "cs")) }
+                Chip("English", prefs.ocrLanguage == "en") { update(prefs.copy(ocrLanguage = "en")) }
             }
+            FieldLabel("Handwritten math (Convert to math)")
+            MathAddonControls()
 
             HorizontalDivider(color = palette.border.toComposeColor())
             SectionTitle(stringResource(R.string.pref_new_notes))
@@ -383,6 +468,8 @@ fun PreferencesPane(
             CheckRow(stringResource(R.string.pref_page_colour_follows_theme), prefs.pageColor == null) {
                 update(prefs.copy(pageColor = if (it) null else pageColorPresets.first()))
             }
+            Spacer(Modifier.size(8.dp))
+            TemplateControls(editor, editor.newNoteStyle, editor.newNotePageMm()) { editor.saveNewNoteStyle(it) }
 
             HorizontalDivider(color = palette.border.toComposeColor())
             SectionTitle(stringResource(R.string.pref_home_explorer))
@@ -399,7 +486,7 @@ fun PreferencesPane(
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ExplorerLayout.entries.forEach { l ->
                     val on = l in prefs.switcherLayouts
-                    ExplorerChip(stringResource(l.labelRes), on, icon = if (on) XnotesIcons.check else XnotesIcons.plus) {
+                    CheckChip(stringResource(l.labelRes), on) {
                         val next = if (on) prefs.switcherLayouts - l else prefs.switcherLayouts + l
                         if (next.isNotEmpty()) updateHome(prefs.copy(switcherLayouts = ExplorerLayout.entries.filter { it in next }))
                     }
@@ -409,11 +496,14 @@ fun PreferencesPane(
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 @Composable
                 fun section(label: String, on: Boolean, flip: () -> Preferences) =
-                    ExplorerChip(label, on, icon = if (on) XnotesIcons.check else XnotesIcons.plus) { updateHome(flip()) }
+                    CheckChip(label, on) { updateHome(flip()) }
                 section(stringResource(R.string.recent), prefs.sidebarRecent) { prefs.copy(sidebarRecent = !prefs.sidebarRecent) }
                 section(stringResource(R.string.pinned), prefs.sidebarPinned) { prefs.copy(sidebarPinned = !prefs.sidebarPinned) }
                 section(stringResource(R.string.toolbar_colours), prefs.sidebarColours) { prefs.copy(sidebarColours = !prefs.sidebarColours) }
                 if (prefs.trashDays != 0) section(stringResource(R.string.trash), prefs.sidebarTrash) { prefs.copy(sidebarTrash = !prefs.sidebarTrash) }
+                section(stringResource(R.string.sidebar_files), prefs.sidebarFiles) { prefs.copy(sidebarFiles = !prefs.sidebarFiles) }
+                section("Sync now", prefs.sidebarSync) { prefs.copy(sidebarSync = !prefs.sidebarSync) }
+                section(stringResource(R.string.about), prefs.sidebarAbout) { prefs.copy(sidebarAbout = !prefs.sidebarAbout) }
             }
             FieldLabel(stringResource(R.string.pref_home_opens_to))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -457,7 +547,7 @@ fun PreferencesPane(
                     }
                     var picking by remember { mutableStateOf(false) }
                     Box {
-                        ExplorerChip(stringResource(R.string.name_a_colour), false, icon = XnotesIcons.plus) { picking = true }
+                        CheckChip(stringResource(R.string.name_a_colour), false) { picking = true }
                         DropdownMenu(expanded = picking, onDismissRequest = { picking = false }) {
                             ColorCodeMenuContent { c -> picking = false; if (c != null) namingColor = c }
                         }
@@ -467,6 +557,7 @@ fun PreferencesPane(
             CheckRow(stringResource(R.string.pref_per_folder_views), prefs.perFolderViews) { updateHome(prefs.copy(perFolderViews = it)) }
             CheckRow(stringResource(R.string.pref_show_folder_counts), prefs.showFolderCounts) { updateHome(prefs.copy(showFolderCounts = it)) }
             CheckRow(stringResource(R.string.pref_show_extensions), prefs.showExtensions) { updateHome(prefs.copy(showExtensions = it)) }
+            CheckRow(stringResource(R.string.pref_hide_dot_items), prefs.hideDotItems) { editor.setHideDotItems(it) }
 
             HorizontalDivider(color = palette.border.toComposeColor())
             SectionTitle(stringResource(R.string.pref_pdf_export))
@@ -673,7 +764,38 @@ fun PreferencesPane(
                     sectionDropTarget = null
                 },
             )
+            FieldLabel(stringResource(R.string.pref_hidden_shapes))
+            Text(stringResource(R.string.pref_hidden_shapes_help), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
+            fun toggleHidden(key: String) {
+                val hidden = prefs.hiddenShapes
+                updateHome(prefs.copy(hiddenShapes = if (key in hidden) hidden - key else hidden + key))
+            }
+            for (page in ShapePresets.pages) {
+                val pageShown = page.key !in prefs.hiddenShapes
+                CheckRow(stringResource(pageLabel(page)), pageShown) { toggleHidden(page.key) }
+                if (pageShown) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        for (p in page.presets) KindChip(ShapeIcons.of(p), chipLabel(p), selected = p.key !in prefs.hiddenShapes) { toggleHidden(p.key) }
+                    }
+                }
+            }
+            HorizontalDivider(color = palette.border.toComposeColor())
+            BackupSection(editor)
+            HorizontalDivider(color = palette.border.toComposeColor())
+            Box(Modifier.onPlaced { syncTop = it.positionInParent().y.roundToInt() }.searchAnchor(stringResource(R.string.search_keywords_sync)).sectionAnchor("Filen sync")) { FilenSyncSection(editor) }
+            HorizontalDivider(color = palette.border.toComposeColor())
+            Box(Modifier.searchAnchor(stringResource(R.string.search_keywords_port))) { PortSection(editor) }
+            HorizontalDivider(color = palette.border.toComposeColor())
+            Box(Modifier.searchAnchor(stringResource(R.string.search_keywords_update)).sectionAnchor("Updates")) { UpdateSection() }
             Spacer(Modifier.size(8.dp))
+        }
+        }
+        // Phones lay the panel over the settings, so opening it never squeezes the column.
+        if (sectionsOpen && compact) {
+            Box(Modifier.fillMaxSize().background(palette.materialColors.scrim.withAlpha(82).toComposeColor()).clickable { sectionsOpen = false })
+            sectionsPanel()
+        }
+        }
         }
     }
         // The dragged chip/section's floating copy: a pane-root sibling so the scroll never clips it.
@@ -713,14 +835,263 @@ fun PreferencesPane(
     }
 }
 
+/**
+ * Download or delete the handwritten-maths model. It is too big to bundle, so the selection
+ * menu only offers Convert to math once it is here.
+ */
+@Composable
+private fun MathAddonControls() {
+    val context = LocalContext.current
+    val palette = LocalPalette.current
+    LaunchedEffect(Unit) { MathOcr.refresh(context) }
+    val state by MathOcr.state.collectAsState()
+    var confirmDelete by remember { mutableStateOf(false) }
+    val sizeMb = MathOcr.DOWNLOAD_BYTES / 1_000_000
+    Text(
+        "An on-device model that turns selected handwritten formulas into LaTeX. Download it once; it works offline after.",
+        color = palette.textDim.toComposeColor(),
+        fontSize = 12.sp,
+    )
+    if (!MathOcr.supported) {
+        Text("Not available for this device's processor.", color = palette.text.toComposeColor(), fontSize = 12.sp)
+        return
+    }
+    when (val s = state) {
+        MathOcr.State.Missing ->
+            TextButton(onClick = { MathOcr.startDownload(context) }) { Text("Download ($sizeMb MB)", fontSize = 13.sp) }
+        is MathOcr.State.Downloading -> {
+            LinearProgressIndicator(progress = { s.done.toFloat() / s.total }, modifier = Modifier.width(280.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("${s.done / 1_000_000} of ${s.total / 1_000_000} MB", color = palette.text.toComposeColor(), fontSize = 12.sp)
+                TextButton(onClick = { MathOcr.cancelDownload(context) }) { Text(stringResource(R.string.cancel), fontSize = 13.sp) }
+            }
+        }
+        MathOcr.State.Installed ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Downloaded", color = palette.text.toComposeColor(), fontSize = 12.sp)
+                TextButton(onClick = { confirmDelete = true }) { Text("Delete", fontSize = 13.sp) }
+            }
+        is MathOcr.State.Failed -> {
+            Text("Download failed: ${s.message}", color = palette.danger.toComposeColor(), fontSize = 12.sp)
+            TextButton(onClick = { MathOcr.startDownload(context) }) { Text("Retry", fontSize = 13.sp) }
+        }
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete the math model?") },
+            text = { Text("Convert to math goes away until you download it again ($sizeMb MB).") },
+            confirmButton = { TextButton(onClick = { MathOcr.delete(context); confirmDelete = false }) { Text("Delete") } },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.cancel)) } },
+        )
+    }
+}
+
+/** Export every setting to a zip, or adopt one, for a new device or a fresh install. */
+@Composable
+private fun BackupSection(editor: Editor) {
+    val palette = LocalPalette.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var confirmImport by remember { mutableStateOf<android.net.Uri?>(null) }
+    val exportLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { context.contentResolver.openOutputStream(uri, "wt")?.use { editor.exportSettings(it) } != null }.getOrDefault(false)
+            }
+            editor.message = context.getString(if (ok) R.string.settings_exported else R.string.err_export_settings)
+        }
+    }
+    val importLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri -> confirmImport = uri }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        SectionTitle(stringResource(R.string.pref_backup))
+        Text(stringResource(R.string.pref_backup_help), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
+        Row {
+            TextButton(onClick = { exportLauncher.launch("n-notes-settings.zip") }) { Text(stringResource(R.string.export_settings), fontSize = 13.sp) }
+            TextButton(onClick = { importLauncher.launch(arrayOf("application/zip", "application/octet-stream")) }) { Text(stringResource(R.string.import_settings), fontSize = 13.sp) }
+        }
+    }
+    confirmImport?.let { uri ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmImport = null },
+            title = { Text(stringResource(R.string.import_settings)) },
+            text = { Text(stringResource(R.string.import_settings_confirm)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmImport = null
+                    scope.launch {
+                        val ok = runCatching {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { context.contentResolver.openInputStream(uri) }
+                                ?.use { editor.importSettings(it) } ?: false
+                        }.getOrDefault(false)
+                        editor.message = context.getString(if (ok) R.string.settings_imported else R.string.err_import_settings)
+                    }
+                }) { Text(stringResource(R.string.replace)) }
+            },
+            dismissButton = { TextButton(onClick = { confirmImport = null }) { Text(stringResource(R.string.cancel)) } },
+        )
+    }
+}
+
+/** Find and rewrite the notes that still hold shapes from earlier n-notes versions. */
+@Composable
+private fun PortSection(editor: Editor) {
+    val palette = LocalPalette.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var found by remember { mutableStateOf<List<com.xnotes.platform.NotePorter.Found>?>(null) }
+    var status by remember { mutableStateOf<String?>(null) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        SectionTitle(stringResource(R.string.pref_port))
+        Text(stringResource(R.string.pref_port_help), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
+        Row {
+            TextButton(enabled = !busy, onClick = {
+                busy = true
+                status = context.getString(R.string.port_scanning)
+                scope.launch {
+                    val scanned = runCatching { editor.scanForkShapes() }.getOrNull()
+                    found = scanned
+                    status = when {
+                        scanned == null -> context.getString(R.string.port_no_root)
+                        scanned.isEmpty() -> context.getString(R.string.port_none)
+                        else -> context.getString(R.string.port_found, scanned.size, scanned.sumOf { it.shapes })
+                    }
+                    busy = false
+                }
+            }) { Text(stringResource(R.string.port_scan), fontSize = 13.sp) }
+            val todo = found
+            if (!todo.isNullOrEmpty()) {
+                TextButton(enabled = !busy, onClick = {
+                    busy = true
+                    scope.launch {
+                        val result = editor.portForkShapes(
+                            todo,
+                            isOpen = { uri -> editor.hasOpen(uri) || editor.secondary?.hasOpen(uri) == true },
+                            onProgress = { done, total -> scope.launch { status = context.getString(R.string.port_progress, done, total) } },
+                        )
+                        status = listOfNotNull(
+                            context.getString(R.string.port_done, result.ported.size, result.failed.size, result.skipped.size),
+                            result.failed.takeIf { it.isNotEmpty() }?.let { context.getString(R.string.port_failed_list, it.joinToString(", ")) },
+                            result.skipped.takeIf { it.isNotEmpty() }?.let { context.getString(R.string.port_skipped_list, it.joinToString(", ")) },
+                            result.backupDir?.let { context.getString(R.string.port_backups, it.path) },
+                        ).joinToString("\n")
+                        found = null
+                        busy = false
+                        editor.relistTree()
+                    }
+                }) { Text(stringResource(R.string.port_run), fontSize = 13.sp) }
+            }
+        }
+        status?.let { Text(it, color = palette.textDim.toComposeColor(), fontSize = 12.sp) }
+    }
+}
+
+/**
+ * The content y the sections panel marks the section above: [top] below the top of the view, until
+ * the last screenful, where it slides down to the bottom as fast as the page scrolls, so the short
+ * sections at the end, which can never reach the top, still each get marked, the last at the very end.
+ */
+internal fun sectionLine(scroll: Int, maxScroll: Int, height: Float, top: Float): Float =
+    scroll + top + (height - top - (maxScroll - scroll)).coerceAtLeast(0f)
+
+/** The scroll at which [sectionLine] reaches a section starting at [y]: [y] itself, or less near the end. */
+internal fun scrollForSection(y: Int, maxScroll: Int, height: Float, top: Float): Int =
+    if (maxScroll - y >= height - top) y
+    else ((y + maxScroll - height + top) / 2f).roundToInt().coerceIn(0, maxScroll)
+
 @Composable
 private fun SectionTitle(text: String) {
-    Text(text, color = LocalPalette.current.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 15.sp)
+    Text(text, color = LocalPalette.current.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.searchAnchor(text).sectionAnchor(text))
 }
 
 @Composable
 private fun FieldLabel(text: String) {
-    Text(text, color = LocalPalette.current.accent.toComposeColor(), fontSize = 13.sp)
+    Text(text, color = LocalPalette.current.accent.toComposeColor(), fontSize = 13.sp, modifier = Modifier.searchAnchor(text))
+}
+
+/**
+ * The Preferences search: every section title and setting label registers where it sits in the
+ * scrolled column, so a query can light up the matches and step the scroll from one to the next.
+ */
+private class PrefSearch {
+    var open by mutableStateOf(false)
+    var query by mutableStateOf("")
+    var current by mutableStateOf(0)
+    var toContentY: (Float) -> Float = { it }
+    var density = 1f
+    /** Label text and its top in the column's content, by the label that registered it. Read only
+     *  when searching, so it is a plain map: a scroll repositions labels without recomposing. */
+    val anchors = HashMap<Any, Pair<String, Float>>()
+    /** Section titles and their tops in the column's content, for the sections panel. */
+    val sections = mutableStateMapOf<String, Int>()
+
+    fun matches(text: String): Boolean = query.isNotBlank() && text.contains(query.trim(), ignoreCase = true)
+
+    /** The matching labels, top to bottom. */
+    fun hits(): List<Pair<String, Float>> = anchors.values.filter { matches(it.first) }.sortedBy { it.second }
+}
+
+private val LocalPrefSearch = androidx.compose.runtime.staticCompositionLocalOf<PrefSearch?> { null }
+
+/** Register this label with the Preferences search under [text], and tint it while it matches. */
+@Composable
+private fun Modifier.searchAnchor(text: String): Modifier {
+    val search = LocalPrefSearch.current ?: return this
+    val key = remember { Any() }
+    androidx.compose.runtime.DisposableEffect(key) { onDispose { search.anchors.remove(key) } }
+    val hit = search.matches(text)
+    val tint = LocalPalette.current.accent.withAlpha(if (hit && search.hits().getOrNull(search.current)?.first == text) 90 else 40).toComposeColor()
+    return this
+        .onGloballyPositioned { search.anchors[key] = text to search.toContentY(it.positionInRoot().y) }
+        .then(if (hit) Modifier.background(tint, MaterialTheme.shapes.extraSmall) else Modifier)
+}
+
+/** List this section under [title] in the sections panel, at where it sits in the column. */
+@Composable
+private fun Modifier.sectionAnchor(title: String): Modifier {
+    val search = LocalPrefSearch.current ?: return this
+    androidx.compose.runtime.DisposableEffect(title) { onDispose { search.sections.remove(title) } }
+    return onGloballyPositioned {
+        val y = search.toContentY(it.positionInRoot().y).roundToInt()
+        if (search.sections[title] != y) search.sections[title] = y
+    }
+}
+
+/** The settings' sections, styled like the note's side panel; a tap jumps to that section. */
+@Composable
+private fun PrefSectionsPanel(titles: List<String>, current: String?, onPick: (String) -> Unit) {
+    val palette = LocalPalette.current
+    Column(
+        Modifier
+            .width(224.dp)
+            .fillMaxHeight()
+            .background(palette.panel.toComposeColor())
+            .verticalScroll(rememberScrollState())
+            .padding(vertical = 4.dp),
+    ) {
+        for (title in titles) {
+            val selected = title == current
+            Text(
+                title,
+                color = (if (selected) palette.selectionForeground else palette.text).toComposeColor(),
+                fontSize = 12.sp,
+                fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (selected) Modifier.background(palette.selectionBackground.toComposeColor()) else Modifier)
+                    .clickable { onPick(title) }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
+        }
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -765,6 +1136,31 @@ private fun CustomMaterialControls(prefs: Preferences, update: (Preferences) -> 
         steps = 19,
         modifier = Modifier.width(280.dp),
     )
+}
+
+/** A chip that toggles membership, marked with a check when on; padded like [Chip] so both are one height. */
+@Composable
+internal fun CheckChip(label: String, on: Boolean, onClick: () -> Unit) {
+    val palette = LocalPalette.current
+    val fg = (if (on) palette.selectionForeground else palette.text).toComposeColor()
+    Row(
+        Modifier
+            .clip(MaterialTheme.shapes.small)
+            .background(if (on) palette.selectionBackground.toComposeColor() else palette.surface.toComposeColor())
+            .border(1.dp, if (on) palette.accent.toComposeColor() else palette.border.toComposeColor(), MaterialTheme.shapes.small)
+            .semantics { this.selected = on }
+            .clickable(onClick = onClick)
+            .padding(start = 8.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(
+            if (on) XnotesIcons.check else XnotesIcons.plus, null,
+            tint = (if (on) palette.selectionForeground else palette.textDim).toComposeColor(),
+            modifier = Modifier.size(16.dp),
+        )
+        Text(label, color = fg, fontSize = 14.sp, maxLines = 1, softWrap = false)
+    }
 }
 
 @Composable
@@ -947,20 +1343,24 @@ private fun SizeDropdown(size: PageSize, onSelect: (PageSize) -> Unit) {
     }
 }
 
+/** The shared preferences dropdown: a bordered field showing the current choice and a down chevron. */
 @Composable
-private fun OptionDropdown(options: List<Pair<String, String>>, selectedId: String, onSelect: (String) -> Unit) {
+internal fun OptionDropdown(options: List<Pair<String, String>>, selectedId: String, onSelect: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val palette = LocalPalette.current
     val label = options.firstOrNull { it.first == selectedId }?.second ?: options.first().second
     Box {
-        Box(
+        Row(
             Modifier
                 .clip(MaterialTheme.shapes.small)
                 .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.small)
                 .clickable { expanded = true }
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .padding(start = 12.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(label, color = palette.text.toComposeColor(), fontSize = 14.sp)
+            Spacer(Modifier.width(6.dp))
+            Icon(XnotesIcons.chevronDown, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(16.dp))
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             options.forEach { (id, lbl) ->

@@ -5,6 +5,9 @@
          it, so a device without it keeps the rest of the app. -->
     <uses-feature android:glEsVersion="0x00030000" android:required="false" />
 
+    <!-- Filen cloud backup/sync (opt-in, off by default). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- The apps that act on selected text ("Translate", "Search"), listed in a PDF text
          selection's menu; Android 11 and later hide them from apps that do not ask. -->
     <queries>

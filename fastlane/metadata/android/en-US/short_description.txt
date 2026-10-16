@@ -1,1 +1,0 @@
-Handwriting notes and sketching app with stylus support

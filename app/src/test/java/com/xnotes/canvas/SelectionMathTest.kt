@@ -52,6 +52,17 @@ class SelectionMathTest {
         assertSame(a, members[0].item)
     }
 
+    @Test fun wholeTakesOnlyWhatLiesFullyInside() {
+        val inside = Stroke(Tool.PEN, ToolDefaults.configFor(Tool.PEN), mutableListOf(Sample(10.0, 10.0, 1.0), Sample(20.0, 20.0, 1.0)))
+        val across = Stroke(Tool.PEN, ToolDefaults.configFor(Tool.PEN), mutableListOf(Sample(20.0, 10.0, 1.0), Sample(60.0, 10.0, 1.0)))
+        pages[0].items.addAll(listOf(inside, across))
+        val band = Rect(50.0, 50.0, 30.0, 30.0) // page 0 local (2,2)-(32,32)
+        assertEquals(2, SelectionMath.bandMembers(pages, rects, band).size)
+        assertEquals(listOf<CanvasItem>(inside), SelectionMath.bandMembers(pages, rects, band, whole = true).map { it.item })
+        val poly = listOf(Pt(50.0, 50.0), Pt(80.0, 50.0), Pt(80.0, 80.0), Pt(50.0, 80.0))
+        assertEquals(listOf<CanvasItem>(inside), SelectionMath.lassoMembers(pages, rects, poly, whole = true).map { it.item })
+    }
+
     @Test fun bandSpansPages() {
         val a = dot(50.0, 50.0) // page 0
         val b = dot(50.0, 50.0) // page 1

@@ -1,1 +1,0 @@
-- Fix wet ink landing away from the pen after the window changed size

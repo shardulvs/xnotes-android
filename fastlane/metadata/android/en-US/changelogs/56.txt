@@ -1,3 +1,0 @@
-- Add dual tone themes that pair an accent with its own surface colour
-- Eight styles for every colour: Soft, Vivid, Original, Playful, Fresh, Clean, Muted, Grayscale
-- Minor fixes and improvements

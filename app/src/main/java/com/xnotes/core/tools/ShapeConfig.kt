@@ -4,6 +4,7 @@ import com.xnotes.core.geometry.Flip
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.model.ConnectorEnd
 import com.xnotes.core.model.ConnectorItem
+import com.xnotes.core.model.FunctionSpec
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.shapes.ConnectorPreset
@@ -51,6 +52,10 @@ data class ShapeConfig(
 
     val shape: ShapeKind get() = chip.kind
 
+    /** What the chosen function chip plots, or null when the chip is not a function. */
+    val function: FunctionSpec? get() =
+        preset.takeIf { it.startsWith(ShapePresets.FUNCTION_PREFIX) }?.let { FunctionSpec.preset(it.removePrefix(ShapePresets.FUNCTION_PREFIX)) }
+
     /** The point or side count a new shape gets. */
     val count: Int get() = if (n > 0 && chip.counted) n else chip.n
 
@@ -81,7 +86,7 @@ data class ShapeConfig(
             adj = chip.adj.copyOf(), n = count,
             headStart = if (kind.isOpen) headStart else Head.NONE,
             headEnd = if (kind.isOpen) headEnd else Head.NONE,
-        )
+        ).also { shape -> function?.let { shape.setFunction(it) } }
     }
 
     /**
