@@ -9,8 +9,10 @@ import com.xnotes.core.model.Rgba
  * fence info), lists/tasks/blockquotes map to paragraph properties, and the
  * inline pass handles ** __ * _ ~~ `code` plus links (styled text, URL dropped)
  * and images (alt text). GitHub pipe tables become flow tables with a header
- * row and the delimiter row's column alignments. Unclosed markers fall out as
- * literal text.
+ * row and the delimiter row's column alignments. Inline HTML styling tags
+ * (<b>, <i>, <u>, <s>, <code>, <mark>, <a>) style their text like the Markdown
+ * markers, <br>, <hN> and <li> become lines, headings and items, other tags are
+ * dropped and entities decoded. Unclosed markers fall out as literal text.
  */
 object MarkdownParser {
 
@@ -22,7 +24,16 @@ object MarkdownParser {
     private val BLOCKQUOTE = Regex("^(>+)\\s?(.*)$")
     private val LINK = Regex("^\\[([^\\]]*)\\]\\(([^)]*)\\)")
     private val IMAGE = Regex("^!\\[([^\\]]*)\\]\\(([^)]*)\\)")
-    private val MATH_FENCE = Regex("^\\s{0,3}\\\$\\\$\\s*$")
+    internal val MATH_FENCE = Regex("^\\s{0,3}\\\$\\\$\\s*$")
+    private val HTML_TAG = Regex("^<(/?)([A-Za-z][A-Za-z0-9]*)((?:\\s[^<>]*)?)/?>")
+    private val HTML_BREAK = Regex("<br\\s*/?>", RegexOption.IGNORE_CASE)
+    private val HTML_HEADING = Regex("^\\s*<h([1-6])(?:\\s[^>]*)?>(.*?)</h\\1>\\s*$", RegexOption.IGNORE_CASE)
+    private val HTML_ITEM = Regex("^(\\s*)<li(?:\\s[^>]*)?>", RegexOption.IGNORE_CASE)
+    private val HTML_ONLY_TAGS = Regex("^\\s*(<[^<>]+>\\s*)+$")
+    private val HTML_ENTITY = Regex("&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z]+);")
+    private val ENTITIES = mapOf("amp" to "&", "lt" to "<", "gt" to ">", "quot" to "\"", "apos" to "'", "nbsp" to "\u00A0")
+    private val ALT = Regex("\\salt=\"([^\"]*)\"", RegexOption.IGNORE_CASE)
+    private val HIGHLIGHT_COLOR = Rgba(255, 208, 0, 102)
     private val TABLE_DELIM = Regex("^\\s*\\|?\\s*:?-+:?\\s*(\\|\\s*:?-+:?\\s*)*\\|?\\s*$")
 
     /** Inert link styling: the text keeps a link look, the URL is dropped. */
@@ -77,7 +88,7 @@ object MarkdownParser {
                 if (i < lines.size) i++ // swallow the closing fence
                 continue
             }
-            out.add(parseLine(line))
+            for (part in htmlBlocks(line)) out.add(parseLine(part))
             i++
         }
         return out
@@ -153,6 +164,20 @@ object MarkdownParser {
         codeLang = lang,
     )
 
+    /** Block-level HTML as the Markdown it means: <br> splits lines, <hN> and <li> become headings and items, tag-only lines go. */
+    private fun htmlBlocks(line: String): List<String> {
+        if ('<' !in line) return listOf(line)
+        return line.split(HTML_BREAK).mapNotNull { part ->
+            HTML_HEADING.matchEntire(part)?.let { m -> return@mapNotNull "#".repeat(m.groupValues[1].toInt()) + " " + m.groupValues[2] }
+            val item = HTML_ITEM.find(part)
+            when {
+                item != null -> item.groupValues[1] + "- " + part.substring(item.range.last + 1)
+                HTML_ONLY_TAGS.matches(part) -> null
+                else -> part
+            }
+        }
+    }
+
     private fun parseLine(line: String): Paragraph {
         HEADING.matchEntire(line)?.let { m ->
             val level = m.groupValues[1].length
@@ -220,7 +245,7 @@ object MarkdownParser {
         val literal = StringBuilder()
         fun flush() {
             if (literal.isNotEmpty()) {
-                appendRun(out, literal.toString(), base)
+                appendRun(out, decodeEntities(literal.toString()), base)
                 literal.clear()
             }
         }
@@ -272,6 +297,19 @@ object MarkdownParser {
                     inlineInto(m.groupValues[1], base, out)
                     i += m.value.length
                 }
+                c == '<' && text.startsWith("<!--", i) -> {
+                    val close = text.indexOf("-->", i + 4)
+                    if (close < 0) {
+                        literal.append(c)
+                        i++
+                    } else {
+                        i = close + 3
+                    }
+                }
+                c == '<' && HTML_TAG.containsMatchIn(text.substring(i)) -> {
+                    flush()
+                    i = htmlTag(text, i, base, out)
+                }
                 c == '[' && LINK.containsMatchIn(text.substring(i)) -> {
                     val m = LINK.find(text.substring(i))!!
                     flush()
@@ -292,7 +330,7 @@ object MarkdownParser {
      * doubled display form, or null. Mirrors what typing the same text converts,
      * so pasting and typing land the same paragraph.
      */
-    private fun mathSpan(text: String, at: Int): Pair<Int, Boolean>? {
+    internal fun mathSpan(text: String, at: Int): Pair<Int, Boolean>? {
         val display = text.startsWith("$$", at)
         val marker = if (display) "$$" else "$"
         val from = at + marker.length
@@ -306,6 +344,50 @@ object MarkdownParser {
         // A single "$" must not close on the first half of a doubled one.
         if (!display && close + 1 < text.length && text[close + 1] == '$') return null
         return close to display
+    }
+
+    /**
+     * The inline HTML tag at [at]: a styling tag with its closing tag styles what is between,
+     * <img> leaves its alt text, and any other tag is dropped. Returns where to go on from.
+     */
+    private fun htmlTag(text: String, at: Int, base: CharStyle, out: MutableList<Run>): Int {
+        val m = HTML_TAG.find(text.substring(at))!!
+        val end = at + m.value.length
+        val name = m.groupValues[2].lowercase()
+        if (m.groupValues[1].isNotEmpty()) return end
+        if (name == "img") {
+            ALT.find(m.groupValues[3])?.let { inlineInto(decodeEntities(it.groupValues[1]), base, out) }
+            return end
+        }
+        val styled = when (name) {
+            "b", "strong" -> base.copy(bold = true)
+            "i", "em", "cite", "var" -> base.copy(italic = true)
+            "u", "ins" -> base.copy(underline = true)
+            "s", "del", "strike" -> base.copy(strike = true)
+            "code", "kbd", "samp", "tt" -> base.copy(code = true)
+            "mark" -> base.copy(highlight = HIGHLIGHT_COLOR)
+            "a" -> base.copy(underline = true, color = LINK_COLOR)
+            else -> return end
+        }
+        val close = text.indexOf("</$name>", end, ignoreCase = true)
+        if (close < 0) return end
+        val inner = text.substring(end, close)
+        if (styled.code) appendRun(out, decodeEntities(inner), styled) else inlineInto(inner, styled, out)
+        return close + name.length + 3
+    }
+
+    /** Named (the common few) and numeric HTML entities as the characters they stand for. */
+    internal fun decodeEntities(text: String): String {
+        if ('&' !in text) return text
+        return HTML_ENTITY.replace(text) { m ->
+            val e = m.groupValues[1]
+            when {
+                e.startsWith("#x") || e.startsWith("#X") -> e.substring(2).toIntOrNull(16)
+                e.startsWith("#") -> e.substring(1).toIntOrNull()
+                else -> null
+            }?.takeIf { Character.isValidCodePoint(it) }?.let { String(Character.toChars(it)) }
+                ?: ENTITIES[e] ?: m.value
+        }
     }
 
     /** Consume a [marker]-delimited span (recursing with [styled]); unmatched emits literally. */

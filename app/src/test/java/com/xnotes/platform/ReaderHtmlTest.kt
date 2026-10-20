@@ -45,6 +45,16 @@ class ReaderHtmlTest {
     }
 
     @Test
+    fun mathIsTypesetOutsideCodeAndHtmlPassesThrough() {
+        val math = ReaderHtml.MathTypeset { latex, display -> "<span class=\"m\">${if (display) "D" else "I"}:$latex</span>" }
+        val html = ReaderHtml.markdown("Area \$\\pi r^2\$ and `\$code\$` <u>under</u>\n\n$$\na_1 + b_2\n$$", math = math)
+        assertTrue(html, html.contains("<span class=\"m\">I:\\pi r^2</span>"))
+        assertTrue(html, html.contains("<span class=\"m\">D:a_1 + b_2</span>"))
+        assertTrue(html, html.contains("<code>\$code\$</code>"))
+        assertTrue(html, html.contains("<u>under</u>"))
+    }
+
+    @Test
     fun unsyncedImagesFallBackToAltText() {
         val html = ReaderHtml.markdown("![a cat](cat.png)")
         assertTrue(html.contains("[a cat]"))

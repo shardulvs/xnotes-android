@@ -70,6 +70,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.xnotes.R
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.util.ReaderKind
+import com.xnotes.platform.MathRendering
 import com.xnotes.platform.ReaderHtml
 import com.xnotes.platform.ReaderPdf
 import com.xnotes.platform.ReaderPrint
@@ -571,7 +572,7 @@ private fun loadReader(context: Context, file: ReaderFile, labels: ReaderHtml.La
 private fun readerHtmlBody(context: Context, file: ReaderFile, labels: ReaderHtml.Labels): ReaderContent.Html? {
     val uri = Uri.parse(file.uri)
     return when (ReaderKind.ofName(file.name)) {
-        ReaderKind.MARKDOWN -> ReaderContent.Html(ReaderHtml.markdown(readText(context, uri), labels), wide = false)
+        ReaderKind.MARKDOWN -> ReaderContent.Html(ReaderHtml.markdown(readText(context, uri), labels, ::readerMath), wide = false)
         ReaderKind.CSV -> ReaderContent.Html(ReaderHtml.csv(readText(context, uri), labels), wide = true)
         ReaderKind.DOCX -> ReaderContent.Html(withZip(context, uri) { ReaderHtml.docx(it, ::newParser, labels) }, wide = false)
         ReaderKind.PPTX -> ReaderContent.Html(withZip(context, uri) { ReaderHtml.pptx(it, ::newParser, labels) }, wide = false)
@@ -579,6 +580,17 @@ private fun readerHtmlBody(context: Context, file: ReaderFile, labels: ReaderHtm
         ReaderKind.PDF, null -> null
     }
 }
+
+// Painted black and used as a mask, so the formula takes the reader's text colour in either theme.
+private fun readerMath(latex: String, display: Boolean): String? {
+    val (bmp, box) = MathRendering.formulaBitmap(latex, READER_MATH_PX, Rgba(0, 0, 0, 255), display) ?: return null
+    val png = java.io.ByteArrayOutputStream().also { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+    bmp.recycle()
+    return ReaderHtml.mathHtml(latex, png, box.width, box.ascent, box.descent, display)
+}
+
+// The reader's body font size in CSS px.
+private const val READER_MATH_PX = 17.0
 
 /** Office XML is read with prefixed names (w:p, r:id), which the converters match on. */
 private fun newParser(): XmlPullParser =

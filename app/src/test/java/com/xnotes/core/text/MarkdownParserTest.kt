@@ -193,4 +193,22 @@ class MarkdownParserTest {
         assertTrue(parse("\$   \$")[0].runs.none { it.style.math })
     }
 
+    @Test
+    fun inlineHtmlStylesLikeMarkdownAndDropsOtherTags() {
+        val runs = parse("<b>bold</b> <em>it</em> <span class=\"x\">plain</span> <code>a<b</code> &amp; &#169;")[0].runs
+        assertEquals("bold it plain a<b & \u00A9", runs.joinToString("") { it.text })
+        assertTrue(runs.first { it.text == "bold" }.style.bold)
+        assertTrue(runs.first { it.text == "it" }.style.italic)
+        assertFalse(runs.first { it.text.contains("plain") }.style.bold)
+        assertTrue(runs.first { it.text == "a<b" }.style.code)
+        assertEquals("a < b", parse("a < b")[0].plainText())
+    }
+
+    @Test
+    fun blockHtmlBecomesLinesHeadingsAndItems() {
+        val paras = parse("<div>\n<h2>Title</h2>\none<br>two\n<li>item</li>\n</div>")
+        assertEquals(listOf("Title", "one", "two", "item"), paras.map { it.plainText() })
+        assertEquals(2, paras[0].headingLevel)
+        assertEquals(ListKind.BULLET, paras[3].list)
+    }
 }

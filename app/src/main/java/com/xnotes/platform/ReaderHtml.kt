@@ -1,5 +1,6 @@
 package com.xnotes.platform
 
+import com.xnotes.core.text.MarkdownParser
 import org.commonmark.ext.autolink.AutolinkExtension
 import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension
 import org.commonmark.ext.gfm.tables.TablesExtension
@@ -91,6 +92,8 @@ object ReaderHtml {
             .slide h2:first-of-type{margin-top:.3em}
             .notes{border-top:1px dashed ${c.border};margin-top:12px;padding-top:6px;font-size:.88em;color:${c.muted}}
             .note{font-size:13px;color:${c.muted};margin:.6em 0}
+            .math{display:inline-block;background:currentColor;-webkit-mask-size:100% 100%;-webkit-mask-repeat:no-repeat}
+            .math-block{text-align:center;margin:.8em 0;overflow-x:auto}
         """.trimIndent()
         return "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
             "<style>$css\n$extraCss</style></head><body>$body</body></html>"
@@ -104,11 +107,17 @@ object ReaderHtml {
     private val mdParser: Parser by lazy { Parser.builder().extensions(mdExtensions).build() }
     private val mdRenderer: HtmlRenderer by lazy { HtmlRenderer.builder().extensions(mdExtensions).build() }
 
-    fun markdown(source: String, labels: Labels = Labels()): String {
+    /**
+     * [markdown] typesets LaTeX through this: the formula and whether it is display maths, to HTML
+     * (see [mathHtml]), or null to leave its source as written.
+     */
+    fun interface MathTypeset { fun html(latex: String, display: Boolean): String? }
+
+    fun markdown(source: String, labels: Labels = Labels(), math: MathTypeset? = null): String {
         val text = source.removePrefix("\uFEFF").replace("\r\n", "\n")
         if (text.isBlank()) return "<p class=\"missing\">${esc(labels.empty)}</p>"
         val (front, body) = splitFrontmatter(text)
-        var html = mdRenderer.render(mdParser.parse(obsidianSyntax(body)))
+        var html = mdRenderer.render(mdParser.parse(obsidianSyntax(body, math)))
         html = callouts(html)
         html = stripExternalImages(html, labels)
         return frontmatterHtml(front) + html
@@ -144,36 +153,75 @@ object ReaderHtml {
     private val wikiLink = Regex("\\[\\[([^\\]\\n]+)]]")
     private val highlight = Regex("==([^=\\n](?:[^\\n]*?[^=\\n])?)==")
 
-    /** Rewrites Obsidian-only syntax ([[links]], ![[embeds]], ==highlights==) into CommonMark, leaving code alone. */
-    internal fun obsidianSyntax(body: String): String {
+    /**
+     * Rewrites Obsidian-only syntax ([[links]], ![[embeds]], ==highlights==) into CommonMark, and
+     * $maths$ into HTML through [math], leaving code alone.
+     */
+    internal fun obsidianSyntax(body: String, math: MathTypeset? = null): String {
         val out = StringBuilder(body.length + 64)
         var fence: String? = null
+        var mathBlock: MutableList<String>? = null
         for (line in body.split('\n')) {
             val trimmed = line.trimStart()
             val marker = Regex("^(`{3,}|~{3,})").find(trimmed)?.value
+            val mathFence = math != null && MarkdownParser.MATH_FENCE.matches(line)
             when {
+                mathBlock != null -> {
+                    if (!mathFence) { mathBlock.add(line.trim()); continue }
+                    val latex = mathBlock.joinToString(" ").trim()
+                    out.append("\n").append(math!!.html(latex, true) ?: "$$\n$latex\n$$").append("\n")
+                    mathBlock = null
+                }
                 fence != null -> { if (marker != null && marker[0] == fence[0] && marker.length >= fence.length) fence = null; out.append(line) }
                 marker != null -> { fence = marker; out.append(line) }
+                mathFence -> { mathBlock = ArrayList(); continue }
                 line.startsWith("    ") || line.startsWith("\t") -> out.append(line)
-                else -> out.append(rewriteInline(line))
+                else -> out.append(rewriteInline(line, math))
             }
             out.append('\n')
         }
+        mathBlock?.let { out.append("$$\n").append(it.joinToString("\n")).append('\n') }
         return out.toString().removeSuffix("\n")
     }
 
-    /** Applies the wikilink/highlight rewrite outside `code spans` only. */
-    private fun rewriteInline(line: String): String {
-        if (!line.contains("[[") && !line.contains("==")) return line
+    /** Applies the wikilink/highlight/maths rewrite outside `code spans` only. */
+    private fun rewriteInline(line: String, math: MathTypeset?): String {
+        if (!line.contains("[[") && !line.contains("==") && (math == null || !line.contains('$'))) return line
         val parts = line.split('`')
         // An odd part is code only when a closing backtick follows it.
         return parts.mapIndexed { i, part ->
             if (i % 2 == 1 && i < parts.lastIndex) part else {
                 var p = wikiEmbed.replace(part) { wikiMarkdown(it.groupValues[1]) }
                 p = wikiLink.replace(p) { wikiMarkdown(it.groupValues[1]) }
-                highlight.replace(p) { "<mark>${it.groupValues[1]}</mark>" }
+                p = highlight.replace(p) { "<mark>${it.groupValues[1]}</mark>" }
+                if (math != null) mathSpans(p, math) else p
             }
         }.joinToString("`")
+    }
+
+    /** Replaces each $inline$ or $$display$$ span in [text] with its typeset HTML, by the note import's rules. */
+    private fun mathSpans(text: String, math: MathTypeset): String {
+        if ('$' !in text) return text
+        val out = StringBuilder()
+        var i = 0
+        while (i < text.length) {
+            val span = if (text[i] == '$' && (i == 0 || text[i - 1] != '\\')) MarkdownParser.mathSpan(text, i) else null
+            if (span == null) { out.append(text[i]); i++; continue }
+            val n = if (span.second) 2 else 1
+            val html = math.html(text.substring(i + n, span.first).trim(), span.second)
+            out.append(html ?: text.substring(i, span.first + n))
+            i = span.first + n
+        }
+        return out.toString()
+    }
+
+    /** A typeset formula as an alpha [png] tinted with the text colour, so it follows the theme; sizes in CSS px. */
+    fun mathHtml(latex: String, png: ByteArray, width: Double, ascent: Double, descent: Double, display: Boolean): String {
+        fun px(v: Double) = String.format(java.util.Locale.ROOT, "%.2fpx", v)
+        val url = "data:image/png;base64," + Base64.getEncoder().encodeToString(png)
+        val span = "<span class=\"math\" role=\"img\" aria-label=\"${esc(latex)}\" style=\"width:${px(width)};height:${px(ascent + descent)};" +
+            "vertical-align:-${px(descent)};-webkit-mask-image:url($url)\"></span>"
+        return if (display) "<div class=\"math-block\">$span</div>" else span
     }
 
     private fun wikiMarkdown(inner: String): String {
