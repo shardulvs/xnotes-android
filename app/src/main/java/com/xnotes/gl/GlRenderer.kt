@@ -192,6 +192,11 @@ class GlRenderer : GLSurfaceView.Renderer {
         while (true) after.add(afterFrame.poll() ?: break)
         val started = System.nanoTime()
         val paper = f.paper
+        // Effects and offscreen passes change GL viewport/scissor state. On a reused canvas
+        // surface (e.g. switching from a paged note), reset it before clearing the whole frame.
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        GLES30.glViewport(0, 0, f.widthPx, f.heightPx)
+        GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
         GLES30.glClearColor(paper.r / 255f, paper.g / 255f, paper.b / 255f, 1f)
         GLES30.glClearStencil(0)
         GLES30.glDepthMask(true)
