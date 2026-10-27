@@ -16,6 +16,7 @@ import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.Page
 import com.xnotes.core.model.Stroke
+import com.xnotes.core.model.TapeItem
 import com.xnotes.core.pal.BlendMode
 import com.xnotes.platform.AndroidRenderer
 import com.xnotes.platform.MathRendering
@@ -529,7 +530,7 @@ class CanvasView @JvmOverloads constructor(
                     r.clipRect(pr)
                     r.translate(pr.left, pr.top)
                     st.applyPageTransform(r, page)
-                    for (item in page.items) {
+                    for ((k, item) in page.items.withIndex()) {
                         if (item is Stroke && item.isHighlighterInk() && !st.isLiftedItem(item) &&
                             item.bounds().intersects(visLocal)
                         ) {
@@ -537,7 +538,12 @@ class CanvasView @JvmOverloads constructor(
                             // instead of re-tessellating the ribbon every frame.
                             val hc = st.highlighterCacheFor(item, page)
                             val faint = if (st.fade?.fades(item) == true) com.xnotes.core.audio.InkFade.ALPHA else 1.0
-                            r.drawRasterBlended(hc.surface, hc.cover, item.renderColor.a / 255.0 * faint, item.blendMode)
+                            // Composited over the finished page, so tape laid over it has to be cut out by hand.
+                            val covers = coveringTapes(st, page.items, k, item.bounds())
+                            r.withSave {
+                                if (covers != null) r.clipOutPolygons(covers)
+                                r.drawRasterBlended(hc.surface, hc.cover, item.renderColor.a / 255.0 * faint, item.blendMode)
+                            }
                         }
                     }
                 }
@@ -577,6 +583,20 @@ class CanvasView @JvmOverloads constructor(
 
         // A formula still being set shimmers in its place; keep the sweep moving until it lands.
         if (r.standIns > 0) postInvalidateDelayed(SHIMMER_FRAME_MS)
+    }
+
+    /**
+     * The bodies of the covered tapes laid after item [index] of [items] over [bounds], or null for
+     * none. A lifted tape is drawn over everything with the selection, so it needs no cut.
+     */
+    private fun coveringTapes(st: CanvasState, items: List<com.xnotes.core.model.CanvasItem>, index: Int, bounds: Rect): List<List<Pt>>? {
+        var out: ArrayList<List<Pt>>? = null
+        for (k in index + 1 until items.size) {
+            val t = items[k] as? TapeItem ?: continue
+            if (t.peeled || st.isLiftedItem(t) || !t.bounds().intersects(bounds)) continue
+            (out ?: ArrayList<List<Pt>>().also { out = it }).addAll(t.shape.body)
+        }
+        return out
     }
 
     /**

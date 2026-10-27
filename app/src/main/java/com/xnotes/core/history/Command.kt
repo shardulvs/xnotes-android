@@ -1,16 +1,23 @@
 package com.xnotes.core.history
 
+import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.Document
 import com.xnotes.core.model.DrawStyle
 import com.xnotes.core.model.GeoHandle
 import com.xnotes.core.model.GeometrySnapshot
+import com.xnotes.core.model.ImageData
+import com.xnotes.core.model.ImageItem
 import com.xnotes.core.model.Labelled
 import com.xnotes.core.model.Page
+import com.xnotes.core.model.PageMarks
+import com.xnotes.core.model.PageShape
 import com.xnotes.core.model.Resizable
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.ShapeLabel
+import com.xnotes.core.model.TapeItem
+import com.xnotes.core.model.TapePattern
 import com.xnotes.core.model.TextItem
 import com.xnotes.core.model.TextMarkup
 import com.xnotes.core.model.TextStyle
@@ -45,6 +52,9 @@ interface Command {
 
     /** The items this edit put in as new: a finished stroke, a drawn shape, a paste. A recording gives them their moment. */
     fun added(): List<CanvasItem> = emptyList()
+
+    /** The pages whose size, margins or turn this command changes, which the view lays out and repaints afresh. */
+    fun reshaped(): List<Page> = emptyList()
 }
 
 /** Append an item to a page (finishing a stroke, pasting/inserting, new text). */
@@ -274,6 +284,27 @@ class RestyleItems(private val entries: List<Entry>) : Command {
     override fun touched(locate: (CanvasItem) -> Page?) = pagedItems(entries.map { it.item }, locate)
 }
 
+/** Print a new pattern on tape: one step for the whole selection. */
+class RepatternTape(private val entries: List<Entry>) : Command {
+    class Entry(val tape: TapeItem, val before: TapePattern, val after: TapePattern)
+
+    override fun redo() {
+        for (e in entries) e.tape.pattern = e.after
+    }
+
+    override fun undo() {
+        for (e in entries) e.tape.pattern = e.before
+    }
+
+    override fun touched(locate: (CanvasItem) -> Page?) = pagedItems(entries.map { it.tape }, locate)
+
+    companion object {
+        /** The entries that print [pattern] on [tapes], those already printed with it left out. */
+        fun of(tapes: List<TapeItem>, pattern: TapePattern): List<Entry> =
+            tapes.filter { it.pattern != pattern }.map { Entry(it, it.pattern, pattern) }
+    }
+}
+
 /** Recolour shapes' fills, each keeping its own opacity: one step for the whole selection. */
 class RefillShapes(private val entries: List<Entry>) : Command {
     class Entry(val shape: ShapeItem, val before: Rgba?, val after: Rgba?)
@@ -338,20 +369,20 @@ class ReorderItems(
     }
 }
 
-/** Insert a page at an index. */
+/** Insert a page at an index; bookmarks stay on their pages. */
 class AddPage(
     private val document: Document,
     private val page: Page,
     private val index: Int,
 ) : Command {
+    private var marks = PageMarks.NONE
+
     override fun redo() {
-        if (!document.pages.containsRef(page)) {
-            document.pages.add(index.coerceIn(0, document.pages.size), page)
-        }
+        if (!document.pages.containsRef(page)) document.insertPage(page, index, marks)
     }
 
     override fun undo() {
-        document.pages.removeRef(page)
+        marks = document.removePage(page)
     }
 }
 
@@ -375,42 +406,89 @@ class CompositeCommand(private val commands: List<Command>) : Command {
     override fun touchedMarkups(): List<Pair<Page, TextMarkup>> = commands.flatMap { it.touchedMarkups() }
 
     override fun added(): List<CanvasItem> = commands.flatMap { it.added() }
+
+    override fun reshaped(): List<Page> = commands.flatMap { it.reshaped() }
 }
 
-/** Delete a page (reversible by re-inserting at its original index). */
+/** Items put in group [group] together, or taken out of their groups with null. Nothing changes how they look. */
+class Regroup(private val items: List<CanvasItem>, private val group: Int?) : Command {
+    private val before = items.map { it.group }
+
+    override fun redo() {
+        for (item in items) item.group = group
+    }
+
+    override fun undo() {
+        items.forEachIndexed { i, item -> item.group = before[i] }
+    }
+
+    override fun touched(locate: (CanvasItem) -> Page?): List<Pair<Page, CanvasItem>> = emptyList()
+}
+
+/** A picture swapped for another of itself, as a crop does: its file and its box, before and after. */
+class ReplaceImage(
+    private val item: ImageItem,
+    private val before: Pair<ImageData, Rect>,
+    private val after: Pair<ImageData, Rect>,
+) : Command {
+    override fun redo() {
+        item.image = after.first
+        item.rect = after.second
+    }
+
+    override fun undo() {
+        item.image = before.first
+        item.rect = before.second
+    }
+
+    override fun touched(locate: (CanvasItem) -> Page?) = pagedItems(listOf(item), locate)
+}
+
+/** Pages turned or resized: each one's [PageShape] before and after. The view repaints them whole. */
+class ReshapePages(
+    private val pages: List<Page>,
+    private val before: List<PageShape>,
+    private val after: List<PageShape>,
+) : Command {
+    override fun redo() = pages.forEachIndexed { i, page -> after[i].restore(page) }
+    override fun undo() = pages.forEachIndexed { i, page -> before[i].restore(page) }
+
+    override fun touched(locate: (CanvasItem) -> Page?): List<Pair<Page, CanvasItem>> = emptyList()
+
+    override fun reshaped(): List<Page> = pages
+}
+
+/** Delete a page and its bookmarks (reversible by re-inserting both at the original index). */
 class DeletePage(
     private val document: Document,
     private val page: Page,
     private val index: Int,
 ) : Command {
+    private var marks = PageMarks.NONE
+
     override fun redo() {
-        document.pages.removeRef(page)
+        if (document.pages.containsRef(page)) marks = document.removePage(page)
     }
 
     override fun undo() {
-        if (!document.pages.containsRef(page)) {
-            document.pages.add(index.coerceIn(0, document.pages.size), page)
-        }
+        if (!document.pages.containsRef(page)) document.insertPage(page, index, marks)
     }
 }
 
-/**
- * Put the pages in a new order: [before] and [after] hold the same pages. Built before it is
- * applied, so it can note which page each bookmark points at and carry the bookmark along.
- */
+/** Put the pages in a new order: [before] and [after] hold the same pages. Bookmarks go with their pages. */
 class MovePages(
     private val document: Document,
     private val before: List<Page>,
     private val after: List<Page>,
 ) : Command {
-    private val marks = document.bookmarks.mapNotNull { mark -> before.getOrNull(mark.page)?.let { mark to it } }
-
     override fun redo() = arrange(after)
 
     override fun undo() = arrange(before)
 
     private fun arrange(order: List<Page>) {
         val pages = document.pages
+        val marks = document.bookmarks.mapNotNull { mark -> pages.getOrNull(mark.page)?.let { mark to it } }
+        val breaks = document.flow.paragraphs.mapNotNull { para -> para.breakToPage?.let { pages.getOrNull(it) }?.let { para to it } }
         // Pages never override equals, so these sets compare by reference. A page this move never
         // knew stays in the note, after the rest.
         val present = HashSet(pages)
@@ -419,6 +497,7 @@ class MovePages(
         pages.clear()
         pages.addAll(next)
         for ((mark, page) in marks) next.indexOf(page).takeIf { it >= 0 }?.let { mark.page = it }
+        for ((para, page) in breaks) next.indexOf(page).takeIf { it >= 0 }?.let { para.breakToPage = it }
     }
 
     companion object {

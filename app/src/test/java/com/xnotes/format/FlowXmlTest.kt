@@ -281,6 +281,21 @@ class FlowXmlTest {
     }
 
     @Test
+    fun aBreakToAPageRoundTripsBesideTheOdfBreak() {
+        val flow = TextFlow().apply {
+            paragraphs.add(Paragraph(mutableListOf(Run("a"))))
+            paragraphs.add(Paragraph(mutableListOf(Run("b")), breakBefore = true, breakToPage = 4))
+            paragraphs.add(Paragraph(mutableListOf(Run("c")), breakToPage = 7))
+        }
+        val xml = String(FlowXml.write(flow))
+        assertTrue(xml.contains("xnotes:break-page=\"4\""))
+        assertFalse(xml.contains("xnotes:break-page=\"7\""))
+        val back = roundTrip(flow).paragraphs
+        assertEquals(4, back[1].breakToPage)
+        assertEquals(null, back[2].breakToPage)
+    }
+
+    @Test
     fun aListStartRoundTripsAsOdfStartValue() {
         val flow = TextFlow().apply {
             paragraphs.add(Paragraph(mutableListOf(Run("a")), list = ListKind.ORDERED, listStart = 4))

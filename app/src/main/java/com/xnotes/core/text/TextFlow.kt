@@ -108,6 +108,11 @@ class Paragraph(
     var rule: Boolean = false,
     /** A page break before this paragraph: it starts the next page. */
     var breakBefore: Boolean = false,
+    /**
+     * With [breakBefore], the page it starts on at the earliest, an index into the note's pages
+     * kept on its page as pages come and go; text before it that runs long pushes it on.
+     */
+    var breakToPage: Int? = null,
     /** The number an ordered item restarts its list at; null counts on from the item before. */
     var listStart: Int? = null,
     /** The quote or callout this paragraph sits in; code lines, rules and cells never do. */
@@ -138,7 +143,7 @@ class Paragraph(
     fun deepCopy(): Paragraph =
         Paragraph(
             runs.mapTo(mutableListOf()) { it.deepCopy() }, align, indent, list, checked, codeLang, table, cellStart, headingLevel,
-            rule = rule, breakBefore = breakBefore, listStart = listStart, quote = quote,
+            rule = rule, breakBefore = breakBefore, breakToPage = breakToPage, listStart = listStart, quote = quote,
         ).also { it.rev = rev }
 
     companion object {

@@ -10,10 +10,10 @@ import org.junit.Test
 
 class ToolsTest {
 
-    @Test fun theMarkupToolHighlightsAtHalfAndPansAFreeFinger() {
+    @Test fun theMarkupToolHighlightsAtNinetyAndPansAFreeFinger() {
         val c = ToolDefaults.configFor(Tool.MARKUP)
         assertEquals(MarkupMode.HIGHLIGHT, c.markupMode)
-        assertEquals(0.5, c.markupIntensity, 1e-9)
+        assertEquals(0.9, c.markupIntensity, 1e-9)
         assertTrue(Tool.MARKUP.fingerPansWhenOff)
         assertFalse(Tool.MARKUP.isStroke)
         assertTrue(Tool.MARKUP in Tool.wheelOrder && Tool.MARKUP in ToolDefaults.persistedTools)
@@ -32,6 +32,8 @@ class ToolsTest {
         val hi = ToolDefaults.configFor(Tool.HIGHLIGHTER)
         assertEquals(16.0, hi.baseWidth, 1e-9)
         assertFalse(hi.pressureEnabled)
+        assertEquals(0.90, hi.highlighterAlpha, 1e-9)
+        assertEquals(1.0, ToolConversions.intensityToHighlighterAlpha(100.0), 1e-9)
         assertEquals(24.0, ToolDefaults.configFor(Tool.ERASER).baseWidth, 1e-9)
         assertEquals(2.0, ToolDefaults.configFor(Tool.LASSO).baseWidth, 1e-9)
         // A tool without an entry uses ToolConfig() = (3.0, on, 0.35, 0.0).
@@ -57,7 +59,7 @@ class ToolsTest {
     }
 
     @Test fun widthRanges() {
-        assertEquals(4.0..40.0, ToolConversions.widthRange(Tool.HIGHLIGHTER))
+        assertEquals(4.0..120.0, ToolConversions.widthRange(Tool.HIGHLIGHTER))
         assertEquals(1.0..20.0, ToolConversions.widthRange(Tool.PEN))
     }
 
@@ -91,6 +93,6 @@ class ToolsTest {
 
     @Test fun toolIdRoundTrip() {
         for (t in Tool.entries) assertEquals(t, Tool.fromId(t.id))
-        assertEquals(14, Tool.wheelOrder.size)
+        assertEquals(15, Tool.wheelOrder.size)
     }
 }

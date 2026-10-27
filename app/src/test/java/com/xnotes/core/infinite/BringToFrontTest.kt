@@ -1,7 +1,9 @@
 package com.xnotes.core.infinite
 
+import com.xnotes.core.model.Arrange
 import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.Stroke
+import com.xnotes.core.model.arrangeOrder
 import com.xnotes.core.stroke.Sample
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
@@ -16,6 +18,12 @@ class BringToFrontTest {
     private fun stroke() = Stroke(
         Tool.PEN, ToolConfig(), mutableListOf(Sample(0.0, 0.0, 1.0), Sample(10.0, 10.0, 1.0)),
     )
+
+    /** Items never override equals, so a hash set of them already compares by identity. */
+    private fun bringToFrontOrder(all: List<CanvasItem>, selected: List<CanvasItem>): List<CanvasItem> {
+        val picked = HashSet(selected)
+        return arrangeOrder(all, { it in picked }, Arrange.FRONT) { it.bounds() }
+    }
 
     private fun assertOrder(expected: List<CanvasItem>, actual: List<CanvasItem>) {
         assertTrue("size ${actual.size}, expected ${expected.size}", expected.size == actual.size)

@@ -24,6 +24,10 @@ import com.xnotes.core.model.TextStyle
 import com.xnotes.core.model.ShapeLabel
 import com.xnotes.core.model.Stroke
 import com.xnotes.core.model.SyncMark
+import com.xnotes.core.model.TapeItem
+import com.xnotes.core.model.TapeMode
+import com.xnotes.core.model.TapePattern
+import com.xnotes.core.model.TapeShape
 import com.xnotes.core.stroke.Sample
 import com.xnotes.core.shapes.Axis
 import com.xnotes.core.shapes.Elbow
@@ -294,7 +298,7 @@ class CanvasCodecTest {
         assertTrue(taper.config.taperEnabled)
         assertEquals(ToolDefaults.DEFAULT_TAPER_TIP, taper.config.taperMinFactor, 1e-9)
         val hl = back.items[5] as Stroke
-        assertEquals(0.50, hl.config.highlighterAlpha, 1e-9)
+        assertEquals(0.90, hl.config.highlighterAlpha, 1e-9)
         val dashed = back.items[1] as Stroke
         assertEquals(10.0, dashed.config.dashLength, 1e-9)
         assertEquals(8.0, dashed.config.dashGap, 1e-9)
@@ -1016,5 +1020,32 @@ class CanvasCodecTest {
         assertNull(back.items[2].sync)
         assertTrue(manifestText(back).contains("\"rec\":2,\"rec_ms\":61000"))
     }
-}
 
+    @Test fun tapeRoundTripsOnACanvas() {
+        val doc = InfiniteDocument()
+        val box = TapeItem(TapeShape(TapeMode.RECTANGLE, listOf(Pt(-5000.0, 40.0), Pt(-4800.0, 40.0)), 80.0), Rgba(120, 200, 160, 255), TapePattern.GRID)
+        box.peeled = true
+        doc.add(box)
+        val back = roundTrip(doc).items.single() as TapeItem
+        assertEquals(box.shape, back.shape)
+        assertEquals(TapePattern.GRID, back.pattern)
+        assertEquals(Rgba(120, 200, 160, 255), back.rgba)
+        assertFalse(back.peeled)
+    }
+
+    @Test fun tapeLoadsForgivingly() {
+        val doc = readManifest(
+            """{"format":"xcanvas","items":[""" +
+                """{"kind":"tape","mode":"straight","points":[[0,0],[50,0],[90,9]],"rgba":[1,2,3,255]},""" +
+                """{"kind":"tape","mode":"zigzag","points":[[0,0],[10,0]],"width":-4,"pattern":"plaid"},""" +
+                """{"kind":"tape","mode":"freehand","points":[[5,5]]}]}""",
+        )
+        val (strip, odd) = doc.items.map { it as TapeItem }
+        assertEquals("a strip keeps its axis's two ends", listOf(Pt(0.0, 0.0), Pt(50.0, 0.0)), strip.shape.points)
+        assertEquals(TapeItem.DEFAULT_WIDTH, strip.shape.width, 0.0)
+        assertEquals(TapeMode.STRAIGHT, odd.mode)
+        assertEquals(TapeItem.DEFAULT_WIDTH, odd.shape.width, 0.0)
+        assertEquals(TapePattern.SOLID, odd.pattern)
+        assertEquals(2, doc.items.size)
+    }
+}

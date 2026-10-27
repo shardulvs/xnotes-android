@@ -1,0 +1,13 @@
+- Tape tool: hides content until peeled
+- Copy and move pages between notes
+- Merge notes
+- Pin notes
+- Group and arrange items, crop pictures
+- Rotate pages, PDFs too
+- Insert photos from the camera
+- Share a selection as an image
+- Arrow keys, Space and volume keys turn pages
+- Export and import settings
+- Fix palm rejection leaving the page scrolled
+- Fix canvas pictures not drawing until a pan
+- Fix explorer search closing with the keyboard

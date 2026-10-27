@@ -533,6 +533,12 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
                 } else {
                     pageBreaks.getOrNull(page)?.add(breakMark(flow, here, y, below = false))
                 }
+                // A break to a page further on skips the pages between; one already passed is a plain break.
+                val to = para.breakToPage
+                if (to != null && to > page && to < pageBoxes.size) {
+                    page = to
+                    y = contentRects[page].top
+                }
                 if (page > throughPage) break
             }
             val quote = para.quote

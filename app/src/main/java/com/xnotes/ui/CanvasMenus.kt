@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -74,7 +75,8 @@ interface SelectionMenuHost : SwatchHost {
     fun deleteSelection()
     fun cutSelection()
     fun copySelection()
-    fun bringToFront()
+    /** Move the selection up or down the stack of items it sits in, as one undo step. */
+    fun arrange(how: com.xnotes.core.model.Arrange)
     fun duplicateSelection()
 
     /** The audio pill selected on its own, which the bar offers to play. */
@@ -106,6 +108,12 @@ interface SelectionMenuHost : SwatchHost {
     /** The fills of the selected shapes that have one, for the restyle popup to open on. */
     fun selectionFills(): List<Rgba>
 
+    /** The first selected tape's pattern, for the restyle popup to open on; null when no tape is selected. */
+    fun selectionTapePattern(): com.xnotes.core.model.TapePattern?
+
+    /** Print [pattern] on every selected tape, as one undo step. */
+    fun setSelectionTapePattern(pattern: com.xnotes.core.model.TapePattern)
+
     /**
      * Recolour the selected shapes' fills in [color], each keeping its opacity; null fills each in
      * its outline's colour. A [preview] call skips history, and the next call without it records
@@ -136,11 +144,35 @@ interface SelectionMenuHost : SwatchHost {
 
     /** Mirror the selection about its own centre, left to right or [upsideDown], as one undo step. */
     fun mirrorSelection(upsideDown: Boolean)
+
+    /** Put the selection, drawn alone over what lies beneath it and cut to its bounds, on the clipboard as a picture. */
+    fun copySelectionAsImage()
+
+    /** That picture as a PNG ready for the share sheet, or null (with a message) when it could not be made. */
+    fun selectionImageForShare(): java.io.File?
+
+    /** True when the selection is two or more items not already one group. */
+    fun canGroupSelection(): Boolean
+
+    /** True when the selection holds a group. */
+    fun canUngroupSelection(): Boolean
+
+    /** Put the selection in one group, any groups in it merged, as one undo step. */
+    fun groupSelection()
+
+    /** Free every item of the groups in the selection, as one undo step. */
+    fun ungroupSelection()
+
+    /** True when the selection is a lone picture, which the bar offers to crop. */
+    fun canCropSelection(): Boolean
+
+    /** Put that picture in crop mode, the frame standing over it. */
+    fun startCrop()
 }
 
 /**
  * Floating action bar shown above a settled selection (spec-adjacent): delete,
- * cut, copy, bring-to-front, duplicate, and an overflow menu for the rest.
+ * cut, copy, arrange, duplicate, and an overflow menu for the rest.
  * Hidden while moving/resizing. Rotation is not here: everything the bar can be
  * shown over turns by its own grip.
  */
@@ -149,17 +181,20 @@ fun SelectionMenu(
     host: SelectionMenuHost,
     onSaveAudio: ((com.xnotes.core.model.AudioItem) -> Unit)? = null,
     onShareAudio: ((com.xnotes.core.model.AudioItem) -> Unit)? = null,
+    onShareImage: ((java.io.File) -> Unit)? = null,
 ) {
     val rect = host.selectionMenuRect ?: return
     val palette = LocalPalette.current
     val density = LocalDensity.current
     var overflowOpen by remember { mutableStateOf(false) }
+    var arrangeOpen by remember { mutableStateOf(false) }
     var styleOpen by remember { mutableStateOf(false) }
     var renamingAudio by remember { mutableStateOf<com.xnotes.core.model.AudioItem?>(null) }
 
     val audio = host.selectedAudio()
+    val crops = host.canCropSelection()
     val barHeightPx = with(density) { 48.dp.toPx() }
-    val barWidthPx = with(density) { ((if (audio != null) 7 else 6) * 46).dp.toPx() }
+    val barWidthPx = with(density) { ((6 + (if (audio != null) 1 else 0) + (if (crops) 1 else 0)) * 46).dp.toPx() }
     val gap = with(density) { 10.dp.toPx() }
     val centerX = ((rect.left + rect.right) / 2.0).toFloat()
     val xPx = (centerX - barWidthPx / 2f).coerceAtLeast(with(density) { 8.dp.toPx() })
@@ -184,10 +219,22 @@ fun SelectionMenu(
                 val playing = AudioPlayback.session?.let { it.item === audio && it.playing } == true
                 ActionIcon(if (playing) XnotesIcons.pause else XnotesIcons.play, stringResource(if (playing) R.string.audio_pause else R.string.audio_play)) { host.playSelectedAudio() }
             }
+            if (crops) ActionIcon(XnotesIcons.crop, stringResource(R.string.crop)) { host.startCrop() }
             ActionIcon(XnotesIcons.trash, stringResource(R.string.delete), shortcut = Keys.DELETE) { host.deleteSelection() }
             ActionIcon(XnotesIcons.cut, stringResource(R.string.cut)) { host.cutSelection() }
             ActionIcon(XnotesIcons.copy, stringResource(R.string.copy)) { host.copySelection(); host.dismissSelectionMenu() }
-            ActionIcon(XnotesIcons.front, stringResource(R.string.bring_to_front)) { host.bringToFront(); host.dismissSelectionMenu() }
+            Box {
+                ActionIcon(XnotesIcons.front, stringResource(R.string.arrange)) { arrangeOpen = true }
+                DropdownMenu(
+                    expanded = arrangeOpen,
+                    onDismissRequest = { arrangeOpen = false },
+                    properties = PopupProperties(focusable = false),
+                ) {
+                    for ((how, label) in ARRANGE_ROWS) {
+                        DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = { arrangeOpen = false; host.arrange(how) })
+                    }
+                }
+            }
             ActionIcon(XnotesIcons.duplicate, stringResource(R.string.duplicate)) { host.duplicateSelection() }
             Box {
                 ActionIcon(XnotesIcons.more, stringResource(R.string.more)) { overflowOpen = true }
@@ -251,6 +298,28 @@ fun SelectionMenu(
                         enabled = mirrors,
                         onClick = { overflowOpen = false; host.mirrorSelection(upsideDown = true) },
                     )
+                    if (host.canGroupSelection()) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.group)) },
+                            onClick = { overflowOpen = false; host.groupSelection() },
+                        )
+                    }
+                    if (host.canUngroupSelection()) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.ungroup)) },
+                            onClick = { overflowOpen = false; host.ungroupSelection() },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.copy_as_image)) },
+                        onClick = { overflowOpen = false; host.copySelectionAsImage() },
+                    )
+                    onShareImage?.let { share ->
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.share_as_image)) },
+                            onClick = { overflowOpen = false; host.selectionImageForShare()?.let(share) },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.lock)) },
                         onClick = { overflowOpen = false; host.lockSelection() },
@@ -267,6 +336,14 @@ fun SelectionMenu(
         }
     }
 }
+
+/** The Arrange menu's rows, top of the stack first. */
+private val ARRANGE_ROWS = listOf(
+    com.xnotes.core.model.Arrange.FRONT to R.string.bring_to_front,
+    com.xnotes.core.model.Arrange.FORWARD to R.string.bring_forward,
+    com.xnotes.core.model.Arrange.BACKWARD to R.string.send_backward,
+    com.xnotes.core.model.Arrange.BACK to R.string.send_to_back,
+)
 
 /** Rename a recording: its name, ready to type over. */
 @Composable
@@ -339,6 +416,18 @@ private fun SelectionStylePopup(host: SelectionMenuHost, onDismiss: () -> Unit) 
                         onDismiss = dismiss,
                         onPick = pick,
                     )
+                }
+            }
+            host.selectionTapePattern()?.let { opened ->
+                var pattern by remember { mutableStateOf(opened) }
+                StyleCaption(stringResource(R.string.caption_pattern))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (p in com.xnotes.core.model.TapePattern.entries) {
+                        ModeChip(stringResource(p.labelRes), selected = pattern == p) {
+                            pattern = p
+                            host.setSelectionTapePattern(p)
+                        }
+                    }
                 }
             }
             if (fills.isNotEmpty()) {
@@ -466,13 +555,13 @@ private fun StepDot(glyph: String, label: String, enabled: Boolean, onClick: () 
  * "Copy as image" button that renders the region and puts it on the system clipboard.
  */
 @Composable
-fun ScreenshotMenu(editor: Editor) {
+fun ScreenshotMenu(editor: Editor, onShare: (java.io.File) -> Unit) {
     val rect = editor.screenshotMenu ?: return
     val palette = LocalPalette.current
     val density = LocalDensity.current
 
     val barHeightPx = with(density) { 44.dp.toPx() }
-    val barWidthPx = with(density) { 170.dp.toPx() }
+    val barWidthPx = with(density) { 216.dp.toPx() }
     val gap = with(density) { 10.dp.toPx() }
     val centerX = ((rect.left + rect.right) / 2.0).toFloat()
     val xPx = (centerX - barWidthPx / 2f).coerceAtLeast(with(density) { 8.dp.toPx() })
@@ -486,23 +575,28 @@ fun ScreenshotMenu(editor: Editor) {
             .offset(with(density) { xPx.toDp() }, with(density) { yPx.toDp() })
             .clip(MaterialTheme.shapes.medium)
             .background(palette.menuBg.toComposeColor())
-            .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium)
-            .clickable { editor.copyScreenshotAsImage() }
-            .padding(horizontal = 14.dp, vertical = 11.dp),
+            .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            XnotesIcons.copy,
-            contentDescription = stringResource(R.string.copy_as_image),
-            tint = palette.text.toComposeColor(),
-            modifier = Modifier.size(20.dp),
-        )
-        Text(
-            stringResource(R.string.copy_as_image),
-            color = palette.text.toComposeColor(),
-            fontSize = 14.sp,
-            modifier = Modifier.padding(start = 8.dp),
-        )
+        Row(
+            Modifier.clickable { editor.copyScreenshotAsImage() }.padding(horizontal = 14.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                XnotesIcons.copy,
+                contentDescription = stringResource(R.string.copy_as_image),
+                tint = palette.text.toComposeColor(),
+                modifier = Modifier.size(20.dp),
+            )
+            Text(
+                stringResource(R.string.copy_as_image),
+                color = palette.text.toComposeColor(),
+                fontSize = 14.sp,
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
+        Box(Modifier.width(1.dp).height(24.dp).background(palette.border.toComposeColor()))
+        ActionIcon(XnotesIcons.share, stringResource(R.string.share)) { editor.screenshotImageForShare()?.let(onShare) }
     }
 }
 

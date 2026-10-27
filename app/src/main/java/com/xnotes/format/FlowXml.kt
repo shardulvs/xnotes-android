@@ -246,6 +246,7 @@ object FlowXml {
         if (para.headingLevel > 0) append(" xnotes:heading=\"${para.headingLevel}\"")
         para.codeLang?.let { append(" xnotes:code-lang=\"${escapeAttr(it)}\"") }
         if (para.rule) append(" xnotes:rule=\"true\"")
+        if (para.breakBefore) para.breakToPage?.let { append(" xnotes:break-page=\"$it\"") }
         // A quote's paragraphs share its number; a callout's say its kind as well.
         quotes[para]?.let { append(" xnotes:quote=\"$it\"") }
         para.quote?.kind?.let { append(" xnotes:callout=\"${it.id}\"") }
@@ -546,6 +547,7 @@ object FlowXml {
             headingLevel = attr(p, "heading")?.toIntOrNull()?.coerceIn(0, Paragraph.MAX_HEADING) ?: 0,
             rule = attr(p, "rule") == "true",
             breakBefore = props.breakBefore,
+            breakToPage = if (props.breakBefore) attr(p, "break-page")?.toIntOrNull()?.takeIf { it >= 0 } else null,
             listStart = (p.parentNode as? Element)
                 ?.takeIf { (it.localName ?: it.nodeName) == "list-item" }
                 ?.let { attr(it, "start-value")?.toIntOrNull() },

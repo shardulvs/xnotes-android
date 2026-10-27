@@ -1,7 +1,7 @@
 package com.xnotes.platform
 
 import com.xnotes.core.geometry.Rect
-import com.xnotes.core.model.withoutAudio
+import com.xnotes.core.model.forExport
 import android.content.Context
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
@@ -63,7 +63,7 @@ object CanvasPdfExporter {
         // A non-finite item is outside the page by construction (contentBounds skips it too), and
         // drawn anyway it would put a NaN coordinate into the content stream and corrupt the file.
         // Recordings are left out, and the page fits what is left.
-        val items = doc.items.filter { it.paintBounds().isFinite() }.withoutAudio()
+        val items = doc.items.filter { it.paintBounds().isFinite() }.forExport()
         val bounds = if (items.size == doc.itemCount) doc.contentBounds() else items.fold(null as Rect?) { acc, it -> acc?.union(it.paintBounds()) ?: it.paintBounds() }
         val layout = CanvasPdfLayout.of(bounds, doc.dpi)
         onProgress(0, items.size)

@@ -97,6 +97,7 @@ fun Toolbar(
     onImportTemplate: () -> Unit = {},
     onInsertAudio: () -> Unit = {},
     onRecordAudio: () -> Unit = {},
+    onTakePhoto: () -> Unit = {},
 ) {
     // The five stroke tools use the designed vector drawables (res/drawable/ic_stroke_*),
     // tinted at the call site like every other icon; the rest use the built-in line set.
@@ -116,6 +117,7 @@ fun Toolbar(
         Tool.TEXT to XnotesIcons.text,
         Tool.TEXT_BOX to XnotesIcons.textBox,
         Tool.MARKUP to XnotesIcons.markup,
+        Tool.TAPE to XnotesIcons.tape,
     )
     var configForTool by remember { mutableStateOf<Tool?>(null) }
     var switcherIndex by remember { mutableStateOf<Int?>(null) }
@@ -143,6 +145,7 @@ fun Toolbar(
                     onImportTemplate = onImportTemplate,
                     onInsertAudio = onInsertAudio,
                     onRecordAudio = onRecordAudio,
+                    onTakePhoto = onTakePhoto,
                 )
             }
         }
@@ -179,6 +182,7 @@ private fun ToolbarItemView(
     onImportTemplate: () -> Unit,
     onInsertAudio: () -> Unit,
     onRecordAudio: () -> Unit,
+    onTakePhoto: () -> Unit,
 ) {
     when (item) {
         // Canvas-only items; a stored paged layout can never hold one, so nothing is drawn.
@@ -201,7 +205,7 @@ private fun ToolbarItemView(
         ToolbarItem.PEN, ToolbarItem.DASHED, ToolbarItem.CALLIGRAPHY, ToolbarItem.SPEED,
         ToolbarItem.TAPER, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER, ToolbarItem.PAN,
         ToolbarItem.SELECT, ToolbarItem.LASSO, ToolbarItem.SCREENSHOT, ToolbarItem.SHAPE,
-        ToolbarItem.TEXT, ToolbarItem.TEXT_BOX -> {
+        ToolbarItem.TEXT, ToolbarItem.TEXT_BOX, ToolbarItem.TAPE -> {
             val tool = Tool.fromId(item.id)
             if (tool != null) ToolButton(editor, tool, toolIcons[tool], configForTool, setConfigForTool)
         }
@@ -215,7 +219,7 @@ private fun ToolbarItemView(
         ToolbarItem.RULER ->
             ToolbarIcon(XnotesIcons.ruler, stringResource(R.string.tool_ruler), active = editor.rulerVisible) { editor.toggleRuler() }
 
-        ToolbarItem.IMAGE -> NoteInsertMenu(editor, onInsertImage, onAddStickers, onInsertAudio, onRecordAudio)
+        ToolbarItem.IMAGE -> NoteInsertMenu(editor, onInsertImage, onTakePhoto, onAddStickers, onInsertAudio, onRecordAudio)
 
         ToolbarItem.UNDO -> ToolbarIcon(XnotesIcons.undo, stringResource(R.string.undo), enabled = editor.canUndo, shortcut = Keys.UNDO) { editor.undo() }
         ToolbarItem.REDO -> ToolbarIcon(XnotesIcons.redo, stringResource(R.string.redo), enabled = editor.canRedo, shortcut = Keys.REDO) { editor.redo() }
@@ -292,7 +296,7 @@ private fun ToolButton(
 ) {
     if (icon == null) return
     val armed = editor.tool == tool
-    val configurable = tool.isStroke || tool == Tool.SHAPE || tool == Tool.ERASER || tool == Tool.SELECT || tool == Tool.TEXT || tool == Tool.MARKUP
+    val configurable = tool.isStroke || tool == Tool.SHAPE || tool == Tool.ERASER || tool == Tool.SELECT || tool == Tool.TEXT || tool == Tool.MARKUP || tool == Tool.TAPE
     Box {
         ToolbarIcon(
             icon,
@@ -316,6 +320,7 @@ private fun ToolButton(
                 tool == Tool.SELECT -> SelectConfigPopup(editor) { setConfigForTool(null) }
                 tool == Tool.TEXT -> TextToolConfigPopup(editor) { setConfigForTool(null) }
                 tool == Tool.MARKUP -> MarkupToolPopup(editor) { setConfigForTool(null) }
+                tool == Tool.TAPE -> TapeConfigPopup(editor) { setConfigForTool(null) }
                 else -> ToolConfigPopup(editor, tool) { setConfigForTool(null) }
             }
         }
@@ -608,12 +613,13 @@ private fun PageCounter(current: Int, count: Int, modifier: Modifier) {
 }
 
 @Composable
-private fun NoteInsertMenu(editor: Editor, onInsertImage: () -> Unit, onAddStickers: () -> Unit, onInsertAudio: () -> Unit, onRecordAudio: () -> Unit) {
+private fun NoteInsertMenu(editor: Editor, onInsertImage: () -> Unit, onTakePhoto: () -> Unit, onAddStickers: () -> Unit, onInsertAudio: () -> Unit, onRecordAudio: () -> Unit) {
     var stickersOpen by remember { mutableStateOf(false) }
     InsertButton(
         owner = editor,
         imageRows = listOf(
             InsertRow(XnotesIcons.image, stringResource(R.string.insert_image_ellipsis)) { onInsertImage() },
+            InsertRow(XnotesIcons.camera, stringResource(R.string.take_photo)) { onTakePhoto() },
             InsertRow(XnotesIcons.paste, stringResource(R.string.paste_image)) { editor.pasteImage() },
             InsertRow(XnotesIcons.sticker, stringResource(R.string.stickers), more = true) { stickersOpen = true },
         ),
