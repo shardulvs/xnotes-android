@@ -20,14 +20,20 @@ import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.PageSizeChoice
 import com.xnotes.core.model.PageMargins
 import com.xnotes.core.model.PageStyle
+import com.xnotes.core.model.PageTurn
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.Routing
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.ShapeLabel
 import com.xnotes.core.model.Stroke
 import com.xnotes.core.model.SyncMark
+import com.xnotes.core.model.TapeItem
+import com.xnotes.core.model.TapeMode
+import com.xnotes.core.model.TapePattern
+import com.xnotes.core.model.TapeShape
 import com.xnotes.core.model.TextItem
 import com.xnotes.core.model.TextStyle
+import com.xnotes.core.model.keepBorrowedTemplateSettings
 import com.xnotes.core.pal.FontFace
 import com.xnotes.core.pal.ImageCodec
 import com.xnotes.core.pal.TextMeasurer
@@ -39,6 +45,7 @@ import com.xnotes.core.shapes.Elbow
 import com.xnotes.core.shapes.FreePath
 import com.xnotes.core.shapes.Head
 import com.xnotes.core.shapes.ShapeKind
+import com.xnotes.core.tools.InkPalette
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
 import com.xnotes.core.tools.ToolDefaults
@@ -221,7 +228,7 @@ class DocumentCodec(
 
     /** [page]'s map into PDF user space: its source page's, else its own points with y up. */
     private fun geometryOf(doc: Document, page: Page): PdfPageGeometry =
-        page.pdfPage?.let { pdfGeometry(doc, it) } ?: PdfPageGeometry.flipped(page.height * 72.0 / doc.dpi)
+        page.pdfKey?.let { pdfGeometry(doc, it) } ?: PdfPageGeometry.flipped(page.height * 72.0 / doc.dpi)
 
     /** The embedded templates [doc]'s styles name, in key order; built-in rulings need none. */
     internal fun usedTemplates(doc: Document): List<Pair<String, String>> =
@@ -327,6 +334,7 @@ class DocumentCodec(
         j.name("height").value(page.height)
         j.name("pdf_page")
         page.pdfPage?.let { j.value(it) } ?: j.nullValue()
+        if (page.pdfPage != null && page.pdfTurn != 0) j.name("pdf_turn").value(page.pdfTurn)
         if (page.cover) j.name("cover").value(true)
         j.name("items").beginArray()
         // Ids only for what a connector on this page glues to; a page without connectors writes none.
@@ -347,6 +355,7 @@ class DocumentCodec(
                 is TextItem -> writeText(j, item, ids[item])
                 is ShapeItem -> writeShape(j, item, ids[item])
                 is ConnectorItem -> writeConnector(j, item, ids)
+                is TapeItem -> writeTape(j, item)
                 else -> {} // unrecognized kind: not written
             }
         }
@@ -409,6 +418,7 @@ class DocumentCodec(
         if (s.straight) j.name("straight").value(true)
         s.sync?.let { writeSync(j, it) }
         if (s.locked) j.name("locked").value(true)
+        s.group?.let { j.name("group").value(it) }
         j.endObject()
     }
 
@@ -427,6 +437,7 @@ class DocumentCodec(
         if (item.flip != Flip.NONE) j.name("flip").value(item.flip.id)
         item.sync?.let { writeSync(j, it) }
         if (item.locked) j.name("locked").value(true)
+        item.group?.let { j.name("group").value(it) }
         j.endObject()
     }
 
@@ -440,6 +451,7 @@ class DocumentCodec(
         j.name("duration_ms").value(a.audio.durationMs)
         if (a.audio.peaks.isNotEmpty()) j.name("peaks").value(java.util.Base64.getEncoder().encodeToString(a.audio.peaks))
         if (a.locked) j.name("locked").value(true)
+        a.group?.let { j.name("group").value(it) }
         j.endObject()
     }
 
@@ -465,6 +477,7 @@ class DocumentCodec(
         if (t.face != TextItem.DEFAULT_FACE) j.name("font_face").value(t.face.id)
         t.sync?.let { writeSync(j, it) }
         if (t.locked) j.name("locked").value(true)
+        t.group?.let { j.name("group").value(it) }
         j.endObject()
     }
 
@@ -537,6 +550,7 @@ class DocumentCodec(
         }
         s.sync?.let { writeSync(j, it) }
         if (s.locked) j.name("locked").value(true)
+        s.group?.let { j.name("group").value(it) }
         j.endObject()
     }
 
@@ -545,6 +559,24 @@ class DocumentCodec(
      * then as itself: its routing, its two ends (glued ones naming their item's id and point) and its
      * route. Its style and label are a shape's.
      */
+    /** A tape: its mode, the points it runs along and its width, colour and pattern. Peeling is never saved. */
+    private fun writeTape(j: JsonWrite, t: TapeItem) {
+        val s = t.shape
+        j.beginObject()
+        j.name("kind").value(TapeItem.KIND)
+        j.name("mode").value(s.mode.id)
+        j.name("points").beginArray()
+        for (p in s.points) j.beginArray().value(p.x).value(p.y).endArray()
+        j.endArray()
+        j.name("width").value(s.width)
+        j.name("rgba")
+        writeRgba(j, t.rgba)
+        if (t.pattern != TapePattern.SOLID) j.name("pattern").value(t.pattern.id)
+        if (t.locked) j.name("locked").value(true)
+        t.group?.let { j.name("group").value(it) }
+        j.endObject()
+    }
+
     private fun writeConnector(j: JsonWrite, c: ConnectorItem, ids: Map<CanvasItem, Int>) {
         val line = PathFlattener.flatten(c.body(), STAND_IN_FLATTEN)
         val drawn = Rect.bounding(line)
@@ -601,6 +633,7 @@ class DocumentCodec(
         }
         c.sync?.let { writeSync(j, it) }
         if (c.locked) j.name("locked").value(true)
+        c.group?.let { j.name("group").value(it) }
         j.endObject()
     }
 
@@ -794,6 +827,7 @@ class DocumentCodec(
             return doc
         }
         doc.pages.addAll(m.pages)
+        if (m.writer < OWN_TEMPLATE_SETTINGS_SINCE) doc.keepBorrowedTemplateSettings()
         markupBytes?.let { MarkupsXfdf.readInto(doc.pages, it) }
 
         // Image entries stream out of the zip after the manifest, so image items materialize only
@@ -875,6 +909,7 @@ class DocumentCodec(
         val locked: Boolean,
         val id: Int?,
         val sync: SyncMark?,
+        val group: Int? = null,
     ) : Pending(index, asset)
 
     private class PendingAudio(
@@ -886,6 +921,7 @@ class DocumentCodec(
         val durationMs: Int,
         val peaks: ByteArray,
         val locked: Boolean,
+        val group: Int? = null,
     ) : Pending(index, asset)
 
     /**
@@ -996,6 +1032,7 @@ class DocumentCodec(
             var width = fallbackW
             var height = fallbackH
             var pdfPage: Int? = null
+            var pdfTurn = 0
             var cover = false
             var style = PageStyle()
             var margins = PageMargins()
@@ -1008,6 +1045,7 @@ class DocumentCodec(
                     "width" -> width = doubleOr(p, fallbackW)
                     "height" -> height = doubleOr(p, fallbackH)
                     "pdf_page" -> pdfPage = intOrNull(p)
+                    "pdf_turn" -> pdfTurn = intOrNull(p) ?: 0
                     "cover" -> cover = boolOr(p, false)
                     "style" -> style = parseStyle(p)
                     "margins" -> margins = parseMargins(p)
@@ -1023,7 +1061,10 @@ class DocumentCodec(
                 height = prev?.height ?: fallbackH
                 pdfPage = null
             }
-            val page = Page(width = width, height = height, items = items, pdfPage = pdfPage, style = style, margins = margins)
+            val page = Page(
+                width = width, height = height, items = items, pdfPage = pdfPage, style = style, margins = margins,
+                pdfTurn = if (pdfPage == null) 0 else PageTurn.normalize(pdfTurn),
+            )
             // Only the first page can be the cover; a flag anywhere else is dropped.
             page.cover = cover && m.pages.isEmpty()
             m.pages.add(page)
@@ -1043,6 +1084,7 @@ class DocumentCodec(
     /** Union of every kind's fields, so an item parses in one pass whatever its key order. */
     private class ItemScratch {
         var locked = false
+        var group: Int? = null
         var kind: String? = null
         var id: Int? = null
         var connector: ConnectorScratch? = null
@@ -1092,6 +1134,9 @@ class DocumentCodec(
         var peaks: ByteArray? = null
         var rec: Int? = null
         var recMs = 0
+        var mode: String? = null
+        var pattern: String? = null
+        var tapeWidth: Double? = null
     }
 
     /** Stroke config fields as written; null = absent, so defaults resolve exactly as before. */
@@ -1135,7 +1180,7 @@ class DocumentCodec(
                 "orientation" -> s.orientation = intOr(p, 0)
                 "angle" -> s.angle = doubleOr(p, 0.0)
                 "pos" -> s.pos = ptOrNull(p)
-                "width" -> s.width = doubleOr(p, TextItem.DEFAULT_WIDTH)
+                "width" -> s.width = doubleOr(p, TextItem.DEFAULT_WIDTH).also { s.tapeWidth = it }
                 "height" -> s.height = doubleOr(p, 0.0)
                 "text" -> s.text = stringOr(p, "")
                 "rgba" -> s.rgba = rgbaOrNull(p)
@@ -1163,12 +1208,15 @@ class DocumentCodec(
                 "dash_length" -> s.dashLength = doubleOr(p, 10.0)
                 "dash_gap" -> s.dashGap = doubleOr(p, 8.0)
                 "locked" -> s.locked = boolOr(p, false)
+                "group" -> s.group = intOrNull(p)
                 "rid" -> s.rid = intOr(p, 0)
                 "name" -> s.name = stringOr(p, "")
                 "duration_ms" -> s.durationMs = intOr(p, 0)
                 "peaks" -> s.peaks = stringOrNull(p)?.let { runCatching { java.util.Base64.getDecoder().decode(it) }.getOrNull() }
                 "rec" -> s.rec = intOrNull(p)
                 "rec_ms" -> s.recMs = intOr(p, 0)
+                "mode" -> s.mode = stringOrNull(p)
+                "pattern" -> s.pattern = stringOrNull(p)
                 else -> p.skipValue()
             }
         }
@@ -1183,7 +1231,7 @@ class DocumentCodec(
                     pending.add(
                         PendingImage(
                             items.size + pending.size, asset, s.rect, s.srcW, s.srcH,
-                            s.orientation, s.angle, Flip.fromId(s.flip), s.locked, s.id, sync,
+                            s.orientation, s.angle, Flip.fromId(s.flip), s.locked, s.id, sync, s.group,
                         ),
                     )
                 }
@@ -1191,7 +1239,7 @@ class DocumentCodec(
             AudioItem.KIND -> {
                 val asset = s.asset
                 if (!asset.isNullOrEmpty()) {
-                    pending.add(PendingAudio(items.size + pending.size, asset, s.rect, s.rid, s.name, s.durationMs, s.peaks ?: ByteArray(0), s.locked))
+                    pending.add(PendingAudio(items.size + pending.size, asset, s.rect, s.rid, s.name, s.durationMs, s.peaks ?: ByteArray(0), s.locked, s.group))
                 }
             }
             TextItem.KIND -> items.add(
@@ -1210,12 +1258,26 @@ class DocumentCodec(
                 val c = s.connector
                 items.add(if (c != null && s.kind == ShapeItem.KIND) buildConnector(s, c, glue) else buildShape(s))
             }
+            TapeItem.KIND -> buildTape(s)?.let { items.add(it) }
             else -> {} // unrecognized kind: skipped (forgiving)
         }
         if (items.size > before) glue.named(items[before], s.id)
         // Absent on every note written before locking existed, which reads back as unlocked.
         if (s.locked && items.size > before) items[before].locked = true
+        if (s.group != null && items.size > before) items[before].group = s.group
         if (sync != null && items.size > before) items[before].sync = sync
+    }
+
+    /** A tape, or null without the points it runs along. A strip or a rectangle keeps its axis's two ends. */
+    private fun buildTape(s: ItemScratch): TapeItem? {
+        val mode = TapeMode.fromId(s.mode)
+        val points = s.points ?: return null
+        val width = s.tapeWidth?.takeIf { it.isFinite() && it > 0.0 } ?: TapeItem.DEFAULT_WIDTH
+        return TapeItem(
+            TapeShape(mode, if (mode == TapeMode.FREEHAND) points else points.take(2), width),
+            s.rgba ?: InkPalette.DEFAULT,
+            TapePattern.fromId(s.pattern),
+        )
     }
 
     private fun buildStroke(s: ItemScratch): Stroke {
@@ -1591,6 +1653,7 @@ class DocumentCodec(
             .also {
                 it.locked = spec.locked
                 it.sync = spec.sync
+                it.group = spec.group
             }
     }
 
@@ -1599,7 +1662,10 @@ class DocumentCodec(
         val rect = spec.rect?.takeIf { it.w > 0.0 && it.h > 0.0 } ?: AudioItem.boxAt(Pt.ZERO, dpi).let { it.translate(-it.x, -it.y) }
         val ext = audioExt(spec.asset.substringAfterLast('.', ""))
         return AudioItem(AudioData(file, ext, spec.durationMs, spec.peaks), rect, spec.name, spec.rid, textMeasurer)
-            .also { it.locked = spec.locked }
+            .also {
+                it.locked = spec.locked
+                it.group = spec.group
+            }
     }
 
     // --- streaming value helpers (mirroring org.json's forgiving opt* coercions) ---
@@ -1730,11 +1796,14 @@ class DocumentCodec(
 
         /** The com.xnotes versionCode stamped into manifests this build writes ("writer"), kept
          *  in step with the release that carries it. Old readers ignore the unknown key. */
-        const val WRITER = 48
+        const val WRITER = 67
 
         /** Writers at/after this versionCode reduce ink samples at pen-up; ink from older
          *  writers (or files with no "writer" at all) is compacted once at load instead. */
         private const val SIMPLIFIED_SINCE = 43
+
+        /** Pages in notes from writers before this versionCode borrowed template settings; they are copied in at load. */
+        private const val OWN_TEMPLATE_SETTINGS_SINCE = 67
 
         private const val NOT_XNOTE = "Not an xnotes document"
 

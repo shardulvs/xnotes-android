@@ -15,6 +15,18 @@ class NewPageSizeTest {
         )
     }
 
+    @Test fun aPageIsReadBackAsTheNamedSizeItIsElseAsCustom() {
+        val (w, h) = PageSize.LETTER.pixels(Orientation.LANDSCAPE, 150)
+        assertEquals(PageSizeChoice(PageSize.LETTER, Orientation.LANDSCAPE), PageSizeChoice.of(w, h, 150))
+        val (aw, ah) = PageSize.A4.pixels(Orientation.PORTRAIT, 150)
+        assertEquals(PageSizeChoice(PageSize.A4, Orientation.PORTRAIT), PageSizeChoice.of(aw, ah, 150))
+        val odd = PageSizeChoice.of(1500.0, 750.0, 150)
+        assertEquals(PageSize.CUSTOM, odd.size)
+        assertEquals(254.0, odd.customWidthMm, 1e-6)
+        assertEquals(127.0, odd.customHeightMm, 1e-6)
+        assertEquals(1500.0 to 750.0, odd.pixels(150).let { (x, y) -> Math.round(x).toDouble() to Math.round(y).toDouble() })
+    }
+
     @Test fun aBlankPageTakesTheNotesNewPageSizeElseThePageBefore() {
         val doc = Document(dpi = 150)
         val before = Page(800.0, 600.0)

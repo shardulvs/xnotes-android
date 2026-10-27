@@ -90,6 +90,7 @@ class FlowEditor(private val flow: TextFlow) {
                 // A rule stays only where nothing was typed into it, and never continues.
                 rule = i == 0 && props.rule && runs.isEmpty(),
                 breakBefore = i == 0 && props.breakBefore,
+                breakToPage = if (i == 0 && props.breakBefore) props.breakToPage else null,
                 listStart = if (i == 0) props.listStart else null,
                 quote = props.quote,
             ).also { normalize(it) }

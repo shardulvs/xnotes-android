@@ -929,6 +929,24 @@ class CanvasState(
         clampScroll()
     }
 
+    /** The scroll, zoom and fit magnets at one moment, for [restoreView]. */
+    class ViewSnapshot(val zoom: Double, val scrollX: Double, val scrollY: Double, val fitWidth: Boolean, val fitHeight: Boolean)
+
+    fun snapshotView(): ViewSnapshot = ViewSnapshot(zoom, scrollX, scrollY, fitWidthActive, fitHeightActive)
+
+    /** Put the view back as [v] found it, rebuilding the page caches if the zoom moved. */
+    fun restoreView(v: ViewSnapshot) {
+        if (abs(v.zoom - zoom) >= 1e-9) {
+            zoom = v.zoom
+            invalidateCachesForZoom()
+        }
+        fitWidthActive = v.fitWidth
+        fitHeightActive = v.fitHeight
+        scrollX = v.scrollX
+        scrollY = v.scrollY
+        clampScroll()
+    }
+
     fun zoomByStep(zoomIn: Boolean) {
         val factor = if (zoomIn) ZOOM_STEP else 1.0 / ZOOM_STEP
         setZoomAnchored(clearCenter(), zoom * factor)

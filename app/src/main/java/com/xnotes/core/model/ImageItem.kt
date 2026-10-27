@@ -30,6 +30,7 @@ class ImageItem(
     override val kind = KIND
     override val resizable = true
     override var locked = false
+    override var group: Int? = null
     override var sync: SyncMark? = null
 
     override fun paint(r: Renderer) = r.drawImage(image, rect, orientation, angle, flip)

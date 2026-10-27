@@ -59,6 +59,8 @@ data class Preferences(
     val stylusButton1Tap: String = "none",
     /** Action mapped to the second page-key side button (keycode 93); "none" disables it. */
     val stylusButton2Tap: String = "none",
+    /** Whether the volume keys turn pages in a note (up for the previous page, down for the next). */
+    val volumeKeysTurnPages: Boolean = false,
     /** Horizontal margin (px) on each side of the page column; 0 ⇒ fit-width fills the screen. */
     val sideMargin: Double = 16.0,
     /** Whether the hairline outline around every page is left undrawn. */
@@ -145,6 +147,7 @@ data class Preferences(
         .put("stylus_button_tap", stylusButtonTap)
         .put("stylus_button_1_tap", stylusButton1Tap)
         .put("stylus_button_2_tap", stylusButton2Tap)
+        .put("volume_keys_turn_pages", volumeKeysTurnPages)
         .put("side_margin", sideMargin)
         .put("hide_page_borders", hidePageBorders)
         .put("min_zoom_enabled", minZoomEnabled)
@@ -265,6 +268,7 @@ data class Preferences(
                 stylusButtonTap = tapAction("stylus_button_tap"),
                 stylusButton1Tap = tapAction("stylus_button_1_tap"),
                 stylusButton2Tap = tapAction("stylus_button_2_tap"),
+                volumeKeysTurnPages = o.optBoolean("volume_keys_turn_pages", false),
                 sideMargin = o.optDouble("side_margin", 16.0).coerceIn(0.0, 80.0),
                 hidePageBorders = o.optBoolean("hide_page_borders", false),
                 minZoomEnabled = o.optBoolean("min_zoom_enabled", false),

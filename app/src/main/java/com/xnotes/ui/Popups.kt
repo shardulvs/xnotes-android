@@ -60,7 +60,11 @@ import com.xnotes.core.model.PageSizeChoice
 import com.xnotes.core.model.PagePattern
 import com.xnotes.core.model.PageTemplates
 import com.xnotes.core.model.PageStyle
+import com.xnotes.core.model.TapeMode
+import com.xnotes.core.model.TapePattern
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.model.TemplateMemory
+import com.xnotes.core.model.TemplateSettings
 import com.xnotes.core.pal.FontFace
 import com.xnotes.core.tools.EraseMode
 import com.xnotes.core.tools.MarkupMode
@@ -70,6 +74,7 @@ import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
 import com.xnotes.core.tools.ToolConversions
 import com.xnotes.platform.FontCatalog
+import com.xnotes.platform.TemplateLibrary
 import com.xnotes.settings.Preferences
 import com.xnotes.settings.SwatchRole
 import com.xnotes.ui.icons.XnotesIcons
@@ -137,7 +142,7 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
             // COLOUR override: "Default" follows the toolbar's active ink colour; pick a hue to pin
             // this tool to it regardless of the toolbar selection.
             StyleCaption(stringResource(R.string.caption_colour))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ModeChip(stringResource(R.string.default_choice), colorOverride == null) { colorOverride = null; emit() }
                 ColorPickerDot(
                     colorOverride,
@@ -179,7 +184,7 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
             // The highlighter's strength (translucency) and an optional straight-segment lock
             // (for ruling/underlining).
             if (tool == Tool.HIGHLIGHTER) {
-                SliderRow(stringResource(R.string.caption_intensity), intensity, 10f..90f) { intensity = it; emit() }
+                SliderRow(stringResource(R.string.caption_intensity), intensity, 10f..100f) { intensity = it; emit() }
                 ToggleRow(stringResource(R.string.caption_straight_line), straight) { straight = it; emit() }
                 // INVERSE swaps the multiply blend for a screen one, so the marker lightens the
                 // page instead of darkening it. A multiply has nothing to darken on a dark page.
@@ -202,11 +207,14 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
  * Page", each editing the paper colour and the template. Controls are tri-state: "Default"
  * leaves the field unset so it inherits the level below (page, document, then the global
  * page-colour preference or a built-in default). The All Pages template has no "Default", since
- * nothing sits below it but None. Customize opens the shown template on a page of its
- * own, with its colours and parameters. Like [ToolConfigPopup], the popup holds the edited style
- * locally and pushes each change to the [Editor] (which persists, but never undoes). The All Pages
- * tab also offers making its style the default stamped onto new notes, plus a Reset back to
- * all-Default. Below both tabs sits the note's new page size, which neither tab nor Reset touches.
+ * nothing sits below it but None. Customize opens the shown template on a page of its own, with
+ * its colours and parameters, which belong to that template alone; while the popup is open each
+ * level keeps them for every template it showed ([TemplateMemory]), so trying another loses
+ * nothing. Like [ToolConfigPopup], the popup holds the edited style locally and pushes each
+ * change to the [Editor] (which persists, but never undoes). The All Pages tab also offers making
+ * its style the default stamped onto new notes, plus a Reset back to all-Default, which forgets
+ * that memory too. Below both tabs sits the note's new page size, which neither tab nor Reset
+ * touches.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -220,27 +228,42 @@ fun StylesPopup(editor: Editor, onImportTemplate: () -> Unit = {}, onDismiss: ()
     // default, and stays for the rest of the popup session (so it doesn't vanish when checked).
     // An all-Default style hides it regardless (e.g. after Reset): there is nothing to save.
     var showNewNoteRow by remember { mutableStateOf(editor.documentStyle != editor.newNoteStyle) }
+    // What each level had for the templates it showed during this visit.
+    val memory = remember { TemplateMemory() }
+    // Both levels are read back: a template picked for All Pages also changes the pages following it.
+    fun synced() {
+        docStyle = editor.documentStyle
+        pageStyle = editor.currentPageStyle
+        if (docStyle != editor.newNoteStyle) showNewNoteRow = true
+    }
     fun apply(next: PageStyle) {
-        if (tab == 0) {
-            docStyle = next; editor.setDocumentStyle(next)
-            if (next != editor.newNoteStyle) showNewNoteRow = true
-        } else { pageStyle = next; editor.setCurrentPageStyle(next) }
+        if (tab == 0) editor.setDocumentStyle(next) else editor.setCurrentPageStyle(next)
+        synced()
+    }
+    fun pick(key: String?) {
+        if (tab == 0) editor.setDocumentTemplate(key ?: PageTemplates.NONE, memory) else editor.setCurrentPageTemplate(key, memory)
+        synced()
     }
 
     // What this level shows with no template of its own: the document's, on the page tab.
     val inherited = if (tab == 0) PageTemplates.NONE else docStyle.template ?: PageTemplates.NONE
     val shownKey = style.template ?: inherited
     val shown = if (shownKey == PageTemplates.NONE) null else editor.templateFor(shownKey)
-    // The level below whose parameters show through, when they belong to the shown template.
-    val lower = docStyle.takeIf { tab == 1 && (it.template == null || PageTemplates.compatible(it.template, shownKey)) }
-    val look = TemplateLook.of(style, if (tab == 1) docStyle else null, LocalPalette.current.paper)
+    // The level below whose settings show through, when it shows the same template.
+    val lower = docStyle.takeIf { tab == 1 && (it.template ?: PageTemplates.NONE) == shownKey }
+    val look = TemplateLook.of(style, lower, LocalPalette.current.paper, below = if (tab == 1) docStyle else null)
+    // A strip tile draws its template as this tab shows it, as last set during this visit, or as it comes.
+    fun drawing(e: TemplateLibrary.Entry): TemplateDrawing {
+        val kept = if (tab == 0) memory.recall(null, e.key) else editor.currentPage?.let { memory.recall(it, e.key) }
+        return TemplateDrawing.inStrip(e, style, shownKey, kept, docStyle.takeIf { tab == 1 }, look.paper, editor.documentDpi)
+    }
 
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
         if (customizing && shown != null) {
             TemplateCustomizer(editor, shown, shownKey, tab, style, lower, look, ::apply) { customizing = false }
         } else Column(Modifier.width(286.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
             PopupTitle(stringResource(R.string.title_styles))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ModeChip(stringResource(R.string.all_pages), tab == 0) { tab = 0 }
                 ModeChip(stringResource(R.string.current_page), tab == 1) { tab = 1 }
             }
@@ -262,9 +285,9 @@ fun StylesPopup(editor: Editor, onImportTemplate: () -> Unit = {}, onDismiss: ()
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 // With nothing below All Pages, an unset template there already means None.
-                if (tab == 1) ModeChip(stringResource(R.string.default_choice), style.template == null) { apply(style.withTemplate(null, inherited)) }
+                if (tab == 1) ModeChip(stringResource(R.string.default_choice), style.template == null) { pick(null) }
                 val none = style.template == PageTemplates.NONE || (tab == 0 && style.template == null)
-                ModeChip(stringResource(R.string.none), none) { apply(style.withTemplate(PageTemplates.NONE, inherited)) }
+                ModeChip(stringResource(R.string.none), none) { pick(PageTemplates.NONE) }
             }
             Spacer(Modifier.size(6.dp))
             val libraryVersion = TemplateLibraryUi.version
@@ -277,10 +300,8 @@ fun StylesPopup(editor: Editor, onImportTemplate: () -> Unit = {}, onDismiss: ()
                 entries = choices,
                 selected = style.template,
                 pageMm = editor.currentPageMm,
-                ink = look.ink,
-                accent = look.accent,
-                paper = look.paper,
-                onSelect = { apply(style.withTemplate(it, inherited)) },
+                drawing = ::drawing,
+                onSelect = { pick(it) },
                 onImport = onImportTemplate,
                 onRemove = { editor.removeTemplate(it) },
                 onKeep = { editor.keepNoteTemplate(it) },
@@ -321,7 +342,10 @@ fun StylesPopup(editor: Editor, onImportTemplate: () -> Unit = {}, onDismiss: ()
                     Spacer(Modifier.size(4.dp))
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    ModeChip(stringResource(R.string.reset), false) { apply(PageStyle()) }
+                    ModeChip(stringResource(R.string.reset), false) {
+                        editor.resetDocumentStyle(memory)
+                        synced()
+                    }
                 }
             }
 
@@ -361,7 +385,7 @@ private fun NewPageSizeControls(editor: Editor) {
                 }
             }
         } else {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ModeChip(stringResource(R.string.orientation_portrait), c.orientation == Orientation.PORTRAIT) {
                     apply(c.copy(orientation = Orientation.PORTRAIT))
                 }
@@ -375,7 +399,7 @@ private fun NewPageSizeControls(editor: Editor) {
 
 /** One side of a custom page in millimetres; only a value inside the settable range reaches [onChange]. */
 @Composable
-private fun SideField(label: String, mm: Double, modifier: Modifier, onChange: (Double) -> Unit) {
+internal fun SideField(label: String, mm: Double, modifier: Modifier, onChange: (Double) -> Unit) {
     Column(modifier) {
         StyleCaption(label)
         Spacer(Modifier.size(4.dp))
@@ -434,24 +458,16 @@ private fun TemplateCustomizer(
         }
 
         Spacer(Modifier.size(12.dp))
-        val numbers = HashMap<String, Double>()
-        lower?.params?.let(numbers::putAll)
-        style.params?.let(numbers::putAll)
-        val spacing = t.spacingParam
-        (style.spacing ?: lower?.spacing)?.let { px -> if (spacing != null) numbers[spacing.name] = px * 25.4 / dpi }
-        val colors = (lower?.colors ?: emptyMap()) + (style.colors ?: emptyMap())
+        val drawn = TemplateDrawing.of(t, style.settings, lower?.settings, look.paper, dpi)
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            TemplatePreview(
-                t, key, editor.currentPageMm, look.ink, look.accent, look.paper,
-                com.xnotes.core.template.TemplateValues(numbers, colors), 112.dp,
-            )
+            TemplatePreview(t, key, editor.currentPageMm, drawn.look.ink, drawn.look.accent, drawn.look.paper, drawn.values, 112.dp)
         }
 
         if (t.usesInk) {
             Spacer(Modifier.size(12.dp))
             StyleCaption(stringResource(R.string.caption_pattern_colour))
             Spacer(Modifier.size(4.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 ModeChip(stringResource(R.string.default_choice), style.patternColor == null) { apply(style.copy(patternColor = null)) }
                 // Circles hold the hue at full strength; OPACITY sets the alpha, so a pick keeps it.
                 SwatchCircles(editor, SwatchRole.LINES, style.patternColor?.copy(a = 255)) {
@@ -473,7 +489,7 @@ private fun TemplateCustomizer(
             Spacer(Modifier.size(4.dp))
             StyleCaption(stringResource(R.string.caption_accent_colour))
             Spacer(Modifier.size(4.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 ModeChip(stringResource(R.string.default_choice), style.accentColor == null) { apply(style.copy(accentColor = null)) }
                 SwatchCircles(editor, SwatchRole.ACCENT, style.accentColor?.copy(a = 255)) {
                     apply(style.copy(accentColor = it.copy(a = look.accent.a)))
@@ -486,7 +502,7 @@ private fun TemplateCustomizer(
         Spacer(Modifier.size(12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             ModeChip(stringResource(R.string.reset), false) {
-                apply(style.copy(patternColor = null, accentColor = null, spacing = null, params = null, colors = null))
+                apply(style.withSettings(TemplateSettings()))
             }
         }
     }
@@ -524,7 +540,7 @@ fun MarginsPopup(editor: Editor, onDismiss: () -> Unit) {
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
         Column(Modifier.width(286.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
             PopupTitle(stringResource(R.string.title_margins))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ModeChip(stringResource(R.string.all_pages), tab == 0) { tab = 0 }
                 ModeChip(stringResource(R.string.current_page), tab == 1) { tab = 1 }
             }
@@ -687,7 +703,7 @@ fun ViewMenuPopup(editor: Editor, onDismiss: () -> Unit) {
         Column(Modifier.width(300.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
             PopupTitle(stringResource(R.string.title_view))
             StyleCaption(stringResource(R.string.caption_viewing_mode))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ModeChip(stringResource(R.string.view_single), vs.mode == ViewingMode.SINGLE) { setMode(ViewingMode.SINGLE) }
                 ModeChip(stringResource(R.string.view_double), vs.mode == ViewingMode.DOUBLE) { setMode(ViewingMode.DOUBLE) }
                 ModeChip(stringResource(R.string.view_cover), vs.mode == ViewingMode.COVER) { setMode(ViewingMode.COVER) }
@@ -958,6 +974,71 @@ fun SelectConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
             // Re-arm the previous pen/highlighter once a selection action (move, resize, delete,
             // cut, copy, duplicate) finishes, so a quick edit doesn't strand you in select.
             ToggleRow(stringResource(R.string.caption_switch_back), switchBack) { switchBack = it; emit() }
+        }
+    }
+}
+
+/**
+ * Tape popup: what a drag lays (a straight strip, a rectangle or a freehand band), its colour and
+ * pattern, the width of a strip or band, and Reveal all / Cover all for every tape in the note or
+ * canvas. Like the pens, tape follows the toolbar's ink colour unless a colour is picked here.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun TapeConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
+    val base = remember { editor.toolConfig(Tool.TAPE) }
+    var mode by remember { mutableStateOf(base.tapeMode) }
+    var pattern by remember { mutableStateOf(base.tapePattern) }
+    var width by remember { mutableStateOf(base.baseWidth.toFloat()) }
+    var scale by remember { mutableStateOf(base.scale) }
+    var colorOverride by remember { mutableStateOf(base.colorOverride) }
+
+    fun emit() = editor.updateToolConfig(
+        Tool.TAPE,
+        base.copy(tapeMode = mode, tapePattern = pattern, baseWidth = width.toDouble(), scale = scale, colorOverride = colorOverride),
+    )
+
+    DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
+        Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
+            PopupTitle(stringResource(R.string.tool_tape))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (m in TapeMode.entries) ModeChip(stringResource(m.labelRes), selected = mode == m) { mode = m; emit() }
+            }
+            Spacer(Modifier.size(8.dp))
+            StyleCaption(stringResource(R.string.caption_colour))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                ModeChip(stringResource(R.string.default_choice), colorOverride == null) { colorOverride = null; emit() }
+                ColorPickerDot(
+                    colorOverride,
+                    custom = colorOverride != null,
+                    onPick = { colorOverride = it; emit() },
+                    dismissOnPick = false,
+                ) { d, p ->
+                    ColorPickerPopup(
+                        initial = colorOverride ?: editor.hostToolbarColors.getOrNull(editor.hostActiveColorIndex),
+                        recents = editor.hostRecentColors,
+                        onDismiss = d,
+                        onPick = p,
+                    )
+                }
+            }
+            Spacer(Modifier.size(8.dp))
+            StyleCaption(stringResource(R.string.caption_pattern))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (p in TapePattern.entries) ModeChip(stringResource(p.labelRes), selected = pattern == p) { pattern = p; emit() }
+            }
+            // A rectangle is as tall as it is dragged, so only a strip and a band take a width.
+            if (mode != TapeMode.RECTANGLE) {
+                Spacer(Modifier.size(4.dp))
+                val range = ToolConversions.widthRange(Tool.TAPE)
+                SliderRow(stringResource(R.string.caption_width), width, range.start.toFloat()..range.endInclusive.toFloat()) { width = it; emit() }
+                ToggleRow(stringResource(R.string.caption_scale), scale) { scale = it; emit() }
+            }
+            Spacer(Modifier.size(8.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                ModeChip(stringResource(R.string.tape_reveal_all), selected = false) { editor.setAllTapePeeled(true) }
+                ModeChip(stringResource(R.string.tape_cover_all), selected = false) { editor.setAllTapePeeled(false) }
+            }
         }
     }
 }
