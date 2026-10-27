@@ -1,0 +1,9 @@
+- Neighbouring pages stay attached as you swipe in horizontal mode
+- Pages turn on how far you pull, even slowly or with two fingers
+- Each page of a mixed-size PDF sits centred in horizontal mode
+- Let pages move freely in horizontal mode from the View menu
+- Page borders stay sharp at every zoom
+- The explorer's gallery fits more notes in a row
+- The Lenovo Tab Pen Plus button now works
+- Ink shows as you write on Honor and TCL devices
+- Minor fixes and improvements

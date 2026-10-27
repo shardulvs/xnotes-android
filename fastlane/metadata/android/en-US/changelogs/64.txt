@@ -1,0 +1,7 @@
+- New note opens full screen, with a preview of your pages and cover
+- Give a note a cover: Hokusai, Van Gogh, Earthrise, the Webb telescope and more
+- Make page and cover templates from your own pictures
+- Have an AI design a template, then import it
+- Choose the size of a note's new pages from the Styles menu
+- The xtemplate format is now open: github.com/shardulvs/xtemplate
+- Minor fixes and improvements

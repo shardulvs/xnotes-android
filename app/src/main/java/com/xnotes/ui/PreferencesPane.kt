@@ -84,14 +84,12 @@ import com.xnotes.settings.CornerStyle
 import com.xnotes.settings.ToolbarPosition
 import com.xnotes.settings.ToolbarSize
 import com.xnotes.settings.MaterialColourMode
+import com.xnotes.settings.SwatchRole
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
 import kotlinx.coroutines.delay
 
-internal val pageColorPresets = listOf(
-    Rgba(22, 22, 22), Rgba(13, 13, 13), Rgba(255, 255, 255), Rgba(247, 243, 233), Rgba(232, 232, 232),
-)
 /** One-tap filename templates offered beside the free-text field. */
 private val NAME_TEMPLATE_PRESETS = listOf(
     NameTemplate.DEFAULT,
@@ -123,6 +121,7 @@ fun PreferencesPane(
     onBackToHome: () -> Unit,
     onImportCodeTheme: () -> Unit = {},
     onImportFont: () -> Unit = {},
+    onBackup: (export: Boolean) -> Unit = {},
 ) {
     val palette = LocalPalette.current
     val focusManager = LocalFocusManager.current
@@ -304,6 +303,7 @@ fun PreferencesPane(
                     OptionDropdown(tapOptions, prefs.stylusButton2Tap) { update(prefs.copy(stylusButton2Tap = it)) }
                 }
             }
+            CheckRow(stringResource(R.string.pref_volume_keys_turn_pages), prefs.volumeKeysTurnPages) { update(prefs.copy(volumeKeysTurnPages = it)) }
 
             HorizontalDivider(color = palette.border.toComposeColor())
             SectionTitle(stringResource(R.string.pref_new_notes))
@@ -335,7 +335,7 @@ fun PreferencesPane(
             HorizontalDivider(color = palette.border.toComposeColor())
             SectionTitle(stringResource(R.string.pref_page))
             FieldLabel(stringResource(R.string.pref_default_page_size))
-            SizeDropdown(prefs.defaultPageSize) { update(prefs.copy(defaultPageSize = it)) }
+            SizeDropdown(prefs.defaultPageSize) { it?.let { size -> update(prefs.copy(defaultPageSize = size)) } }
             if (prefs.defaultPageSize == PageSize.CUSTOM) {
                 // A custom page is taken as typed, so the orientation chips have nothing to say
                 // about it and are left out rather than shown doing nothing.
@@ -370,18 +370,10 @@ fun PreferencesPane(
             )
             FieldLabel(stringResource(R.string.pref_page_colour))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                pageColorPresets.forEach { c ->
-                    ColorDot(c.toComposeColor(), prefs.pageColor == c) { update(prefs.copy(pageColor = c)) }
-                }
-                ColorPickerDot(
-                    prefs.pageColor,
-                    custom = prefs.pageColor != null && prefs.pageColor !in pageColorPresets,
-                    onPick = { update(prefs.copy(pageColor = it)) },
-                    dismissOnPick = false,
-                ) { onDismiss, onPick -> PageColorGridPopup(prefs.pageColor, onDismiss, onPick) }
+                SwatchCircles(editor, SwatchRole.PAPER, prefs.pageColor) { update(prefs.copy(pageColor = it)) }
             }
             CheckRow(stringResource(R.string.pref_page_colour_follows_theme), prefs.pageColor == null) {
-                update(prefs.copy(pageColor = if (it) null else pageColorPresets.first()))
+                update(prefs.copy(pageColor = if (it) null else editor.swatches(SwatchRole.PAPER).first()))
             }
 
             HorizontalDivider(color = palette.border.toComposeColor())
@@ -673,6 +665,14 @@ fun PreferencesPane(
                     sectionDropTarget = null
                 },
             )
+
+            HorizontalDivider(color = palette.border.toComposeColor())
+            SectionTitle(stringResource(R.string.pref_backup))
+            Text(stringResource(R.string.pref_backup_help), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { onBackup(true) }) { Text(stringResource(R.string.export_settings), fontSize = 13.sp) }
+                TextButton(onClick = { onBackup(false) }) { Text(stringResource(R.string.import_settings), fontSize = 13.sp) }
+            }
             Spacer(Modifier.size(8.dp))
         }
     }
@@ -854,6 +854,33 @@ internal fun ColorPickerDot(
     }
 }
 
+/** Where each [SwatchRole]'s circles are kept: the settings file, shared by every row of that role. */
+interface SwatchStore {
+    fun swatches(role: SwatchRole): List<Rgba>
+    fun setSwatch(role: SwatchRole, index: Int, color: Rgba)
+}
+
+/**
+ * A role's five colour circles. A tap applies one; a tap on the one already [selected] opens the
+ * picker and recolours that circle, as the toolbar's pen swatches do. Emits the circles straight
+ * into the caller's row, so a Default chip can sit before them.
+ */
+@Composable
+internal fun SwatchCircles(store: SwatchStore, role: SwatchRole, selected: Rgba?, onPick: (Rgba) -> Unit) {
+    var swatches by remember(role) { mutableStateOf(store.swatches(role)) }
+    var editing by remember { mutableStateOf<Int?>(null) }
+    swatches.forEachIndexed { i, c ->
+        Box {
+            ColorDot(c.toComposeColor(), selected == c) { if (selected == c) editing = i else onPick(c) }
+            if (editing == i) PageColorGridPopup(c, onDismiss = { editing = null }) { picked ->
+                swatches = swatches.toMutableList().also { it[i] = picked }
+                store.setSwatch(role, i, picked)
+                onPick(picked)
+            }
+        }
+    }
+}
+
 /** One tappable colour cell in a picker grid. */
 /**
  * The colour-code picker shown inside a note/folder's overflow menu: a None row to clear the colour,
@@ -910,41 +937,13 @@ private fun MillimetreField(label: String, value: Double, onChange: (Double) -> 
         value = text,
         onValueChange = { raw ->
             text = raw
-            raw.trim().toDoubleOrNull()?.let {
-                if (it in Preferences.CUSTOM_PAGE_MIN_MM..Preferences.CUSTOM_PAGE_MAX_MM) onChange(it)
-            }
+            parseMm(raw)?.let(onChange)
         },
         singleLine = true,
         label = { Text(label, fontSize = 12.sp) },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
         modifier = Modifier.width(136.dp),
     )
-}
-
-/** Drop a whole number's ".0" so the field reads "210", not "210.0". */
-private fun formatMm(v: Double): String =
-    if (v == Math.floor(v) && !v.isInfinite()) v.toInt().toString() else v.toString()
-
-@Composable
-private fun SizeDropdown(size: PageSize, onSelect: (PageSize) -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    val palette = LocalPalette.current
-    Box {
-        Box(
-            Modifier
-                .clip(MaterialTheme.shapes.small)
-                .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.small)
-                .clickable { expanded = true }
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-        ) {
-            Text(pageSizeLabel(size), color = palette.text.toComposeColor(), fontSize = 14.sp)
-        }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            PageSize.entries.forEach { s ->
-                DropdownMenuItem(text = { Text(pageSizeLabel(s)) }, onClick = { onSelect(s); expanded = false })
-            }
-        }
-    }
 }
 
 @Composable

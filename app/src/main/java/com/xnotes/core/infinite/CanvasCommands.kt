@@ -25,6 +25,25 @@ class AddCanvasItem(
     override fun undo() {
         doc.remove(item)
     }
+
+    override fun added() = listOf(item)
+}
+
+/** Put an item in at z position [at]: a dropped colour's fill, under the lines it fills. */
+class InsertCanvasItem(
+    private val doc: InfiniteDocument,
+    private val item: CanvasItem,
+    private val at: Int,
+) : Command {
+    override fun redo() {
+        if (!doc.containsRef(item)) doc.add(at.coerceIn(0, doc.itemCount), item)
+    }
+
+    override fun undo() {
+        doc.remove(item)
+    }
+
+    override fun added() = listOf(item)
 }
 
 /** Append several items as one edit (paste, duplicate, an eraser split's survivors). */
@@ -39,6 +58,8 @@ class AddCanvasItems(
     override fun undo() {
         doc.removeAll(items)
     }
+
+    override fun added() = items
 }
 
 /**
@@ -82,21 +103,6 @@ class ReplaceCanvasItems(
 ) : Command {
     override fun redo() = doc.replaceAll(after)
     override fun undo() = doc.replaceAll(before)
-}
-
-/**
- * The item list with [selected] moved to the end, keeping the order within each part.
- *
- * On a flat canvas, bringing something to the front is only this: z order is list order. Items are
- * compared by identity, never by equality, because two strokes with the same samples are still two
- * strokes.
- */
-fun bringToFrontOrder(all: List<CanvasItem>, selected: List<CanvasItem>): List<CanvasItem> {
-    if (selected.isEmpty()) return all
-    val moved = all.filter { item -> selected.any { it === item } }
-    if (moved.isEmpty()) return all
-    val kept = all.filter { item -> moved.none { it === item } }
-    return kept + moved
 }
 
 /** True when [a] and [b] hold the very same items in the very same order. */

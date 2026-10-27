@@ -53,4 +53,22 @@ class FlowLinksTest {
         assertTrue(links.all { it.uri == "https://abcdefghij.io/abc" })
         assertEquals(links[0].end, links[1].start)
     }
+
+    @Test
+    fun linkedTextLinksAcrossItsRunsAndWinsOverAnAddressInIt() {
+        val uri = "https://x.org"
+        val links = place(
+            Paragraph(
+                mutableListOf(
+                    Run("see "),
+                    Run("www.y.org", CharStyle(bold = true, link = uri)),
+                    Run(" here", CharStyle(link = uri)),
+                    Run(" and https://z.org"),
+                ),
+            ),
+        )
+        assertEquals(listOf(uri, "https://z.org"), links.map { it.uri })
+        assertEquals(4, links[0].start)
+        assertEquals(18, links[0].end)
+    }
 }

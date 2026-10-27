@@ -25,8 +25,8 @@ android {
         applicationId = "com.xnotes"
         minSdk = 26
         targetSdk = 36
-        versionCode = 63
-        versionName = "0.9.2"
+        versionCode = 67
+        versionName = "0.9.6"
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
         }
@@ -135,6 +135,7 @@ dependencies {
     implementation(libs.latex.base)
     implementation(libs.latex.parser)
     implementation(libs.latex.renderer)
+    implementation(libs.bundles.commonmark)
     debugImplementation(libs.androidx.ui.tooling)
 
     testImplementation(libs.junit)

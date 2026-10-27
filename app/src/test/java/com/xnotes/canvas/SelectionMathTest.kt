@@ -148,4 +148,21 @@ class SelectionMathTest {
         val members = SelectionMath.lassoMembers(pages, rects, loop(88.0, 88.0, 108.0, 108.0))
         assertEquals(listOf<CanvasItem>(note), members.map { it.item })
     }
+
+    private fun sq(l: Double, t: Double, size: Double) = listOf(Pt(l, t), Pt(l + size, t), Pt(l + size, t + size), Pt(l, t + size))
+
+    @Test fun aLassoRoundWritingInAFillLeavesTheFillOut() {
+        val face = ShapeItem.fill(listOf(sq(0.0, 0.0, 300.0), sq(100.0, 100.0, 50.0)), Rgba(240, 200, 160, 255))
+        val word = dot(200.0, 200.0)
+        val eye = dot(125.0, 125.0)
+        assertEquals(listOf<CanvasItem>(word), SelectionMath.lassoMembers(listOf(face, word), sq(180.0, 180.0, 40.0)))
+        assertEquals("round its hole, too", listOf<CanvasItem>(eye), SelectionMath.lassoMembers(listOf(face, eye), sq(90.0, 90.0, 70.0)))
+    }
+
+    @Test fun aRingCrossingAFillsEdgeOrAroundItTakesIt() {
+        val fill = ShapeItem.fill(listOf(sq(0.0, 0.0, 100.0)), Rgba(240, 200, 160, 255))
+        assertEquals(listOf<CanvasItem>(fill), SelectionMath.bandMembers(listOf(fill), Rect(80.0, 40.0, 50.0, 20.0)))
+        assertEquals(listOf<CanvasItem>(fill), SelectionMath.lassoMembers(listOf(fill), sq(-10.0, -10.0, 130.0)))
+        assertTrue(SelectionMath.bandMembers(listOf(fill), Rect(30.0, 30.0, 20.0, 20.0)).isEmpty())
+    }
 }

@@ -1,5 +1,6 @@
 package com.xnotes.ui.theme
 
+import com.xnotes.core.model.AudioLook
 import com.xnotes.core.model.Rgba
 import com.xnotes.settings.Preferences
 import kotlin.math.abs
@@ -95,6 +96,11 @@ data class Palette(
         private fun hex(rgb: Int): Rgba =
             Rgba((rgb shr 16) and 0xFF, (rgb shr 8) and 0xFF, rgb and 0xFF, 255)
     }
+}
+
+/** The audio pill's colours: this theme's accent over its paper. */
+fun Palette.audioLook(): AudioLook = with(materialColors) {
+    AudioLook.of(primary, onPrimary, primaryContainer, onPrimaryContainer, paper)
 }
 
 /** Small pure colour math for accent derivations (spec 11 §1). */

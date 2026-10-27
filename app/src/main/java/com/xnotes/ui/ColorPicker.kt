@@ -417,6 +417,7 @@ internal fun NativeField(
     onText: (String) -> Unit,
     modifier: Modifier = Modifier,
     numeric: Boolean = false,
+    decimal: Boolean = false,
     maxLen: Int = 6,
     hexOnly: Boolean = false,
     endAlign: Boolean = false,
@@ -435,10 +436,10 @@ internal fun NativeField(
                 includeFontPadding = false
                 isSingleLine = true
                 setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13f)
-                inputType = if (numeric) {
-                    InputType.TYPE_CLASS_NUMBER
-                } else {
-                    InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                inputType = when {
+                    decimal -> InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                    numeric -> InputType.TYPE_CLASS_NUMBER
+                    else -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
                 }
                 imeOptions = EditorInfo.IME_ACTION_DONE
                 gravity = (if (endAlign) Gravity.END else Gravity.START) or Gravity.CENTER_VERTICAL

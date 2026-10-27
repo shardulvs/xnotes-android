@@ -1,13 +1,18 @@
 package com.xnotes.core.template
 
 import com.xnotes.core.FakeRenderer
+import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.PagePattern
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.paintPagePattern
+import com.xnotes.core.pal.Pen
+import com.xnotes.core.pal.Renderer
 import com.xnotes.format.TemplateFormatException
+import com.xnotes.format.TemplatePackage
 import com.xnotes.format.TemplateReader
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -373,5 +378,187 @@ class TemplateTest {
                 assertEquals(old.ops.count { it == "saveLayerAlpha" }, neu.ops.count { it == "saveLayerAlpha" })
             }
         }
+    }
+    @Test
+    fun anImageIsALayerOfItsOwnInPaintOrder() {
+        val out = eval(
+            tpl(
+                """{ "type": "hline", "y": 10 }, { "type": "image", "src": "images/a.jpg", "opacity": 0.5 },
+                   { "type": "hline", "y": 20, "stroke": "accent" }, { "type": "hline", "y": 30 }""",
+            ),
+        )
+        assertEquals(3, out.layers.size)
+        assertEquals(ink, out.layers[0].color)
+        assertEquals(2, out.layers[0].prims.size)
+        val img = out.layers[1].image!!
+        assertEquals(128, out.layers[1].color.a)
+        assertEquals("images/a.jpg", img.src)
+        assertEquals(Rect(0.0, 0.0, 100.0, 100.0), img.box)
+        assertEquals(accent, out.layers[2].color)
+    }
+
+    @Test
+    fun anImageIsClippedToItsBoxAndTheClipInEffect() {
+        val out = eval(
+            tpl(
+                """{ "type": "group", "x": 10, "y": 10, "w": 50, "h": 50, "clip": true, "children": [
+                     { "type": "image", "src": "a.png", "x": 20, "y": 20, "w": 60, "h": 60, "fit": "cover", "position": "top left" } ] }""",
+            ),
+        )
+        val img = out.layers.single().image!!
+        assertEquals(Rect(30.0, 30.0, 60.0, 60.0), img.box)
+        assertEquals(Rect(30.0, 30.0, 30.0, 30.0), img.clip)
+        assertEquals(ImageFit.COVER, img.fit)
+        assertEquals(0.0, img.posX, 0.0)
+        assertEquals(0.0, img.posY, 0.0)
+    }
+
+    @Test
+    fun anImageWithABadSourceOrNoAreaDrawsNothing() {
+        val out = eval(
+            tpl(
+                """{ "type": "image", "src": "../a.png" }, { "type": "image", "src": "/a.png" }, { "type": "image" },
+                   { "type": "image", "src": "a.png", "w": 0 }, { "type": "image", "src": "a.png", "opacity": 0 }""",
+            ),
+        )
+        assertTrue(out.layers.isEmpty())
+    }
+
+    @Test
+    fun fitAndPositionPlaceThePicture() {
+        val box = Rect(0.0, 0.0, 100.0, 50.0)
+        fun place(fit: ImageFit, px: Double, py: Double, iw: Double, ih: Double) = TImage("a", box, box, fit, px, py).dest(iw, ih)
+        // A square picture in a wide box: contain fits its height, cover its width.
+        assertEquals(Rect(25.0, 0.0, 50.0, 50.0), place(ImageFit.CONTAIN, 0.5, 0.5, 10.0, 10.0))
+        assertEquals(Rect(0.0, 0.0, 50.0, 50.0), place(ImageFit.CONTAIN, 0.0, 0.5, 10.0, 10.0))
+        assertEquals(Rect(50.0, 0.0, 50.0, 50.0), place(ImageFit.CONTAIN, 1.0, 0.5, 10.0, 10.0))
+        assertEquals(Rect(0.0, -25.0, 100.0, 100.0), place(ImageFit.COVER, 0.5, 0.5, 10.0, 10.0))
+        assertEquals(Rect(0.0, 0.0, 100.0, 100.0), place(ImageFit.COVER, 0.5, 0.0, 10.0, 10.0))
+        assertEquals(Rect(0.0, -50.0, 100.0, 100.0), place(ImageFit.COVER, 0.5, 1.0, 10.0, 10.0))
+        assertEquals(box, place(ImageFit.STRETCH, 0.0, 0.0, 10.0, 10.0))
+    }
+
+    @Test
+    fun aPictureIsDrawnClippedAndFadedAndSkippedWithoutOne() {
+        val out = eval(tpl("""{ "type": "image", "src": "a.png", "fit": "cover", "opacity": 0.5 }"""), w = 100.0, h = 50.0)
+        val withPicture = FakeRenderer()
+        val data = com.xnotes.core.model.ImageData(File("a.png"), 10, 10)
+        TemplatePainter.paint(withPicture, out, 2.0, Rect(0.0, 0.0, 200.0, 100.0)) { if (it == "a.png") data else null }
+        assertEquals(listOf("save", "clipRect", "saveLayerAlpha", "drawImage", "restore", "restore"), withPicture.ops)
+        assertEquals(Rect(0.0, 0.0, 200.0, 100.0), withPicture.clips.single())
+        assertEquals(Rect(0.0, -50.0, 200.0, 200.0), withPicture.images.single())
+
+        val without = FakeRenderer()
+        TemplatePainter.paint(without, out, 2.0, Rect(0.0, 0.0, 200.0, 100.0))
+        assertTrue(without.ops.isEmpty())
+    }
+    @Test
+    fun aThumbnailsLinesAndDotsKeepAtLeastTheirMinimum() {
+        val out = eval(
+            tpl(
+                """{ "type": "hline", "y": 10, "strokeWidth": 0.1 }, { "type": "hline", "y": 20, "strokeWidth": 3 },
+                   { "type": "dot", "cx": 5, "cy": 5, "r": 0.1 }, { "type": "circle", "cx": 50, "cy": 50, "r": 20, "fill": "ink" }""",
+            ),
+        )
+        fun paint(minLine: Double): Pair<List<Double>, List<Double>> {
+            val widths = ArrayList<Double>()
+            val radii = ArrayList<Double>()
+            val r = object : Renderer by FakeRenderer() {
+                override fun strokePolyline(points: List<Pt>, pen: Pen) { widths += pen.width }
+                override fun fillCircle(center: Pt, radius: Double, color: Rgba) { radii += radius }
+            }
+            TemplatePainter.paint(r, out, 1.0, Rect(0.0, 0.0, 100.0, 100.0), minLine = minLine)
+            return widths to radii
+        }
+        assertEquals(listOf(0.1, 3.0) to listOf(0.1, 20.0), paint(0.0))
+        assertEquals(listOf(1.0, 3.0) to listOf(0.75, 20.0), paint(1.0))
+    }
+
+    @Test
+    fun aTemplateUsesInkOnlyWhereSomethingDrawsInIt() {
+        fun inks(items: String, extra: String = "") = TemplateReader.read(tpl(items, extra)).usesInk
+        assertTrue(inks("""{ "type": "hline", "y": 10 }"""))
+        assertTrue(inks("""{ "type": "dot", "cx": 5, "cy": 5 }"""))
+        assertTrue(inks("""{ "type": "rect", "x": 0, "y": 0, "w": 10, "h": 10, "fill": "ink", "stroke": "none" }"""))
+        assertTrue(inks("""{ "type": "group", "stroke": "none", "children": [ { "type": "hline", "y": 1, "stroke": "ink" } ] }"""))
+        assertFalse(inks("""{ "type": "image", "src": "a.png" }"""))
+        assertFalse(inks("""{ "type": "hline", "y": 10 }""", """ "stroke": "accent", """))
+        assertFalse(inks("""{ "type": "rect", "x": 0, "y": 0, "w": 10, "h": 10, "fill": "#123456", "stroke": "none" }"""))
+        assertFalse(inks("""{ "type": "dot", "cx": 5, "cy": 5, "fill": "accent" }"""))
+        for (name in listOf("lines", "grid", "dots")) assertTrue(name, bundled(name).usesInk)
+    }
+
+    @Test
+    fun theBundledAiGuideHoldsTheSpecAndExamplesThatRead() {
+        val text = File("src/main/assets/templates/AI.md").readText()
+        assertTrue(text.contains("\n# xtemplate for AI assistants\n"))
+        assertTrue(text.contains("\n## xtemplate format, version 1\n"))
+        val examples = text.substringAfter("\n## Examples\n").substringBefore("\n## Your turn\n")
+        val blocks = Regex("```json\n(.*?)\n```", RegexOption.DOT_MATCHES_ALL).findAll(examples).map { it.groupValues[1] }.toList()
+        assertEquals(7, blocks.size)
+        for (b in blocks) TemplateReader.read(b)
+    }
+
+    @Test
+    fun everyBundledCoverIsACoverAndDrawsOnAnyPageShape() {
+        val covers = File("src/main/assets/templates/examples").listFiles { f -> f.name.startsWith("cover-") }!!.sortedBy { it.name }
+        assertEquals(10, covers.size)
+        for (f in covers) {
+            assertTrue("${f.name} is a package", TemplatePackage.isPackage(f))
+            val t = TemplateReader.read(TemplatePackage.readJson(f))
+            assertEquals(f.name, TemplateKind.COVER, t.kind)
+            for ((w, h) in listOf(210.0 to 297.0, 297.0 to 210.0, 190.5 to 338.7)) {
+                val out = TemplateEval().evaluate(t, TemplatePage(w, h, Rect(0.0, 0.0, w, h), ink, accent))
+                // The board fills the whole page first, in its own colour, so a picture that fails still leaves a cover.
+                val board = out.layers.first().prims.first()
+                assertTrue("${f.name} starts with its board", board is TPrim.FillRect && board.rect == Rect(0.0, 0.0, w, h))
+                assertTrue("${f.name} at $w x $h draws a picture", out.layers.any { it.image != null })
+            }
+        }
+    }
+
+    @Test
+    fun everyBundledCoverHasALabelOnThePageThatSizeZeroHides() {
+        val covers = File("src/main/assets/templates/examples").listFiles { f -> f.name.startsWith("cover-") }!!
+        for (f in covers) {
+            val t = TemplateReader.read(TemplatePackage.readJson(f))
+            for ((w, h) in listOf(210.0 to 297.0, 297.0 to 210.0, 190.5 to 338.7)) {
+                fun eval(numbers: Map<String, Double>) =
+                    TemplateEval().evaluate(t, TemplatePage(w, h, Rect(0.0, 0.0, w, h), ink, accent, TemplateValues(numbers)))
+                val shown = eval(emptyMap())
+                // The label is the last three shapes, its shadow, its paper and its rule, each a colour of its own.
+                assertEquals("${f.name} at $w x $h", 3, shown.primCount - eval(mapOf("labelSize" to 0.0)).primCount)
+                for (p in shown.layers.takeLast(3).flatMap { it.prims }) {
+                    val b = p.bounds
+                    assertTrue("${f.name} label on a $w x $h page", b.x >= 0.0 && b.y >= 0.0 && b.x + b.w <= w && b.y + b.h <= h)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun everyPictureABundledCoverNamesIsAWebPInItsPackage() {
+        val covers = File("src/main/assets/templates/examples").listFiles { f -> f.name.startsWith("cover-") }!!
+        for (f in covers) {
+            val out = TemplateEval().evaluate(TemplateReader.read(TemplatePackage.readJson(f)), TemplatePage(210.0, 297.0, ink = ink, accent = accent))
+            for (src in out.layers.mapNotNull { it.image?.src }.toSet()) {
+                val tmp = File.createTempFile("pic", ".webp")
+                try {
+                    assertTrue("${f.name} holds $src", TemplatePackage.extract(f, src, tmp))
+                    val head = tmp.readBytes().copyOf(12)
+                    assertEquals("${f.name} $src", "RIFF", String(head, 0, 4, Charsets.US_ASCII))
+                    assertEquals("${f.name} $src", "WEBP", String(head, 8, 4, Charsets.US_ASCII))
+                } finally {
+                    tmp.delete()
+                }
+            }
+        }
+    }
+
+    @Test
+    fun everyOtherBundledTemplateIsAPage() {
+        val pages = File("src/main/assets/templates").walk().filter { it.isFile && it.name.endsWith(".xtemplate") && !it.name.startsWith("cover-") }.toList()
+        assertTrue(pages.size >= 20)
+        for (f in pages) assertEquals(f.name, TemplateKind.PAGE, TemplateReader.read(f.readText()).kind)
     }
 }

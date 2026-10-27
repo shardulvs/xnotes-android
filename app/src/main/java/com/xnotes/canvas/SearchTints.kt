@@ -267,19 +267,7 @@ class SearchTints(
     }
 
     /** Scrolls the least that centres [c] on whichever axis it is off screen. */
-    private fun scrollIntoView(c: Rect) {
-        val tl = state.contentToViewport(Pt(c.left, c.top))
-        val br = state.contentToViewport(Pt(c.right, c.bottom))
-        val margin = REVEAL_MARGIN_DP * state.devicePxPerDp
-        val left = state.insetLeft + margin
-        val right = state.viewportW - state.insetRight - margin
-        val top = state.insetTop + margin
-        val bottom = state.viewportH - state.insetBottom - margin
-        if (right <= left || bottom <= top) return
-        val dx = if (tl.x < left || br.x > right) (tl.x + br.x) / 2 - (left + right) / 2 else 0.0
-        val dy = if (tl.y < top || br.y > bottom) (tl.y + br.y) / 2 - (top + bottom) / 2 else 0.0
-        if (dx != 0.0 || dy != 0.0) state.scrollBy(dx, dy)
-    }
+    private fun scrollIntoView(c: Rect) = state.scrollIntoView(c, REVEAL_MARGIN_DP * state.devicePxPerDp)
 
     private companion object {
         /** Accent at 25% for every match, 45% for the current one. */

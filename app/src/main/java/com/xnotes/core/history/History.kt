@@ -23,8 +23,12 @@ class History(private val limit: Int = DEFAULT_LIMIT) {
     val nextUndo: Command? get() = undoStack.lastOrNull()
     val nextRedo: Command? get() = redoStack.lastOrNull()
 
+    /** Told of every new edit as it is recorded; never of an undo or a redo. */
+    var onPush: ((Command) -> Unit)? = null
+
     /** Record an already-applied edit and invalidate any redo branch. */
     fun push(command: Command) {
+        onPush?.invoke(command)
         undoStack.addLast(command)
         while (undoStack.size > limit) undoStack.removeFirst() // the oldest edit becomes unreachable
         redoStack.clear()

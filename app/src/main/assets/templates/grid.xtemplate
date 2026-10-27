@@ -3,6 +3,7 @@
   "id": "com.xnotes.grid",
   "name": "Grid",
   "license": "MIT",
+  "tags": ["grid"],
   "params": {
     "spacing": { "type": "length", "default": "10.837333mm", "min": "2.709333mm", "max": "33.866667mm",
                  "label": "Spacing", "role": "spacing" }

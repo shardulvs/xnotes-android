@@ -107,4 +107,20 @@ class FlowStructureTest {
         assertFalse(root.prune { false })
         assertTrue(root.kids.isEmpty())
     }
+
+    @Test
+    fun aQuoteIsABlockQuoteAndACalloutReadsItsTitleFirst() {
+        val note = com.xnotes.core.text.FlowQuote(com.xnotes.core.text.CalloutKind.NOTE)
+        val plain = com.xnotes.core.text.FlowQuote()
+        val a = para("a").apply { quote = note }
+        val b = para("b", list = ListKind.BULLET).apply { quote = note }
+        val c = para("c").apply { quote = plain }
+        val t = tree(para("before"), a, b, c, para("after"))
+        assertEquals(listOf("P", "BlockQuote", "BlockQuote", "P"), t.blocks.map { it.type })
+        assertEquals("BlockQuote(P P L(LI(Lbl LBody)))", shape(t.blocks[1]))
+        assertSame(t.blocks[1].kids[0], t.titleOf(1))
+        assertSame(t.blocks[1].kids[1], t.textOf(1))
+        assertEquals("BlockQuote(P)", shape(t.blocks[2]))
+        assertSame(t.textOf(3), t.titleOf(3))
+    }
 }

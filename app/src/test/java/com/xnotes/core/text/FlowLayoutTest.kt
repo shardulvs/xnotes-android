@@ -1,6 +1,7 @@
 package com.xnotes.core.text
 
 import com.xnotes.core.FakeTextMeasurer
+import com.xnotes.core.model.Rgba
 import com.xnotes.core.pal.FontFace
 import com.xnotes.core.pal.LineMetrics
 import org.junit.Assert.assertEquals
@@ -210,5 +211,16 @@ class FlowLayoutTest {
             assertEquals(40.0 to grown.height, caretPreviewSpan(40.0, held, pending))
             assertEquals(40.0 to pending.height, caretPreviewSpan(40.0, null, pending))
         }
+    }
+
+    @Test
+    fun innermostCodeSpanColoursNestedText() {
+        val string = Rgba(1, 1, 1, 255)
+        val escape = Rgba(2, 2, 2, 255)
+        layout.codeSpans = { listOf(CodeSpan(0, 8, string), CodeSpan(3, 5, escape), CodeSpan(3, 5, string)) }
+        val p = para("\"ab\\ncd\"").apply { codeLang = "go" }
+        val segs = layout.layout(flowWith(p), listOf(PageBox(400.0, 200.0)), 150).pages[0].lines[0].segs
+        assertEquals(listOf("\"ab", "\\n", "cd\""), segs.map { it.text })
+        assertEquals(listOf(string, escape, string), segs.map { it.style.color })
     }
 }

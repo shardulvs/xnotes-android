@@ -89,6 +89,13 @@ class FlowTableLayoutTest {
     }
 
     @Test
+    fun aTableOverflowsOntoPagesOfTheAddedSize() {
+        val f = flow(2, List(12) { "x" })
+        assertTrue(layout.layout(f, pages(1, 50.0), 150).extraPagesNeeded > 1)
+        assertEquals(1, layout.layout(f, pages(1, 50.0), 150, addedPage = PageBox(200.0, 400.0)).extraPagesNeeded)
+    }
+
+    @Test
     fun aRowTallerThanAPageSplitsByLines() {
         val frame = layout.layout(flow(1, listOf("1\n2\n3\n4\n5")), pages(3, 50.0), 150)
         assertTrue(frame.pages[0].tables.isEmpty())

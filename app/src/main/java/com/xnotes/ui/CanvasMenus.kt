@@ -1,5 +1,6 @@
 package com.xnotes.ui
 
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.border
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -73,8 +75,21 @@ interface SelectionMenuHost : SwatchHost {
     fun deleteSelection()
     fun cutSelection()
     fun copySelection()
-    fun bringToFront()
+    /** Move the selection up or down the stack of items it sits in, as one undo step. */
+    fun arrange(how: com.xnotes.core.model.Arrange)
     fun duplicateSelection()
+
+    /** The audio pill selected on its own, which the bar offers to play. */
+    fun selectedAudio(): com.xnotes.core.model.AudioItem?
+
+    /** Play or pause [selectedAudio]: the way to play it when a finger draws rather than pans. */
+    fun playSelectedAudio()
+
+    /** Give [selectedAudio] a new name, undoably. */
+    fun renameSelectedAudio(name: String)
+
+    /** Untie the ink written during [selectedAudio] from it, undoably, with Undo on the message. */
+    fun unlinkSelectedAudio()
     fun dismissSelectionMenu()
 
     /** Pin the selection where it is and put it away; a held finger over it offers to release it. */
@@ -92,6 +107,12 @@ interface SelectionMenuHost : SwatchHost {
 
     /** The fills of the selected shapes that have one, for the restyle popup to open on. */
     fun selectionFills(): List<Rgba>
+
+    /** The first selected tape's pattern, for the restyle popup to open on; null when no tape is selected. */
+    fun selectionTapePattern(): com.xnotes.core.model.TapePattern?
+
+    /** Print [pattern] on every selected tape, as one undo step. */
+    fun setSelectionTapePattern(pattern: com.xnotes.core.model.TapePattern)
 
     /**
      * Recolour the selected shapes' fills in [color], each keeping its opacity; null fills each in
@@ -123,24 +144,57 @@ interface SelectionMenuHost : SwatchHost {
 
     /** Mirror the selection about its own centre, left to right or [upsideDown], as one undo step. */
     fun mirrorSelection(upsideDown: Boolean)
+
+    /** Put the selection, drawn alone over what lies beneath it and cut to its bounds, on the clipboard as a picture. */
+    fun copySelectionAsImage()
+
+    /** That picture as a PNG ready for the share sheet, or null (with a message) when it could not be made. */
+    fun selectionImageForShare(): java.io.File?
+
+    /** True when the selection is two or more items not already one group. */
+    fun canGroupSelection(): Boolean
+
+    /** True when the selection holds a group. */
+    fun canUngroupSelection(): Boolean
+
+    /** Put the selection in one group, any groups in it merged, as one undo step. */
+    fun groupSelection()
+
+    /** Free every item of the groups in the selection, as one undo step. */
+    fun ungroupSelection()
+
+    /** True when the selection is a lone picture, which the bar offers to crop. */
+    fun canCropSelection(): Boolean
+
+    /** Put that picture in crop mode, the frame standing over it. */
+    fun startCrop()
 }
 
 /**
  * Floating action bar shown above a settled selection (spec-adjacent): delete,
- * cut, copy, bring-to-front, duplicate, and an overflow menu for the rest.
+ * cut, copy, arrange, duplicate, and an overflow menu for the rest.
  * Hidden while moving/resizing. Rotation is not here: everything the bar can be
  * shown over turns by its own grip.
  */
 @Composable
-fun SelectionMenu(host: SelectionMenuHost) {
+fun SelectionMenu(
+    host: SelectionMenuHost,
+    onSaveAudio: ((com.xnotes.core.model.AudioItem) -> Unit)? = null,
+    onShareAudio: ((com.xnotes.core.model.AudioItem) -> Unit)? = null,
+    onShareImage: ((java.io.File) -> Unit)? = null,
+) {
     val rect = host.selectionMenuRect ?: return
     val palette = LocalPalette.current
     val density = LocalDensity.current
     var overflowOpen by remember { mutableStateOf(false) }
+    var arrangeOpen by remember { mutableStateOf(false) }
     var styleOpen by remember { mutableStateOf(false) }
+    var renamingAudio by remember { mutableStateOf<com.xnotes.core.model.AudioItem?>(null) }
 
+    val audio = host.selectedAudio()
+    val crops = host.canCropSelection()
     val barHeightPx = with(density) { 48.dp.toPx() }
-    val barWidthPx = with(density) { (6 * 46).dp.toPx() }
+    val barWidthPx = with(density) { ((6 + (if (audio != null) 1 else 0) + (if (crops) 1 else 0)) * 46).dp.toPx() }
     val gap = with(density) { 10.dp.toPx() }
     val centerX = ((rect.left + rect.right) / 2.0).toFloat()
     val xPx = (centerX - barWidthPx / 2f).coerceAtLeast(with(density) { 8.dp.toPx() })
@@ -161,10 +215,26 @@ fun SelectionMenu(host: SelectionMenuHost) {
                 .background(palette.menuBg.toComposeColor())
                 .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium),
         ) {
+            if (audio != null) {
+                val playing = AudioPlayback.session?.let { it.item === audio && it.playing } == true
+                ActionIcon(if (playing) XnotesIcons.pause else XnotesIcons.play, stringResource(if (playing) R.string.audio_pause else R.string.audio_play)) { host.playSelectedAudio() }
+            }
+            if (crops) ActionIcon(XnotesIcons.crop, stringResource(R.string.crop)) { host.startCrop() }
             ActionIcon(XnotesIcons.trash, stringResource(R.string.delete), shortcut = Keys.DELETE) { host.deleteSelection() }
             ActionIcon(XnotesIcons.cut, stringResource(R.string.cut)) { host.cutSelection() }
             ActionIcon(XnotesIcons.copy, stringResource(R.string.copy)) { host.copySelection(); host.dismissSelectionMenu() }
-            ActionIcon(XnotesIcons.front, stringResource(R.string.bring_to_front)) { host.bringToFront(); host.dismissSelectionMenu() }
+            Box {
+                ActionIcon(XnotesIcons.front, stringResource(R.string.arrange)) { arrangeOpen = true }
+                DropdownMenu(
+                    expanded = arrangeOpen,
+                    onDismissRequest = { arrangeOpen = false },
+                    properties = PopupProperties(focusable = false),
+                ) {
+                    for ((how, label) in ARRANGE_ROWS) {
+                        DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = { arrangeOpen = false; host.arrange(how) })
+                    }
+                }
+            }
             ActionIcon(XnotesIcons.duplicate, stringResource(R.string.duplicate)) { host.duplicateSelection() }
             Box {
                 ActionIcon(XnotesIcons.more, stringResource(R.string.more)) { overflowOpen = true }
@@ -173,12 +243,36 @@ fun SelectionMenu(host: SelectionMenuHost) {
                     onDismissRequest = { overflowOpen = false },
                     properties = PopupProperties(focusable = false),
                 ) {
-                    // Empty when nothing selected carries ink: an image or a text box has no
-                    // colour-and-width pair to restyle.
+                    // A lone recording's own actions come first.
+                    if (audio != null) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.rename)) },
+                            onClick = { overflowOpen = false; renamingAudio = audio },
+                        )
+                        onSaveAudio?.let { save ->
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.audio_save)) },
+                                onClick = { overflowOpen = false; save(audio) },
+                            )
+                        }
+                        onShareAudio?.let { share ->
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.audio_share)) },
+                                onClick = { overflowOpen = false; share(audio) },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.audio_unlink)) },
+                            onClick = { overflowOpen = false; host.unlinkSelectedAudio() },
+                        )
+                        androidx.compose.material3.HorizontalDivider(color = palette.border.toComposeColor())
+                    }
+                    // Empty when nothing selected carries ink or a fill: an image or a text box has
+                    // no colour-and-width pair to restyle.
                     val styles = host.selectionStyles()
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.change_style)) },
-                        enabled = styles.isNotEmpty(),
+                        enabled = styles.isNotEmpty() || host.selectionFills().isNotEmpty(),
                         onClick = { overflowOpen = false; styleOpen = true },
                     )
                     if (host.canLabelSelection()) {
@@ -204,6 +298,28 @@ fun SelectionMenu(host: SelectionMenuHost) {
                         enabled = mirrors,
                         onClick = { overflowOpen = false; host.mirrorSelection(upsideDown = true) },
                     )
+                    if (host.canGroupSelection()) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.group)) },
+                            onClick = { overflowOpen = false; host.groupSelection() },
+                        )
+                    }
+                    if (host.canUngroupSelection()) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.ungroup)) },
+                            onClick = { overflowOpen = false; host.ungroupSelection() },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.copy_as_image)) },
+                        onClick = { overflowOpen = false; host.copySelectionAsImage() },
+                    )
+                    onShareImage?.let { share ->
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.share_as_image)) },
+                            onClick = { overflowOpen = false; host.selectionImageForShare()?.let(share) },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.lock)) },
                         onClick = { overflowOpen = false; host.lockSelection() },
@@ -213,9 +329,45 @@ fun SelectionMenu(host: SelectionMenuHost) {
                     // Closing settles any preview the slider left open.
                     SelectionStylePopup(host) { host.restyleSelection(null, null); styleOpen = false }
                 }
+                renamingAudio?.let { item ->
+                    AudioNameDialog(item.name, onConfirm = { renamingAudio = null; host.renameSelectedAudio(it) }) { renamingAudio = null }
+                }
             }
         }
     }
+}
+
+/** The Arrange menu's rows, top of the stack first. */
+private val ARRANGE_ROWS = listOf(
+    com.xnotes.core.model.Arrange.FRONT to R.string.bring_to_front,
+    com.xnotes.core.model.Arrange.FORWARD to R.string.bring_forward,
+    com.xnotes.core.model.Arrange.BACKWARD to R.string.send_backward,
+    com.xnotes.core.model.Arrange.BACK to R.string.send_to_back,
+)
+
+/** Rename a recording: its name, ready to type over. */
+@Composable
+private fun AudioNameDialog(initial: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(initial, androidx.compose.ui.text.TextRange(0, initial.length))) }
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    androidx.compose.runtime.LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.rename_recording)) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true,
+                label = { Text(stringResource(R.string.audio_name)) },
+                modifier = Modifier.focusRequester(focus),
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { if (text.text.isBlank()) onDismiss() else onConfirm(text.text) }) { Text(stringResource(R.string.rename)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
 }
 
 /**
@@ -233,13 +385,16 @@ private fun SelectionStylePopup(host: SelectionMenuHost, onDismiss: () -> Unit) 
     val shared = opened.firstOrNull()?.color?.takeIf { c -> opened.all { it.color == c } }
     var color by remember { mutableStateOf(shared ?: first?.color ?: Rgba(0, 0, 0)) }
     var width by remember { mutableStateOf((first?.width ?: 1.0).toFloat()) }
-    if (first == null) return
+    val fills = remember { host.selectionFills() }
+    // Only dropped colours selected: they have a fill and nothing else to restyle.
+    val fillsOnly = first == null
+    if (fillsOnly && fills.isEmpty()) return
 
     DropdownMenu(expanded = true, onDismissRequest = onDismiss, properties = PopupProperties(focusable = false)) {
         Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
             PopupTitle(stringResource(R.string.title_change_style))
-            StyleCaption(stringResource(R.string.caption_colour))
-            FlowRow(
+            if (!fillsOnly) StyleCaption(stringResource(R.string.caption_colour))
+            if (!fillsOnly) FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -263,7 +418,18 @@ private fun SelectionStylePopup(host: SelectionMenuHost, onDismiss: () -> Unit) 
                     )
                 }
             }
-            val fills = remember { host.selectionFills() }
+            host.selectionTapePattern()?.let { opened ->
+                var pattern by remember { mutableStateOf(opened) }
+                StyleCaption(stringResource(R.string.caption_pattern))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (p in com.xnotes.core.model.TapePattern.entries) {
+                        ModeChip(stringResource(p.labelRes), selected = pattern == p) {
+                            pattern = p
+                            host.setSelectionTapePattern(p)
+                        }
+                    }
+                }
+            }
             if (fills.isNotEmpty()) {
                 var fill by remember { mutableStateOf<Rgba?>(fills.first().copy(a = 255)) }
                 var editingFill by remember { mutableStateOf<Int?>(null) }
@@ -271,9 +437,11 @@ private fun SelectionStylePopup(host: SelectionMenuHost, onDismiss: () -> Unit) 
                 StyleCaption(stringResource(R.string.caption_fill_colour))
                 // The toolbar's own swatches; tapping the chosen one again opens the picker on it, as the toolbar does.
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    MatchDot(outline, selected = fill == null || fill == outline) {
-                        fill = null
-                        host.refillSelection(null)
+                    if (!fillsOnly) {
+                        MatchDot(outline, selected = fill == null || fill == outline) {
+                            fill = null
+                            host.refillSelection(null)
+                        }
                     }
                     host.shownSwatches.forEachIndexed { i, c ->
                         val on = fill == c
@@ -319,6 +487,7 @@ private fun SelectionStylePopup(host: SelectionMenuHost, onDismiss: () -> Unit) 
                     StepDot("+", stringResource(R.string.count_more), enabled = count < range.last) { host.setSelectionCount(count + 1) }
                 }
             }
+            if (fillsOnly) return@Column
             Spacer(Modifier.size(8.dp))
             // The drag previews live and commits on release, so it is one undo step, not fifty.
             SliderRow(
@@ -386,13 +555,13 @@ private fun StepDot(glyph: String, label: String, enabled: Boolean, onClick: () 
  * "Copy as image" button that renders the region and puts it on the system clipboard.
  */
 @Composable
-fun ScreenshotMenu(editor: Editor) {
+fun ScreenshotMenu(editor: Editor, onShare: (java.io.File) -> Unit) {
     val rect = editor.screenshotMenu ?: return
     val palette = LocalPalette.current
     val density = LocalDensity.current
 
     val barHeightPx = with(density) { 44.dp.toPx() }
-    val barWidthPx = with(density) { 170.dp.toPx() }
+    val barWidthPx = with(density) { 216.dp.toPx() }
     val gap = with(density) { 10.dp.toPx() }
     val centerX = ((rect.left + rect.right) / 2.0).toFloat()
     val xPx = (centerX - barWidthPx / 2f).coerceAtLeast(with(density) { 8.dp.toPx() })
@@ -406,23 +575,28 @@ fun ScreenshotMenu(editor: Editor) {
             .offset(with(density) { xPx.toDp() }, with(density) { yPx.toDp() })
             .clip(MaterialTheme.shapes.medium)
             .background(palette.menuBg.toComposeColor())
-            .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium)
-            .clickable { editor.copyScreenshotAsImage() }
-            .padding(horizontal = 14.dp, vertical = 11.dp),
+            .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            XnotesIcons.copy,
-            contentDescription = stringResource(R.string.copy_as_image),
-            tint = palette.text.toComposeColor(),
-            modifier = Modifier.size(20.dp),
-        )
-        Text(
-            stringResource(R.string.copy_as_image),
-            color = palette.text.toComposeColor(),
-            fontSize = 14.sp,
-            modifier = Modifier.padding(start = 8.dp),
-        )
+        Row(
+            Modifier.clickable { editor.copyScreenshotAsImage() }.padding(horizontal = 14.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                XnotesIcons.copy,
+                contentDescription = stringResource(R.string.copy_as_image),
+                tint = palette.text.toComposeColor(),
+                modifier = Modifier.size(20.dp),
+            )
+            Text(
+                stringResource(R.string.copy_as_image),
+                color = palette.text.toComposeColor(),
+                fontSize = 14.sp,
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
+        Box(Modifier.width(1.dp).height(24.dp).background(palette.border.toComposeColor()))
+        ActionIcon(XnotesIcons.share, stringResource(R.string.share)) { editor.screenshotImageForShare()?.let(onShare) }
     }
 }
 

@@ -41,8 +41,26 @@ sealed class TPrim {
     }
 }
 
-/** Every shape of one colour: painted opaque together, then composited at [color]'s alpha (SPEC §7.1). */
-class TemplateLayer(val color: Rgba, val prims: List<TPrim>)
+/**
+ * A picture laid out (SPEC §5.3): [box] is the rectangle `fit` and the position place it in, all
+ * in page mm, and only the part inside [clip] shows.
+ */
+class TImage(val src: String, val box: Rect, val clip: Rect, val fit: ImageFit, val posX: Double, val posY: Double) {
+    /** Where a picture [iw] by [ih] pixels lands. */
+    fun dest(iw: Double, ih: Double): Rect {
+        if (fit == ImageFit.STRETCH || iw <= 0.0 || ih <= 0.0) return box
+        val s = if (fit == ImageFit.CONTAIN) min(box.w / iw, box.h / ih) else max(box.w / iw, box.h / ih)
+        val w = iw * s
+        val h = ih * s
+        return Rect(box.x + (box.w - w) * posX, box.y + (box.h - h) * posY, w, h)
+    }
+}
+
+/**
+ * Every shape of one colour: painted opaque together, then composited at [color]'s alpha (SPEC §7.1).
+ * An [image] is a layer of its own, composited at [color]'s alpha, with no prims.
+ */
+class TemplateLayer(val color: Rgba, val prims: List<TPrim>, val image: TImage? = null)
 
 /** A template laid out for one page: its colour layers in compositing order. */
 class TemplateOutput(val layers: List<TemplateLayer>) {

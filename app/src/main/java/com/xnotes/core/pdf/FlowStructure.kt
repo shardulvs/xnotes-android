@@ -44,18 +44,26 @@ class StructNode(val type: String) {
 }
 
 /**
- * The logical structure of a flow: headings, paragraphs, lists nested by indent, code blocks and
- * tables, the way a tagged PDF presents them to a reader.
+ * The logical structure of a flow: headings, paragraphs, lists nested by indent, code blocks,
+ * tables and quotes (a callout's title read first), the way a tagged PDF presents them to a reader.
  */
 object FlowStructure {
 
     /** The flow's top-level [blocks] in reading order, and where each paragraph's parts belong. */
-    class Tree(val blocks: List<StructNode>, private val text: Array<StructNode?>, private val label: Array<StructNode?>) {
+    class Tree(
+        val blocks: List<StructNode>,
+        private val text: Array<StructNode?>,
+        private val label: Array<StructNode?>,
+        private val title: Map<Int, StructNode> = emptyMap(),
+    ) {
         /** The element paragraph [para]'s characters belong to. */
         fun textOf(para: Int): StructNode? = text.getOrNull(para)
 
         /** The element paragraph [para]'s list marker belongs to: its Lbl, else its own text's. */
         fun labelOf(para: Int): StructNode? = label.getOrNull(para) ?: textOf(para)
+
+        /** The element the title of the callout paragraph [para] opens belongs to. */
+        fun titleOf(para: Int): StructNode? = title[para] ?: textOf(para)
     }
 
     fun build(flow: TextFlow): Tree {
@@ -63,7 +71,11 @@ object FlowStructure {
         val cells = CellIndex(paras)
         val text = arrayOfNulls<StructNode>(paras.size)
         val label = arrayOfNulls<StructNode>(paras.size)
-        val blocks = mutableListOf<StructNode>()
+        val top = mutableListOf<StructNode>()
+        val title = HashMap<Int, StructNode>()
+        // A quote's paragraphs go inside its BlockQuote; everything else straight in at the top.
+        var blocks = top
+        var quote: com.xnotes.core.text.FlowQuote? = null
         val lists = ArrayList<OpenList>()
         var code: StructNode? = null
         var i = 0
@@ -72,11 +84,24 @@ object FlowStructure {
             if (block != null) {
                 lists.clear()
                 code = null
+                blocks = top
+                quote = null
                 blocks += table(block, text)
                 i = block.last + 1
                 continue
             }
             val p = paras[i]
+            if (p.quote !== quote) {
+                quote = p.quote
+                lists.clear()
+                code = null
+                blocks = top
+                if (quote != null) {
+                    val node = StructNode("BlockQuote").also { top += it }
+                    blocks = node.kids
+                    if (quote.kind != null) title[i] = StructNode("P").also { blocks += it }
+                }
+            }
             if (p.codeLang != null) {
                 lists.clear()
                 text[i] = code ?: StructNode("Code").also {
@@ -88,6 +113,8 @@ object FlowStructure {
             }
             code = null
             when {
+                // A rule is drawn, not read.
+                p.rule -> lists.clear()
                 p.headingLevel > 0 -> {
                     lists.clear()
                     blocks += StructNode("H${p.headingLevel.coerceIn(1, Paragraph.MAX_HEADING)}").also { text[i] = it }
@@ -100,7 +127,7 @@ object FlowStructure {
             }
             i++
         }
-        return Tree(blocks, text, label)
+        return Tree(top, text, label, title)
     }
 
     /** A list still taking items: its [indent], [kind], element, and its latest item's body. */

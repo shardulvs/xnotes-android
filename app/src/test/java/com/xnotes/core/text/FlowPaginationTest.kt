@@ -46,6 +46,15 @@ class FlowPaginationTest {
     }
 
     @Test
+    fun overflowIsCountedInPagesOfTheAddedSize() {
+        // Added pages half as tall hold one line each, not three.
+        val flow = flowOf(*Array(8) { "" })
+        val frame = layout.layout(flow, pages(1), 150, addedPage = PageBox(100.0, 25.0))
+        assertEquals(3, frame.pages[0].lines.size)
+        assertEquals(5, frame.extraPagesNeeded)
+    }
+
+    @Test
     fun continuationRebreaksAtTheNextPageWidth() {
         val flow = flowOf("aaaa bbbb cccc dddd eeee")
         val boxes = listOf(PageBox(100.0, 16.0), PageBox(60.0, 100.0))
@@ -258,5 +267,156 @@ class FlowPaginationTest {
         assertEquals(listOf(3, 3, 2), frame.pages.map { it.lines.size })
         assertEquals(0, frame.extraPagesNeeded)
     }
+    @Test
+    fun aFlowStartingPastTheCoverLeavesItEmpty() {
+        val frame = layout.layout(flowOf(*Array(5) { "" }), pages(3), 150, firstPage = 1)
+        assertEquals(listOf(0, 3, 2), frame.pages.map { it.lines.size })
+        assertEquals(0, frame.extraPagesNeeded)
+        assertEquals(1, frame.firstPage)
+    }
 
+    @Test
+    fun anEmptyFlowPastTheCoverFillsFromItsFirstPage() {
+        val frame = layout.layout(TextFlow().apply { margins = FlowMargins(0.0, 0.0, 0.0, 0.0) }, pages(3), 150, firstPage = 1)
+        // A tap two lines down page 1 needs two lines before the caret's, none for the cover.
+        assertEquals(3, frame.emptyLinesToReach(1, 2 * 15.6 + 1.0, 15.6))
+        assertEquals(0, frame.emptyLinesToReach(0, 40.0, 15.6))
+    }
+
+    // --- page breaks ---
+
+    @Test
+    fun aPageBreakStartsTheNextPage() {
+        val flow = flowOf("a", "b", "c")
+        flow.paragraphs[1].breakBefore = true
+        val frame = layout.layout(flow, pages(2), 150)
+        assertEquals(listOf(1, 2), frame.pages.map { it.lines.size })
+        assertEquals(1, frame.pages[1].lines[0].paraIndex)
+        val mark = frame.pages[0].breaks.single()
+        assertTrue(mark.y > frame.pages[0].lines[0].bottom)
+        assertTrue(frame.pages[1].breaks.isEmpty())
+    }
+
+    @Test
+    fun aBreakAlreadyAtThePageTopPushesNothingButStillShows() {
+        val flow = flowOf("a", "b")
+        flow.paragraphs[0].breakBefore = true
+        val frame = layout.layout(flow, pages(2), 150)
+        assertEquals(listOf(2, 0), frame.pages.map { it.lines.size })
+        assertTrue(frame.pages[0].breaks.single().y < 0.0)
+    }
+
+    @Test
+    fun aBreakOnTheLastPageAsksForAnotherPage() {
+        val flow = flowOf("a", "b")
+        flow.paragraphs[1].breakBefore = true
+        assertEquals(1, layout.layout(flow, pages(1), 150).extraPagesNeeded)
+    }
+
+    @Test
+    fun aBreakToAPageSkipsThePagesBetween() {
+        val flow = flowOf("a", "b")
+        flow.paragraphs[1].breakBefore = true
+        flow.paragraphs[1].breakToPage = 3
+        assertEquals(listOf(1, 0, 0, 1), layout.layout(flow, pages(4), 150).pages.map { it.lines.size })
+    }
+
+    @Test
+    fun textRunningPastABreaksPageCarriesItOn() {
+        val flow = flowOf("1", "2", "3", "4", "b")
+        flow.paragraphs[4].breakBefore = true
+        flow.paragraphs[4].breakToPage = 1
+        assertEquals(listOf(3, 1, 1), layout.layout(flow, pages(3), 150).pages.map { it.lines.size })
+    }
+
+    @Test
+    fun aBreakToAPageOpeningTheFlowStartsThere() {
+        val flow = flowOf("b")
+        flow.paragraphs[0].breakBefore = true
+        flow.paragraphs[0].breakToPage = 2
+        assertEquals(listOf(0, 0, 1), layout.layout(flow, pages(3), 150).pages.map { it.lines.size })
+    }
+
+    @Test
+    fun aBreakToAPageNoLongerThereIsAPlainBreak() {
+        val flow = flowOf("a", "b")
+        flow.paragraphs[1].breakBefore = true
+        flow.paragraphs[1].breakToPage = 9
+        assertEquals(listOf(1, 1), layout.layout(flow, pages(2), 150).pages.map { it.lines.size })
+    }
+
+    // --- list numbering ---
+
+    private fun item(text: String, indent: Int = 0, kind: ListKind = ListKind.ORDERED, start: Int? = null) =
+        Paragraph(mutableListOf(Run(text)), indent = indent, list = kind, listStart = start)
+
+    private fun ordinals(vararg paras: Paragraph): List<Int?> {
+        val flow = TextFlow().apply {
+            margins = FlowMargins(0.0, 0.0, 0.0, 0.0)
+            paragraphs.addAll(paras)
+        }
+        val frame = layout.layout(flow, listOf(PageBox(400.0, 400.0)), 150)
+        return frame.pages[0].lines.map { it.marker?.ordinal }
+    }
+
+    @Test
+    fun anOrderedListCountsFromItsStart() {
+        assertEquals(listOf(3, 4, 5), ordinals(item("a", start = 3), item("b"), item("c")))
+    }
+
+    @Test
+    fun aNestedListCountsApartFromTheOneAroundIt() {
+        val got = ordinals(
+            item("a"), item("x", 1), item("y", 1), item("b"),
+            item("dot", 1, ListKind.BULLET), item("c"),
+        )
+        assertEquals(listOf(1, 1, 2, 2, 0, 3), got)
+    }
+
+    @Test
+    fun aParagraphContinuingAnItemKeepsTheCountButBodyTextEndsIt() {
+        val more = Paragraph(mutableListOf(Run("more")), indent = 1)
+        val body = Paragraph(mutableListOf(Run("body")))
+        assertEquals(listOf(1, null, 2, null, 1), ordinals(item("a"), more, item("b"), body, item("c")))
+    }
+
+    // --- quotes and callouts ---
+
+    @Test
+    fun aQuoteStandsInAndACalloutTitleSitsAboveItsFirstLine() {
+        val note = FlowQuote(CalloutKind.NOTE)
+        val flow = flowOf("a", "b", "c")
+        flow.paragraphs[1].quote = note
+        flow.paragraphs[2].quote = note
+        val frame = layout.layout(flow, listOf(PageBox(200.0, 400.0)), 150)
+        val lines = frame.pages[0].lines
+        assertEquals(-1, lines[0].quoteId)
+        assertEquals(0, lines[1].quoteId)
+        assertEquals(0, lines[2].quoteId)
+        assertEquals(FlowLayout.QUOTE_INSET_PX, lines[1].xs[0], 1e-9)
+        val title = frame.pages[0].callouts.single()
+        assertEquals(CalloutKind.NOTE, title.kind)
+        assertEquals(1, title.para)
+        assertEquals(lines[0].bottom, title.top, 1e-9)
+        assertEquals(title.bottom, lines[1].top, 1e-9)
+    }
+
+    @Test
+    fun aCalloutTitleKeepsWithItsFirstLine() {
+        val flow = flowOf("a", "b", "c")
+        flow.paragraphs[2].quote = FlowQuote(CalloutKind.TIP)
+        val frame = layout.layout(flow, pages(2), 150)
+        assertEquals(listOf(2, 1), frame.pages.map { it.lines.size })
+        assertTrue(frame.pages[0].callouts.isEmpty())
+        assertEquals(0.0, frame.pages[1].callouts.single().top, 1e-9)
+    }
+
+    @Test
+    fun twoNeighbouringQuotesAreTwo() {
+        val flow = flowOf("a", "b")
+        flow.paragraphs[0].quote = FlowQuote()
+        flow.paragraphs[1].quote = FlowQuote()
+        val lines = layout.layout(flow, pages(1), 150).pages[0].lines
+        assertEquals(listOf(0, 1), lines.map { it.quoteId })
+    }
 }

@@ -147,8 +147,9 @@ struct DisplayMap {
     }
 };
 
-// The map PDFium renders with, sampled from FPDF_PageToDevice at 1/1024 pt.
-DisplayMap MapFor(FPDF_PAGE page) {
+// The map PDFium renders with when the page is shown turn more quarter turns clockwise than its
+// /Rotate says, sampled from FPDF_PageToDevice at 1/1024 pt.
+DisplayMap MapFor(FPDF_PAGE page, int turn) {
     constexpr double kScale = 1024;
     DisplayMap m;
     FS_RECTF box;
@@ -157,12 +158,14 @@ DisplayMap MapFor(FPDF_PAGE page) {
     const double w = FPDF_GetPageWidthF(page) * kScale;
     const double h = FPDF_GetPageHeightF(page) * kScale;
     if (bw <= 0 || bh <= 0 || w < 1 || h < 1) return m;
-    const int sx = static_cast<int>(std::lround(w));
-    const int sy = static_cast<int>(std::lround(h));
+    // A quarter turn lays the page across, so the box it fills has its sides swapped.
+    const bool across = turn % 2 == 1;
+    const int sx = static_cast<int>(std::lround(across ? h : w));
+    const int sy = static_cast<int>(std::lround(across ? w : h));
     int x0, y0, x1, y1, x2, y2;
-    FPDF_PageToDevice(page, 0, 0, sx, sy, 0, box.left, box.bottom, &x0, &y0);
-    FPDF_PageToDevice(page, 0, 0, sx, sy, 0, box.right, box.bottom, &x1, &y1);
-    FPDF_PageToDevice(page, 0, 0, sx, sy, 0, box.left, box.top, &x2, &y2);
+    FPDF_PageToDevice(page, 0, 0, sx, sy, turn, box.left, box.bottom, &x0, &y0);
+    FPDF_PageToDevice(page, 0, 0, sx, sy, turn, box.right, box.bottom, &x1, &y1);
+    FPDF_PageToDevice(page, 0, 0, sx, sy, turn, box.left, box.top, &x2, &y2);
     m.a = (x1 - x0) / (bw * kScale);
     m.b = (y1 - y0) / (bw * kScale);
     m.c = (x2 - x0) / (bh * kScale);
@@ -425,13 +428,15 @@ Java_com_xnotes_platform_PdfiumNative_nativePageSizes(JNIEnv* env, jclass, jlong
     return out;
 }
 
-// Renders the part of page index at (left, top) in a full_w x full_h raster of the whole page
-// into bitmap, on white. False when cancelled or failed.
+// Renders the part of page index, turned turn quarter turns clockwise past its /Rotate, at
+// (left, top) in a full_w x full_h raster of the whole page into bitmap, on white. False when
+// cancelled or failed.
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_xnotes_platform_PdfiumNative_nativeRender(JNIEnv* env, jclass, jlong handle, jint index,
-                                                   jobject jbitmap, jint full_w, jint full_h,
-                                                   jint left, jint top, jobject lifetime,
-                                                   jobject token) {
+                                                   jint turn, jobject jbitmap, jint full_w,
+                                                   jint full_h, jint left, jint top,
+                                                   jobject lifetime, jobject token) {
+    turn &= 3;
     Doc* doc = FromHandle(handle);
     Cancel cancel(env, lifetime, token);
     FPDF_PAGE page = cancel.IsCancelled() ? nullptr : GetPage(doc, index);
@@ -446,7 +451,7 @@ Java_com_xnotes_platform_PdfiumNative_nativeRender(JNIEnv* env, jclass, jlong ha
     FPDF_BITMAP bitmap = FPDFBitmap_CreateEx(static_cast<int>(info.width),
                                              static_cast<int>(info.height), FPDFBitmap_BGRA,
                                              pixels, static_cast<int>(info.stride));
-    int status = FPDF_RenderPageBitmap_Start(bitmap, page, -left, -top, full_w, full_h, 0,
+    int status = FPDF_RenderPageBitmap_Start(bitmap, page, -left, -top, full_w, full_h, turn,
                                              FPDF_ANNOT | FPDF_REVERSE_BYTE_ORDER,
                                              &cancel.pause);
     // The pause only ever asks to stop, so a render left to be continued was cancelled.
@@ -456,7 +461,7 @@ Java_com_xnotes_platform_PdfiumNative_nativeRender(JNIEnv* env, jclass, jlong ha
     FPDF_RenderPage_Close(page);
     if (status == FPDF_RENDER_DONE && doc->form) {
         // Without FPDF_ANNOT, FFLDraw paints the form fields alone, not the annotations again.
-        FPDF_FFLDraw(doc->form, bitmap, page, -left, -top, full_w, full_h, 0,
+        FPDF_FFLDraw(doc->form, bitmap, page, -left, -top, full_w, full_h, turn,
                      FPDF_REVERSE_BYTE_ORDER);
     }
     FPDFBitmap_Destroy(bitmap);
@@ -464,15 +469,18 @@ Java_com_xnotes_platform_PdfiumNative_nativeRender(JNIEnv* env, jclass, jlong ha
     return status == FPDF_RENDER_DONE;
 }
 
-// The display boxes, in points, of the images on page index, those inside form XObjects included.
+// The display boxes, in points, of the images on page index turned turn quarter turns, those
+// inside form XObjects included.
 extern "C" JNIEXPORT jfloatArray JNICALL
 Java_com_xnotes_platform_PdfiumNative_nativeImageRects(JNIEnv* env, jclass, jlong handle,
-                                                       jint index) {
+                                                       jint index, jint turn) {
+    turn &= 3;
     FPDF_PAGE page = GetPage(FromHandle(handle), index);
     if (!page) return nullptr;
-    const DisplayMap map = MapFor(page);
-    const float w = FPDF_GetPageWidthF(page);
-    const float h = FPDF_GetPageHeightF(page);
+    const DisplayMap map = MapFor(page, turn);
+    const bool across = turn % 2 == 1;
+    const float w = across ? FPDF_GetPageHeightF(page) : FPDF_GetPageWidthF(page);
+    const float h = across ? FPDF_GetPageWidthF(page) : FPDF_GetPageHeightF(page);
     std::vector<float> rects;
     const int count = FPDFPage_CountObjects(page);
     for (int i = 0; i < count; ++i) {
@@ -483,14 +491,16 @@ Java_com_xnotes_platform_PdfiumNative_nativeImageRects(JNIEnv* env, jclass, jlon
     return out;
 }
 
-// Page index's links: one display box (l, t, r, b) per quad, or per link without quads, with the
-// page it goes to (-1 for none) and its URI bytes (null for none), as {float[], int[], byte[][]}.
+// Page index's links, the page turned turn quarter turns: one display box (l, t, r, b) per quad,
+// or per link without quads, with the page it goes to (-1 for none) and its URI bytes (null for
+// none), as {float[], int[], byte[][]}.
 extern "C" JNIEXPORT jobjectArray JNICALL
-Java_com_xnotes_platform_PdfiumNative_nativeLinks(JNIEnv* env, jclass, jlong handle, jint index) {
+Java_com_xnotes_platform_PdfiumNative_nativeLinks(JNIEnv* env, jclass, jlong handle, jint index,
+                                                  jint turn) {
     Doc* doc = FromHandle(handle);
     FPDF_PAGE page = GetPage(doc, index);
     if (!page) return nullptr;
-    const DisplayMap map = MapFor(page);
+    const DisplayMap map = MapFor(page, turn & 3);
     std::vector<float> boxes;
     std::vector<jint> dests;
     std::vector<std::string> uris;
@@ -622,15 +632,17 @@ Java_com_xnotes_platform_PdfiumNative_nativeOutline(JNIEnv* env, jclass, jlong h
 }
 
 // Page index's text in PDFium's order as {int[] codepoints, float[] boxes, byte[] flags,
-// float[] angles}: per character its loose box (l, t, r, b) in display points, its kText* bits
-// and its DisplayAngle; angles is null when no character is turned.
+// float[] angles}: per character its loose box (l, t, r, b) in display points, the page turned
+// turn quarter turns, its kText* bits and its DisplayAngle; angles is null when no character is
+// turned.
 extern "C" JNIEXPORT jobjectArray JNICALL
-Java_com_xnotes_platform_PdfiumNative_nativePageText(JNIEnv* env, jclass, jlong handle, jint index) {
+Java_com_xnotes_platform_PdfiumNative_nativePageText(JNIEnv* env, jclass, jlong handle, jint index,
+                                                     jint turn) {
     FPDF_PAGE page = GetPage(FromHandle(handle), index);
     if (!page) return nullptr;
     FPDF_TEXTPAGE text = LoadTextPage(page);
     if (!text) return nullptr;
-    const DisplayMap map = MapFor(page);
+    const DisplayMap map = MapFor(page, turn & 3);
     CharReader reader(text);
     const int count = reader.count();
     std::vector<jint> codepoints(count);
@@ -675,10 +687,12 @@ Java_com_xnotes_platform_PdfiumNative_nativePageText(JNIEnv* env, jclass, jlong 
 // Page index's characters as nativePageText reads them, without boxes: {int[] codepoints,
 // byte[] flags}. A page the cache lacks is loaded for this read alone, so a search through a book
 // never pushes the pages on screen out of it.
-// Page index's display map, user space to points as displayed, as {a, b, c, d, e, f}, leaving the
-// page cache as it was; null when the page does not load or has no area.
+// Page index's display map, user space to points as displayed with the page turned turn quarter
+// turns, as {a, b, c, d, e, f}, leaving the page cache as it was; null when the page does not load
+// or has no area.
 extern "C" JNIEXPORT jdoubleArray JNICALL
-Java_com_xnotes_platform_PdfiumNative_nativePageGeometry(JNIEnv* env, jclass, jlong handle, jint index) {
+Java_com_xnotes_platform_PdfiumNative_nativePageGeometry(JNIEnv* env, jclass, jlong handle, jint index,
+                                                         jint turn) {
     Doc* doc = FromHandle(handle);
     FPDF_PAGE page = CachedPage(doc, index);
     const bool own = page == nullptr;
@@ -686,7 +700,7 @@ Java_com_xnotes_platform_PdfiumNative_nativePageGeometry(JNIEnv* env, jclass, jl
     if (!page) return nullptr;
     FS_RECTF box;
     const bool ok = FPDF_GetPageBoundingBox(page, &box) && box.right > box.left && box.top > box.bottom;
-    const DisplayMap m = MapFor(page);
+    const DisplayMap m = MapFor(page, turn & 3);
     if (own) FPDF_ClosePage(page);
     if (!ok) return nullptr;
     const jdouble values[6] = {m.a, m.b, m.c, m.d, m.e, m.f};

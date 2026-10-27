@@ -30,6 +30,7 @@ class ViewStateStoreTest {
             keepImages = true,
             rotation = 90,
             scrollbar = true,
+            freeMovement = true,
         )
         ViewStateStore(json).put("auth|doc1", 1.5, 12.0, 34.0, vo)
 

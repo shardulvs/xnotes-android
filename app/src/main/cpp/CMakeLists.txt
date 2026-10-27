@@ -9,19 +9,42 @@ project(xnotests C CXX)
 set(XNOTES_LINK_OPTIONS -Wl,--gc-sections -Wl,--build-id=none -Wl,-z,max-page-size=16384)
 
 set(GRAMMAR_SOURCES
+    grammars/asm/parser.c
     grammars/bash/parser.c
     grammars/bash/scanner.c
     grammars/c/parser.c
     grammars/cpp/parser.c
     grammars/cpp/scanner.c
+    grammars/css/parser.c
+    grammars/css/scanner.c
+    grammars/diff/parser.c
+    grammars/dockerfile/parser.c
+    grammars/dockerfile/scanner.c
+    grammars/go/parser.c
+    grammars/html/parser.c
+    grammars/html/scanner.c
     grammars/java/parser.c
     grammars/javascript/parser.c
     grammars/javascript/scanner.c
     grammars/json/parser.c
     grammars/kotlin/parser.c
     grammars/kotlin/scanner.c
+    grammars/lua/parser.c
+    grammars/lua/scanner.c
+    grammars/php/parser.c
+    grammars/php/scanner.c
     grammars/python/parser.c
     grammars/python/scanner.c
+    grammars/rust/parser.c
+    grammars/rust/scanner.c
+    grammars/toml/parser.c
+    grammars/toml/scanner.c
+    grammars/typescript/parser.c
+    grammars/typescript/scanner.c
+    grammars/xml/parser.c
+    grammars/xml/scanner.c
+    grammars/yaml/parser.c
+    grammars/yaml/scanner.c
 )
 
 # libxnotests: the tree-sitter runtime, the bundled grammars and a thin JNI bridge.

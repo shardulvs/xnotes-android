@@ -1,12 +1,20 @@
 package com.xnotes.core.infinite
 
+import com.xnotes.core.audio.AudioPill
+import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
+import com.xnotes.core.model.AudioItem
+import com.xnotes.core.model.AudioLook
 import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.ConnectorItem
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.Stroke
+import com.xnotes.core.model.TapeItem
+import com.xnotes.core.model.TapePattern
+import com.xnotes.core.pal.FontSpec
 import com.xnotes.core.stroke.RibbonPoints
+import com.xnotes.core.tape.TapeGeometry
 import com.xnotes.core.tools.Tool
 
 /** How an item's geometry has to reach the framebuffer. */
@@ -64,6 +72,8 @@ class MeshPart(
     val pass: InkPass,
     /** Set on a [InkPass.GLOW] part: the halos to build from this geometry. */
     val glow: GlowSpec? = null,
+    /** Set on a covered tape's body: a highlight beneath it, composited last, has to be drawn round it. */
+    val covers: Boolean = false,
 )
 
 /** An item turned into triangles, with everything the renderer needs to draw it. */
@@ -101,8 +111,63 @@ object ItemMesher {
             is Stroke -> meshStroke(item, tolerance)
             is ShapeItem -> meshShape(item, tolerance)
             is ConnectorItem -> meshConnector(item, tolerance)
+            is AudioItem -> meshAudio(item, tolerance)
+            is TapeItem -> meshTape(item, tolerance)
             else -> null // images carry a texture rather than a colour, and take their own path
         }
+
+    /** Tape as its body and the pattern printed on it, or, peeled, as the dashed edge of where it lies. All opaque. */
+    private fun meshTape(item: TapeItem, tolerance: Double): MeshedItem? {
+        val s = item.shape
+        val parts = ArrayList<MeshPart>(2)
+        if (item.peeled) {
+            val b = MeshBuilder()
+            for (line in s.outline) {
+                for (run in MeshBuilder.dashRuns(line.pts, TapeGeometry.DASH_ON, TapeGeometry.DASH_GAP, line.closed)) {
+                    b.polylineRibbon(run, TapeGeometry.OUTLINE_WIDTH / 2.0, false, tolerance)
+                }
+            }
+            if (!b.isEmpty) parts.add(MeshPart(b.build(), item.coverColor, InkPass.OPAQUE))
+            return if (parts.isEmpty()) null else MeshedItem(parts, item.paintBounds(), TapeGeometry.OUTLINE_WIDTH / 2.0)
+        }
+        val body = MeshBuilder()
+        for (piece in s.body) body.polygon(piece)
+        if (!body.isEmpty) parts.add(MeshPart(body.build(), item.coverColor, InkPass.OPAQUE, covers = true))
+        if (item.pattern != TapePattern.SOLID) {
+            val print = MeshBuilder()
+            for (mark in s.pattern(item.pattern)) print.polygon(mark)
+            if (!print.isEmpty) parts.add(MeshPart(print.build(), item.printColor, InkPass.OPAQUE))
+        }
+        return if (parts.isEmpty()) null else MeshedItem(parts, item.paintBounds())
+    }
+
+    /** The pill as [AudioPill] lays it out, in opaque parts back to front, its text set as glyphs. */
+    private fun meshAudio(item: AudioItem, tolerance: Double): MeshedItem {
+        val l = AudioPill.layout(item)
+        val look = AudioLook.current
+        val parts = ArrayList<MeshPart>()
+        fun fill(polys: List<List<Pt>>, color: Rgba) {
+            val b = MeshBuilder()
+            for (p in polys) b.polygon(p)
+            if (!b.isEmpty) parts.add(MeshPart(b.build(), color, InkPass.OPAQUE))
+        }
+        fun text(s: String, font: FontSpec, at: Pt, color: Rgba) {
+            if (s.isEmpty()) return
+            val width = item.measurer.advances(s, font).sum() + font.pointSize
+            val top = at.y - item.measurer.metrics(font).ascent
+            ShapeTessellator.textPart(item.measurer.outline(s, font, width), color) { Pt(at.x + it.x, top + it.y) }?.let { parts.add(it) }
+        }
+        fill(listOf(l.body), look.body)
+        MeshBuilder().also {
+            it.circle(l.discCenter.x, l.discCenter.y, l.discRadius, tolerance)
+            parts.add(MeshPart(it.build(), look.disc, InkPass.OPAQUE))
+        }
+        fill(l.glyph, look.glyph)
+        for ((color, bars) in l.bars.indices.groupBy { AudioPill.barColor(look, l, it) }) fill(bars.map { l.bars[it] }, color)
+        text(l.name, l.nameFont, l.nameAt, look.name)
+        text(l.time, l.timeFont, l.timeAt, if (l.active) look.timeActive else look.time)
+        return MeshedItem(parts, item.paintBounds())
+    }
 
     private fun meshStroke(stroke: Stroke, tolerance: Double): MeshedItem? {
         if (stroke.isEmpty) return null

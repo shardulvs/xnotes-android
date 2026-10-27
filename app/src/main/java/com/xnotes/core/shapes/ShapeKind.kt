@@ -171,6 +171,9 @@ abstract class ShapeKind internal constructor(val id: String) {
         /** A label an eraser left behind as drawn text: its letters as filled outlines. */
         val GLYPHS: ShapeKind = GlyphsKind("glyphs")
 
+        /** A dropped colour's area: the rings it fills, never stroked. */
+        val FILL: ShapeKind = FillKind("fill")
+
         /**
          * Every kind, in a stable order. Lazy, because the page families are objects whose own
          * kinds initialize this class: whichever loads first, the list is only read once both have.
@@ -179,7 +182,7 @@ abstract class ShapeKind internal constructor(val id: String) {
             listOf(
                 LINE, ARROW, RECTANGLE, ELLIPSE, CIRCLE, TRIANGLE, POLYGON, POLYLINE, CURVE,
                 ROUNDED_RECT, SQUARE, CAPSULE, RIGHT_TRIANGLE, DIAMOND, PARALLELOGRAM, TRAPEZOID,
-                REGULAR_POLYGON, STAR, CROSS, HEART, CLOUD, RING, PIE, ARC, GLYPHS,
+                REGULAR_POLYGON, STAR, CROSS, HEART, CLOUD, RING, PIE, ARC, GLYPHS, FILL,
             ) + FlowchartKinds.all + ArrowKinds.all + SolidMathKinds.all
         }
 
@@ -307,6 +310,17 @@ private class GlyphsKind(id: String) : ShapeKind(id) {
     override val flips get() = Flip.NONE
     override fun build(box: Rect, p: ShapeParams): ShapeGeometry =
         ShapeGeometry(listOf(ShapePath(FreePath.place(p.path.orEmpty(), box), PathRole.FILL_ONLY, FillRule.NONZERO)), textRect = box)
+}
+
+/** A dropped colour's rings stored like a free outline, filled by parity so holes stay open, and never stroked. */
+private class FillKind(id: String) : ShapeKind(id) {
+    override val isClosed get() = true
+    override val isFree get() = true
+    override val pointEditable get() = false
+    override val takesLabel get() = false
+    override val flips get() = Flip.NONE
+    override fun build(box: Rect, p: ShapeParams): ShapeGeometry =
+        ShapeGeometry(listOf(ShapePath(FreePath.place(p.path.orEmpty(), box), PathRole.FILL_ONLY, FillRule.EVEN_ODD)), textRect = box)
 }
 
 /** Polygon, polyline, curve: the shape's own stored outline, placed in its box. */

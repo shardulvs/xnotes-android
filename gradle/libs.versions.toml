@@ -11,6 +11,7 @@ json = "20240303"
 pdfboxAndroid = "2.0.27.0"
 androidsvg = "1.4"
 latex = "1.5.0-kt2.1.0"
+commonmark = "0.30.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -33,6 +34,19 @@ androidsvg = { group = "com.caverock", name = "androidsvg-aar", version.ref = "a
 latex-base = { group = "io.github.huarangmeng", name = "latex-base", version.ref = "latex" }
 latex-parser = { group = "io.github.huarangmeng", name = "latex-parser", version.ref = "latex" }
 latex-renderer = { group = "io.github.huarangmeng", name = "latex-renderer", version.ref = "latex" }
+commonmark-core = { group = "org.commonmark", name = "commonmark", version.ref = "commonmark" }
+commonmark-tables = { group = "org.commonmark", name = "commonmark-ext-gfm-tables", version.ref = "commonmark" }
+commonmark-strikethrough = { group = "org.commonmark", name = "commonmark-ext-gfm-strikethrough", version.ref = "commonmark" }
+commonmark-tasks = { group = "org.commonmark", name = "commonmark-ext-task-list-items", version.ref = "commonmark" }
+commonmark-footnotes = { group = "org.commonmark", name = "commonmark-ext-footnotes", version.ref = "commonmark" }
+commonmark-frontmatter = { group = "org.commonmark", name = "commonmark-ext-yaml-front-matter", version.ref = "commonmark" }
+commonmark-alerts = { group = "org.commonmark", name = "commonmark-ext-gfm-alerts", version.ref = "commonmark" }
+
+[bundles]
+commonmark = [
+    "commonmark-core", "commonmark-tables", "commonmark-strikethrough", "commonmark-tasks",
+    "commonmark-footnotes", "commonmark-frontmatter", "commonmark-alerts",
+]
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

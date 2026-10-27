@@ -34,6 +34,7 @@
 - **Ink that feels like a pen**: pressure-sensitive and low latency, with pens and highlighters.
 - **Neon glow**: make any pen glow.
 - **Disappearing ink**: ink that fades away on its own, great for teaching and presenting.
+- **Tape**: cover answers with tape and tap to peel it back, for testing yourself.
 - **Shape snapping**: draw a rough shape, hold, and it snaps clean.
 - **Sharp at any zoom**: ink and PDFs stay crisp however far you zoom in.
 - **Notebooks and an infinite canvas**: pages when you want structure, endless space when you don't.
@@ -47,6 +48,7 @@
 - **Real PDF export**: sharp vector output with selectable text, links and bookmarks.
 - **Markdown**: write in markdown and it formats as you type.
 - **Typed notes**: tables, LaTeX equations and code highlighting, right on the page.
+- **Audio recording**: record a lecture as you write, and your ink replays in sync with it.
 - **20+ page templates**: Cornell, planners, music staves, isometric and more.
 - **Endless themes**: any accent colour, eight styles for each, dual tone and Material You.
 - **Make it yours**: rearrange the toolbar, float it or dock it on any edge, and pick its size.
@@ -55,7 +57,7 @@
 - **Your notes, your folders**: notes are saved as files in a folder you choose, not locked away in an app's database, so you stay in full control of them.
 - **Works with stylus pens**: S Pen and many others.
 - **Always editable**: nothing gets flattened, so every stroke can be moved, restyled or erased later.
-- **Private**: open source, no account, no ads, no tracking, no permissions.
+- **Private**: open source, no account, no ads, no tracking, no internet access.
 
 ## Install
 

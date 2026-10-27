@@ -1,5 +1,7 @@
 package com.xnotes.core.infinite
 
+import com.xnotes.core.vector.VectorContour
+
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.ConnectorItem
@@ -66,19 +68,20 @@ object ShapeTessellator {
     }
 
     /** [l]'s glyphs set in [frame] and moved onto the page by [toPage], in the label's colour. */
-    private fun glyphPart(l: ShapeLabel, frame: Rect, toPage: (Pt) -> Pt): MeshPart? {
-        val glyphs = l.outline(frame.w)
+    private fun glyphPart(l: ShapeLabel, frame: Rect, toPage: (Pt) -> Pt): MeshPart? =
+        textPart(l.outline(frame.w), l.style.rgba) { toPage(Pt(frame.left + it.x, frame.top + it.y)) }
+
+    /** Glyph outlines as filled triangles in [color], each point put in place by [place]; null for none. */
+    fun textPart(glyphs: List<VectorContour>, color: Rgba, place: (Pt) -> Pt): MeshPart? {
         if (glyphs.isEmpty()) return null
-        val rings = glyphs.map { c ->
-            PathFlattener.flatten(c, GLYPH_FLATTEN).map { toPage(Pt(frame.left + it.x, frame.top + it.y)) }
-        }.filter { it.size >= 3 }
+        val rings = glyphs.map { c -> PathFlattener.flatten(c, GLYPH_FLATTEN).map(place) }.filter { it.size >= 3 }
         if (rings.isEmpty()) return null
         Triangulator.triangulate(rings, FillRule.NONZERO)?.let { mesh ->
             val b = MeshBuilder(mesh.points.size, mesh.indices.size)
             into(b, mesh)
-            if (!b.isEmpty) return MeshPart(b.build(), l.style.rgba, InkPass.OPAQUE)
+            if (!b.isEmpty) return MeshPart(b.build(), color, InkPass.OPAQUE)
         }
-        return stencilPart(rings, l.style.rgba)
+        return stencilPart(rings, color)
     }
 
     /** The triangles of every fill the shape's own fill colour paints; empty for open kinds. */

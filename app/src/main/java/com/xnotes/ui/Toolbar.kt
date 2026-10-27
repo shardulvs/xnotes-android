@@ -70,6 +70,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xnotes.R
+import com.xnotes.core.model.Rgba
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolbarItem
 import com.xnotes.platform.ImageDecoder
@@ -94,6 +95,9 @@ fun Toolbar(
     onAddStickers: () -> Unit,
     onClosePane: (() -> Unit)? = null,
     onImportTemplate: () -> Unit = {},
+    onInsertAudio: () -> Unit = {},
+    onRecordAudio: () -> Unit = {},
+    onTakePhoto: () -> Unit = {},
 ) {
     // The five stroke tools use the designed vector drawables (res/drawable/ic_stroke_*),
     // tinted at the call site like every other icon; the rest use the built-in line set.
@@ -113,6 +117,7 @@ fun Toolbar(
         Tool.TEXT to XnotesIcons.text,
         Tool.TEXT_BOX to XnotesIcons.textBox,
         Tool.MARKUP to XnotesIcons.markup,
+        Tool.TAPE to XnotesIcons.tape,
     )
     var configForTool by remember { mutableStateOf<Tool?>(null) }
     var switcherIndex by remember { mutableStateOf<Int?>(null) }
@@ -138,6 +143,9 @@ fun Toolbar(
                     onAddStickers = onAddStickers,
                     onToggleFullscreen = onToggleFullscreen,
                     onImportTemplate = onImportTemplate,
+                    onInsertAudio = onInsertAudio,
+                    onRecordAudio = onRecordAudio,
+                    onTakePhoto = onTakePhoto,
                 )
             }
         }
@@ -172,6 +180,9 @@ private fun ToolbarItemView(
     onAddStickers: () -> Unit,
     onToggleFullscreen: () -> Unit,
     onImportTemplate: () -> Unit,
+    onInsertAudio: () -> Unit,
+    onRecordAudio: () -> Unit,
+    onTakePhoto: () -> Unit,
 ) {
     when (item) {
         // Canvas-only items; a stored paged layout can never hold one, so nothing is drawn.
@@ -194,7 +205,7 @@ private fun ToolbarItemView(
         ToolbarItem.PEN, ToolbarItem.DASHED, ToolbarItem.CALLIGRAPHY, ToolbarItem.SPEED,
         ToolbarItem.TAPER, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER, ToolbarItem.PAN,
         ToolbarItem.SELECT, ToolbarItem.LASSO, ToolbarItem.SCREENSHOT, ToolbarItem.SHAPE,
-        ToolbarItem.TEXT, ToolbarItem.TEXT_BOX -> {
+        ToolbarItem.TEXT, ToolbarItem.TEXT_BOX, ToolbarItem.TAPE -> {
             val tool = Tool.fromId(item.id)
             if (tool != null) ToolButton(editor, tool, toolIcons[tool], configForTool, setConfigForTool)
         }
@@ -208,7 +219,7 @@ private fun ToolbarItemView(
         ToolbarItem.RULER ->
             ToolbarIcon(XnotesIcons.ruler, stringResource(R.string.tool_ruler), active = editor.rulerVisible) { editor.toggleRuler() }
 
-        ToolbarItem.IMAGE -> ImageMenu(editor, onInsertImage, onAddStickers)
+        ToolbarItem.IMAGE -> NoteInsertMenu(editor, onInsertImage, onTakePhoto, onAddStickers, onInsertAudio, onRecordAudio)
 
         ToolbarItem.UNDO -> ToolbarIcon(XnotesIcons.undo, stringResource(R.string.undo), enabled = editor.canUndo, shortcut = Keys.UNDO) { editor.undo() }
         ToolbarItem.REDO -> ToolbarIcon(XnotesIcons.redo, stringResource(R.string.redo), enabled = editor.canRedo, shortcut = Keys.REDO) { editor.redo() }
@@ -264,6 +275,8 @@ private fun ToolbarItemView(
                 Swatch(
                     color = color.toComposeColor(),
                     active = i == editor.activeColorIndex,
+                    drag = editor,
+                    ink = color,
                     onClick = { if (i == editor.activeColorIndex) setSwitcherIndex(i) else editor.pickColor(i) },
                 )
                 if (switcherIndex == i) ColorSwitcherPopup(editor, i) { setSwitcherIndex(null) }
@@ -283,7 +296,7 @@ private fun ToolButton(
 ) {
     if (icon == null) return
     val armed = editor.tool == tool
-    val configurable = tool.isStroke || tool == Tool.SHAPE || tool == Tool.ERASER || tool == Tool.SELECT || tool == Tool.TEXT || tool == Tool.MARKUP
+    val configurable = tool.isStroke || tool == Tool.SHAPE || tool == Tool.ERASER || tool == Tool.SELECT || tool == Tool.TEXT || tool == Tool.MARKUP || tool == Tool.TAPE
     Box {
         ToolbarIcon(
             icon,
@@ -307,6 +320,7 @@ private fun ToolButton(
                 tool == Tool.SELECT -> SelectConfigPopup(editor) { setConfigForTool(null) }
                 tool == Tool.TEXT -> TextToolConfigPopup(editor) { setConfigForTool(null) }
                 tool == Tool.MARKUP -> MarkupToolPopup(editor) { setConfigForTool(null) }
+                tool == Tool.TAPE -> TapeConfigPopup(editor) { setConfigForTool(null) }
                 else -> ToolConfigPopup(editor, tool) { setConfigForTool(null) }
             }
         }
@@ -370,7 +384,7 @@ private fun MarginsButton(editor: Editor) {
     }
 }
 
-/** Opens the view menu (viewing mode, scroll direction, PDF filters, rotation, scrollbar). */
+/** Opens the view menu (viewing mode, scroll direction, free movement, PDF filters, rotation, scrollbar). */
 @Composable
 private fun ViewButton(editor: Editor) {
     var open by remember { mutableStateOf(false) }
@@ -532,12 +546,21 @@ internal fun ClosePaneButton(onClose: () -> Unit) {
     ToolbarIcon(XnotesIcons.close, stringResource(R.string.close_pane), onClick = onClose)
 }
 
+/** A toolbar ink swatch; given a [drag] host and its [ink], it can also be pulled off the bar onto the page to fill. */
 @Composable
-internal fun Swatch(color: androidx.compose.ui.graphics.Color, active: Boolean, onClick: () -> Unit) {
+internal fun Swatch(
+    color: androidx.compose.ui.graphics.Color,
+    active: Boolean,
+    drag: ColorDropHost? = null,
+    ink: Rgba? = null,
+    onClick: () -> Unit,
+) {
+    val bar = LocalBar.current
     Box(
         modifier = Modifier
-            .then(if (LocalBar.current.vertical) Modifier.padding(vertical = 3.dp) else Modifier.padding(horizontal = 3.dp))
-            .size(LocalBar.current.swatch)
+            .then(if (bar.vertical) Modifier.padding(vertical = 3.dp) else Modifier.padding(horizontal = 3.dp))
+            .size(bar.swatch)
+            .then(if (drag != null && ink != null) Modifier.colorDragSource(drag, ink, bar.vertical) else Modifier)
             // The selection ring takes the swatch's own colour, not the theme accent.
             .then(if (active) Modifier.border(2.dp, color, CircleShape) else Modifier)
             .padding(4.dp)
@@ -590,16 +613,19 @@ private fun PageCounter(current: Int, count: Int, modifier: Modifier) {
 }
 
 @Composable
-private fun ImageMenu(editor: Editor, onInsertImage: () -> Unit, onAddStickers: () -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
+private fun NoteInsertMenu(editor: Editor, onInsertImage: () -> Unit, onTakePhoto: () -> Unit, onAddStickers: () -> Unit, onInsertAudio: () -> Unit, onRecordAudio: () -> Unit) {
     var stickersOpen by remember { mutableStateOf(false) }
-    Box {
-        ToolbarIcon(XnotesIcons.image, stringResource(R.string.tool_image)) { expanded = true }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(text = { Text(stringResource(R.string.paste_image)) }, onClick = { editor.pasteImage(); expanded = false })
-            DropdownMenuItem(text = { Text(stringResource(R.string.insert_image_ellipsis)) }, onClick = { onInsertImage(); expanded = false })
-            DropdownMenuItem(text = { Text(stringResource(R.string.stickers)) }, onClick = { expanded = false; stickersOpen = true })
-        }
+    InsertButton(
+        owner = editor,
+        imageRows = listOf(
+            InsertRow(XnotesIcons.image, stringResource(R.string.insert_image_ellipsis)) { onInsertImage() },
+            InsertRow(XnotesIcons.camera, stringResource(R.string.take_photo)) { onTakePhoto() },
+            InsertRow(XnotesIcons.paste, stringResource(R.string.paste_image)) { editor.pasteImage() },
+            InsertRow(XnotesIcons.sticker, stringResource(R.string.stickers), more = true) { stickersOpen = true },
+        ),
+        onAudioFromFile = onInsertAudio,
+        onRecord = onRecordAudio,
+    ) {
         if (stickersOpen) StickersMenu(editor, onAddStickers) { stickersOpen = false }
     }
 }

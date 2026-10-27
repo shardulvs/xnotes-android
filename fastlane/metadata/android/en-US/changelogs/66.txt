@@ -1,0 +1,9 @@
+- Record audio as you write, and your ink replays in sync with it
+- Attach audio files to notes and canvases
+- Drag a colour from the toolbar into any closed shape to fill it
+- Type markdown callouts, links, page breaks and :emoji:
+- Open markdown files from other apps as notes
+- Highlight code in 13 more languages, including TypeScript, Go and Rust
+- Drag pages to reorder them in the side panel
+- The OnePlus Stylo side button now works
+- Minor fixes and improvements

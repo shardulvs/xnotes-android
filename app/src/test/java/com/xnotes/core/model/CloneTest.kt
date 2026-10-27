@@ -108,4 +108,16 @@ class CloneTest {
         assertEquals(1, snap.flow.paragraphs.size)
         assertEquals("hi", snap.flow.paragraphs[0].runs[0].text)
     }
+
+    @Test fun documentCopiesKeepTheCoverButACopiedPageIsNeverOne() {
+        val doc = denseDoc()
+        doc.pages[0].cover = true
+        doc.templatePackages = mapOf("k" to java.io.File("pkg"))
+
+        assertEquals(true, doc.deepCopy(FakeTextMeasurer()).pages[0].cover)
+        assertEquals(true, doc.snapshot().pages[0].cover)
+        assertEquals(doc.templatePackages, doc.snapshot().templatePackages)
+        assertEquals(doc.templatePackages, doc.deepCopy(FakeTextMeasurer()).templatePackages)
+        assertEquals(false, doc.pages[0].deepCopy(FakeTextMeasurer()).cover)
+    }
 }

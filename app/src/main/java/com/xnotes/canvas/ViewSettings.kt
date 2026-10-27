@@ -30,6 +30,8 @@ data class ViewSettings(
     val mode: ViewingMode = ViewingMode.SINGLE,
     /** True = continuous vertical scroll; false = paginated horizontal page-flip. */
     val verticalScroll: Boolean = true,
+    /** Paginated only: pages move up and down freely and pinches never snap to a fit. */
+    val freeMovement: Boolean = false,
     val contrast: Int = 100, // 0..200, 100 = untouched
     val invert: Int = 0, // 0..100
     val brightness: Int = 100, // 0..200, 100 = untouched
@@ -63,6 +65,7 @@ data class ViewSettings(
 data class ViewOverrides(
     val mode: ViewingMode? = null,
     val verticalScroll: Boolean? = null,
+    val freeMovement: Boolean? = null,
     val contrast: Int? = null,
     val invert: Int? = null,
     val brightness: Int? = null,
@@ -77,6 +80,7 @@ data class ViewOverrides(
     fun resolve(defaults: ViewSettings): ViewSettings = ViewSettings(
         mode = mode ?: defaults.mode,
         verticalScroll = verticalScroll ?: defaults.verticalScroll,
+        freeMovement = freeMovement ?: defaults.freeMovement,
         contrast = contrast ?: defaults.contrast,
         invert = invert ?: defaults.invert,
         brightness = brightness ?: defaults.brightness,

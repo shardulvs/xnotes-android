@@ -2,12 +2,13 @@ package com.xnotes.core.infinite
 
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.history.Command
+import com.xnotes.core.history.CompositeCommand
+import com.xnotes.core.history.RefillShapes
 import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.ConnectorItem
-import com.xnotes.core.model.ImageItem
+import com.xnotes.core.model.EraseRule
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.Stroke
-import com.xnotes.core.model.TextItem
 import java.util.IdentityHashMap
 
 /**
@@ -38,8 +39,11 @@ class EraseSession(private val doc: InfiniteDocument) {
     /** Which original each live fragment came from, so a re-cut updates the right entry. */
     private val originOf = IdentityHashMap<CanvasItem, CanvasItem>()
 
-    /** Whether the drag has cut anything at all. */
-    val isEmpty: Boolean get() = entries.isEmpty()
+    /** Filled shapes whose fill alone this drag took, with the fill each had. */
+    private val unfilled = ArrayList<RefillShapes.Entry>()
+
+    /** Whether the drag has taken anything at all. */
+    val isEmpty: Boolean get() = entries.isEmpty() && unfilled.isEmpty()
 
     /**
      * Pass the eraser over ([cx], [cy]) with [radius], in content space. Returns the region that
@@ -47,14 +51,24 @@ class EraseSession(private val doc: InfiniteDocument) {
      *
      * Images and text are left alone in both modes, matching the paged canvas: they are placed
      * deliberately and are deleted through a selection instead. So is anything locked, which is
-     * what a lock is for.
+     * what a lock is for. A fill it touches at all goes whole, in both modes; a filled shape it
+     * touches inside but not on its outline loses just its fill (see [EraseRule]).
      */
     fun erase(cx: Double, cy: Double, radius: Double, area: Boolean): Rect? {
         val box = Rect(cx - radius, cy - radius, radius * 2, radius * 2)
         var dirty: Rect? = null
         for (item in doc.itemsIn(box)) {
-            if (item.locked || item is ImageItem || item is TextItem) continue
-            val fragments: List<CanvasItem> = if (area) {
+            if (!EraseRule.erasable(item)) continue
+            if (EraseRule.takesFill(item, cx, cy, radius)) {
+                val shape = item as ShapeItem
+                unfilled.add(RefillShapes.Entry(shape, shape.fillRgba, null))
+                shape.fillRgba = null
+                doc.itemsChanged(listOf(shape))
+                dirty = dirty?.union(shape.paintBounds()) ?: shape.paintBounds()
+                continue
+            }
+            val whole = EraseRule.whole(item)
+            val fragments: List<CanvasItem> = if (area && !whole) {
                 when (item) {
                     is Stroke -> item.erasedBy(cx, cy, radius) ?: continue
                     // A cut shape's label stays behind as drawn text.
@@ -63,8 +77,12 @@ class EraseSession(private val doc: InfiniteDocument) {
                     else -> continue
                 }
             } else {
-                if (!item.intersectsCircle(cx, cy, radius)) continue
+                if (!EraseRule.takes(item, cx, cy, radius)) continue
                 emptyList()
+            }
+            for (f in fragments) {
+                f.sync = item.sync // pieces were written when the whole was
+                f.group = item.group
             }
             val touched = item.paintBounds()
             val at = doc.replaceItem(item, fragments)
@@ -75,13 +93,20 @@ class EraseSession(private val doc: InfiniteDocument) {
         return dirty
     }
 
-    /** The single undoable edit for the whole drag, or null when it cut nothing. */
-    fun buildCommand(): Command? =
-        if (entries.isEmpty()) {
-            null
-        } else {
-            SplitCanvasItems(doc, entries.map { SplitCanvasItems.Split(it.at, it.original, it.fragments.toList()) })
+    /**
+     * The single undoable edit for the whole drag, or null when it took nothing. A fill comes off
+     * before any cut, as it did in the drag, so undo puts it back on a shape that is on the canvas.
+     */
+    fun buildCommand(): Command? {
+        val parts = ArrayList<Command>(2)
+        if (unfilled.isNotEmpty()) parts += OnCanvas(doc, RefillShapes(unfilled.toList()), unfilled.map { it.shape })
+        if (entries.isNotEmpty()) parts += SplitCanvasItems(doc, entries.map { SplitCanvasItems.Split(it.at, it.original, it.fragments.toList()) })
+        return when (parts.size) {
+            0 -> null
+            1 -> parts[0]
+            else -> CompositeCommand(parts)
         }
+    }
 
     /** Fold this cut into the entry for whichever item it ultimately came from. */
     private fun record(item: CanvasItem, at: Int, fragments: List<CanvasItem>) {

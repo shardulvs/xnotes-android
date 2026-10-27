@@ -16,7 +16,7 @@ import java.util.IdentityHashMap
  */
 data class CanvasBackground(
     val pattern: PagePattern = PagePattern.GRID,
-    val patternColor: Rgba = PageStyle.DEFAULT_PATTERN_COLOR,
+    val patternColor: Rgba = DEFAULT_PATTERN_COLOR,
     /** Pattern period in content pixels, at the canvas's base scale. */
     val spacing: Double = PageStyle.DEFAULT_SPACING,
     /** Paper colour, or null to take the theme's. */
@@ -24,6 +24,11 @@ data class CanvasBackground(
 ) {
     val clampedSpacing: Double
         get() = spacing.coerceIn(PageStyle.MIN_SPACING, PageStyle.MAX_SPACING)
+
+    companion object {
+        /** The canvas grid's own default, grey at about 25%; page templates default to more. */
+        val DEFAULT_PATTERN_COLOR = Rgba(150, 150, 150, 64)
+    }
 }
 
 /**

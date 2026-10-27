@@ -39,6 +39,70 @@ class EraseSessionTest {
     private fun docOf(vararg items: CanvasItem): InfiniteDocument =
         InfiniteDocument().apply { addAll(items.toList()) }
 
+    private fun square(l: Double, t: Double, size: Double) =
+        listOf(Pt(l, t), Pt(l + size, t), Pt(l + size, t + size), Pt(l, t + size))
+
+    private val sky = Rgba(90, 160, 240, 255)
+
+    // --- fills: a touch takes them whole ---
+
+    @Test fun anEraserOverInkOnAFillTakesBoth() {
+        for (area in listOf(false, true)) {
+            val fill = ShapeItem.fill(listOf(square(-50.0, -50.0, 300.0)), sky)
+            val ink = line(100.0)
+            val doc = docOf(fill, ink)
+            EraseSession(doc).erase(50.0, 0.0, 8.0, area)
+            assertTrue("the fill goes whole (area=$area)", doc.items.none { it === fill })
+            assertTrue("and the ink with it (area=$area)", doc.items.none { it === ink })
+        }
+    }
+
+    @Test fun aSlightTouchAtAFillsEdgeTakesItWhole() {
+        for (area in listOf(false, true)) {
+            val fill = ShapeItem.fill(listOf(square(0.0, 0.0, 200.0)), sky)
+            val doc = docOf(fill)
+            val session = EraseSession(doc)
+            assertNull(session.erase(-20.0, 100.0, 8.0, area))
+            assertNotNull(session.erase(-5.0, 100.0, 8.0, area))
+            assertEquals("area=$area", 0, doc.itemCount)
+        }
+    }
+
+    @Test fun aFilledShapeLosesOnlyItsFillToATouchInside() {
+        val box = ShapeItem(ShapeKind.RECTANGLE, Pt(0.0, 0.0), Pt(200.0, 200.0), Rgba(1, 1, 1, 255), 3.0, sky)
+        val doc = docOf(box)
+        val session = EraseSession(doc)
+        session.erase(100.0, 100.0, 8.0, area = true)
+        assertSame(box, doc.items.single())
+        assertNull(box.fillRgba)
+        val undo = session.buildCommand()!!
+        undo.undo()
+        assertEquals(sky, box.fillRgba)
+        undo.redo()
+        assertNull(box.fillRgba)
+    }
+
+    @Test fun rubbingOutWritingInAFilledShapeTakesItsFillButLeavesItsOutline() {
+        val box = ShapeItem(ShapeKind.RECTANGLE, Pt(-50.0, -50.0), Pt(200.0, 200.0), Rgba(1, 1, 1, 255), 3.0, sky)
+        val ink = line(100.0)
+        val doc = docOf(box, ink)
+        EraseSession(doc).erase(50.0, 0.0, 8.0, area = false)
+        assertSame(box, doc.items.single())
+        assertNull(box.fillRgba)
+    }
+
+    @Test fun aFillComesOffBeforeItsShapeIsCutAndUndoesInOrder() {
+        val box = ShapeItem(ShapeKind.RECTANGLE, Pt(0.0, 0.0), Pt(200.0, 200.0), Rgba(1, 1, 1, 255), 3.0, sky)
+        val doc = docOf(box)
+        val session = EraseSession(doc)
+        session.erase(100.0, 100.0, 8.0, area = true)
+        session.erase(100.0, 0.0, 8.0, area = true) // then across its top edge
+        assertTrue(doc.items.none { it === box })
+        session.buildCommand()!!.undo()
+        assertSame(box, doc.items.single())
+        assertEquals(sky, box.fillRgba)
+    }
+
     // --- whole-stroke mode ---
 
     @Test fun wholeStrokeModeRemovesWhatItTouches() {

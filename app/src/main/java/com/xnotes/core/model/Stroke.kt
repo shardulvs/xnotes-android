@@ -55,6 +55,8 @@ class Stroke(
     override val kind = KIND
     override val resizable = false
     override var locked = false
+    override var group: Int? = null
+    override var sync: SyncMark? = null
 
     /**
      * The samples, frozen (see [Samples]). Volatile, and every edit publishes a whole new tuple in
