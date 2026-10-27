@@ -79,7 +79,11 @@ internal class LatestWork<K>(private val executor: Executor,
                 val remaining = nextStartNs - System.nanoTime()
                 if (remaining > 0) {
                     try { java.util.concurrent.TimeUnit.NANOSECONDS.sleep(remaining) }
-                    catch (_: InterruptedException) { Thread.currentThread().interrupt(); return }
+                    catch (_: InterruptedException) {
+                        // An interruption skips this throttle delay, not the queue. Returning here
+                        // would leave draining=true and silently stall every future submission.
+                        Thread.currentThread().interrupt()
+                    }
                 }
                 nextStartNs = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(minimumStartIntervalMs)
             }

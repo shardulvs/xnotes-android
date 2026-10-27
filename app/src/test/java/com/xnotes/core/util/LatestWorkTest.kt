@@ -111,4 +111,39 @@ class LatestWorkTest {
         assertEquals(listOf(2), shown)
     }
 
+    @Test fun canceledRasterResultIsDiscardedInsteadOfPublished() {
+        val worker = Queue()
+        val main = Queue()
+        val work = LatestWork<String>(worker) { main.execute(it) }
+        val shown = ArrayList<Int>()
+        val discarded = ArrayList<Int>()
+        work.submit("text", { 42 }, shown::add, { throw it }, discard = discarded::add)
+        worker.drain()
+        work.cancel("text")
+        main.drain()
+        assertTrue(shown.isEmpty())
+        assertEquals(listOf(42), discarded)
+    }
+
+    @Test fun interruptedDelayDoesNotAbandonPendingWork() {
+        val worker = Queue()
+        val main = Queue()
+        val work = LatestWork<String>(worker, minimumStartIntervalMs = 100L) { main.execute(it) }
+        val shown = ArrayList<Int>()
+        work.submit("first", { Thread.currentThread().interrupt(); 1 }, shown::add, { throw it })
+        work.submit("pending", { 2 }, shown::add, { throw it })
+        try {
+            worker.drain()
+        } finally {
+            // The deterministic queue executes on the test thread, unlike the app's worker.
+            Thread.interrupted()
+        }
+        main.drain()
+        assertEquals(listOf(1, 2), shown)
+        work.submit("later", { 3 }, shown::add, { throw it })
+        worker.drain()
+        main.drain()
+        assertEquals(listOf(1, 2, 3), shown)
+    }
+
 }
