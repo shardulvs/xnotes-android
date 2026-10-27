@@ -152,13 +152,9 @@ fun Toolbar(
     }
 
     if (renaming) {
-        val renameFailed = stringResource(R.string.err_rename_note)
         RenameDialog(
             initial = editor.title,
-            onConfirm = { name ->
-                renaming = false
-                if (!editor.renameCurrentDocument(name)) editor.message = renameFailed
-            },
+            onConfirm = { name -> editor.renameCurrentDocument(name) },
             onDismiss = { renaming = false },
         )
     }
@@ -341,8 +337,10 @@ private val PAGED_TOOL_KEYS = mapOf(
 
 /** Renames the open note: a small prefilled text field; the ".xnote" suffix is implicit. */
 @Composable
-private fun RenameDialog(initial: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+private fun RenameDialog(initial: String, onConfirm: (String) -> Boolean, onDismiss: () -> Unit) {
     var text by remember { mutableStateOf(initial) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val renameFailed = stringResource(R.string.err_rename_note)
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     AlertDialog(
@@ -351,13 +349,21 @@ private fun RenameDialog(initial: String, onConfirm: (String) -> Unit, onDismiss
         text = {
             OutlinedTextField(
                 value = text,
-                onValueChange = { text = it },
+                onValueChange = {
+                    text = it
+                    error = null
+                },
                 singleLine = true,
+                isError = error != null,
+                supportingText = error?.let { { Text(it) } },
                 modifier = Modifier.focusRequester(focus),
             )
         },
         confirmButton = {
-            TextButton(onClick = { if (text.isBlank()) onDismiss() else onConfirm(text) }) { Text(stringResource(R.string.rename)) }
+            TextButton(
+                onClick = { if (onConfirm(text)) onDismiss() else error = renameFailed },
+                enabled = text.isNotBlank(),
+            ) { Text(stringResource(R.string.rename)) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )

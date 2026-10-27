@@ -309,6 +309,7 @@
     <string name="fit_width">Fit page width</string>
     <string name="fit_height">Fit page height</string>
     <string name="err_rename_note">Couldn’t rename the note.</string>
+    <string name="err_rename_folder">Couldn’t rename the folder.</string>
     <string name="untitled">Untitled</string>
     <string name="insert_image">Insert image</string>
     <string name="insert_group_image">Image</string>
