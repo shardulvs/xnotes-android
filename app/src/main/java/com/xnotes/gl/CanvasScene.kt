@@ -44,7 +44,14 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         val coverColor: Rgba,
         val coverAlpha: Double,
         val glow: GlowSpec? = null,
+        /** A covered tape's body, which the highlights beneath it are drawn round. */
+        val covers: Boolean = false,
     )
+
+    /** A highlight held back to composite last, and the bodies of the covered tape laid over it since. */
+    private class Deferred(val record: Record, val part: Part) {
+        var under: ArrayList<Part>? = null
+    }
 
     private class Record(
         val item: CanvasItem,
@@ -171,7 +178,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
 
     /** Reused per frame so drawing allocates nothing. */
     private val visible = ArrayList<Record>()
-    private val deferred = ArrayList<Pair<Record, Part>>()
+    private val deferred = ArrayList<Deferred>()
 
     /** Items currently drawn, for the debug readout. */
     val itemCount: Int get() = records.size
@@ -387,12 +394,20 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
                 continue
             }
             for (part in record.parts) {
+                // Tape laid over a held-back highlight hides it, so the highlight will be drawn round it.
+                if (part.covers && deferred.isNotEmpty()) {
+                    for (d in deferred) {
+                        if (d.record !== record && d.record.bounds.intersects(record.bounds)) {
+                            (d.under ?: ArrayList<Part>().also { d.under = it }).add(part)
+                        }
+                    }
+                }
                 @Suppress("UNUSED_EXPRESSION")
                 when (part.pass) {
                     InkPass.MULTIPLY, InkPass.SCREEN -> {
                         // Highlighters composite over the finished picture, matching the paged
                         // canvas, so their blend acts on what is beneath instead of washing it out.
-                        deferred.add(record to part)
+                        deferred.add(Deferred(record, part))
                     }
                     InkPass.OPAQUE -> {
                         if (runStart >= 0 && part.slice.indexOffset == runStart + runCount) {
@@ -423,8 +438,8 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         }
         flushRun(runStart, runCount)
 
-        for ((record, part) in deferred) {
-            drawMasked(record, part, frame, part.pass)
+        for (d in deferred) {
+            drawMasked(store, d.part.slice, d.record.bounds, d.part.coverColor, d.part.coverAlpha, frame, d.part.pass, d.under)
             rebind(program, frame, camChunkX, camChunkY)
         }
 
@@ -957,6 +972,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         coverAlpha: Double,
         frame: FrameState,
         pass: InkPass,
+        under: List<Part>? = null,
     ) {
         val quad = cover ?: return
         // An even-odd fill inverts instead of replacing, so the parity of how many times a pixel
@@ -973,6 +989,15 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         GLES30.glColorMask(false, false, false, false)
         from.drawRange(slice.indexOffset, slice.indexCount)
         lastDrawCalls++
+        // Covered tape over the highlight takes its body back out of the mask, so the cover skips it.
+        if (under != null) {
+            GLES30.glStencilFunc(GLES30.GL_ALWAYS, 0, 0xFF)
+            GLES30.glStencilOp(GLES30.GL_KEEP, GLES30.GL_KEEP, GLES30.GL_REPLACE)
+            for (p in under) {
+                from.drawRange(p.slice.indexOffset, p.slice.indexCount)
+                lastDrawCalls++
+            }
+        }
 
         GLES30.glColorMask(true, true, true, true)
         GLES30.glStencilFunc(if (invert) GLES30.GL_NOTEQUAL else GLES30.GL_EQUAL, if (invert) 0 else 1, 0xFF)
@@ -1057,7 +1082,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
             // which is what stops its own overlaps from compounding.
             val baked = if (part.pass == InkPass.OPAQUE) part.color else part.color.withAlpha(255)
             val slice = store.put(part.mesh, baked) ?: continue
-            parts.add(Part(slice, part.pass, part.color.withAlpha(255), part.color.a / 255.0, part.glow))
+            parts.add(Part(slice, part.pass, part.color.withAlpha(255), part.color.a / 255.0, part.glow, part.covers))
         }
         if (parts.isEmpty() && edit.image == null) return
         val record = Record(edit.item, parts, edit.bounds, previousZ ?: nextZ++, edit.image)

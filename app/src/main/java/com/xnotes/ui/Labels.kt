@@ -10,6 +10,8 @@ import androidx.compose.ui.res.stringResource
 import com.xnotes.R
 import com.xnotes.core.model.PageEdge
 import com.xnotes.core.model.PageSize
+import com.xnotes.core.model.TapeMode
+import com.xnotes.core.model.TapePattern
 import com.xnotes.core.pal.FontFace
 import com.xnotes.core.text.TableBorders
 import com.xnotes.core.tools.MarkupMode
@@ -43,6 +45,24 @@ val Tool.labelRes: Int
         Tool.TEXT_BOX -> R.string.tool_text_box
         Tool.IMAGE -> R.string.tool_image
         Tool.MARKUP -> R.string.tool_markup
+        Tool.TAPE -> R.string.tool_tape
+    }
+
+@get:StringRes
+val TapeMode.labelRes: Int
+    get() = when (this) {
+        TapeMode.STRAIGHT -> R.string.tape_straight
+        TapeMode.RECTANGLE -> R.string.shape_rectangle
+        TapeMode.FREEHAND -> R.string.tape_freehand
+    }
+
+@get:StringRes
+val TapePattern.labelRes: Int
+    get() = when (this) {
+        TapePattern.SOLID -> R.string.tape_solid
+        TapePattern.STRIPES -> R.string.tape_stripes
+        TapePattern.DOTS -> R.string.pattern_dots
+        TapePattern.GRID -> R.string.pattern_grid
     }
 
 @get:StringRes
@@ -74,6 +94,7 @@ val ToolbarItem.labelRes: Int
         ToolbarItem.LASSO -> R.string.tool_lasso
         ToolbarItem.SCREENSHOT -> R.string.tool_screenshot
         ToolbarItem.WAND -> R.string.tool_wand
+        ToolbarItem.TAPE -> R.string.tool_tape
         ToolbarItem.SHAPE -> R.string.tool_shape
         ToolbarItem.RULER -> R.string.tool_ruler
         ToolbarItem.TEXT -> R.string.tool_text

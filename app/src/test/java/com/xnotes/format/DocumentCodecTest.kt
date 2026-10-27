@@ -30,6 +30,10 @@ import com.xnotes.core.model.TextStyle
 import com.xnotes.core.model.ShapeLabel
 import com.xnotes.core.model.Stroke
 import com.xnotes.core.model.SyncMark
+import com.xnotes.core.model.TapeItem
+import com.xnotes.core.model.TapeMode
+import com.xnotes.core.model.TapePattern
+import com.xnotes.core.model.TapeShape
 import com.xnotes.core.model.TextItem
 import com.xnotes.core.stroke.Sample
 import com.xnotes.core.stroke.StrokeSimplify
@@ -149,6 +153,31 @@ class DocumentCodecTest {
         assertTrue(back[2].locked)
         assertTrue(back[3].locked)
         assertTrue(back[4].locked)
+    }
+
+    @Test fun groupsSurviveARoundTripAndLooseItemsWriteNone() {
+        val doc = Document.blank(count = 1)
+        val grouped = Stroke(Tool.PEN, ToolDefaults.configFor(Tool.PEN), mutableListOf(Sample(1.0, 2.0, 1.0))).also { it.group = 4 }
+        val loose = Stroke(Tool.PEN, ToolDefaults.configFor(Tool.PEN), mutableListOf(Sample(3.0, 4.0, 1.0)))
+        doc.pages[0].items.addAll(listOf(grouped, loose))
+        val out = ByteArrayOutputStream()
+        codec.write(doc, out)
+        assertEquals(1, Regex("\"group\"").findAll(manifestOf(out.toByteArray())).count())
+        val back = roundTrip(doc).pages[0].items
+        assertEquals(listOf(4, null), back.map { it.group })
+    }
+
+    @Test fun aTurnedPdfPageKeepsItsTurnAndAPlainOneWritesNone() {
+        val doc = Document.blank(count = 2)
+        doc.pages[0].pdfPage = 0
+        doc.pages[0].pdfTurn = 3
+        val out = ByteArrayOutputStream()
+        codec.write(doc, out)
+        val manifest = manifestOf(out.toByteArray())
+        assertEquals(1, Regex("\"pdf_turn\"").findAll(manifest).count())
+        val back = roundTrip(doc)
+        assertEquals(3, back.pages[0].pdfTurn)
+        assertEquals(0, back.pages[1].pdfTurn)
     }
 
     @Test fun createdTimeRoundTripsAsIsoUtc() {
@@ -704,6 +733,30 @@ class DocumentCodecTest {
         assertEquals(back.pressure, twice.pressure, 0.0)
     }
 
+    @Test fun olderNotesKeepWhatTheirPagesBorrowedAcrossTemplates() {
+        // No "writer" field: written when a page's built-in ruling took the note's spacing and colour.
+        val out = ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(out).use {
+            it.putNextEntry(java.util.zip.ZipEntry("manifest.json"))
+            it.write(
+                ("{\"format\":\"xnote\",\"version\":1,\"style\":{\"pattern\":\"lines\",\"spacing\":48,\"pattern_color\":[1,2,3,4]}," +
+                    "\"pages\":[{\"width\":100,\"height\":100,\"style\":{\"pattern\":\"grid\"},\"items\":[]}]}").toByteArray(),
+            )
+            it.closeEntry()
+        }
+        val s = codec.read(ByteArrayInputStream(out.toByteArray())).pages[0].style
+        assertEquals(PagePattern.GRID.id, s.template)
+        assertEquals(48.0, s.spacing!!, 0.0)
+        assertEquals(Rgba(1, 2, 3, 4), s.patternColor)
+    }
+
+    @Test fun aCurrentNoteKeepsAPagesDefaultColour() {
+        val doc = Document(dpi = 150)
+        doc.style = PageStyle(template = PagePattern.LINES.id, patternColor = Rgba(1, 2, 3, 4))
+        doc.pages.add(Page(100.0, 100.0).also { it.style = PageStyle(template = PagePattern.GRID.id) })
+        assertNull(roundTrip(doc).pages[0].style.patternColor)
+    }
+
     @Test fun pageStyleRoundTrips() {
         val doc = Document(dpi = 150)
         doc.style = PageStyle(template = PagePattern.LINES.id, spacing = 48.0) // document-wide ("all pages")
@@ -1158,5 +1211,31 @@ class DocumentCodecTest {
         assertEquals(1, items.size)
         assertEquals("after", (items[0] as TextItem).text)
     }
-}
 
+    @Test fun tapeRoundTripsInANoteAndOpensCovered() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        val strip = TapeItem(TapeShape(TapeMode.STRAIGHT, listOf(Pt(10.0, 20.0), Pt(300.0, 20.0)), 30.0), Rgba(240, 200, 90, 255), TapePattern.STRIPES)
+        strip.peeled = true
+        strip.locked = true
+        val band = TapeItem(TapeShape(TapeMode.FREEHAND, listOf(Pt(0.0, 0.0), Pt(40.0, 10.0), Pt(80.0, 0.0)), 12.0), Rgba(20, 20, 20, 255))
+        band.group = 3
+        page.items.add(strip)
+        page.items.add(band)
+        doc.pages.add(page)
+        val out = ByteArrayOutputStream()
+        codec.write(doc, out)
+        val manifest = manifestOf(out.toByteArray())
+        assertTrue(manifest.contains("\"kind\":\"tape\""))
+        assertFalse("a solid tape writes no pattern", manifest.contains("\"solid\""))
+        val back = roundTrip(doc).pages[0].items.map { it as TapeItem }
+        assertEquals(strip.shape, back[0].shape)
+        assertEquals(TapePattern.STRIPES, back[0].pattern)
+        assertEquals(Rgba(240, 200, 90, 255), back[0].rgba)
+        assertFalse("peeling is never saved", back[0].peeled)
+        assertTrue(back[0].locked)
+        assertEquals(band.shape, back[1].shape)
+        assertEquals(TapePattern.SOLID, back[1].pattern)
+        assertEquals(3, back[1].group)
+    }
+}

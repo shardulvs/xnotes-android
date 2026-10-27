@@ -34,6 +34,19 @@ object ImageDecoder {
     fun probeFile(path: String): ImageSize? =
         if (isVector(path)) cachedSvg(path)?.let { svgSize(it) } else probeRaster(path)
 
+    /** The clockwise quarter turn (0, 90, 180 or 270) a camera's EXIF data asks for the picture at [path]. */
+    fun exifTurn(path: String): Int {
+        if (isVector(path)) return 0
+        return runCatching {
+            when (android.media.ExifInterface(path).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, 0)) {
+                android.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                android.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                android.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                else -> 0
+            }
+        }.getOrDefault(0)
+    }
+
     /** Decode the image at [path] for a [maxWidth]×[maxHeight] box (aspect kept), or null.
      *  Rasters stay within the box and never upscale past their native pixels; an SVG returns the
      *  cached power-of-two bucket covering the box (possibly larger — callers scale into place). */

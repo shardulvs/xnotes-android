@@ -12,7 +12,7 @@ import com.xnotes.core.model.AudioLook
 import com.xnotes.core.model.EraseRule
 import com.xnotes.core.model.Stroke
 import com.xnotes.core.model.SyncMark
-import com.xnotes.core.model.withoutAudio
+import com.xnotes.core.model.forExport
 import com.xnotes.core.stroke.Sample
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
@@ -102,9 +102,9 @@ class RecordingIdsTest {
         val p = pill(1)
         assertFalse(EraseRule.erasable(p))
         val items = listOf(ink(null), p)
-        assertEquals(1, items.withoutAudio().size)
+        assertEquals(1, items.forExport().size)
         val noPills = listOf(ink(null))
-        assertTrue(noPills.withoutAudio() === noPills)
+        assertTrue(noPills.forExport() === noPills)
     }
 
     @Test fun aPillScalesByCornersAndLengthensBySidesButNeverTurns() {

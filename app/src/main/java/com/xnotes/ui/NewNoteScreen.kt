@@ -127,9 +127,10 @@ import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.PageStyle
 import com.xnotes.core.model.PageTemplates
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.model.TemplateSettings
+import com.xnotes.core.model.withTemplate
 import com.xnotes.core.template.Template
 import com.xnotes.core.template.TemplateKind
-import com.xnotes.core.template.TemplateValues
 import com.xnotes.platform.TemplateLibrary
 import com.xnotes.settings.SwatchRole
 import com.xnotes.ui.icons.XnotesIcons
@@ -175,15 +176,6 @@ private const val DPI = PageSize.DEFAULT_DPI
 /** A length in mm as it is typed: no ".0" on a whole number. */
 private fun mmText(v: Double): String =
     if (v == Math.floor(v)) v.toInt().toString() else String.format(java.util.Locale.ROOT, "%.1f", v)
-
-/** [s]'s parameter values for [t], its spacing turned back from content px into mm. */
-private fun valuesOf(s: PageStyle, t: Template?): TemplateValues {
-    val numbers = HashMap<String, Double>()
-    s.params?.let(numbers::putAll)
-    val sp = t?.spacingParam
-    s.spacing?.let { px -> if (sp != null) numbers[sp.name] = px * 25.4 / DPI }
-    return TemplateValues(numbers, s.colors ?: emptyMap())
-}
 
 /** The screen's cover part alone, for a note that exists: its page size, its cover's style if any, and where the choice goes. */
 internal class CoverEdit(val pageMm: Pair<Double, Double>, val current: PageStyle?, val onDone: (PageStyle) -> Unit)
@@ -233,6 +225,8 @@ internal fun NewNoteScreen(
         var customW by remember { mutableStateOf(mmText(prefs.customPageWidthMm)) }
         var customH by remember { mutableStateOf(mmText(prefs.customPageHeightMm)) }
         var style by remember { mutableStateOf(editor.newNoteStyle) }
+        // Each page template keeps what was set on it while the screen is open, as each cover design does.
+        val pageTweaks = remember { HashMap<String, TemplateSettings>() }
         val version = TemplateLibraryUi.version
         val all = remember(version) { TemplateLibrary.all() }
         val pages = remember(all) { all.filter { it.template.kind == TemplateKind.PAGE } }
@@ -261,7 +255,7 @@ internal fun NewNoteScreen(
                 }
                 // The cover picker of an open note has no pages to put it on; it just joins the library.
                 !coverOnly -> {
-                    style = style.withTemplate(e.key, PageTemplates.NONE)
+                    style = style.withTemplate(e.key, PageTemplates.NONE, pageTweaks)
                     face = Face.PAGES
                     aiOpen = false
                 }
@@ -283,6 +277,8 @@ internal fun NewNoteScreen(
         val canCreate = !busy && sizeOk
 
         val look = TemplateLook.of(style, null, palette.paper)
+        // A cover draws in its own colours, on the pages' paper unless it has its own.
+        val coverPaper = coverStyle.pageColor ?: look.paper
         val pageKey = style.template ?: PageTemplates.NONE
         val pageT = pages.firstOrNull { it.key == pageKey }?.template
         val coverKey = coverStyle.template
@@ -308,7 +304,7 @@ internal fun NewNoteScreen(
         }
 
         fun pickPage(key: String) {
-            style = style.withTemplate(key, PageTemplates.NONE)
+            style = style.withTemplate(key, PageTemplates.NONE, pageTweaks)
             face = Face.PAGES
         }
 
@@ -323,14 +319,16 @@ internal fun NewNoteScreen(
             face = Face.COVER
         }
 
+        // [t] drawn with [own] settings on [paper]. A [tile] shows the ruling plainly; [keep] holds on to the picture.
         @Composable
-        fun Thumb(t: Template?, key: String, values: TemplateValues, w: Dp, h: Dp, keep: Boolean) {
-            Box(Modifier.size(w, h).background(look.paper.toComposeColor())) {
+        fun Thumb(t: Template?, key: String, own: TemplateSettings, paper: Rgba, w: Dp, h: Dp, keep: Boolean, tile: Boolean = keep) {
+            Box(Modifier.size(w, h).background(paper.toComposeColor())) {
                 if (t != null) {
-                    val spec = if (keep) {
-                        TemplateThumbs.spec(key, pageMm, look.ink, look.accent, look.paper, values, thumbPx(w))
+                    val d = TemplateDrawing.of(t, own, null, paper, DPI)
+                    val spec = if (tile) {
+                        TemplateThumbs.spec(key, pageMm, d, thumbPx(w))
                     } else {
-                        TemplateThumbs.Spec(key, pageMm, look.ink, look.accent, look.paper, values.numbers, values.colors, thumbPx(w))
+                        TemplateThumbs.Spec(key, pageMm, d.look.ink, d.look.accent, paper, d.values.numbers, d.values.colors, thumbPx(w))
                     }
                     val bmp = rememberTemplateThumb(t, spec, keep)
                     // A picture drawn just now fades in; one drawn before shows at once.
@@ -339,6 +337,20 @@ internal fun NewNoteScreen(
                     if (bmp != null) Image(bmp, contentDescription = t.name, Modifier.size(w, h), contentScale = ContentScale.Crop, alpha = shown)
                 }
             }
+        }
+
+        // A tile shows its template as set here; the picked one is drawn afresh, so a slider drag never fills the cache.
+        @Composable
+        fun PageThumb(e: TemplateLibrary.Entry, w: Dp, h: Dp) {
+            val picked = e.key == pageKey
+            Thumb(e.template, e.key, if (picked) style.settings else pageTweaks[e.key] ?: TemplateSettings(), look.paper, w, h, keep = !picked, tile = true)
+        }
+
+        @Composable
+        fun CoverThumb(e: TemplateLibrary.Entry, w: Dp, h: Dp) {
+            val picked = hasCover && e.key == coverKey
+            val set = if (picked) coverStyle else coverTweaks[e.key]
+            Thumb(e.template, e.key, set?.settings ?: TemplateSettings(), set?.pageColor ?: look.paper, w, h, keep = !picked, tile = true)
         }
 
         @Composable
@@ -524,7 +536,7 @@ internal fun NewNoteScreen(
                     if (!coverOn && coverT != null) coverOn = true
                 }) {
                     if (hasCover) {
-                        Box(paper) { Thumb(coverT, coverKey!!, valuesOf(coverStyle, coverT), w, h, keep = false) }
+                        Box(paper) { Thumb(coverT, coverKey!!, coverStyle.settings, coverPaper, w, h, keep = false) }
                     } else {
                         Dashed(w, h) {
                             Icon(XnotesIcons.plus, null, tint = dim, modifier = Modifier.size(22.dp))
@@ -540,7 +552,7 @@ internal fun NewNoteScreen(
                         val ph = pw * aspect
                         Box(Modifier.size(w, ph + lift)) {
                             Box(Modifier.offset(lift, lift).size(pw, ph).background(ColorMath.darken(look.paper, 0.06).toComposeColor()).border(1.dp, edge))
-                            Box(paper) { Thumb(pageT, pageKey, valuesOf(style, pageT), pw, ph, keep = false) }
+                            Box(paper) { Thumb(pageT, pageKey, style.settings, look.paper, pw, ph, keep = false) }
                         }
                     }
                 }
@@ -750,16 +762,16 @@ internal fun NewNoteScreen(
                 if (tag == null || builtIn.isNotEmpty()) {
                     heading(sBuiltIn, builtIn.size)
                     if (tag == null) item {
-                        Tile(stringResource(R.string.none), pageKey == PageTemplates.NONE, { pickPage(PageTemplates.NONE) }, null) { w, h -> Thumb(null, PageTemplates.NONE, TemplateValues.DEFAULTS, w, h, keep = true) }
+                        Tile(stringResource(R.string.none), pageKey == PageTemplates.NONE, { pickPage(PageTemplates.NONE) }, null) { w, h -> Thumb(null, PageTemplates.NONE, TemplateSettings(), look.paper, w, h, keep = true) }
                     }
                     items(builtIn, key = { it.key }) { e ->
-                        Tile(e.template.name, pageKey == e.key, { pickPage(e.key) }, null) { w, h -> Thumb(e.template, e.key, TemplateValues.DEFAULTS, w, h, keep = true) }
+                        Tile(e.template.name, pageKey == e.key, { pickPage(e.key) }, null) { w, h -> PageThumb(e, w, h) }
                     }
                 }
                 if (examples.isNotEmpty()) {
                     heading(sExamples, examples.size)
                     items(examples, key = { it.key }) { e ->
-                        Tile(e.template.name, pageKey == e.key, { pickPage(e.key) }, null) { w, h -> Thumb(e.template, e.key, TemplateValues.DEFAULTS, w, h, keep = true) }
+                        Tile(e.template.name, pageKey == e.key, { pickPage(e.key) }, null) { w, h -> PageThumb(e, w, h) }
                     }
                 }
                 heading(sImported, null, sImportedHelp)
@@ -768,7 +780,7 @@ internal fun NewNoteScreen(
                         editor.removeTemplate(e.key)
                         if (pageKey == e.key) pickPage(PageTemplates.NONE)
                     }) { w, h ->
-                        Thumb(e.template, e.key, TemplateValues.DEFAULTS, w, h, keep = true)
+                        PageThumb(e, w, h)
                     }
                 }
                 item { ActionTile(XnotesIcons.importDoc, stringResource(R.string.import_template_file), onImportTemplate) }
@@ -787,7 +799,7 @@ internal fun NewNoteScreen(
                 }
                 items(bundled, key = { it.key }) { e ->
                     Tile(e.template.name, hasCover && coverKey == e.key, { pickCover(e.key) }, null) { w, h ->
-                        Thumb(e.template, e.key, TemplateValues.DEFAULTS, w, h, keep = true)
+                        CoverThumb(e, w, h)
                     }
                 }
                 heading(sImported, null, sImportedHelp)
@@ -796,7 +808,7 @@ internal fun NewNoteScreen(
                         editor.removeTemplate(e.key)
                         if (coverKey == e.key) coverOn = false
                     }) { w, h ->
-                        Thumb(e.template, e.key, TemplateValues.DEFAULTS, w, h, keep = true)
+                        CoverThumb(e, w, h)
                     }
                 }
                 item { ActionTile(XnotesIcons.importDoc, stringResource(R.string.import_template_file), onImportTemplate) }

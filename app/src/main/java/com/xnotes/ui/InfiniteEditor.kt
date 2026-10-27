@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import com.xnotes.R
 import com.xnotes.canvas.InteractionController
+import com.xnotes.canvas.ItemClipboard
 import com.xnotes.core.fill.ColorDrop
 import com.xnotes.core.fill.DropAction
 import com.xnotes.core.fill.FillGrid
@@ -45,12 +46,14 @@ import com.xnotes.core.model.DrawStyle
 import com.xnotes.core.model.ImageData
 import com.xnotes.core.model.ImageItem
 import com.xnotes.core.model.PageLayers
+import com.xnotes.core.model.forExport
 import com.xnotes.core.model.deepCopyAll
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.Labelled
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.ShapeLabel
 import com.xnotes.core.model.Stroke
+import com.xnotes.core.model.TapeItem
 import com.xnotes.core.model.TextItem
 import com.xnotes.core.model.TextStyle
 import com.xnotes.core.pal.FontFace
@@ -80,7 +83,7 @@ import com.xnotes.ui.theme.Palette
 /** How near ink a finger tap during playback may land to play from it, in dp. */
 private const val INK_TAP_DP = 8.0
 
-class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongPressMenuHost, TextEditHost, ColorDropHost, AudioHost {
+class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongPressMenuHost, TextEditHost, ColorDropHost, AudioHost, CropHost {
 
     private val appContext = context.applicationContext
 
@@ -137,6 +140,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         isEditingText = { editingLabel != null },
         onCommitText = { commitText() },
         onAudioTap = { tapAudio(it) },
+        onPeelTape = { peelTape(it) },
         onUserMovedView = { AudioPlayback.userMoved(this) },
     )
 
@@ -296,8 +300,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         view.minimapVisible = minimapVisible
         view.scene = scene
         // Decoding reads a file and can take tens of milliseconds, so it never runs on the render
-        // thread; the finished bitmap is picked up and uploaded at the start of the next frame.
-        scene.decodeOn = { work -> decodeExecutor.execute(work) }
+        // thread; the finished bitmap is uploaded at the start of the next frame, which the decode
+        // asks for itself, since nothing else may be drawing.
+        scene.decodeOn = { work -> decodeExecutor.execute { work.run(); view.requestRender() } }
         scene.onOutOfMemory = { short -> view.post { outOfMemory = short } }
         document.listener = modelListener
         // Whatever is added while this canvas records takes the recording's moment.
@@ -477,12 +482,6 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
      * here. The behaviour they present is the same, which is what the shared [SelectionMenu] holds
      * them to.
      */
-    private val clipboard = ArrayList<CanvasItem>()
-
-    /** Whether the clipboard was filled by a cut, which the first paste spends. Same rule as the
-     *  paged canvas: a cut moves items, so pasting them back finishes the move. */
-    private var clipboardFromCut = false
-
     /** Only text needs a measurer to clone, and the canvas has none; this satisfies the signature. */
     private val textMeasurer = com.xnotes.platform.AndroidTextMeasurer()
 
@@ -524,20 +523,18 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     override fun copySelection() {
         if (selection.isEmpty) return
-        copyToClipboard()
+        copyToClipboard(cut = false)
         maybeSwitchBackAfterSelect()
     }
 
-    private fun copyToClipboard() {
-        clipboard.clear()
-        clipboardFromCut = false
-        clipboard.addAll(selection.items.deepCopyAll(textMeasurer))
+    /** Put copies of the selection on the item clipboard both panes share; a [cut]'s are spent by the paste that lands them. */
+    private fun copyToClipboard(cut: Boolean) {
+        ItemClipboard.clip = ItemClipboard.Clip(selection.items.deepCopyAll(textMeasurer), document.dpi, document, cut)
     }
 
     override fun cutSelection() {
         if (selection.isEmpty) return
-        copyToClipboard()
-        clipboardFromCut = true
+        copyToClipboard(cut = true)
         deleteSelection() // also runs the select tool's switch-back, once
     }
 
@@ -545,6 +542,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     override fun duplicateSelection() {
         if (selection.isEmpty) return
         val clones = selection.items.deepCopyAll(textMeasurer)
+        com.xnotes.core.model.Groups.refresh(clones, document.items)
         for (clone in clones) clone.translate(DUPLICATE_NUDGE, DUPLICATE_NUDGE)
         com.xnotes.core.audio.RecordingIds.adopt(clones, document.items, moves = false)
         document.addAll(clones)
@@ -580,30 +578,28 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         refresh()
     }
 
-    /** Paste the clipboard at [atContent], or a nudge from where it was copied. */
+    /**
+     * Paste the clipboard with its top-left at [atContent]; without one, a nudge from where it was
+     * copied on this canvas, or centred in the view when it came from elsewhere.
+     */
     fun pasteClipboard(atContent: Pt? = null) {
-        if (clipboard.isEmpty()) return
-        val clones = clipboard.deepCopyAll(textMeasurer)
+        val clip = ItemClipboard.clip ?: return
+        val home = clip.isFrom(document)
+        val clones = ItemClipboard.copiesFor(clip, document.dpi, home, textMeasurer)
         var box: Rect? = null
         for (clone in clones) box = box?.union(clone.bounds()) ?: clone.bounds()
         val bounds = box ?: return
-        val dx: Double
-        val dy: Double
-        if (atContent == null) {
-            dx = DUPLICATE_NUDGE
-            dy = DUPLICATE_NUDGE
-        } else {
-            dx = atContent.x - bounds.left
-            dy = atContent.y - bounds.top
+        val (dx, dy) = when {
+            atContent != null -> atContent.x - bounds.left to atContent.y - bounds.top
+            home -> DUPLICATE_NUDGE to DUPLICATE_NUDGE
+            else -> viewport.centerContent.let { c -> c.x - bounds.center.x to c.y - bounds.center.y }
         }
         for (clone in clones) clone.translate(dx, dy)
-        com.xnotes.core.audio.RecordingIds.adopt(clones, document.items, moves = clipboardFromCut)
+        com.xnotes.core.model.Groups.refresh(clones, document.items)
+        com.xnotes.core.audio.RecordingIds.adopt(clones, document.items, moves = clip.cut)
         document.addAll(clones)
         history.push(AddCanvasItems(document, clones))
-        if (clipboardFromCut) {
-            clipboard.clear()
-            clipboardFromCut = false
-        }
+        if (clip.cut && ItemClipboard.clip === clip) ItemClipboard.clip = null
         selection.select(clones)
         armTool(Tool.SELECT)
         markDirty()
@@ -611,7 +607,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         publishOverlay()
     }
 
-    override val hasClipboardItems: Boolean get() = clipboard.isNotEmpty()
+    override val hasClipboardItems: Boolean get() = ItemClipboard.clip != null
 
     // --- long-press paste menu ---
 
@@ -634,11 +630,128 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         insertImage(bytes, content)
     }
 
-    /** Put the selection on top. On a flat canvas that is purely a reorder of the item list. */
-    override fun bringToFront() {
+    // --- crop: a lone picture cut down to part of itself, for good ---
+
+    override fun canCropSelection(): Boolean = selection.items.singleOrNull() is ImageItem
+
+    override var cropFrame by mutableStateOf<CropFrame?>(null)
+        private set
+
+    /** The picture in crop mode, or null outside it. */
+    private var cropping: ImageItem? = null
+
+    override fun startCrop() {
+        val item = selection.items.singleOrNull() as? ImageItem ?: return
+        interaction.clearSelection()
+        publishOverlay()
+        cropping = item
+        val c = viewport.contentToViewport(item.rect.center)
+        cropFrame = CropFrame(
+            c.x.toFloat(), c.y.toFloat(), (item.rect.w * viewport.zoom).toFloat(), (item.rect.h * viewport.zoom).toFloat(),
+            Math.toDegrees(item.angle).toFloat(),
+        )
+    }
+
+    override fun finishCrop(part: Rect?) {
+        val item = cropping ?: return
+        cropping = null
+        cropFrame = null
+        if (part == null || com.xnotes.core.model.ImageCrop.isWhole(part)) return
+        val dir = imageDir ?: return
+        val image = item.image
+        val source = com.xnotes.core.model.ImageCrop.sourceRect(item, image.width, image.height, part)
+        decodeExecutor.execute {
+            val cut = com.xnotes.platform.ImageCropper.crop(image.file, image.width, image.height, source, dir)
+            mainHandler.post {
+                if (cut == null || item.image !== image) {
+                    if (cut == null) onMessage?.invoke(appContext.getString(R.string.err_crop), null)
+                    return@post
+                }
+                val cmd = com.xnotes.core.infinite.OnCanvas(
+                    document,
+                    com.xnotes.core.history.ReplaceImage(item, image to item.rect, cut to com.xnotes.core.model.ImageCrop.croppedRect(item, part)),
+                    listOf(item),
+                )
+                cmd.redo()
+                history.push(cmd)
+                markDirty()
+                refresh()
+                publishOverlay()
+            }
+        }
+    }
+
+    override fun copySelectionAsImage() {
+        val bmp = renderSelectionBitmap()
+        val ok = bmp != null && com.xnotes.platform.SystemClipboard.putImage(appContext, bmp, "xnotes selection")
+        onMessage?.invoke(appContext.getString(if (ok) R.string.image_copied else R.string.err_copy_image), null)
+    }
+
+    override fun selectionImageForShare(): java.io.File? {
+        val file = renderSelectionBitmap()?.let { com.xnotes.platform.ShareFiles.png(appContext, it, document.title) }
+        if (file == null) onMessage?.invoke(appContext.getString(R.string.err_share_image), null)
+        return file
+    }
+
+    /**
+     * The selected items alone over the canvas's paper and ruling, cut to their bounds, at twice
+     * content size with the longest side capped, like the paged Screenshot tool's capture.
+     */
+    private fun renderSelectionBitmap(): android.graphics.Bitmap? {
+        if (selection.isEmpty) return null
+        val picked = HashSet(selection.items)
+        val items = document.items.filter { it in picked }.forExport()
+        val bounds = items.map { it.paintBounds() }.reduceOrNull { a, b -> a.union(b) } ?: return null
+        if (bounds.w <= 0.0 || bounds.h <= 0.0) return null
+        val maxDim = 4096.0
+        val res = minOf(2.0, maxDim / bounds.w, maxDim / bounds.h).coerceAtLeast(0.05)
+        val surface = com.xnotes.platform.AndroidRasterSurface.create(
+            kotlin.math.ceil(bounds.w * res).toInt().coerceIn(1, maxDim.toInt()),
+            kotlin.math.ceil(bounds.h * res).toInt().coerceIn(1, maxDim.toInt()),
+        )
+        surface.fill(view.paperColor)
+        val r = surface.renderer()
+        r.scale(res, res)
+        r.translate(-bounds.left, -bounds.top)
+        val bg = document.background
+        if (bg.pattern != com.xnotes.core.model.PagePattern.NONE) {
+            val spacing = bg.clampedSpacing
+            val period = spacing * com.xnotes.core.infinite.BackgroundPattern.levelMultiplier(spacing, res)
+            com.xnotes.core.model.paintPagePattern(r, bg.pattern, bg.patternColor, period, bounds, bounds)
+        }
+        for (item in items) item.paint(r)
+        return surface.bitmap
+    }
+
+    // --- groups ---
+
+    override fun canGroupSelection(): Boolean = com.xnotes.core.model.Groups.canGroup(selection.items)
+
+    override fun canUngroupSelection(): Boolean = com.xnotes.core.model.Groups.hasGroup(selection.items)
+
+    override fun groupSelection() {
+        if (!canGroupSelection()) return
+        history.push(com.xnotes.core.history.Regroup(selection.items, com.xnotes.core.model.Groups.nextId(document.items)).also { it.redo() })
+        markDirty()
+        refresh()
+        publishOverlay()
+    }
+
+    override fun ungroupSelection() {
+        val grouped = selection.items.filter { it.group != null }
+        if (grouped.isEmpty()) return
+        history.push(com.xnotes.core.history.Regroup(grouped, null).also { it.redo() })
+        markDirty()
+        refresh()
+        publishOverlay()
+    }
+
+    /** Restack the selection. On a flat canvas that is purely a reorder of the item list. */
+    override fun arrange(how: com.xnotes.core.model.Arrange) {
         if (selection.isEmpty) return
         val before = document.items.toList()
-        val after = com.xnotes.core.infinite.bringToFrontOrder(before, selection.items)
+        val picked = HashSet(selection.items)
+        val after = com.xnotes.core.model.arrangeOrder(before, { it in picked }, how) { it.paintBounds() }
         if (!com.xnotes.core.infinite.sameOrder(before, after)) {
             document.replaceAll(after)
             history.push(ReplaceCanvasItems(document, before, after))
@@ -674,6 +787,22 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     /** The fills as a refill preview found them, so its settling call records them as one step. */
     private var refillBaseline: Map<ShapeItem, Rgba?>? = null
+
+    override fun selectionTapePattern(): com.xnotes.core.model.TapePattern? =
+        selection.items.firstNotNullOfOrNull { (it as? TapeItem)?.pattern }
+
+    override fun setSelectionTapePattern(pattern: com.xnotes.core.model.TapePattern) {
+        val tapes = selection.items.filterIsInstance<TapeItem>()
+        val entries = com.xnotes.core.history.RepatternTape.of(tapes, pattern)
+        if (entries.isEmpty()) return
+        val command = com.xnotes.core.history.RepatternTape(entries)
+        command.redo()
+        document.itemsChanged(entries.map { it.tape })
+        history.push(OnCanvas(document, command, entries.map { it.tape }))
+        markDirty()
+        refresh()
+        publishOverlay()
+    }
 
     override fun selectionCount(): ShapeCount? = ShapeCount.of(selection.items.singleOrNull() as? ShapeItem)
 
@@ -934,6 +1063,22 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     }
 
     override val hostShapeConfig: ShapeConfig get() = shapeConfig
+
+    /** Peel [tape] back, or cover it again: the mesh changes, the history and the file do not. */
+    private fun peelTape(tape: TapeItem) {
+        tape.peeled = !tape.peeled
+        document.itemsChanged(listOf(tape))
+        requestRender()
+    }
+
+    override fun setAllTapePeeled(peeled: Boolean) {
+        val turned = document.items.filter { it is TapeItem && it.peeled != peeled }
+        if (turned.isEmpty()) return
+        for (t in turned) (t as TapeItem).peeled = peeled
+        // Peeling is a look, not an edit: the meshes change, the history and the file do not.
+        document.itemsChanged(turned)
+        requestRender()
+    }
 
     override fun updateShapeConfig(config: ShapeConfig) {
         val marked = interaction.connecting
@@ -1553,15 +1698,17 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         }
         // Land it at a comfortable size for the current view rather than at its pixel size, which
         // on an unbounded canvas would be arbitrary.
+        val turn = com.xnotes.platform.ImageDecoder.exifTurn(file.path)
+        val (iw, ih) = if (turn % 180 != 0) size.height to size.width else size.width to size.height
         val visible = viewport.visibleContentRect()
         val maxW = visible.w * 0.6
         val maxH = visible.h * 0.6
-        val scale = minOf(1.0, maxW / size.width, maxH / size.height)
-        val w = size.width * scale
-        val h = size.height * scale
+        val scale = minOf(1.0, maxW / iw, maxH / ih)
+        val w = iw * scale
+        val h = ih * scale
         val centre = atContent ?: viewport.centerContent
         val rect = Rect(centre.x - w / 2.0, centre.y - h / 2.0, w, h)
-        commitItem(ImageItem(ImageData(file, size.width, size.height), rect))
+        commitItem(ImageItem(ImageData(file, size.width, size.height), rect, orientation = turn))
         return true
     }
 
@@ -2006,14 +2153,30 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_X -> cutSelection()
             ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_V -> pasteClipboard()
             ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_D -> duplicateSelection()
+            ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_G -> if (shift) ungroupSelection() else groupSelection()
             ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_0 -> zoomToFit()
             ctrl && (e.keyCode == android.view.KeyEvent.KEYCODE_PLUS || e.keyCode == android.view.KeyEvent.KEYCODE_EQUALS) -> zoomBy(ZOOM_STEP)
             ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_MINUS -> zoomBy(1.0 / ZOOM_STEP)
+            ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_RIGHT_BRACKET ->
+                arrange(if (shift) com.xnotes.core.model.Arrange.FRONT else com.xnotes.core.model.Arrange.FORWARD)
+            ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_LEFT_BRACKET ->
+                arrange(if (shift) com.xnotes.core.model.Arrange.BACK else com.xnotes.core.model.Arrange.BACKWARD)
             e.keyCode == android.view.KeyEvent.KEYCODE_DEL || e.keyCode == android.view.KeyEvent.KEYCODE_FORWARD_DEL -> deleteSelection()
             e.keyCode == android.view.KeyEvent.KEYCODE_ESCAPE -> interaction.clearSelection()
+            e.keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT -> panStep(-1, 0)
+            e.keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> panStep(1, 0)
+            e.keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP -> panStep(0, -1)
+            e.keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN -> panStep(0, 1)
             else -> return false
         }
         return true
+    }
+
+    /** Show more of the canvas toward ([dx], [dy]) by an eighth of the view, as the arrow keys do. */
+    private fun panStep(dx: Int, dy: Int) {
+        viewport.panByViewport(-dx * viewport.widthPx / PAN_STEPS, -dy * viewport.heightPx / PAN_STEPS)
+        onViewChanged()
+        view.publish()
     }
 
     /** Select everything unlocked on the canvas, which on an unbounded one means most of it. */
@@ -2220,6 +2383,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     companion object {
         /** Zoom step for the keyboard, matching a comfortable notch of a pinch. */
         const val ZOOM_STEP = 1.25
+
+        /** An arrow key moves the view by this fraction of itself, as a divisor. */
+        const val PAN_STEPS = 8.0
 
         /** Content pixels a duplicate lands from its original, so the copy is visibly a copy. */
         const val DUPLICATE_NUDGE = 24.0
