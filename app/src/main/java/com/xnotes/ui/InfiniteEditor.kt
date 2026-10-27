@@ -414,21 +414,19 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         scene.reset()
         vectorMeshGen.clear()
         val items = document.items.toList()
-        val started = android.os.SystemClock.uptimeMillis()
         scene.setOrder(items)
         sceneBuild.start(
             items = items,
-            batchSize = 16,
+            // Keep each UI-thread meshing burst short, including on mid-range tablets.
+            batchSize = 4,
             onBatch = { batch ->
                 scene.batch {
                     for (item in batch) if (item !in sceneBuildRemoved) pushItem(item)
                 }
                 view.publish()
             },
-            schedule = { next -> view.postDelayed(next, 16L) },
-            onComplete = {
-                android.util.Log.i("xnotes.canvas", "scene ready: ${items.size} items in ${android.os.SystemClock.uptimeMillis() - started}ms")
-            },
+            // Yield to queued input without imposing 16 ms of artificial latency per four items.
+            schedule = { next -> view.post(next) },
         )
     }
 
