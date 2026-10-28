@@ -375,17 +375,6 @@ fun PreferencesPane(
             OptionDropdown(tapOptions, prefs.stylusDoubleTap) { update(prefs.copy(stylusDoubleTap = it)) }
             FieldLabel(stringResource(R.string.pref_stylus_button_tap))
             OptionDropdown(tapOptions, prefs.stylusButtonTap) { update(prefs.copy(stylusButtonTap = it)) }
-            FieldLabel(stringResource(R.string.pref_redmi_buttons))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(stringResource(R.string.pen_button_1), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
-                    OptionDropdown(tapOptions, prefs.stylusButton1Tap) { update(prefs.copy(stylusButton1Tap = it)) }
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(stringResource(R.string.pen_button_2), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
-                    OptionDropdown(tapOptions, prefs.stylusButton2Tap) { update(prefs.copy(stylusButton2Tap = it)) }
-                }
-            }
             CheckRow(stringResource(R.string.pref_volume_keys_turn_pages), prefs.volumeKeysTurnPages) { update(prefs.copy(volumeKeysTurnPages = it)) }
 
             HorizontalDivider(color = palette.border.toComposeColor())

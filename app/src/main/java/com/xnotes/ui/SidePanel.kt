@@ -108,7 +108,6 @@ fun SidePanel(
     onSharePages: (indices: List<Int>, asPdf: Boolean) -> Unit = { _, _ -> },
     onSavePagesAsPdf: (indices: List<Int>) -> Unit = {},
     onSavePagesAsImages: (indices: List<Int>) -> Unit = {},
-    onInsertPdf: (after: Int) -> Unit = {},
     onInsertPages: (PageInsert, Int) -> Unit = { _, _ -> },
     onImportTemplate: () -> Unit = {},
     onTemplateFromImage: (com.xnotes.core.template.TemplateKind) -> Unit = {},
@@ -147,7 +146,7 @@ fun SidePanel(
         }
         Box(Modifier.fillMaxWidth().weight(1f)) {
             when (tab) {
-                SidePanelTab.PAGES -> PagesTab(editor, onSharePages, onSavePagesAsPdf, onSavePagesAsImages, onInsertPdf, onInsertPages) { pickingCover = true }
+                SidePanelTab.PAGES -> PagesTab(editor, onSharePages, onSavePagesAsPdf, onSavePagesAsImages, onInsertPages) { pickingCover = true }
                 SidePanelTab.CONTENTS -> ContentsTab(editor)
                 SidePanelTab.BOOKMARKS -> BookmarksTab(editor)
                 SidePanelTab.SEARCH -> SearchTab(editor)
@@ -180,7 +179,6 @@ private fun PagesTab(
     onSharePages: (List<Int>, Boolean) -> Unit,
     onSavePagesAsPdf: (List<Int>) -> Unit,
     onSavePagesAsImages: (List<Int>) -> Unit,
-    onInsertPdf: (Int) -> Unit,
     onInsertPages: (PageInsert, Int) -> Unit,
     onPickCover: () -> Unit,
 ) {
@@ -339,7 +337,7 @@ private fun PagesTab(
         ) {
             itemsIndexed(pages, key = { _, page -> page.uid }) { index, page ->
                 val carried = drag?.pages?.any { it === page } == true
-                PageThumb(editor, index, page, selecting, settled, carried, Modifier.animateItem(), onSharePages, onSavePagesAsPdf, onSavePagesAsImages, onInsertPdf, onInsertPages, onPickCover)
+                PageThumb(editor, index, page, selecting, settled, carried, Modifier.animateItem(), onSharePages, onSavePagesAsPdf, onSavePagesAsImages, onInsertPages, onPickCover)
             }
             if (!selecting && pages.isNotEmpty()) item(key = "add") { AddPageButton(editor, pages.lastIndex, onInsertPages) }
         }
@@ -450,7 +448,6 @@ private fun PageThumb(
     onSharePages: (List<Int>, Boolean) -> Unit,
     onSavePagesAsPdf: (List<Int>) -> Unit,
     onSavePagesAsImages: (List<Int>) -> Unit,
-    onInsertPdf: (Int) -> Unit,
     onInsertPages: (PageInsert, Int) -> Unit,
     onPickCover: () -> Unit,
 ) {
@@ -459,8 +456,6 @@ private fun PageThumb(
     val selected = editor.isPageSelected(index)
     var menuOpen by remember { mutableStateOf(false) }
     var sizing by remember { mutableStateOf(false) }
-    var extracting by remember { mutableStateOf<Boolean?>(null) }
-    extracting?.let { move -> ExtractDialog(editor, listOf(index), move) { extracting = null } }
     if (sizing) {
         editor.pageSizeChoice(index)?.let { initial ->
             PageSizeDialog(initial, onApply = { sizing = false; editor.resizePages(listOf(index), it) }) { sizing = false }
@@ -519,8 +514,8 @@ private fun PageThumb(
                         }
                     }
                     PageContextMenu(
-                        editor, index, page.cover, page.pdfPage != null, menuOpen, { menuOpen = false }, { sizing = true }, { extracting = it },
-                        onSharePages, onSavePagesAsPdf, onSavePagesAsImages, onInsertPdf, onInsertPages, onPickCover,
+                        editor, index, page.cover, page.pdfPage != null, menuOpen, { menuOpen = false }, { sizing = true },
+                        onSharePages, onSavePagesAsPdf, onSavePagesAsImages, onInsertPages, onPickCover,
                     )
                 }
             }
@@ -562,11 +557,9 @@ private fun PageContextMenu(
     expanded: Boolean,
     onDismiss: () -> Unit,
     onPageSize: () -> Unit,
-    onExtract: (move: Boolean) -> Unit,
     onSharePages: (List<Int>, Boolean) -> Unit,
     onSavePagesAsPdf: (List<Int>) -> Unit,
     onSavePagesAsImages: (List<Int>) -> Unit,
-    onInsertPdf: (Int) -> Unit,
     onInsertPages: (PageInsert, Int) -> Unit,
     onPickCover: () -> Unit,
 ) {
@@ -578,7 +571,6 @@ private fun PageContextMenu(
     fun menuIcon(icon: ImageVector) = @Composable { Icon(icon, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp)) }
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         when (sub) {
-            MENU_ROTATE -> RotateRows({ sub = MENU_MAIN }) { turns -> onDismiss(); editor.rotatePages(one, turns) }
             MENU_SHARE, MENU_SAVE -> PageFormatRows(sub == MENU_SHARE, { sub = MENU_MAIN }) { image ->
                 val saving = sub == MENU_SAVE
                 onDismiss()
@@ -615,17 +607,14 @@ private fun PageContextMenu(
                         }
                     }
                 }
-                DropdownMenuItem(text = { Text(stringResource(R.string.insert_pdf)) }, leadingIcon = menuIcon(XnotesIcons.importDoc), onClick = { onInsertPdf(index); onDismiss() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.duplicate)) }, leadingIcon = menuIcon(XnotesIcons.duplicate), onClick = { onDismiss(); editor.duplicatePages(one) })
                 DropdownMenuItem(text = { Text(stringResource(R.string.copy)) }, leadingIcon = menuIcon(XnotesIcons.copy), onClick = { editor.copyPages(one); onDismiss() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.cut)) }, leadingIcon = menuIcon(XnotesIcons.cut), onClick = { editor.cutPages(one); onDismiss() })
                 if (editor.canPastePages) {
                     DropdownMenuItem(text = { Text(stringResource(R.string.paste)) }, leadingIcon = menuIcon(XnotesIcons.paste), onClick = { scope.launch { editor.pastePagesAfter(index) }; onDismiss() })
                 }
-                DropdownMenuItem(text = { Text(stringResource(R.string.rotate_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.rotateRight), onClick = { sub = MENU_ROTATE })
+                DropdownMenuItem(text = { Text(stringResource(R.string.rotate_clockwise)) }, leadingIcon = menuIcon(XnotesIcons.rotateRight), onClick = { onDismiss(); editor.rotatePages(one, 1) })
                 DropdownMenuItem(text = { Text(stringResource(R.string.page_size_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.pageSize), enabled = !isPdf, onClick = { onDismiss(); onPageSize() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.extract_to_new_note)) }, leadingIcon = menuIcon(XnotesIcons.extract), onClick = { onDismiss(); onExtract(false) })
-                DropdownMenuItem(text = { Text(stringResource(R.string.move_to_new_note)) }, leadingIcon = menuIcon(XnotesIcons.moveToFolder), onClick = { onDismiss(); onExtract(true) })
                 DropdownMenuItem(text = { Text(stringResource(R.string.erase_page)) }, leadingIcon = menuIcon(XnotesIcons.eraser), onClick = { editor.erasePages(one); onDismiss() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.delete)) }, leadingIcon = menuIcon(XnotesIcons.trash), onClick = { editor.deletePages(one); onDismiss() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.share_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.share), onClick = { sub = MENU_SHARE })

@@ -668,6 +668,7 @@
     <string name="erase">清空</string>
     <string name="share_ellipsis">分享…</string>
     <string name="rotate_ellipsis">旋转…</string>
+    <string name="rotate_clockwise">顺时针旋转</string>
     <string name="back_rotate">"‹  旋转"</string>
     <string name="rotate_right">向右</string>
     <string name="rotate_left">向左</string>

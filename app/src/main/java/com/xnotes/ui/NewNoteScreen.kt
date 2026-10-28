@@ -667,7 +667,6 @@ internal fun NewNoteScreen(
                 // The cover picker of an open note styles its cover alone, so it has no Pages tab.
                 if (!coverOnly) Tab(stringResource(R.string.pages), !aiOpen && face == Face.PAGES) { face = Face.PAGES; aiOpen = false }
                 Tab(stringResource(R.string.cover), !aiOpen && face == Face.COVER) { face = Face.COVER; aiOpen = false }
-                Tab(stringResource(R.string.tab_generate_ai), aiOpen) { aiOpen = true }
             }
         }
 

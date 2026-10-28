@@ -4054,16 +4054,27 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             noteTileThumbnail(uri)
         }
 
-    /** A read-only PDF's first page (memory-cached only); null for the other reader kinds, which tile as text. */
+    /** A read-only PDF's or Markdown file's first page (memory-cached only); null for the other reader kinds, which tile as text. */
     private suspend fun readerThumbnail(uri: String, name: String): ImageBitmap? {
-        if (com.xnotes.core.util.ReaderKind.ofName(name) != com.xnotes.core.util.ReaderKind.PDF) return null
+        val kind = com.xnotes.core.util.ReaderKind.ofName(name)
+        if (kind != com.xnotes.core.util.ReaderKind.PDF && kind != com.xnotes.core.util.ReaderKind.MARKDOWN) return null
         val key = "reader|$uri"
         synchronized(noteThumbs) { noteThumbs.get(key)?.let { return it } }
         return withContext(thumbDispatcher) {
             delay(150)
             if (!isActive) return@withContext null
-            val bmp = com.xnotes.platform.ReaderPdf.renderFirstPage(appContext, android.net.Uri.parse(uri), pageThumbPx)
-                ?.asImageBitmap() ?: return@withContext null
+            val bmp = if (kind == com.xnotes.core.util.ReaderKind.PDF) {
+                com.xnotes.platform.ReaderPdf.renderFirstPage(appContext, android.net.Uri.parse(uri), pageThumbPx)
+            } else {
+                // Printed the way the reader shows it, then its first page drawn like a PDF's.
+                val pdf = java.io.File.createTempFile("preview", ".pdf", appContext.cacheDir)
+                try {
+                    readerFileToPdf(appContext, this@Editor, ReaderFile(uri, name), pdf)
+                        ?.let { com.xnotes.platform.ReaderPdf.renderFirstPage(appContext, android.net.Uri.fromFile(it), pageThumbPx) }
+                } finally {
+                    pdf.delete()
+                }
+            }?.asImageBitmap() ?: return@withContext null
             synchronized(noteThumbs) { noteThumbs.put(key, bmp) }
             bmp
         }

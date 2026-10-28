@@ -341,8 +341,6 @@ private fun EditorScreen(
     var pendingImportInto by remember { mutableStateOf<String?>(null) }
     // The same, for the infinite canvas.
     var pendingCanvasInsert by remember { mutableStateOf<PendingInsert?>(null) }
-    // The pane and page a side-panel "Insert PDF" picked a file for.
-    var pendingPdfInsert by remember { mutableStateOf<PendingPdfInsert?>(null) }
     var pendingShareUri by remember { mutableStateOf<String?>(null) }
     var pendingSaveCopyUri by remember { mutableStateOf<String?>(null) }
     // A finished PDF render awaiting a SAF "Save as" destination (open-note / file / pages export).
@@ -566,12 +564,6 @@ private fun EditorScreen(
         val pane = pendingAudioPane
         pendingAudioPane = null
         if (uri != null && pane != null) pane.attachAudio(uri)
-    }
-
-    // A PDF picked from a page's menu in the side panel; its pages go in right after that page.
-    val insertPdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        val pending = pendingPdfInsert; pendingPdfInsert = null
-        if (uri != null && pending != null) scope.launch { pending.editor.insertPdfAfter(pending.after, uri.toString()) }
     }
 
     // A file whose pages go into the open note, from a page's menu in the side panel.
@@ -1187,10 +1179,6 @@ private fun EditorScreen(
                 onSharePages = { pane, pages, asPdf -> sharePages(pane, pages, asPdf) },
                 onSavePagesAsPdf = { pane, pages -> savePagesAsPdf(pane, pages) },
                 onSavePagesAsImages = { pane, pages -> savePagesAsImages(pane, pages) },
-                onInsertPdf = { pane, after ->
-                    pendingPdfInsert = PendingPdfInsert(pane, after)
-                    insertPdfLauncher.launch(arrayOf("application/pdf"))
-                },
                 onInsertPages = { pane, kind, at ->
                     when (kind) {
                         com.xnotes.ui.PageInsert.FILE -> {
@@ -1367,9 +1355,6 @@ private class PendingPagePhoto(val editor: Editor, val file: java.io.File, val p
 /** Side-panel pages of [editor] waiting on a SAF "Save as" destination. */
 private class PendingPages(val editor: Editor, val pages: List<Int>)
 
-/** A side-panel "Insert PDF" waiting on the picker: the pane, and the page its pages go after. */
-private class PendingPdfInsert(val editor: Editor, val after: Int)
-
 /** Explorer picks waiting on the file their PDFs go to; [onStarted] runs once one is chosen. */
 private class PendingPdfs(val picked: List<com.xnotes.ui.BrowseEntry>, val onStarted: () -> Unit)
 
@@ -1441,7 +1426,6 @@ private class PaneActions(
     val onSharePages: (Editor, List<Int>, Boolean) -> Unit,
     val onSavePagesAsPdf: (Editor, List<Int>) -> Unit,
     val onSavePagesAsImages: (Editor, List<Int>) -> Unit,
-    val onInsertPdf: (Editor, Int) -> Unit,
     val onInsertPages: (Editor, com.xnotes.ui.PageInsert, Int) -> Unit,
     /** Pick an image and add it as a page after the current one. */
     val onImagePage: (Editor) -> Unit,
@@ -1682,7 +1666,6 @@ private fun EditorPane(
                                 onSharePages = { pages, asPdf -> actions.onSharePages(editor, pages, asPdf) },
                                 onSavePagesAsPdf = { pages -> actions.onSavePagesAsPdf(editor, pages) },
                                 onSavePagesAsImages = { pages -> actions.onSavePagesAsImages(editor, pages) },
-                                onInsertPdf = { after -> actions.onInsertPdf(editor, after) },
                                 onInsertPages = { kind, at -> actions.onInsertPages(editor, kind, at) },
                                 onImportTemplate = actions.onImportTemplate,
                                 onTemplateFromImage = actions.onTemplateFromImage,

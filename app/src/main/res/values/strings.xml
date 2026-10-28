@@ -762,6 +762,7 @@
     <string name="pages_already_empty">Those pages are already empty.</string>
     <string name="erase">Erase</string>
     <string name="rotate_ellipsis">Rotate…</string>
+    <string name="rotate_clockwise">Rotate clockwise</string>
     <string name="page_size">Page size</string>
     <string name="page_size_ellipsis">Page size…</string>
     <string name="apply">Apply</string>

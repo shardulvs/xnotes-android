@@ -70,6 +70,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.xnotes.R
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.util.ReaderKind
+import com.xnotes.platform.AndroidText
 import com.xnotes.platform.MathRendering
 import com.xnotes.platform.ReaderHtml
 import com.xnotes.platform.ReaderPdf
@@ -359,12 +360,12 @@ private fun readerColors(p: Palette, background: String = Rgba.toHex(p.paper)) =
 
 /**
  * Prints a non-PDF reader file as the light reader shows it (on white paper) into a PDF in the cache,
- * for turning into a note; null when it will not open. Each call replaces the previous one's file.
+ * for turning into a note; null when it will not open. Without [to], each call replaces the previous one's file.
  */
-internal suspend fun readerFileToPdf(context: Context, editor: Editor, file: ReaderFile): File? {
+internal suspend fun readerFileToPdf(context: Context, editor: Editor, file: ReaderFile, to: File? = null): File? {
     val content = withContext(Dispatchers.IO) { runCatching { readerHtmlBody(context, file, readerLabels(context)) }.getOrNull() } ?: return null
     val html = ReaderHtml.printPage(content.body, readerColors(editor.readerPalette(dark = false), "#ffffff"), content.wide)
-    val out = withContext(Dispatchers.IO) {
+    val out = to ?: withContext(Dispatchers.IO) {
         File(context.cacheDir, "convert").apply { deleteRecursively(); mkdirs() }.resolve("${file.name.substringBeforeLast('.')}.pdf")
     }
     return out.takeIf { ReaderPrint.toPdf(context, html, landscape = content.wide, out) }
@@ -583,7 +584,8 @@ private fun readerHtmlBody(context: Context, file: ReaderFile, labels: ReaderHtm
 
 // Painted black and used as a mask, so the formula takes the reader's text colour in either theme.
 private fun readerMath(latex: String, display: Boolean): String? {
-    val (bmp, box) = MathRendering.formulaBitmap(latex, READER_MATH_PX, Rgba(0, 0, 0, 255), display) ?: return null
+    // The box comes back in page px, so ask for the size that makes it come out in CSS px.
+    val (bmp, box) = MathRendering.formulaBitmap(latex, READER_MATH_PX / AndroidText.POINTS_TO_PX, Rgba(0, 0, 0, 255), display) ?: return null
     val png = java.io.ByteArrayOutputStream().also { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
     bmp.recycle()
     return ReaderHtml.mathHtml(latex, png, box.width, box.ascent, box.descent, display)
