@@ -9,14 +9,27 @@
 #include <string.h>
 #include "tree_sitter/api.h"
 
+const TSLanguage *tree_sitter_asm(void);
 const TSLanguage *tree_sitter_bash(void);
 const TSLanguage *tree_sitter_c(void);
 const TSLanguage *tree_sitter_cpp(void);
+const TSLanguage *tree_sitter_css(void);
+const TSLanguage *tree_sitter_diff(void);
+const TSLanguage *tree_sitter_dockerfile(void);
+const TSLanguage *tree_sitter_go(void);
+const TSLanguage *tree_sitter_html(void);
 const TSLanguage *tree_sitter_java(void);
 const TSLanguage *tree_sitter_javascript(void);
 const TSLanguage *tree_sitter_json(void);
 const TSLanguage *tree_sitter_kotlin(void);
+const TSLanguage *tree_sitter_lua(void);
+const TSLanguage *tree_sitter_php_only(void);
 const TSLanguage *tree_sitter_python(void);
+const TSLanguage *tree_sitter_rust(void);
+const TSLanguage *tree_sitter_toml(void);
+const TSLanguage *tree_sitter_typescript(void);
+const TSLanguage *tree_sitter_xml(void);
+const TSLanguage *tree_sitter_yaml(void);
 
 typedef struct {
     const char *name;
@@ -24,14 +37,27 @@ typedef struct {
 } LangEntry;
 
 static const LangEntry LANGS[] = {
+    {"asm", tree_sitter_asm},
     {"bash", tree_sitter_bash},
     {"c", tree_sitter_c},
     {"cpp", tree_sitter_cpp},
+    {"css", tree_sitter_css},
+    {"diff", tree_sitter_diff},
+    {"dockerfile", tree_sitter_dockerfile},
+    {"go", tree_sitter_go},
+    {"html", tree_sitter_html},
     {"java", tree_sitter_java},
     {"javascript", tree_sitter_javascript},
     {"json", tree_sitter_json},
     {"kotlin", tree_sitter_kotlin},
+    {"lua", tree_sitter_lua},
+    {"php", tree_sitter_php_only},
     {"python", tree_sitter_python},
+    {"rust", tree_sitter_rust},
+    {"toml", tree_sitter_toml},
+    {"typescript", tree_sitter_typescript},
+    {"xml", tree_sitter_xml},
+    {"yaml", tree_sitter_yaml},
 };
 
 // --- query predicate evaluation ---

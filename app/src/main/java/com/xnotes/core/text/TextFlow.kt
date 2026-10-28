@@ -28,6 +28,27 @@ enum class ListKind(val id: String) {
     }
 }
 
+/** A callout's kind: GitHub's five alerts. [id] is the stable serialized token. */
+enum class CalloutKind(val id: String, val title: String) {
+    NOTE("note", "Note"),
+    TIP("tip", "Tip"),
+    IMPORTANT("important", "Important"),
+    WARNING("warning", "Warning"),
+    CAUTION("caution", "Caution");
+
+    companion object {
+        fun fromId(id: String?): CalloutKind? = entries.firstOrNull { it.id.equals(id, ignoreCase = true) }
+    }
+}
+
+/**
+ * A quote, or with a [kind] a callout, that consecutive paragraphs share. Like a
+ * [FlowTable] it is compared by identity: a container is the longest run of
+ * neighbouring paragraphs holding the same one, so two callouts of one kind side
+ * by side stay two. Immutable, so a kind never changes under a paragraph.
+ */
+class FlowQuote(val kind: CalloutKind? = null)
+
 /**
  * Immutable character style for a run. Nullable fields inherit the flow defaults
  * ([TextFlow.defaultColor]/[TextFlow.defaultFace]), and a null size the paragraph's
@@ -44,15 +65,18 @@ data class CharStyle(
     val highlight: Rgba? = null,
     val sizePt: Double? = null,
     val face: FontFace? = null,
-    /** Non-null makes the run a tappable hyperlink (rendered link-coloured + underlined). */
-    val link: String? = null,
     /** Marks a run whose text is LaTeX, drawn as the formula it sets. */
     val math: Boolean = false,
     /** A [math] run set as display rather than inline: bigger operators, its own line. */
     val mathDisplay: Boolean = false,
+    /** The address this text links to; it draws in the link look and a finger tap opens it. */
+    val link: String? = null,
 ) {
     companion object {
         val DEFAULT = CharStyle()
+
+        /** The highlight ==text== takes until one has been picked. */
+        val DEFAULT_HIGHLIGHT = Rgba(255, 235, 59, 255)
     }
 }
 
@@ -80,6 +104,19 @@ class Paragraph(
     var cellStart: Boolean = false,
     /** 1..[MAX_HEADING] marks a heading, whose text takes its size from the level; 0 is body text. */
     var headingLevel: Int = 0,
+    /** A horizontal rule: an empty line drawn as a hairline, which typing into turns back into text. */
+    var rule: Boolean = false,
+    /** A page break before this paragraph: it starts the next page. */
+    var breakBefore: Boolean = false,
+    /**
+     * With [breakBefore], the page it starts on at the earliest, an index into the note's pages
+     * kept on its page as pages come and go; text before it that runs long pushes it on.
+     */
+    var breakToPage: Int? = null,
+    /** The number an ordered item restarts its list at; null counts on from the item before. */
+    var listStart: Int? = null,
+    /** The quote or callout this paragraph sits in; code lines, rules and cells never do. */
+    var quote: FlowQuote? = null,
 ) {
     /** Bumped on any content or style mutation; layout caches key on it. */
     var rev: Int = 0
@@ -100,12 +137,14 @@ class Paragraph(
     /** True when every paragraph-level property is at its default (runs not considered). */
     fun isDefaultStyle(): Boolean =
         align == ParaAlign.LEFT && indent == 0 && list == ListKind.NONE && !checked && codeLang == null &&
-            table == null && headingLevel == 0
+            table == null && headingLevel == 0 && !rule && !breakBefore && listStart == null && quote == null
 
-    /** A copy sharing [table]; [TextFlow.deepCopy] remaps it onto copied tables. */
+    /** A copy sharing [table] and [quote]; [TextFlow.deepCopy] remaps tables onto copies. */
     fun deepCopy(): Paragraph =
-        Paragraph(runs.mapTo(mutableListOf()) { it.deepCopy() }, align, indent, list, checked, codeLang, table, cellStart, headingLevel)
-            .also { it.rev = rev }
+        Paragraph(
+            runs.mapTo(mutableListOf()) { it.deepCopy() }, align, indent, list, checked, codeLang, table, cellStart, headingLevel,
+            rule = rule, breakBefore = breakBefore, breakToPage = breakToPage, listStart = listStart, quote = quote,
+        ).also { it.rev = rev }
 
     companion object {
         const val MAX_INDENT = 6

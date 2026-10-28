@@ -44,12 +44,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -116,6 +114,7 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -148,6 +147,7 @@ import com.xnotes.settings.ExplorerView
 import com.xnotes.settings.ExplorerLayout
 import com.xnotes.settings.FolderPlacement
 import com.xnotes.settings.GroupBy
+import com.xnotes.settings.ThumbShape
 import com.xnotes.settings.TileSize
 import com.xnotes.core.util.DocumentKind
 import com.xnotes.core.util.ReaderKind
@@ -208,6 +208,8 @@ fun Backstage(
     onImportCodeTheme: () -> Unit = {},
     /** Preferences asked to import a font file. */
     onImportFont: () -> Unit = {},
+    /** Preferences asked to export the settings ([export]) or import them. */
+    onBackup: (export: Boolean) -> Unit = {},
     /** Two picked files are to be opened together, one per pane of a split view. */
     onOpenSplit: (String, String) -> Unit = { _, _ -> },
     /** Several files are to be shared at once, as they are. */
@@ -217,6 +219,10 @@ fun Backstage(
     /** Picked items are to be exported as PDFs, zipped under the given name; the callback runs once a destination is chosen. */
     onExportPdfs: (List<BrowseEntry>, String, () -> Unit) -> Unit = { _, _, _ -> },
     onImportIntoNote: (String) -> Unit = {},
+    /** The New note screen asked to import a template file. */
+    onImportTemplate: () -> Unit = {},
+    /** The New note screen asked to make a cover or page template from a picture. */
+    onTemplateFromImage: (com.xnotes.core.template.TemplateKind) -> Unit = {},
 ) {
     // Below this width the sidebar becomes a slide-over drawer instead of a persistent pane.
     val compact = LocalConfiguration.current.screenWidthDp < COMPACT_WIDTH_DP
@@ -233,10 +239,12 @@ fun Backstage(
         openBeside = onOpenBeside,
         exportPdfs = onExportPdfs,
         importInto = onImportIntoNote,
+        importTemplate = onImportTemplate,
+        templateFromImage = onTemplateFromImage,
     )
     // The backstage is the root of the stack — ordinary base content, not a dialog. The activity
     // window already runs edge-to-edge with the system bars hidden (MainActivity.applyFullscreen).
-    BackstageContent(editor, compact, view, onSelectView, calls, onExitApp, onImportCodeTheme, onImportFont)
+    BackstageContent(editor, compact, view, onSelectView, calls, onExitApp, onImportCodeTheme, onImportFont, onBackup)
 }
 
 /** How far a swipe right on Home travels before it opens the sidebar. */
@@ -250,6 +258,7 @@ private const val SIDEBAR_ANIM_MS = 150
 
 private val SIDEBAR_WIDTH = 264.dp
 private val RAIL_WIDTH = 80.dp
+private val PANE_GUTTER = 16.dp
 private val DRAWER_WIDTH = 296.dp
 
 /**
@@ -267,6 +276,7 @@ private fun BackstageContent(
     onExitApp: () -> Unit,
     onImportCodeTheme: () -> Unit,
     onImportFont: () -> Unit,
+    onBackup: (Boolean) -> Unit,
 ) {
     val palette = LocalPalette.current
     var createMode by remember { mutableStateOf(CreateMode.NONE) }
@@ -298,7 +308,12 @@ private fun BackstageContent(
     var focusSync by remember { mutableStateOf(false) }
     val pinsOpen = rememberSaveable { mutableStateOf(true) }
     // Colour names live in the notes folder, so pick up another device's edits whenever Home comes back.
-    LaunchedEffect(editor.browseRoot, editor.noteOpen) { withContext(Dispatchers.IO) { editor.loadColorNames() } }
+    LaunchedEffect(editor.browseRoot, editor.noteOpen) {
+        withContext(Dispatchers.IO) {
+            editor.loadColorNames()
+            editor.loadNotePins()
+        }
+    }
     val colors = editor.colorNames.entries.sortedBy { it.value.lowercase() }.map { it.key to it.value }
     val activeColor = if (view == BackstageView.HOME) explorerColor else null
     val recentActive = view == BackstageView.HOME && explorerRecent
@@ -360,7 +375,7 @@ private fun BackstageContent(
         Box(Modifier.fillMaxSize().background(palette.bg.toComposeColor())) {
             BackstageMain(
                 Modifier.fillMaxSize(), editor, view, compact, drawerOpen, { animateClose = true; drawerOpen = true }, { selectView(BackstageView.HOME) },
-                calls, createMode, { createMode = it }, onImportCodeTheme, onImportFont, link, { selectView(BackstageView.PREFERENCES) },
+                calls, createMode, { createMode = it }, onImportCodeTheme, onImportFont, onBackup, link, { selectView(BackstageView.PREFERENCES) },
                 focusSync, { focusSync = false },
             )
             AnimatedVisibility(
@@ -394,7 +409,7 @@ private fun BackstageContent(
                     layout(constraints.maxWidth, placeable.height) { placeable.place(inset, 0) }
                 },
                 editor, view, compact, true, { setRailed(false) }, { selectView(BackstageView.HOME) },
-                calls, createMode, { createMode = it }, onImportCodeTheme, onImportFont, link, { selectView(BackstageView.PREFERENCES) },
+                calls, createMode, { createMode = it }, onImportCodeTheme, onImportFont, onBackup, link, { selectView(BackstageView.PREFERENCES) },
                 focusSync, { focusSync = false },
             )
             // Both stay composed so a fold never pays to build one; only the current one is measured and placed.
@@ -544,7 +559,7 @@ private fun BackstageRail(modifier: Modifier, nav: SidebarNav, onExpand: () -> U
                 key(pin.uri) {
                     var menuOpen by remember { mutableStateOf(false) }
                     Box {
-                        RailItem(XnotesIcons.folder, pin.name, selected = i == nav.activePin, onLongClick = { menuOpen = true }) { nav.onOpenPin(pin) }
+                        RailItem(XnotesIcons.folder, pin.name, selected = i == nav.activePin, labelled = true, onLongClick = { menuOpen = true }) { nav.onOpenPin(pin) }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             DropdownMenuItem(text = { Text(stringResource(R.string.unpin_from_sidebar)) }, onClick = { menuOpen = false; nav.onUnpin(pin) })
                         }
@@ -573,6 +588,7 @@ private fun BackstageMain(
     onCreateMode: (CreateMode) -> Unit,
     onImportCodeTheme: () -> Unit,
     onImportFont: () -> Unit,
+    onBackup: (Boolean) -> Unit,
     link: ExplorerLink,
     onOpenPreferences: () -> Unit,
     focusSync: Boolean,
@@ -602,10 +618,10 @@ private fun BackstageMain(
                 }
             }
         }
-        Box(Modifier.weight(1f).fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp)) {
+        Box(Modifier.weight(1f).fillMaxWidth().padding(start = PANE_GUTTER, end = PANE_GUTTER, top = 4.dp, bottom = 12.dp)) {
             when (view) {
                 BackstageView.HOME -> HomePane(editor, calls, createMode, onCreateMode, sidebarOpen, onShowSidebar, link)
-                BackstageView.PREFERENCES -> PreferencesPane(editor, compact, sidebarOpen, onShowSidebar, onBackToHome, onImportCodeTheme, onImportFont, focusSync, onSyncFocused)
+                BackstageView.PREFERENCES -> PreferencesPane(editor, compact, sidebarOpen, onShowSidebar, onBackToHome, onImportCodeTheme, onImportFont, focusSync, onSyncFocused, onBackup)
                 BackstageView.TRASH -> TrashPane(editor, sidebarOpen, onShowSidebar, onOpenPreferences)
                 BackstageView.ABOUT -> AboutPane()
             }
@@ -656,34 +672,39 @@ private fun Command(
     }
 }
 
-/** One rail destination: an icon in a pill that fills when selected, its label beneath. */
+/** One rail destination: an icon in a pill that fills when selected. Only [labelled] ones show their name beneath; the rest name themselves in a tip. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun RailItem(icon: ImageVector, label: String, selected: Boolean = false, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
+private fun RailItem(icon: ImageVector, label: String, selected: Boolean = false, labelled: Boolean = false, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
     val palette = LocalPalette.current
     val pill = MaterialTheme.shapes.large
-    Column(
-        Modifier.width(RAIL_WIDTH).combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(top = 6.dp, bottom = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
-            Modifier.size(width = 56.dp, height = 32.dp).clip(pill)
-                .background(if (selected) palette.selectionBackground.toComposeColor() else Color.Transparent),
-            contentAlignment = Alignment.Center,
+    val item = @Composable {
+        Column(
+            Modifier.width(RAIL_WIDTH).combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(top = if (labelled) 6.dp else 8.dp, bottom = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Icon(icon, null, tint = (if (selected) palette.selectionForeground else palette.accent).toComposeColor(), modifier = Modifier.size(20.dp))
+            Box(
+                Modifier.size(width = 56.dp, height = 32.dp).clip(pill)
+                    .background(if (selected) palette.selectionBackground.toComposeColor() else Color.Transparent),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, if (labelled) null else label, tint = (if (selected) palette.selectionForeground else palette.accent).toComposeColor(), modifier = Modifier.size(20.dp))
+            }
+            if (labelled) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    label,
+                    color = palette.text.toComposeColor(),
+                    fontSize = 11.sp,
+                    fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+            }
         }
-        Spacer(Modifier.height(4.dp))
-        Text(
-            label,
-            color = palette.text.toComposeColor(),
-            fontSize = 11.sp,
-            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 4.dp),
-        )
     }
+    if (labelled) item() else Tooltip(label, side = TipSide.RIGHT) { item() }
 }
 
 /** A small caption over a group of sidebar rows. */
@@ -862,6 +883,8 @@ private class ExplorerCalls(
     val exportPdfs: (List<BrowseEntry>, String, () -> Unit) -> Unit,
     /** Picks a file and appends it to the note at this URI. */
     val importInto: (String) -> Unit,
+    val importTemplate: () -> Unit,
+    val templateFromImage: (com.xnotes.core.template.TemplateKind) -> Unit,
 )
 
 @Composable
@@ -1004,6 +1027,8 @@ private fun ExplorerSection(
     val density = LocalDensity.current
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
     val compactScreen = screenWidthDp < COMPACT_WIDTH_DP
+    // The pane's width with the rail beside it (a compact screen's drawer covers it instead), so folding the sidebar never reflows the gallery.
+    val railedWidth = screenWidthDp.dp - (if (compactScreen) 0.dp else RAIL_WIDTH) - PANE_GUTTER * 2
     val prefs = remember(editor.prefsVersion) { editor.preferences }
     val rootDocId = remember(root) { editor.browseRootDocId(root) }
     val stack = remember(root) { mutableStateListOf<Pair<String, String>>() }
@@ -1012,10 +1037,25 @@ private fun ExplorerSection(
     var fieldError by remember(root) { mutableStateOf<String?>(null) }
     var renaming by remember(root) { mutableStateOf<BrowseEntry?>(null) }
     val selection = remember(root) { mutableStateListOf<BrowseEntry>() }
+    // Notes picked for Merge, in pick order, while its review dialog is up.
+    var merging by remember(root) { mutableStateOf<List<BrowseEntry>?>(null) }
+    merging?.let { picked ->
+        MergeDialog(picked, onDismiss = { merging = null }) { order, name ->
+            merging = null
+            editor.mergeNotes(order.map { it.documentUri }, name) { made ->
+                if (made == null) return@mergeNotes
+                selection.clear()
+                refreshKey++
+                editor.say(
+                    context.getString(R.string.merged_into, com.xnotes.core.util.DocumentKind.stripSuffix(made.name)),
+                    context.getString(R.string.open) to { calls.openFile(made.uri) },
+                )
+            }
+        }
+    }
     var clipboard by remember(root) { mutableStateOf<ClipItem?>(null) }
     var pendingDelete by remember(root) { mutableStateOf<List<BrowseEntry>?>(null) }
     var moving by remember(root) { mutableStateOf<List<BrowseEntry>?>(null) }
-    var merging by remember(root) { mutableStateOf<List<BrowseEntry>?>(null) }
     var previewing by remember(root) { mutableStateOf<BrowseEntry?>(null) }
     var opError by remember(root) { mutableStateOf<String?>(null) }
     var query by remember(root) { mutableStateOf("") }
@@ -1089,7 +1129,6 @@ private fun ExplorerSection(
         showRecent = false
         selection.clear()
     }
-    BackHandler(enabled = selection.isNotEmpty()) { selection.clear() }
 
     val folderKey = editor.folderKey(root, currentDocId)
     val view = editor.viewFor(folderKey)
@@ -1133,11 +1172,20 @@ private fun ExplorerSection(
         if (showRecent || shelves) value = withContext(Dispatchers.IO) { editor.recentEntries(root) }
     }
     val recentByUri = remember(recents) { recents.orEmpty().associateBy { it.entry.documentUri } }
+    // Pinned notes head the top folder in the layouts that read top to bottom, nowhere else.
+    val showPinned = stack.isEmpty() && !flat &&
+        (layout == ExplorerLayout.GRID || layout == ExplorerLayout.GALLERY || layout == ExplorerLayout.LIST)
+    val pinnedRaw by produceState(emptyList<BrowseEntry>(), root, showPinned, editor.notePins, refreshKey, editor.noteOpen, editor.treeVersion) {
+        value = if (showPinned && editor.notePins.isNotEmpty()) withContext(Dispatchers.IO) { editor.pinnedEntries(root) } else emptyList()
+    }
+    val pinnedUris = remember(pinnedRaw) { pinnedRaw.mapTo(HashSet()) { it.documentUri } }
     val source: List<BrowseEntry>? = when {
         showRecent -> recents?.map { it.entry }
         colorFilter != null -> colorResults
         searching -> results
         layout == ExplorerLayout.TIMELINE -> timeline?.files
+        // A pinned note living in the top folder shows under Pinned only.
+        showPinned && pinnedUris.isNotEmpty() -> entries?.filterNot { it.documentUri in pinnedUris }
         else -> entries
     }
     // Page counts, PDF flags and the created times files record fill in behind the listing, a few files at a time.
@@ -1170,6 +1218,7 @@ private fun ExplorerSection(
                 .sortedWith(explorerComparator(view.sortKey, view.descending) { it.created })
         }
     }
+    val pinned = remember(pinnedRaw, arrange, showPinned) { if (showPinned) arrange(pinnedRaw).filterNot { it.isDir } else emptyList() }
     val now = remember(arranged) { System.currentTimeMillis() }
     val folderRow = remember(arranged, view.folders, layout) {
         if (view.folders == FolderPlacement.TOP && layout != ExplorerLayout.TIMELINE) arranged.orEmpty().filter { it.isDir } else emptyList()
@@ -1317,6 +1366,7 @@ private fun ExplorerSection(
             selecting = { selection.isNotEmpty() },
             isCut = { e -> clipboard?.let { c -> c.isCut && c.entries.any { it.documentUri == e.documentUri } } == true },
             isPinned = { e -> e.isDir && editor.isPinned(e.documentUri) },
+            isNotePinned = { e -> !e.isDir && editor.isNotePinned(e.documentUri) },
             isDropTarget = { e -> dragPos != null && dropTargetUri == e.documentUri },
             isPulsing = { e -> pulseUri == e.documentUri },
             onPulseDone = { e -> if (pulseUri == e.documentUri) pulseUri = null },
@@ -1346,6 +1396,13 @@ private fun ExplorerSection(
                 color = { e, c -> recolor(listOf(e), c) },
                 nameColor = { namingColor = it },
                 togglePin = { e -> if (editor.isPinned(e.documentUri)) editor.unpinFolder(e.documentUri) else editor.pinFolder(e.documentUri, e.name) },
+                toggleNotePin = { e ->
+                    scope.launch {
+                        val ok = withContext(Dispatchers.IO) { editor.setNotePinned(e.documentUri, !editor.isNotePinned(e.documentUri)) }
+                        if (!ok) opError = context.getString(R.string.err_pin_note)
+                        refreshKey++
+                    }
+                },
                 share = { callsNow.value.shareFile(it.documentUri) },
                 saveCopy = { callsNow.value.saveCopyFile(it.documentUri) },
                 exportPdf = { callsNow.value.exportFilePdf(it.documentUri) },
@@ -1358,11 +1415,16 @@ private fun ExplorerSection(
     val folderNames = timeline?.folderNames
     val clock24 = android.text.format.DateFormat.is24HourFormat(context)
     // Kept while what it describes holds, so a drag (which recomposes this every frame) leaves the tiles be.
-    val body = remember(view, folderRow, groups, metas, counts, now, clock24, prefs, host, showRecent, recentByUri, folderNames, layout, words) { ExplorerBody(
+    val restLabel = stringResource(R.string.in_folder, rootName ?: stringResource(R.string.folder))
+    val body = remember(view, folderRow, groups, metas, counts, now, clock24, prefs, host, showRecent, recentByUri, folderNames, layout, words, pinned, restLabel, shelves, rootDocId) { ExplorerBody(
         editor = editor,
         view = view,
         folders = folderRow,
         groups = groups,
+        // Home's shelves, when they're up, take the pinned notes in among their own.
+        pinned = if (shelves) emptyList() else pinned,
+        restLabel = restLabel,
+        pinnedWhere = { e -> e.parentDocId.takeIf { it != rootDocId }?.removePrefix("$rootDocId/")?.replace("/", " / ") },
         metas = metas,
         counts = counts,
         now = now,
@@ -1418,6 +1480,7 @@ private fun ExplorerSection(
         showRecent && recents!!.isEmpty() -> EmptyState(stringResource(R.string.recent_empty), EmptyArt.RECENT)
         source == null -> EmptyState(stringResource(R.string.loading))
         layout == ExplorerLayout.COLUMNS -> null
+        pinned.isNotEmpty() -> null
         source.isEmpty() -> EmptyState(
             if (layout == ExplorerLayout.TIMELINE) stringResource(R.string.nothing_here_yet) else stringResource(R.string.folder_empty),
             EmptyArt.PAGES, offersCreate = true,
@@ -1524,6 +1587,7 @@ private fun ExplorerSection(
     val viewNow = rememberUpdatedState(view)
     val pinchable = layout == ExplorerLayout.GRID || layout == ExplorerLayout.GALLERY || layout == ExplorerLayout.TIMELINE
     val filesNow = rememberUpdatedState(arranged.orEmpty())
+    val pinnedNow = rememberUpdatedState(pinned)
     Box(Modifier.fillMaxSize()) {
         Box(
             // The keyboard slides over the files; ending the body at its edge lets the last ones scroll clear of it.
@@ -1583,7 +1647,8 @@ private fun ExplorerSection(
                         if (selection.none { it.documentUri == hitUri }) {
                             // First long-press selects. Consume to the up (Initial pass, ahead of the
                             // tile) so its click can't toggle the selection straight back off.
-                            (filesNow.value.firstOrNull { it.documentUri == hitUri } ?: timeline?.files?.firstOrNull { it.documentUri == hitUri })?.let {
+                            val hit = filesNow.value.firstOrNull { it.documentUri == hitUri } ?: pinnedNow.value.firstOrNull { it.documentUri == hitUri }
+                            (hit ?: timeline?.files?.firstOrNull { it.documentUri == hitUri })?.let {
                                 renaming = null; opError = null; selection.add(it)
                             }
                             do {
@@ -1643,7 +1708,8 @@ private fun ExplorerSection(
         ) {
             val shelfBlock: (@Composable () -> Unit)? = if (!shelves) null else ({
                 HomeShelves(
-                    body, recents.orEmpty(), editor.sidebarPins, rootName ?: stringResource(R.string.folder),
+                    body, recents.orEmpty(), pinned, layout == ExplorerLayout.GALLERY || (layout == ExplorerLayout.GRID && view.thumb == ThumbShape.PAGE),
+                    editor.sidebarPins, rootName ?: stringResource(R.string.folder),
                     counts = countsLabel(words, arranged.orEmpty().count { it.isDir }, arranged.orEmpty().count { !it.isDir }),
                     onSeeAll = { showRecent = true; selection.clear() },
                     onOpenRecent = { host.onClick(it) },
@@ -1662,7 +1728,7 @@ private fun ExplorerSection(
                     } })
                 }
                 layout == ExplorerLayout.GRID -> GridBody(body, gridState, gridColumns(screenWidthDp, view.tileSize), chipRow, gridTop, Modifier.fillMaxSize())
-                layout == ExplorerLayout.GALLERY -> GalleryBody(body, galleryState, galleryColumns(screenWidthDp, view.tileSize), chipRow, gridTop, Modifier.fillMaxSize())
+                layout == ExplorerLayout.GALLERY -> GalleryBody(body, galleryState, galleryColumns(railedWidth, view.tileSize), chipRow, gridTop, Modifier.fillMaxSize())
                 layout == ExplorerLayout.LIST -> BoxWithConstraints(Modifier.fillMaxSize()) {
                     ListBody(
                         body, listState, wide = maxWidth >= 720.dp,
@@ -1812,6 +1878,8 @@ private fun ExplorerSection(
             }
             // While items are picked, the selection bar stays pinned where the chip row starts.
             if (selection.isNotEmpty()) Box(Modifier.fillMaxWidth().height(48.dp), contentAlignment = Alignment.CenterStart) {
+                // Registered when the bar appears, after the search field's, so Back clears the picks first.
+                BackHandler { selection.clear() }
                 SelectionBar(selection.size, onClear = { selection.clear() }, onSelectAll = { selection.clear(); selection.addAll(arranged.orEmpty()) }) {
                     val files = selection.filterNot { it.isDir }
                     val fg = palette.selectionForeground.toComposeColor()
@@ -1821,23 +1889,67 @@ private fun ExplorerSection(
                     ExplorerIcon(XnotesIcons.moveToFolder, stringResource(R.string.move_to_folder), fg) { moving = selection.toList() }
                     // Only editable notes merge: canvases, reader files and folders have no pages to join.
                     val notes = selection.all { DocumentKind.ofName(it.name) == DocumentKind.NOTE }
-                    ExplorerIcon(XnotesIcons.merge, stringResource(R.string.merge_notes), fg, enabled = selection.size >= 2 && notes) { merging = selection.toList() }
                     ExplorerIcon(XnotesIcons.copy, stringResource(R.string.copy), fg) { clipboard = ClipItem(selection.toList(), false); selection.clear() }
-                    ExplorerIcon(XnotesIcons.cut, stringResource(R.string.cut), fg) { clipboard = ClipItem(selection.toList(), true); selection.clear() }
-                    var colorsOpen by remember { mutableStateOf(false) }
-                    Box {
-                        ExplorerIcon(XnotesIcons.palette, stringResource(R.string.colour_code), fg) { colorsOpen = true }
-                        DropdownMenu(expanded = colorsOpen, onDismissRequest = { colorsOpen = false }) {
-                            ColorCodeMenuContent { c -> colorsOpen = false; recolor(selection.toList(), c); selection.clear() }
-                        }
-                    }
-                    ExplorerIcon(XnotesIcons.share, stringResource(R.string.share), fg, enabled = files.size == selection.size && files.none { ReaderKind.isReadable(it.name) }) {
-                        val uris = files.map { it.documentUri }
-                        selection.clear()
-                        if (uris.size == 1) calls.shareFile(uris[0]) else calls.shareFiles(uris)
-                    }
                     SelectionDivider()
                     ExplorerIcon(XnotesIcons.trash, if (prefs.trashDays == 0) stringResource(R.string.delete) else stringResource(R.string.move_to_trash), palette.danger.toComposeColor()) { remove(selection.toList()) }
+                    // The rest wait in a menu, so the bar stays short enough to read at a glance.
+                    var moreOpen by remember { mutableStateOf(false) }
+                    var colours by remember { mutableStateOf(false) }
+                    LaunchedEffect(moreOpen) { if (!moreOpen) colours = false }
+                    Box {
+                        ExplorerIcon(XnotesIcons.more, stringResource(R.string.more), fg) { moreOpen = true }
+                        DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
+                            if (colours) {
+                                ColorCodeMenuContent { c -> moreOpen = false; recolor(selection.toList(), c); selection.clear() }
+                            } else {
+                                // A lone item gets the rest of its own ⋮ here too, since the gallery, timeline and columns draw none.
+                                val one = selection.singleOrNull()
+                                if (one != null && !one.isDir) {
+                                    DropdownMenuItem(text = { Text(stringResource(R.string.preview)) }, onClick = { moreOpen = false; selection.clear(); previewing = one })
+                                }
+                                DropdownMenuItem(text = { Text(stringResource(R.string.cut)) }, onClick = {
+                                    moreOpen = false
+                                    clipboard = ClipItem(selection.toList(), true)
+                                    selection.clear()
+                                })
+                                DropdownMenuItem(text = { Text(stringResource(R.string.colour_code)) }, onClick = { colours = true })
+                                if (one != null) {
+                                    one.color?.let { c ->
+                                        DropdownMenuItem(text = { Text(stringResource(R.string.name_colour_ellipsis)) }, onClick = { moreOpen = false; selection.clear(); namingColor = c })
+                                    }
+                                    val pinLabel = if (one.isDir) {
+                                        if (editor.isPinned(one.documentUri)) R.string.unpin_from_sidebar else R.string.pin_to_sidebar
+                                    } else {
+                                        if (editor.isNotePinned(one.documentUri)) R.string.unpin_from_top else R.string.pin_to_top
+                                    }
+                                    DropdownMenuItem(text = { Text(stringResource(pinLabel)) }, onClick = {
+                                        moreOpen = false
+                                        selection.clear()
+                                        if (one.isDir) host.menu.togglePin(one) else host.menu.toggleNotePin(one)
+                                    })
+                                    if (!one.isDir) HorizontalDivider(color = palette.border.toComposeColor())
+                                }
+                                DropdownMenuItem(text = { Text(stringResource(R.string.share)) }, enabled = files.size == selection.size, onClick = {
+                                    moreOpen = false
+                                    val uris = files.map { it.documentUri }
+                                    selection.clear()
+                                    if (uris.size == 1) calls.shareFile(uris[0]) else calls.shareFiles(uris)
+                                })
+                                if (one != null && !one.isDir) {
+                                    DropdownMenuItem(text = { Text(stringResource(R.string.save_copy_ellipsis)) }, onClick = { moreOpen = false; selection.clear(); calls.saveCopyFile(one.documentUri) })
+                                    DropdownMenuItem(text = { Text(stringResource(R.string.export_pdf)) }, onClick = { moreOpen = false; selection.clear(); calls.exportFilePdf(one.documentUri) })
+                                }
+                                // Only notes merge: a canvas has no pages, a folder no one order.
+                                val notes = selection.filter { !it.isDir && com.xnotes.core.util.DocumentKind.ofName(it.name) == com.xnotes.core.util.DocumentKind.NOTE }
+                                if (notes.size >= 2 && notes.size == selection.size) {
+                                    DropdownMenuItem(text = { Text(stringResource(R.string.merge_ellipsis)) }, onClick = {
+                                        moreOpen = false
+                                        merging = notes.toList()
+                                    })
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1870,22 +1982,38 @@ private fun ExplorerSection(
     val pendingImport = editor.pendingImport
     // Clear any stale error when a fresh name dialog opens for a new operation.
     LaunchedEffect(createMode, pendingImport) { fieldError = null }
-    // Name entry for a new note, new folder, or a pending PDF import. Hidden while an import is
-    // actually being written, so only the "Importing…" dialog shows.
+    // A new note gets the full-screen New note; it opens once it is made.
     if (createMode == CreateMode.FILE && pendingImport == null && !editor.importing) {
-        NewNoteDialog(
+        var busy by remember { mutableStateOf(false) }
+        NewNoteScreen(
             editor = editor,
-            initial = nextUntitled(editor, editor.cachedChildren(root, currentDocId)),
+            folderName = stack.lastOrNull()?.second ?: rootName ?: stringResource(R.string.folder),
+            initialName = remember { nextUntitled(editor, editor.cachedChildren(root, currentDocId)) },
             error = fieldError,
-            onConfirm = { n, style, orientation ->
+            busy = busy,
+            onImportTemplate = { callsNow.value.importTemplate() },
+            onTemplateFromImage = { callsNow.value.templateFromImage(it) },
+            onCreate = { n, setup ->
+                busy = true
                 scope.launch {
-                    val uri = withContext(Dispatchers.IO) { editor.createBlankNoteFile(root, currentDocId, n, style, orientation) }
-                    if (uri != null) { onCreateMode(CreateMode.NONE); refreshKey++; calls.openFile(uri) } else fieldError = context.getString(R.string.err_create_note)
+                    val uri = withContext(Dispatchers.IO) { editor.createNoteFile(root, currentDocId, n, setup) }
+                    busy = false
+                    if (uri != null) {
+                        fieldError = null
+                        onCreateMode(CreateMode.NONE)
+                        refreshKey++
+                        callsNow.value.openFile(uri)
+                    } else {
+                        fieldError = context.getString(R.string.err_create_note)
+                    }
                 }
             },
-            onDismiss = { fieldError = null; onCreateMode(CreateMode.NONE) },
+            onClose = { fieldError = null; onCreateMode(CreateMode.NONE) },
         )
-    } else if ((createMode != CreateMode.NONE || pendingImport != null) && !editor.importing) {
+    }
+    // Name entry for a new canvas, new folder, or a pending PDF import. Hidden while an import is
+    // actually being written, so only the "Importing…" dialog shows.
+    if ((createMode == CreateMode.CANVAS || createMode == CreateMode.FOLDER || pendingImport != null) && !editor.importing) {
         val isFolder = pendingImport == null && createMode == CreateMode.FOLDER
         val default = when {
             pendingImport != null -> pendingImport.defaultName // import names default to the source file
@@ -1970,23 +2098,6 @@ private fun ExplorerSection(
         )
     }
 
-    merging?.let { items ->
-        MergeDialog(
-            initial = context.getString(R.string.merged_name, DocumentKind.stripSuffix(items.first().name)),
-            onConfirm = { name, trashOriginals ->
-                merging = null
-                selection.clear()
-                scope.launch {
-                    val uri = editor.mergeNotes(items.map { it.documentUri }, root, currentDocId, name)
-                    if (uri == null) opError = context.getString(R.string.err_merge_notes)
-                    else if (trashOriginals) remove(items)
-                    refreshKey++
-                }
-            },
-            onDismiss = { merging = null },
-        )
-    }
-
     moving?.let { items ->
         val movingFolders = remember(items) { items.filter { it.isDir }.map { editor.browseDocId(it.documentUri) } }
         FolderPickerDialog(
@@ -2053,14 +2164,15 @@ private val SEARCH_HEIGHT = 40.dp
 /**
  * The explorer's recursive name filter. Idle it's a bare magnifier like the header's other icons; tapped,
  * it eases out into a rounded pill of [expandedWidth] holding the field and stops (no overshoot). Tapping
- * outside drops focus, which clears the query and lets it ease back. A trailing ✕ does the same by hand.
+ * outside drops focus, which clears the query and lets it ease back. A trailing ✕ does the same by hand,
+ * and so does Back once the keyboard is down; the keyboard's Search key only hides the keyboard.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ExplorerSearchField(query: String, onQueryChange: (String) -> Unit, expandedWidth: Dp, lift: () -> Float = { 0f }) {
     val palette = LocalPalette.current
     val focus = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     // `active` bootstraps the field into composition on tap so its FocusRequester can grab focus;
     // `focused` is the real focus state. Either keeps the pill expanded.
     var active by remember { mutableStateOf(false) }
@@ -2075,16 +2187,8 @@ internal fun ExplorerSearchField(query: String, onQueryChange: (String) -> Unit,
     val surface = palette.surface.toComposeColor()
     val border = palette.border.toComposeColor()
     LaunchedEffect(active) { if (active) runCatching { focus.requestFocus() } }
-    // Back only hides the keyboard and leaves focus put, so a keyboard that was up going away ends the search too.
-    val imeUp = WindowInsets.isImeVisible
-    var imeSeen by remember { mutableStateOf(false) }
-    LaunchedEffect(imeUp, focused) {
-        when {
-            !focused -> imeSeen = false
-            imeUp -> imeSeen = true
-            imeSeen -> focusManager.clearFocus()
-        }
-    }
+    // Back exits the search
+    BackHandler(enabled = expanded) { focusManager.clearFocus() }
     Row(
         Modifier
             .width(lerp(SEARCH_HEIGHT, expandedWidth, open))
@@ -2110,7 +2214,7 @@ internal fun ExplorerSearchField(query: String, onQueryChange: (String) -> Unit,
                 textStyle = TextStyle(color = palette.text.toComposeColor(), fontSize = 14.sp),
                 cursorBrush = SolidColor(palette.accent.toComposeColor()),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
+                keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
                 modifier = Modifier.weight(1f)
                     .focusRequester(focus)
                     .onFocusChanged {
@@ -2177,6 +2281,8 @@ internal fun EntryMenu(
     onColor: ((Rgba?) -> Unit)? = null,
     pinned: Boolean = false,
     onTogglePin: (() -> Unit)? = null,
+    notePinned: Boolean = false,
+    onToggleNotePin: (() -> Unit)? = null,
     onNameColor: (() -> Unit)? = null,
     onMoveTo: (() -> Unit)? = null,
     onPreview: (() -> Unit)? = null,
@@ -2204,6 +2310,9 @@ internal fun EntryMenu(
             if (onNameColor != null) DropdownMenuItem(text = { Text(stringResource(R.string.name_colour_ellipsis)) }, onClick = { onDismiss(); onNameColor() })
             if (onTogglePin != null) {
                 DropdownMenuItem(text = { Text(if (pinned) stringResource(R.string.unpin_from_sidebar) else stringResource(R.string.pin_to_sidebar)) }, onClick = { onDismiss(); onTogglePin() })
+            }
+            if (onToggleNotePin != null) {
+                DropdownMenuItem(text = { Text(if (notePinned) stringResource(R.string.unpin_from_top) else stringResource(R.string.pin_to_top)) }, onClick = { onDismiss(); onToggleNotePin() })
             }
             DropdownMenuItem(text = { Text(deleteLabel) }, onClick = { onDismiss(); onDelete?.invoke() })
             if (onShare != null) {
@@ -2279,64 +2388,6 @@ private fun StackedNoteCard(editor: Editor, entry: BrowseEntry, modifier: Modifi
 }
 
 // --- shared bits ---
-
-/** The new-note prompt: its name, page orientation and the toolbar's page-style controls (template, page colour), preset from the new-note defaults. */
-@Composable
-private fun NewNoteDialog(
-    editor: Editor,
-    initial: String,
-    error: String?,
-    onConfirm: (String, com.xnotes.core.model.PageStyle, Orientation) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val palette = LocalPalette.current
-    var text by remember { mutableStateOf(TextFieldValue(initial, selection = TextRange(0, initial.length))) }
-    var style by remember { mutableStateOf(editor.newNoteStyle) }
-    var orientation by remember { mutableStateOf(editor.preferences.defaultPageOrientation) }
-    val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
-    val confirm = { onConfirm(text.text.trim(), style, orientation) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.new_note)) },
-        text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.verticalScroll(rememberScrollState()),
-            ) {
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    singleLine = true,
-                    isError = error != null,
-                    supportingText = error?.let { { Text(it, color = Color(0xFFE5534B)) } },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { confirm() }),
-                    modifier = Modifier
-                        .focusRequester(focus)
-                        .onPreviewKeyEvent { ev ->
-                            when {
-                                ev.type != KeyEventType.KeyDown -> false
-                                ev.key == Key.Enter || ev.key == Key.NumPadEnter -> { confirm(); true }
-                                ev.key == Key.Escape -> { onDismiss(); true }
-                                else -> false
-                            }
-                        },
-                )
-                StyleCaption(stringResource(R.string.pref_orientation))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    ModeChip(stringResource(R.string.orientation_portrait), orientation == Orientation.PORTRAIT) { orientation = Orientation.PORTRAIT }
-                    ModeChip(stringResource(R.string.orientation_landscape), orientation == Orientation.LANDSCAPE) { orientation = Orientation.LANDSCAPE }
-                }
-                Spacer(Modifier.size(12.dp))
-                PageStyleControls(editor, style, editor.newNotePageMm(orientation)) { style = it }
-            }
-        },
-        confirmButton = { TextButton(onClick = { confirm() }) { Text(stringResource(R.string.create)) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
-        containerColor = palette.menuBg.toComposeColor(),
-    )
-}
 
 /**
  * A small modal that asks for a single name, used for new notes, new folders, renames, and
@@ -2583,24 +2634,3 @@ private fun SyncConflictBanner() {
     }
 }
 
-/** Names the note that selected notes merge into, and whether the originals go to trash after. */
-@Composable
-private fun MergeDialog(initial: String, onConfirm: (String, Boolean) -> Unit, onDismiss: () -> Unit) {
-    var name by remember { mutableStateOf(initial) }
-    var trash by remember { mutableStateOf(false) }
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.merge_notes)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { trash = !trash }) {
-                    androidx.compose.material3.Checkbox(checked = trash, onCheckedChange = { trash = it })
-                    Text(stringResource(R.string.merge_trash_originals))
-                }
-            }
-        },
-        confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = { onConfirm(name.trim(), trash) }) { Text(stringResource(R.string.merge)) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
-    )
-}

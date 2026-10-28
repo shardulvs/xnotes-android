@@ -47,7 +47,9 @@ import androidx.compose.ui.unit.sp
 import com.xnotes.R
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.PageStyle
+import com.xnotes.core.model.PageTemplates
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.model.TemplateSettings
 import com.xnotes.core.template.Template
 import com.xnotes.core.template.TemplatePage
 import com.xnotes.core.template.TemplatePainter
@@ -71,9 +73,9 @@ private val THUMB_W = 52.dp
 private val TILE_W = 62.dp
 
 /**
- * A row of template previews drawn at the current page's proportions, the [selected] one outlined,
- * ending in an Import tile when there is an [onImport]. A long press on an imported template offers to remove it, and on one
- * only this note carries, to add it to the library.
+ * A row of template previews at the current page's proportions, each drawn as [drawing] says, the
+ * [selected] one outlined, ending in an Import tile. A long press on an imported template offers
+ * to remove it, and on one only this note carries, to add it to the library.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -81,9 +83,7 @@ internal fun TemplateStrip(
     entries: List<TemplateLibrary.Entry>,
     selected: String?,
     pageMm: Pair<Double, Double>,
-    ink: Rgba,
-    accent: Rgba,
-    paper: Rgba,
+    drawing: (TemplateLibrary.Entry) -> TemplateDrawing,
     onSelect: (String) -> Unit,
     onImport: (() -> Unit)?,
     onRemove: (String) -> Unit,
@@ -117,7 +117,7 @@ internal fun TemplateStrip(
                         .border(if (sel) 2.dp else 1.dp, (if (sel) palette.accent else palette.border).toComposeColor(), RoundedCornerShape(3.dp))
                         .padding(if (sel) 2.dp else 1.dp),
                 ) {
-                    val bmp = rememberTemplateThumb(e.template, TemplateThumbs.spec(e.key, pageMm, ink, accent, paper, TemplateValues.DEFAULTS, wPx), keep = true)
+                    val bmp = rememberTemplateThumb(e.template, TemplateThumbs.spec(e.key, pageMm, drawing(e), wPx), keep = true)
                     if (bmp != null) Image(bmp, contentDescription = e.template.name, Modifier.size(THUMB_W, thumbH))
                 }
                 Spacer(Modifier.height(3.dp))
@@ -186,11 +186,11 @@ internal fun TemplatePreview(
 }
 
 @Composable
-private fun thumbPx(width: Dp): Int = with(LocalDensity.current) { width.toPx() }.toInt().coerceAtLeast(8)
+internal fun thumbPx(width: Dp): Int = with(LocalDensity.current) { width.toPx() }.toInt().coerceAtLeast(8)
 
 /** [spec] drawn off the main thread, straight from [TemplateThumbs] when it is there already. */
 @Composable
-private fun rememberTemplateThumb(t: Template, spec: TemplateThumbs.Spec, keep: Boolean): ImageBitmap? {
+internal fun rememberTemplateThumb(t: Template, spec: TemplateThumbs.Spec, keep: Boolean): ImageBitmap? {
     val state = produceState(if (keep) TemplateThumbs.cached(spec) else null, spec) {
         value = (if (keep) TemplateThumbs.cached(spec) else null) ?: withContext(Dispatchers.Default) { TemplateThumbs.render(t, spec, keep) }
     }
@@ -221,6 +221,9 @@ internal object TemplateThumbs {
     fun spec(key: String, pageMm: Pair<Double, Double>, ink: Rgba, accent: Rgba, paper: Rgba, values: TemplateValues, wPx: Int) =
         Spec(key, pageMm, ink.copy(a = max(ink.a, 170)), accent.copy(a = max(accent.a, 190)), paper, values.numbers, values.colors, wPx)
 
+    fun spec(key: String, pageMm: Pair<Double, Double>, d: TemplateDrawing, wPx: Int) =
+        spec(key, pageMm, d.look.ink, d.look.accent, d.look.paper, d.values, wPx)
+
     fun cached(s: Spec): ImageBitmap? = synchronized(cache) { cache[s] }
 
     fun render(t: Template, s: Spec, keep: Boolean): ImageBitmap? {
@@ -233,19 +236,19 @@ internal object TemplateThumbs {
             c.drawColor(s.paper.toArgb())
             val values = TemplateValues(s.numbers, s.colors)
             val out = TemplateLibrary.layouts.layout(t, TemplatePage(w, h, Rect(0.0, 0.0, w, h), s.ink, s.accent, values))
-            TemplatePainter.paint(AndroidRenderer(c), out, s.wPx / w, Rect(0.0, 0.0, s.wPx.toDouble(), hPx.toDouble()))
+            TemplatePainter.paint(AndroidRenderer(c), out, s.wPx / w, Rect(0.0, 0.0, s.wPx.toDouble(), hPx.toDouble()), minLine = 1.0, picture = TemplateLibrary.pictures(null, s.key))
             bmp.asImageBitmap()
         }.getOrNull() ?: return null
         if (keep) synchronized(cache) { cache[s] = img }
         return img
     }
 
-    /** Draw the strip's thumbnails for each of [looks] that are not kept yet, one at a time. */
-    suspend fun prewarm(entries: List<TemplateLibrary.Entry>, pageMm: Pair<Double, Double>, looks: List<TemplateLook>, wPx: Int) =
+    /** Draw the strip's [tiles] that are not kept yet, one at a time. */
+    suspend fun prewarm(tiles: List<Pair<TemplateLibrary.Entry, TemplateDrawing>>, pageMm: Pair<Double, Double>, wPx: Int) =
         withContext(Dispatchers.Default) {
-            for (look in looks.distinct()) for (e in entries) {
+            for ((e, d) in tiles) {
                 ensureActive()
-                render(e.template, spec(e.key, pageMm, look.ink, look.accent, look.paper, TemplateValues.DEFAULTS, wPx), keep = true)
+                render(e.template, spec(e.key, pageMm, d, wPx), keep = true)
             }
         }
 }
@@ -253,12 +256,39 @@ internal object TemplateThumbs {
 /** The effective colours a style level draws its template with. */
 internal data class TemplateLook(val ink: Rgba, val accent: Rgba, val paper: Rgba) {
     companion object {
-        /** [style]'s colours over [below] (the document's style, under a page's own). */
-        fun of(style: PageStyle, below: PageStyle?, defaultPaper: Rgba) = TemplateLook(
-            ink = style.patternColor ?: below?.patternColor ?: PageStyle.DEFAULT_PATTERN_COLOR,
-            accent = style.accentColor ?: below?.accentColor ?: PageStyle.DEFAULT_ACCENT_COLOR,
-            paper = style.pageColor ?: below?.pageColor ?: defaultPaper,
+        /** [own] colours over [lower]'s, on [paper]. */
+        fun of(own: TemplateSettings, lower: TemplateSettings?, paper: Rgba) = TemplateLook(
+            ink = own.patternColor ?: lower?.patternColor ?: PageStyle.DEFAULT_PATTERN_COLOR,
+            accent = own.accentColor ?: lower?.accentColor ?: PageStyle.DEFAULT_ACCENT_COLOR,
+            paper = paper,
         )
+
+        /** [style]'s colours over [lower] (the document's style, when it shows the same template), its paper over [below]'s. */
+        fun of(style: PageStyle, lower: PageStyle?, defaultPaper: Rgba, below: PageStyle? = lower) =
+            of(style.settings, lower?.settings, style.pageColor ?: below?.pageColor ?: defaultPaper)
+    }
+}
+
+/** How a style level draws one template: its colours and parameter values. */
+internal class TemplateDrawing(val look: TemplateLook, val values: TemplateValues) {
+    companion object {
+        /** [t] with [own] settings over [lower]'s, on [paper]; a spacing in content px turns into mm at [dpi]. */
+        fun of(t: Template, own: TemplateSettings, lower: TemplateSettings?, paper: Rgba, dpi: Int): TemplateDrawing {
+            val numbers = HashMap<String, Double>()
+            lower?.params?.let(numbers::putAll)
+            own.params?.let(numbers::putAll)
+            val spacing = own.spacing ?: lower?.spacing
+            t.spacingParam?.let { sp -> if (spacing != null) numbers[sp.name] = spacing * 25.4 / dpi }
+            val colors = (lower?.colors ?: emptyMap()) + (own.colors ?: emptyMap())
+            return TemplateDrawing(TemplateLook.of(own, lower, paper), TemplateValues(numbers, colors))
+        }
+
+        /** How [style] draws [e] in the strip: as it shows it ([shownKey]), else as [kept]; over [below]'s if that shows [e]. */
+        fun inStrip(e: TemplateLibrary.Entry, style: PageStyle, shownKey: String, kept: TemplateSettings?, below: PageStyle?, paper: Rgba, dpi: Int): TemplateDrawing {
+            val own = if (e.key == shownKey) style.settings else kept ?: TemplateSettings()
+            val lower = below?.takeIf { (it.template ?: PageTemplates.NONE) == e.key }?.settings
+            return of(e.template, own, lower, paper, dpi)
+        }
     }
 }
 
@@ -272,8 +302,19 @@ internal fun PrewarmTemplateThumbs(editor: Editor, popupOpen: Boolean) {
         if (popupOpen || !editor.noteOpen) return@LaunchedEffect
         delay(PREWARM_DELAY_MS)
         val doc = editor.documentStyle
-        val looks = listOf(TemplateLook.of(doc, null, defaultPaper), TemplateLook.of(editor.currentPageStyle, doc, defaultPaper))
-        TemplateThumbs.prewarm(editor.templateChoices(), editor.currentPageMm, looks, wPx)
+        val page = editor.currentPageStyle
+        val docKey = doc.template ?: PageTemplates.NONE
+        val docPaper = doc.pageColor ?: defaultPaper
+        val pagePaper = page.pageColor ?: docPaper
+        val dpi = editor.documentDpi
+        // Both tabs' tiles as the popup opens on them, before it remembers anything.
+        val tiles = editor.templateChoices().flatMap { e ->
+            listOf(
+                e to TemplateDrawing.inStrip(e, doc, docKey, null, null, docPaper, dpi),
+                e to TemplateDrawing.inStrip(e, page, page.template ?: docKey, null, doc, pagePaper, dpi),
+            )
+        }
+        TemplateThumbs.prewarm(tiles, editor.currentPageMm, wPx)
     }
 }
 

@@ -19,13 +19,12 @@ Xnotes is a great app, and I'm grateful that the developer puts so much work int
 ## Additions to the original xnotes
 
 - **Filen cloud sync**: sync notes and settings to Filen from the sidebar or by pulling down on Home, with a synced trash and a banner for conflicting edits.
-- **Settings backup**: export settings, fonts, templates and stickers to one file and import them on another device.
 - **Handwriting to text**: turn selected handwriting (Czech, English) into an editable text box.
 - **Handwriting to math**: an optional on-device add-on turns handwritten formulas into editable LaTeX.
 - **Plain text to equation**: turn typed maths like `int_0^1 x^2 dx` into a formula.
 - **Maths keyboard**: a dedicated keyboard for equations and the formula editor.
 - **File import**: create notes from PDFs, images, txt, md, rtf, html, epub, docx, xlsx and csv.
-- **Import and merge**: import a file into an existing note, merge notes, and add images or photos as pages.
+- **Import into a note**: import a file into an existing note, and add images or photos as pages.
 - **Read-only reader**: open md, docx, pptx, xlsx, csv and pdf files as they are, or convert them to notes.
 - **Reader mode**: a toolbar button that locks a note for reading, with only navigation, search and zoom left in the bar.
 - **Find**: search text in the reader and Preferences.
@@ -33,10 +32,7 @@ Xnotes is a great app, and I'm grateful that the developer puts so much work int
 - **Tables**: a table shape with row and column bars for selecting, resizing, adding and removing.
 - **Function curves**: a Functions page in the shape picker with x^n, roots, logs, exponentials, trig and inverse trig graphs and an editable formula and range.
 - **Circles from the centre**: circles grow out from where the drag starts.
-- **Mixed page orientation**: mix portrait and landscape pages in one note, kept in PDF export.
-- **Default page style**: pick any template (Cornell, checklist, planners and more) and its settings for new notes in Preferences or the new-note dialog, in portrait or landscape.
-- **Hyperlinks**: add tappable links to canvas items and text.
-- **Image cropping**: crop selected images.
+- **Item links**: add tappable links to canvas items, and add or edit the link on selected text.
 - **Eyedropper**: pick a colour from anywhere on screen.
 - **Whole selection**: a switch to select only items lying fully inside the band or lasso.
 - **Finger tap to select**: a finger tap selects, a finger drag still pans.
@@ -56,6 +52,12 @@ Xnotes is a great app, and I'm grateful that the developer puts so much work int
 - ~~**Curve shape**: a smooth line through points you can add, move and remove.~~
 - ~~**Axes shapes**: rotatable x-y axes and a single number line.~~
 - ~~**New shapes stay selected**: move or resize a shape right after drawing it.~~
+- ~~**Settings backup**: export settings and fonts to one file and import them on another device.~~
+- ~~**Image cropping**: crop selected images.~~
+- ~~**Mixed page orientation**: mix portrait and landscape pages in one note.~~
+- ~~**Default page style**: pick a template and its settings for new notes.~~
+- ~~**Merge notes**: join several notes into one.~~
+- ~~**Links in text**: tappable links in typed text.~~
 
 Crossed-out items were later added to xnotes by its original developer.
 

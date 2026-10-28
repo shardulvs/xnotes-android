@@ -32,6 +32,7 @@ private val CANVAS_TOOL_OF: Map<ToolbarItem, Tool> = mapOf(
     ToolbarItem.SELECT to Tool.SELECT,
     ToolbarItem.LASSO to Tool.LASSO,
     ToolbarItem.SHAPE to Tool.SHAPE,
+    ToolbarItem.TAPE to Tool.TAPE,
 )
 
 /**
@@ -48,8 +49,10 @@ fun InfiniteToolbar(
     editor: InfiniteEditor,
     onOpenBackstage: () -> Unit,
     onInsertImage: () -> Unit = {},
-    onTakePhoto: () -> Unit = {},
     onClosePane: (() -> Unit)? = null,
+    onInsertAudio: () -> Unit = {},
+    onRecordAudio: () -> Unit = {},
+    onTakePhoto: () -> Unit = {},
 ) {
     // The stroke tools use the same designed drawables the paged toolbar does, so a pen looks like
     // a pen on either canvas rather than like a generic glyph.
@@ -65,6 +68,7 @@ fun InfiniteToolbar(
         Tool.SHAPE to XnotesIcons.shape,
         Tool.SELECT to XnotesIcons.select,
         Tool.LASSO to XnotesIcons.lasso,
+        Tool.TAPE to XnotesIcons.tape,
     )
     var stylesOpen by remember { mutableStateOf(false) }
     var eraserOpen by remember { mutableStateOf(false) }
@@ -72,6 +76,7 @@ fun InfiniteToolbar(
     var waypointsOpen by remember { mutableStateOf(false) }
     var penOpen by remember { mutableStateOf<Tool?>(null) }
     var selectOpen by remember { mutableStateOf<Tool?>(null) }
+    var tapeOpen by remember { mutableStateOf(false) }
     // Which swatch has the colour picker open, as on the paged bar: tapping the armed swatch again
     // opens it, so the five colours are both the ink and the way to change it.
     var switcherIndex by remember { mutableStateOf<Int?>(null) }
@@ -94,7 +99,7 @@ fun InfiniteToolbar(
                             Box {
                                 // Tapping the armed tool again opens its settings, as the paged bar does.
                                 val armed = editor.tool == tool
-                                val configurable = tool.isStroke || tool == Tool.ERASER || tool == Tool.SHAPE || tool == Tool.SELECT
+                                val configurable = tool.isStroke || tool == Tool.ERASER || tool == Tool.SHAPE || tool == Tool.SELECT || tool == Tool.TAPE
                                 ToolbarIcon(
                                     icon,
                                     stringResource(tool.labelRes),
@@ -106,6 +111,7 @@ fun InfiniteToolbar(
                                         tool == Tool.ERASER && editor.tool == tool -> eraserOpen = true
                                         tool == Tool.SHAPE && editor.tool == tool -> shapeOpen = true
                                         (tool == Tool.SELECT || tool == Tool.LASSO) && editor.tool == tool -> selectOpen = tool
+                                        tool == Tool.TAPE && editor.tool == tool -> tapeOpen = true
                                         tool.isStroke && editor.tool == tool -> penOpen = tool
                                         else -> editor.armTool(tool)
                                     }
@@ -115,6 +121,7 @@ fun InfiniteToolbar(
                                 if (tool == Tool.ERASER && eraserOpen) EraserConfigPopup(editor) { eraserOpen = false }
                                 if (tool == Tool.SHAPE && shapeOpen) ShapeConfigPopup(editor) { shapeOpen = false }
                                 if (selectOpen == tool) SelectConfigPopup(editor, tool) { selectOpen = null }
+                                if (tool == Tool.TAPE && tapeOpen) TapeConfigPopup(editor) { tapeOpen = false }
                                 if (penOpen == tool) ToolConfigPopup(editor, tool) { penOpen = null }
                             }
                         }
@@ -126,25 +133,20 @@ fun InfiniteToolbar(
                         active = editor.wandEnabled,
                     ) { editor.toggleWand() }
 
-                    ToolbarItem.IMAGE -> Box {
-                        var imageMenu by remember { mutableStateOf(false) }
-                        ToolbarIcon(XnotesIcons.image, stringResource(R.string.insert_image)) { imageMenu = true }
-                        androidx.compose.material3.DropdownMenu(expanded = imageMenu, onDismissRequest = { imageMenu = false }) {
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { androidx.compose.material3.Text(stringResource(R.string.insert_image_ellipsis)) },
-                                onClick = { imageMenu = false; onInsertImage() },
-                            )
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { androidx.compose.material3.Text(stringResource(R.string.take_photo)) },
-                                onClick = { imageMenu = false; onTakePhoto() },
-                            )
-                        }
-                    }
+                    ToolbarItem.IMAGE -> InsertButton(
+                        owner = editor,
+                        imageRows = listOf(
+                            InsertRow(XnotesIcons.image, stringResource(R.string.insert_image_ellipsis)) { onInsertImage() },
+                            InsertRow(XnotesIcons.camera, stringResource(R.string.take_photo)) { onTakePhoto() },
+                        ),
+                        onAudioFromFile = onInsertAudio,
+                        onRecord = onRecordAudio,
+                    )
 
                     ToolbarItem.COLORS ->
                         editor.toolbarColors.take(editor.toolbarColorCount).forEachIndexed { i, color ->
                             Box {
-                                Swatch(color.toComposeColor(), active = editor.activeColorIndex == i) {
+                                Swatch(color.toComposeColor(), active = editor.activeColorIndex == i, drag = editor, ink = color) {
                                     if (editor.activeColorIndex == i) switcherIndex = i else editor.pickColor(i)
                                 }
                                 if (switcherIndex == i) ColorSwitcherPopup(editor, i) { switcherIndex = null }

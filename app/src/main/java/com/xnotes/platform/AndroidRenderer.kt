@@ -129,6 +129,11 @@ class AndroidRenderer(private val canvas: Canvas) : Renderer {
         canvas.drawColor(0, PorterDuff.Mode.CLEAR)
     }
 
+    /** Take each of [polygons] out of the clip, so what is drawn next leaves them alone. */
+    fun clipOutPolygons(polygons: List<List<Pt>>) {
+        for (poly in polygons) if (poly.size >= 3) canvas.clipOutPath(buildPath(poly, close = true, FillRule.NONZERO))
+    }
+
     override fun fillBackground(rect: Rect, color: Rgba) = fillRect(rect, color)
 
     override fun fillRect(rect: Rect, color: Rgba) {

@@ -91,6 +91,14 @@ class PlacedLine(
     val mathStarts: IntArray = IntArray(0),
     /** The font of the line's first run, or the empty paragraph's: what a space with no word beside it sets in. */
     val font: FontSpec = FontSpec(TextFlow.DEFAULT_SIZE_PT),
+    /** A horizontal rule's line, drawn across [codeLeft]..[codeRight]. */
+    val rule: Boolean = false,
+    /** Which quote or callout of the flow this line sits in, counted in order, or -1. */
+    val quoteId: Int = -1,
+    /** Where that container's bar stands. */
+    val quoteBar: Double = 0.0,
+    /** The callout's kind, null for a plain quote. */
+    val callout: CalloutKind? = null,
 ) {
     val height: Double get() = bottom - top
 
@@ -155,8 +163,48 @@ class TableFrag(
     }
 }
 
-/** The flow laid onto one page: its content rect, the lines placed there, and its table slices. */
-class PageFlow(val contentRect: Rect, val lines: List<PlacedLine>, val tables: List<TableFrag> = emptyList())
+/**
+ * Where a page break sits, for the screen only: a dashed line centred on [y] from [left] to
+ * [right], broken around its [label], set at [labelX] on [baseline] in [font].
+ */
+class BreakMark(
+    val y: Double,
+    val left: Double,
+    val right: Double,
+    val label: String,
+    val labelX: Double,
+    val labelW: Double,
+    val baseline: Double,
+    val font: FontSpec,
+)
+
+/**
+ * A callout's title row above its first line: [kind]'s icon in a [iconSize] square at [x],
+ * then [label] in [font] on [baseline]. [quoteId] ties it to its lines, [para] is the
+ * paragraph it heads. The row runs from [top] to [bottom].
+ */
+class CalloutTitle(
+    val quoteId: Int,
+    val kind: CalloutKind,
+    val para: Int,
+    val top: Double,
+    val bottom: Double,
+    val x: Double,
+    val baseline: Double,
+    val iconSize: Double,
+    val label: String,
+    val labelX: Double,
+    val font: FontSpec,
+)
+
+/** The flow laid onto one page: its content rect, lines, table slices, page breaks and callout titles. */
+class PageFlow(
+    val contentRect: Rect,
+    val lines: List<PlacedLine>,
+    val tables: List<TableFrag> = emptyList(),
+    val breaks: List<BreakMark> = emptyList(),
+    val callouts: List<CalloutTitle> = emptyList(),
+)
 
 /** What a text-tool tap landed on. */
 sealed class FlowHit {
@@ -181,6 +229,8 @@ class FlowFrame(
     val codeBg: Rgba? = null,
     /** Where each laid-out paragraph sits in tables, as of this layout. */
     val cells: CellIndex = CellIndex(emptyList()),
+    /** The page the flow starts on: past a note's cover. */
+    val firstPage: Int = 0,
 ) {
     private val byPara = HashMap<Int, MutableList<Pair<Int, PlacedLine>>>()
 
@@ -233,6 +283,9 @@ class FlowFrame(
             mix(line.top.toRawBits())
             mix(line.baseline.toRawBits())
             mix(line.bottom.toRawBits())
+            mix(if (line.rule) 1L else 0L)
+            mix(line.quoteId.toLong())
+            mix((line.callout?.ordinal ?: -1).toLong())
             for (x in line.xs) mix(x.toRawBits())
             for (seg in line.segs) mix(if (seg.math) -seg.start.toLong() - 1 else seg.start.toLong())
             for (d in line.decos) {
@@ -240,6 +293,11 @@ class FlowFrame(
                 mix(d.x1.toRawBits())
                 mix((d.math?.ordinal ?: -1).toLong())
             }
+        }
+        for (b in page.breaks) mix(b.y.toRawBits())
+        for (t in page.callouts) {
+            mix(t.top.toRawBits())
+            mix(t.kind.ordinal.toLong())
         }
         for (t in page.tables) {
             for (row in t.rows) {
@@ -257,7 +315,7 @@ class FlowFrame(
     fun pageFlowBounds(pageIndex: Int): Rect? {
         val page = pages.getOrNull(pageIndex) ?: return null
         if (page.lines.isEmpty()) return null
-        var top = page.lines.minOf { it.top }
+        var top = minOf(page.lines.minOf { it.top }, page.callouts.minOfOrNull { it.top } ?: Double.MAX_VALUE)
         var bottom = page.lines.maxOf { it.bottom }
         var pad = FlowPainter.CODE_PAD
         for (t in page.tables) {
@@ -442,6 +500,19 @@ class FlowFrame(
         return Triple(frag.table, row.row, frag.colAt(local.x))
     }
 
+    /** The address of the link drawn at page-local [local] on [pageIndex], within [slop], or null. */
+    fun linkAt(pageIndex: Int, local: Pt, slop: Double): String? {
+        val page = pages.getOrNull(pageIndex) ?: return null
+        for (line in page.lines) {
+            if (local.y < line.top - slop || local.y > line.bottom + slop) continue
+            for (seg in line.segs) {
+                val link = seg.style.link ?: continue
+                if (local.x >= seg.x - slop && local.x <= line.caretX(seg.end) + slop) return link
+            }
+        }
+        return null
+    }
+
     /** Page-local highlight rects (page index keyed) covering [range]. */
     fun selectionRects(range: FlowRange): List<Pair<Int, Rect>> {
         val r = range.normalized()
@@ -494,9 +565,10 @@ class FlowFrame(
      */
     fun emptyLinesToReach(pageIndex: Int, y: Double, slotH: Double): Int {
         if (pages.isEmpty() || slotH <= 0.0 || pageIndex !in pages.indices) return 0
+        val start = firstPage.coerceIn(0, pages.lastIndex)
         val end = lastLineEnd()
-        val endPage = end?.first ?: 0
-        val endY = end?.second ?: pages[0].contentRect.top
+        val endPage = end?.first ?: start
+        val endY = end?.second ?: pages[start].contentRect.top
         if (pageIndex < endPage || (pageIndex == endPage && y < endY)) return 0
         fun slotsIn(h: Double): Int = maxOf(1, kotlin.math.floor(h / slotH).toInt())
         if (pageIndex == endPage) {

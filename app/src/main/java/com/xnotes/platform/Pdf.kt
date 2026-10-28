@@ -1,5 +1,6 @@
 package com.xnotes.platform
 
+import com.xnotes.core.model.forExport
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -21,6 +22,7 @@ import com.xnotes.core.model.ConnectorItem
 import com.xnotes.core.model.Document
 import com.xnotes.core.model.Page
 import com.xnotes.core.model.PageInsets
+import com.xnotes.core.model.PageLayers
 import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.ShapeItem
@@ -237,6 +239,7 @@ object PdfExporter {
                 if (isCancelled()) return
                 val ins = page.insets(doc)
                 if (index < n) {
+                    turnAsShown(srcDoc.getPage(index), page)
                     // Flow text counts as content too: a typed-only page must still annotate, and so
                     // must a margined one — its extra paper is written by growing the page's boxes.
                     if (page.items.isNotEmpty() || flow.bounds(page) != null || !ins.isZero) {
@@ -339,7 +342,13 @@ object PdfExporter {
     private fun vectorImportedPage(ctx: PdfExportContext, srcDoc: PDDocument, srcIdx: Int, page: Page, ins: PageInsets, s: Double, paintRuling: (Page, Renderer) -> Unit, flow: FlowExport): PageFrame {
         val pdfPage = ctx.doc.importPage(srcDoc.getPage(srcIdx))
         ownAnnotations(pdfPage)
+        turnAsShown(pdfPage, page)
         return annotatePage(ctx, pdfPage, page, ins, s, paintRuling, flow)
+    }
+
+    /** Turn [pdfPage], a source page in the export, as far past its own /Rotate as the note shows it. */
+    private fun turnAsShown(pdfPage: PDPage, page: Page) {
+        if (page.pdfTurn != 0) pdfPage.rotation = (pdfPage.rotation + 90 * page.pdfTurn).mod(360)
     }
 
     /**
@@ -417,9 +426,10 @@ object PdfExporter {
         renderer.beginMark(Mark.Decoration)
         paintRuling(page, renderer) // page ruling sits behind the ink
         renderer.endMark()
-        flow.paint(page, renderer, cover, tagged = ctx.tags != null)
-        for (link in flow.links(page)) renderer.addFlowLink(link)
-        for (item in page.items) {
+        PageLayers.paint(page.items.forExport(), {
+            flow.paint(page, renderer, cover, tagged = ctx.tags != null)
+            for (link in flow.links(page)) renderer.addFlowLink(link)
+        }) { item ->
             renderer.beginMark(PdfTags.markOf(item))
             if (PdfItemRaster.needsRaster(item)) {
                 PdfItemRaster.item(item, cover)?.let { raster ->
@@ -495,7 +505,7 @@ object PdfExporter {
                 canvas.translate(-cover.left.toFloat(), -cover.top.toFloat())
 
                 val renderer = AndroidRenderer(canvas)
-                val src = page.pdfPage
+                val src = page.pdfKey
                 val bg = if (src != null && source != null) source.renderPage(src, page.width.toInt(), page.height.toInt(), markups = page.markups) else null
                 if (bg != null) {
                     canvas.drawBitmap(bg.bitmap, null, RectF(0f, 0f, page.width.toFloat(), page.height.toFloat()), bitmapPaint)
@@ -504,8 +514,7 @@ object PdfExporter {
                     MarkupPainter.paint(renderer, page.markups, doc.dpi / 72.0) // on bare paper, beneath the ruling
                 }
                 paintRuling(page, renderer) // ruling behind ink
-                flow.paint(page, renderer, cover)
-                for (item in page.items) item.paint(renderer)
+                PageLayers.paint(page.items.forExport(), { flow.paint(page, renderer, cover) }) { it.paint(renderer) }
                 pdf.finishPage(pdfPage)
                 PdfItemRaster.releaseInkGeometry(page.items)
                 onProgress(index + 1, total)

@@ -74,6 +74,12 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
      */
     var revealedMath: (Paragraph) -> Int = { -1 }
 
+    /** What a page break's on-screen mark says, installed by the host so it can be translated. */
+    var pageBreakLabel: String = "Page break"
+
+    /** A callout's title, installed by the host so it can be translated. */
+    var calloutLabel: (CalloutKind) -> String = { it.title }
+
     // --- per-paragraph measurement (cached) ---
 
     /** Advances and per-run fonts/metrics for one paragraph at given flow defaults. */
@@ -469,8 +475,18 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
      * when it continues onto a page of different width, and count how many
      * virtual pages the tail overflowed past the real ones. Past [throughPage]
      * it stops, for a caller painting only that far: nothing later is shaped.
+     * The flow starts on [firstPage], so a note's cover takes none of it.
+     * The virtual pages are [addedPage], the box a page added now would get,
+     * else the last page's.
      */
-    fun layout(flow: TextFlow, pageBoxes: List<PageBox>, dpi: Int, throughPage: Int = Int.MAX_VALUE): FlowFrame {
+    fun layout(
+        flow: TextFlow,
+        pageBoxes: List<PageBox>,
+        dpi: Int,
+        throughPage: Int = Int.MAX_VALUE,
+        firstPage: Int = 0,
+        addedPage: PageBox? = null,
+    ): FlowFrame {
         val defColor = flow.defaultColor ?: autoColor() ?: TextFlow.DEFAULT_COLOR
         val cells = CellIndex(flow.paragraphs)
         if (pageBoxes.isEmpty()) return FlowFrame(emptyList(), flow.rev, 0, defColor, codeBackground(), cells)
@@ -478,11 +494,19 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
         math?.beginLayout()
         pruneCaches(flow)
         val contentRects = pageBoxes.map { contentRectOf(it, flow.margins, dpi) }
+        val spare = addedPage?.let { contentRectOf(it, flow.margins, dpi) } ?: contentRects.last()
         val pageLines = List(pageBoxes.size) { mutableListOf<PlacedLine>() }
         val pageTables = List(pageBoxes.size) { mutableListOf<TableFrag>() }
-        var page = 0
-        var y = contentRects[0].top
+        val pageBreaks = List(pageBoxes.size) { mutableListOf<BreakMark>() }
+        val pageCallouts = List(pageBoxes.size) { mutableListOf<CalloutTitle>() }
+        var quoteId = -1
+        var page = firstPage.coerceIn(0, pageBoxes.lastIndex)
+        var y = contentRects[page].top
         var ordinal = 0
+        // Numbering counts per indent level, so a nested list or a paragraph continuing an
+        // item does not restart the list it sits in; anything at a level ends the lists at
+        // and below it there.
+        val counters = IntArray(Paragraph.MAX_INDENT + 1)
         var skipTo = 0
         for ((paraIndex, para) in flow.paragraphs.withIndex()) {
             if (page > throughPage) break
@@ -490,17 +514,73 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
             val block = cells.blockAt(paraIndex)
             if (block != null) {
                 val cur = Cursor(page, y)
-                layoutTable(flow, block, contentRects, cur, pageLines, pageTables)
+                layoutTable(flow, block, contentRects, spare, cur, pageLines, pageTables)
                 page = cur.page
                 y = cur.y
                 ordinal = 0
+                counters.fill(0)
                 skipTo = block.last + 1
                 continue
             }
-            ordinal = if (para.list == ListKind.ORDERED) ordinal + 1 else 0
-            val indentPx = para.indent * INDENT_STEP_PX +
-                if (para.list != ListKind.NONE) MARKER_GUTTER_PX else 0.0
-            var rect = contentRects.getOrElse(page) { contentRects.last() }
+            if (para.breakBefore) {
+                val here = contentRects.getOrElse(page) { spare }
+                // Already at the top of a page, the break has nothing to push: its mark goes
+                // in the margin above, so it can still be seen and taken out.
+                if (y > here.top + EPS) {
+                    pageBreaks.getOrNull(page)?.add(breakMark(flow, here, y, below = true))
+                    page++
+                    y = contentRects.getOrElse(page) { spare }.top
+                } else {
+                    pageBreaks.getOrNull(page)?.add(breakMark(flow, here, y, below = false))
+                }
+                // A break to a page further on skips the pages between; one already passed is a plain break.
+                val to = para.breakToPage
+                if (to != null && to > page && to < pageBoxes.size) {
+                    page = to
+                    y = contentRects[page].top
+                }
+                if (page > throughPage) break
+            }
+            val quote = para.quote
+            if (quote != null && flow.paragraphs.getOrNull(paraIndex - 1)?.quote !== quote) {
+                quoteId++
+                val kind = quote.kind
+                if (kind != null) {
+                    // The title keeps with the first line under it, as a heading would.
+                    val font = FontSpec(flow.defaultSizePt, flow.defaultFace, bold = true)
+                    val m = measurer.metrics(font)
+                    val titleH = m.height + TITLE_GAP
+                    var here = contentRects.getOrElse(page) { spare }
+                    val first = breakLines(flow, para, (here.w - indentOf(para)).coerceAtLeast(MIN_LINE_WIDTH)).first()
+                    if (y + titleH + first.height > here.bottom + EPS && y > here.top + EPS) {
+                        page++
+                        here = contentRects.getOrElse(page) { spare }
+                        y = here.top
+                    }
+                    if (page > throughPage) break
+                    val x = here.left + QUOTE_INSET_PX
+                    val icon = m.ascent * ICON_PER_ASCENT
+                    val label = calloutLabel(kind)
+                    pageCallouts.getOrNull(page)?.add(
+                        CalloutTitle(
+                            quoteId, kind, paraIndex, y, y + titleH, x, y + m.ascent, icon,
+                            label, x + icon + ICON_GAP, font,
+                        ),
+                    )
+                    y += titleH
+                }
+            }
+            val level = para.indent.coerceIn(0, Paragraph.MAX_INDENT)
+            if (para.list == ListKind.ORDERED) {
+                counters[level] = para.listStart ?: (counters[level] + 1)
+                counters.fill(0, level + 1, counters.size)
+                ordinal = counters[level]
+            } else {
+                counters.fill(0, level, counters.size)
+                ordinal = 0
+            }
+            val indentPx = indentOf(para)
+            var rect = contentRects.getOrElse(page) { spare }
             var avail = (rect.w - indentPx).coerceAtLeast(MIN_LINE_WIDTH)
             var lines = breakLines(flow, para, avail)
             var li = 0
@@ -509,7 +589,7 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
                 val bl = lines[li]
                 if (y + bl.height > rect.bottom + EPS && y > rect.top + EPS) {
                     page++
-                    rect = contentRects.getOrElse(page) { contentRects.last() }
+                    rect = contentRects.getOrElse(page) { spare }
                     y = rect.top
                     val widthNow = (rect.w - indentPx).coerceAtLeast(MIN_LINE_WIDTH)
                     if (widthNow != avail) {
@@ -524,6 +604,7 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
                     lastLineOfPara = li == lines.lastIndex,
                     firstLineOfPara = firstLine && bl.startChar == 0,
                     ordinal = ordinal,
+                    quoteId = if (quote != null) quoteId else -1,
                 )
                 pageLines.getOrNull(page)?.add(placed)
                 y += bl.height
@@ -532,8 +613,25 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
             }
         }
         val extra = (page - (pageBoxes.size - 1)).coerceAtLeast(0)
-        val pages = pageBoxes.indices.map { PageFlow(contentRects[it], pageLines[it], pageTables[it]) }
-        return FlowFrame(pages, flow.rev, extra, defColor, codeBackground(), cells)
+        val pages = pageBoxes.indices.map {
+            PageFlow(contentRects[it], pageLines[it], pageTables[it], pageBreaks[it], pageCallouts[it])
+        }
+        return FlowFrame(pages, flow.rev, extra, defColor, codeBackground(), cells, firstPage.coerceIn(0, pageBoxes.lastIndex))
+    }
+
+    /** How far [para]'s text stands in from the column: its quote's bar, its indent and its marker. */
+    private fun indentOf(para: Paragraph): Double =
+        (if (para.quote != null) QUOTE_INSET_PX else 0.0) + para.indent * INDENT_STEP_PX +
+            if (para.list != ListKind.NONE) MARKER_GUTTER_PX else 0.0
+
+    /** The mark for a break whose page's text ends at [y]: just [below] it, or else just above it. */
+    private fun breakMark(flow: TextFlow, rect: Rect, y: Double, below: Boolean): BreakMark {
+        val font = FontSpec(flow.defaultSizePt * BREAK_LABEL_SCALE, flow.defaultFace)
+        val m = measurer.metrics(font)
+        val centre = if (below) y + m.height / 2.0 else y - m.height / 2.0
+        val w = measurer.advances(pageBreakLabel, font).sum()
+        val x = rect.left + (rect.w - w) / 2.0
+        return BreakMark(centre, rect.left, rect.right, pageBreakLabel, x, w, centre + (m.ascent - m.descent) / 2.0, font)
     }
 
     private class Cursor(var page: Int, var y: Double)
@@ -552,6 +650,7 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
         flow: TextFlow,
         block: TableBlock,
         contentRects: List<Rect>,
+        spare: Rect,
         cur: Cursor,
         pageLines: List<MutableList<PlacedLine>>,
         pageTables: List<MutableList<TableFrag>>,
@@ -564,7 +663,7 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
         val widths = FlowTable.normalized(table.widths).takeIf { it.size == cols } ?: FlowTable.even(cols)
         val frac = FlowTable.clampWidth(table.width)
         val tint = style.tint ?: accentColor() ?: DEFAULT_TINT
-        fun rectAt(p: Int) = contentRects.getOrElse(p) { contentRects.last() }
+        fun rectAt(p: Int) = contentRects.getOrElse(p) { spare }
         var rect = rectAt(cur.page)
         var colXs = colEdges(rect, widths, frac)
         val rowsHere = mutableListOf<RowFrag>()
@@ -714,6 +813,7 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
         lastLineOfPara: Boolean,
         firstLineOfPara: Boolean,
         ordinal: Int,
+        quoteId: Int = -1,
     ): PlacedLine {
         val n = bl.endChar - bl.startChar
         // A display equation with nothing beside it sits centred, which is where
@@ -754,7 +854,7 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
             if (to > from) {
                 val font = shape.runFonts[r]
                 val style = para.runs[r].style
-                if (style.underline || style.strike || style.highlight != null || style.code) {
+                if (style.underline || style.strike || style.highlight != null || style.code || style.link != null) {
                     decos.add(Deco(xs[from - bl.startChar], xs[to - bl.startChar], font, style))
                 }
                 // A formula is one segment whatever is inside it: splitting at its
@@ -795,7 +895,7 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
             runStart = runEnd
         }
         val marker = if (firstLineOfPara && para.list != ListKind.NONE) {
-            val gutterLeft = contentRect.left + para.indent * INDENT_STEP_PX
+            val gutterLeft = contentRect.left + (if (para.quote != null) QUOTE_INSET_PX else 0.0) + para.indent * INDENT_STEP_PX
             val gutter = Rect(gutterLeft, y, MARKER_GUTTER_PX, bl.height)
             val font = FontSpec(flow.defaultSizePt, flow.defaultFace)
             if (para.list == ListKind.ORDERED) {
@@ -817,6 +917,10 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
             codeRight = contentRect.right,
             mathStarts = mathStarts.toIntArray(),
             font = lineFont(shape, bl.startChar),
+            rule = para.rule,
+            quoteId = quoteId,
+            quoteBar = contentRect.left,
+            callout = para.quote?.kind,
         )
     }
 
@@ -850,6 +954,7 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
     }
 
     /** Emit one word's segments, split at highlight-span boundaries with their colours. */
+    /** Nested captures colour innermost first (an escape inside its string), as tree-sitter nests highlights. */
     private fun emitHighlighted(
         shape: ParaShape,
         spans: List<CodeSpan>,
@@ -863,11 +968,16 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
     ) {
         var i = from
         while (i < to) {
-            val covering = spans.firstOrNull { it.start <= i && i < it.end }
-            val boundary = if (covering != null) {
-                minOf(to, covering.end)
-            } else {
-                minOf(to, spans.firstOrNull { it.start > i }?.start ?: to)
+            var covering: CodeSpan? = null
+            var boundary = to
+            for (s in spans) {
+                if (s.start > i) {
+                    boundary = minOf(boundary, s.start)
+                } else if (i < s.end) {
+                    boundary = minOf(boundary, s.end)
+                    val c = covering
+                    if (c == null || s.start > c.start || (s.start == c.start && s.end < c.end)) covering = s
+                }
             }
             val st = if (covering != null) style.copy(color = covering.color) else style
             segs.add(Seg(shape.text.substring(i, boundary), xs[i - blStart], font, st, start = i))
@@ -913,6 +1023,19 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
 
         /** A content rect is never shorter than this, however extreme the margins. */
         const val MIN_CONTENT_HEIGHT = 16.0
+
+        /** A quote's text stands this far in from its bar's left edge. */
+        const val QUOTE_INSET_PX = 24.0
+
+        /** A callout's icon is this much of its title's ascent, and stands this far from the title. */
+        private const val ICON_PER_ASCENT = 1.0
+        private const val ICON_GAP = 8.0
+
+        /** Room below a callout's title row before its first line. */
+        private const val TITLE_GAP = 4.0
+
+        /** A page break's label sets this much smaller than the text. */
+        private const val BREAK_LABEL_SCALE = 0.75
 
         const val HEADER_ALPHA = 64
         const val BAND_ALPHA = 26

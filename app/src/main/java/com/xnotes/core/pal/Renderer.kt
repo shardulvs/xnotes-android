@@ -59,6 +59,9 @@ sealed class Mark {
     /** The bullet, number or box of flow list paragraph [para]. */
     class FlowMarker(val para: Int) : Mark()
 
+    /** The title of the callout flow paragraph [para] opens. */
+    class FlowTitle(val para: Int) : Mark()
+
     /** Handwriting and shapes. */
     object Drawing : Mark()
 

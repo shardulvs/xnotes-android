@@ -2,6 +2,7 @@ package com.xnotes.settings
 
 import com.xnotes.core.model.Orientation
 import com.xnotes.core.model.PageSize
+import com.xnotes.core.model.PageSizeChoice
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.util.NameTemplate
 import org.json.JSONObject
@@ -58,6 +59,12 @@ data class Preferences(
      *  key press rather than a held state, e.g. HONOR Magic-Pencil whose click arrives as keycode
      *  333); "none" (default) disables it. */
     val stylusButtonTap: String = "none",
+    /** Action mapped to the first page-key side button (keycode 92); "none" disables it. */
+    val stylusButton1Tap: String = "none",
+    /** Action mapped to the second page-key side button (keycode 93); "none" disables it. */
+    val stylusButton2Tap: String = "none",
+    /** Whether the volume keys turn pages in a note (up for the previous page, down for the next). */
+    val volumeKeysTurnPages: Boolean = false,
     /** Horizontal margin (px) on each side of the page column; 0 ⇒ fit-width fills the screen. */
     val sideMargin: Double = 16.0,
     /** Whether the hairline outline around every page is left undrawn. */
@@ -136,12 +143,11 @@ data class Preferences(
      * [orientation]; a custom one is taken as typed, since the two fields already say
      * which way round the page goes.
      */
-    fun newPagePixels(dpi: Int = PageSize.DEFAULT_DPI, orientation: Orientation = defaultPageOrientation): Pair<Double, Double> =
-        if (defaultPageSize == PageSize.CUSTOM) {
-            PageSize.mmToPx(customPageWidthMm, dpi) to PageSize.mmToPx(customPageHeightMm, dpi)
-        } else {
-            defaultPageSize.pixels(orientation, dpi)
-        }
+    fun newPagePixels(dpi: Int = PageSize.DEFAULT_DPI): Pair<Double, Double> = defaultPageChoice.pixels(dpi)
+
+    /** The default page size, orientation and custom sides as one choice. */
+    val defaultPageChoice: PageSizeChoice
+        get() = PageSizeChoice(defaultPageSize, defaultPageOrientation, customPageWidthMm, customPageHeightMm)
 
     fun toJson(): JSONObject = JSONObject()
         .put("ui_appearance", uiAppearance)
@@ -165,6 +171,9 @@ data class Preferences(
         .put("three_finger_tap", threeFingerTap)
         .put("stylus_double_tap", stylusDoubleTap)
         .put("stylus_button_tap", stylusButtonTap)
+        .put("stylus_button_1_tap", stylusButton1Tap)
+        .put("stylus_button_2_tap", stylusButton2Tap)
+        .put("volume_keys_turn_pages", volumeKeysTurnPages)
         .put("side_margin", sideMargin)
         .put("hide_page_borders", hidePageBorders)
         .put("min_zoom_enabled", minZoomEnabled)
@@ -240,10 +249,6 @@ data class Preferences(
         /** [trashDays] for keeping deleted items until Trash is emptied by hand. */
         const val TRASH_FOREVER = -1
 
-        /** Settable range of a custom page's sides, in millimetres. */
-        const val CUSTOM_PAGE_MIN_MM = 10.0
-        const val CUSTOM_PAGE_MAX_MM = 2000.0
-
         /** Settable range of the min/max zoom limits, in percent (within the hard zoom bounds). */
         const val ZOOM_LIMIT_MIN_PCT = 20
         const val ZOOM_LIMIT_MAX_PCT = 1600
@@ -290,9 +295,9 @@ data class Preferences(
                     .ifBlank { NameTemplate.DEFAULT },
                 defaultPageOrientation = Orientation.fromName(o.optString("default_page_orientation", "portrait")),
                 customPageWidthMm = o.optDouble("custom_page_width_mm", 210.0)
-                    .coerceIn(CUSTOM_PAGE_MIN_MM, CUSTOM_PAGE_MAX_MM),
+                    .coerceIn(PageSize.CUSTOM_MIN_MM, PageSize.CUSTOM_MAX_MM),
                 customPageHeightMm = o.optDouble("custom_page_height_mm", 297.0)
-                    .coerceIn(CUSTOM_PAGE_MIN_MM, CUSTOM_PAGE_MAX_MM),
+                    .coerceIn(PageSize.CUSTOM_MIN_MM, PageSize.CUSTOM_MAX_MM),
                 fingerDraws = o.optBoolean("finger_draws", false),
                 zoomLockPan = zoomLockPan,
                 detectShapes = o.optBoolean("detect_shapes", true),
@@ -304,6 +309,9 @@ data class Preferences(
                 threeFingerTap = tapAction("three_finger_tap"),
                 stylusDoubleTap = tapAction("stylus_double_tap"),
                 stylusButtonTap = tapAction("stylus_button_tap"),
+                stylusButton1Tap = tapAction("stylus_button_1_tap"),
+                stylusButton2Tap = tapAction("stylus_button_2_tap"),
+                volumeKeysTurnPages = o.optBoolean("volume_keys_turn_pages", false),
                 sideMargin = o.optDouble("side_margin", 16.0).coerceIn(0.0, 80.0),
                 hidePageBorders = o.optBoolean("hide_page_borders", false),
                 minZoomEnabled = o.optBoolean("min_zoom_enabled", false),

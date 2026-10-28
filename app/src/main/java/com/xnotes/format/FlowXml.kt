@@ -2,9 +2,11 @@ package com.xnotes.format
 
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.pal.FontFace
+import com.xnotes.core.text.CalloutKind
 import com.xnotes.core.text.CellIndex
 import com.xnotes.core.text.CharStyle
 import com.xnotes.core.text.FlowMargins
+import com.xnotes.core.text.FlowQuote
 import com.xnotes.core.text.FlowTable
 import com.xnotes.core.text.ListKind
 import com.xnotes.core.text.ParaAlign
@@ -43,11 +45,10 @@ object FlowXml {
 
     fun write(flow: TextFlow): ByteArray = buildString {
         val charStyles = LinkedHashMap<CharStyle, String>()
-        val paraStyles = LinkedHashMap<Pair<ParaAlign, Int>, String>()
+        val paraStyles = LinkedHashMap<ParaProps, String>()
         for (para in flow.paragraphs) {
-            if (para.align != ParaAlign.LEFT || para.indent != 0) {
-                paraStyles.getOrPut(para.align to para.indent) { "P${paraStyles.size + 1}" }
-            }
+            val props = ParaProps.of(para)
+            if (props != ParaProps.PLAIN) paraStyles.getOrPut(props) { "P${paraStyles.size + 1}" }
             for (run in para.runs) {
                 val style = writtenStyle(flow, para, run.style)
                 if (style != CharStyle.DEFAULT) {
@@ -57,12 +58,14 @@ object FlowXml {
         }
 
         val tables = CellIndex(flow.paragraphs).tables
+        val quotes = quoteIds(flow.paragraphs)
 
         append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
         append("<office:document-content")
         append(" xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\"")
         append(" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\"")
         if (tables.isNotEmpty()) append(" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\"")
+        if (flow.paragraphs.any { p -> p.runs.any { it.style.link != null } }) append(" xmlns:xlink=\"http://www.w3.org/1999/xlink\"")
         append(" xmlns:style=\"urn:oasis:names:tc:opendocument:xmlns:style:1.0\"")
         append(" xmlns:fo=\"urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0\"")
         append(" xmlns:xnotes=\"urn:xnotes:flow:1.0\"")
@@ -79,7 +82,7 @@ object FlowXml {
 
         append(" <office:automatic-styles>\n")
         for ((style, name) in charStyles) appendTextStyle(name, style)
-        for ((key, name) in paraStyles) appendParaStyle(name, key.first, key.second)
+        for ((props, name) in paraStyles) appendParaStyle(name, props)
         for (b in tables) appendTableStyles(b)
         append(" </office:automatic-styles>\n")
 
@@ -90,20 +93,21 @@ object FlowXml {
         while (i < paras.size) {
             val block = tables.getOrNull(nextTable)?.takeIf { it.first == i }
             if (block != null) {
-                appendTable(flow, block, paras, paraStyles, charStyles)
+                appendTable(flow, block, paras, paraStyles, charStyles, quotes)
                 nextTable++
                 i = block.last + 1
                 continue
             }
             val kind = paras[i].list
             if (kind == ListKind.NONE) {
-                appendParagraph(flow, paras[i], paraStyles, charStyles, "   ")
+                appendParagraph(flow, paras[i], paraStyles, charStyles, "   ", quotes)
                 i++
             } else {
                 append("   <text:list xnotes:list=\"${kind.id}\">\n")
                 while (i < paras.size && paras[i].list == kind) {
-                    append("    <text:list-item>\n")
-                    appendParagraph(flow, paras[i], paraStyles, charStyles, "     ")
+                    val start = paras[i].listStart
+                    append(if (start == null) "    <text:list-item>\n" else "    <text:list-item text:start-value=\"$start\">\n")
+                    appendParagraph(flow, paras[i], paraStyles, charStyles, "     ", quotes)
                     append("    </text:list-item>\n")
                     i++
                 }
@@ -120,7 +124,6 @@ object FlowXml {
         if (s.underline) append(" style:text-underline-style=\"solid\"")
         if (s.strike) append(" style:text-line-through-style=\"solid\"")
         if (s.code) append(" xnotes:code=\"true\"")
-        s.link?.let { append(" xnotes:link=\"${escapeAttr(it)}\"") }
         // The run's text is the LaTeX itself, so a reader that ignores this still
         // shows the source rather than losing the equation.
         if (s.math) append(" xnotes:math=\"true\"")
@@ -132,11 +135,33 @@ object FlowXml {
         append("/>\n  </style:style>\n")
     }
 
-    private fun StringBuilder.appendParaStyle(name: String, align: ParaAlign, indent: Int) {
+    private fun StringBuilder.appendParaStyle(name: String, p: ParaProps) {
         append("  <style:style style:name=\"$name\" style:family=\"paragraph\">\n   <style:paragraph-properties")
-        if (align != ParaAlign.LEFT) append(" fo:text-align=\"${align.id}\"")
-        if (indent != 0) append(" fo:margin-left=\"${indent * INDENT_MM_PER_LEVEL}mm\" xnotes:indent=\"$indent\"")
+        if (p.align != ParaAlign.LEFT) append(" fo:text-align=\"${p.align.id}\"")
+        if (p.indent != 0) append(" fo:margin-left=\"${p.indent * INDENT_MM_PER_LEVEL}mm\" xnotes:indent=\"${p.indent}\"")
+        if (p.breakBefore) append(" fo:break-before=\"page\"")
         append("/>\n  </style:style>\n")
+    }
+
+    /** Each quoted paragraph's container, numbered from 1 in order, a container being a run sharing one. */
+    private fun quoteIds(paras: List<Paragraph>): Map<Paragraph, Int> {
+        val ids = java.util.IdentityHashMap<Paragraph, Int>()
+        var n = 0
+        for ((i, p) in paras.withIndex()) {
+            val q = p.quote ?: continue
+            if (paras.getOrNull(i - 1)?.quote !== q) n++
+            ids[p] = n
+        }
+        return ids
+    }
+
+    /** What a paragraph's automatic style holds. */
+    private data class ParaProps(val align: ParaAlign, val indent: Int, val breakBefore: Boolean) {
+        companion object {
+            val PLAIN = ParaProps(ParaAlign.LEFT, 0, false)
+
+            fun of(p: Paragraph) = ParaProps(p.align, p.indent, p.breakBefore)
+        }
     }
 
     private fun tableName(b: TableBlock) = "Table${b.ordinal + 1}"
@@ -166,8 +191,9 @@ object FlowXml {
         flow: TextFlow,
         b: TableBlock,
         paras: List<Paragraph>,
-        paraStyles: Map<Pair<ParaAlign, Int>, String>,
+        paraStyles: Map<ParaProps, String>,
         charStyles: Map<CharStyle, String>,
+        quotes: Map<Paragraph, Int>,
     ) {
         val name = tableName(b)
         val st = b.table.style
@@ -192,7 +218,7 @@ object FlowXml {
                 append("     <table:table-cell office:value-type=\"string\">\n")
                 if (b.hasCell(r, c)) {
                     for (p in b.cellFirstPara(r, c)..b.cellLastPara(r, c)) {
-                        appendParagraph(flow, paras[p], paraStyles, charStyles, "      ")
+                        appendParagraph(flow, paras[p], paraStyles, charStyles, "      ", quotes)
                     }
                 } else {
                     append("      <text:p></text:p>\n")
@@ -208,18 +234,31 @@ object FlowXml {
     private fun StringBuilder.appendParagraph(
         flow: TextFlow,
         para: Paragraph,
-        paraStyles: Map<Pair<ParaAlign, Int>, String>,
+        paraStyles: Map<ParaProps, String>,
         charStyles: Map<CharStyle, String>,
         pad: String,
+        quotes: Map<Paragraph, Int>,
     ) {
         append(pad).append("<text:p")
-        paraStyles[para.align to para.indent]?.let { append(" text:style-name=\"$it\"") }
+        paraStyles[ParaProps.of(para)]?.let { append(" text:style-name=\"$it\"") }
         if (para.list != ListKind.NONE) append(" xnotes:list=\"${para.list.id}\"")
         if (para.checked) append(" xnotes:checked=\"true\"")
         if (para.headingLevel > 0) append(" xnotes:heading=\"${para.headingLevel}\"")
         para.codeLang?.let { append(" xnotes:code-lang=\"${escapeAttr(it)}\"") }
+        if (para.rule) append(" xnotes:rule=\"true\"")
+        if (para.breakBefore) para.breakToPage?.let { append(" xnotes:break-page=\"$it\"") }
+        // A quote's paragraphs share its number; a callout's say its kind as well.
+        quotes[para]?.let { append(" xnotes:quote=\"$it\"") }
+        para.quote?.kind?.let { append(" xnotes:callout=\"${it.id}\"") }
         append(">")
+        // A link is ODF's own text:a around the spans it covers, however they are styled.
+        var link: String? = null
         for (run in para.runs) {
+            if (run.style.link != link) {
+                if (link != null) append("</text:a>")
+                link = run.style.link
+                link?.let { append("<text:a xlink:type=\"simple\" xlink:href=\"${escapeAttr(it)}\">") }
+            }
             val styleName = charStyles[writtenStyle(flow, para, run.style)]
             if (styleName == null) {
                 appendEncodedText(run.text)
@@ -229,12 +268,18 @@ object FlowXml {
                 append("</text:span>")
             }
         }
+        if (link != null) append("</text:a>")
         append("</text:p>\n")
     }
 
-    /** A heading's text sizes from its level; spelled out, older readers still size it. */
-    private fun writtenStyle(flow: TextFlow, para: Paragraph, style: CharStyle): CharStyle =
-        if (para.headingLevel > 0 && style.sizePt == null) style.copy(sizePt = para.textSizePt(flow)) else style
+    /**
+     * The text style written for [style]: a heading's text sizes from its level, spelled out so
+     * older readers still size it, and a link is no style at all but the text:a around it.
+     */
+    private fun writtenStyle(flow: TextFlow, para: Paragraph, style: CharStyle): CharStyle {
+        val s = if (style.link != null) style.copy(link = null) else style
+        return if (para.headingLevel > 0 && s.sizePt == null) s.copy(sizePt = para.textSizePt(flow)) else s
+    }
 
     /** Escape markup and ODF-encode whitespace (lone interior spaces stay literal). */
     private fun StringBuilder.appendEncodedText(text: String) {
@@ -315,13 +360,34 @@ object FlowXml {
 
         val body = descendants(root, "body").firstOrNull() ?: root
         readBlocks(body, styles, flow.paragraphs)
+        joinQuotes(flow.paragraphs, styles.quotes)
         normalizeTables(flow)
         flow.touch()
     }
 
+    /** Neighbouring paragraphs with one quote number share one container, of the kind the first names. */
+    private fun joinQuotes(paras: List<Paragraph>, refs: Map<Paragraph, Pair<String, CalloutKind?>>) {
+        var id: String? = null
+        var quote: FlowQuote? = null
+        for (p in paras) {
+            val ref = refs[p]
+            if (ref == null || p.codeLang != null || p.rule || p.table != null) {
+                id = null
+                quote = null
+                continue
+            }
+            if (ref.first != id) {
+                id = ref.first
+                quote = FlowQuote(ref.second)
+            }
+            p.quote = quote
+        }
+    }
+
     private class Styles {
+        val quotes = java.util.IdentityHashMap<Paragraph, Pair<String, CalloutKind?>>()
         val chars = HashMap<String, CharStyle>()
-        val paras = HashMap<String, Pair<ParaAlign, Int>>()
+        val paras = HashMap<String, ParaProps>()
         val tableWidths = HashMap<String, Double>()
         val colWidths = HashMap<String, Double>()
         val rowHeights = HashMap<String, Double>()
@@ -334,7 +400,9 @@ object FlowXml {
             if (child is Element) {
                 when (child.localName ?: child.nodeName) {
                     "p" -> {
-                        out.add(parseParagraph(child, styles.chars, styles.paras))
+                        val para = parseParagraph(child, styles.chars, styles.paras)
+                        attr(child, "quote")?.let { styles.quotes[para] = it to CalloutKind.fromId(attr(child, "callout")) }
+                        out.add(para)
                         readBlocks(child, styles, out)
                     }
                     "table" -> readTable(child, styles, out)
@@ -451,7 +519,7 @@ object FlowXml {
         link = attr(props, "link")?.takeIf { it.isNotEmpty() },
     )
 
-    private fun parseParaProps(props: Element): Pair<ParaAlign, Int> {
+    private fun parseParaProps(props: Element): ParaProps {
         val align = when (attr(props, "text-align")) {
             "center" -> ParaAlign.CENTER
             "right", "end" -> ParaAlign.RIGHT
@@ -462,23 +530,30 @@ object FlowXml {
             ?: attr(props, "margin-left")?.removeSuffix("mm")?.toDoubleOrNull()
                 ?.let { (it / INDENT_MM_PER_LEVEL).toInt() }
             ?: 0
-        return align to indent.coerceIn(0, Paragraph.MAX_INDENT)
+        return ParaProps(align, indent.coerceIn(0, Paragraph.MAX_INDENT), attr(props, "break-before") == "page")
     }
 
     private fun parseParagraph(
         p: Element,
         charStyles: Map<String, CharStyle>,
-        paraStyles: Map<String, Pair<ParaAlign, Int>>,
+        paraStyles: Map<String, ParaProps>,
     ): Paragraph {
-        val (align, indent) = paraStyles[attr(p, "style-name")] ?: (ParaAlign.LEFT to 0)
+        val props = paraStyles[attr(p, "style-name")] ?: ParaProps.PLAIN
         val para = Paragraph(
-            align = align,
-            indent = indent,
+            align = props.align,
+            indent = props.indent,
             list = ListKind.fromId(attr(p, "list")),
             checked = attr(p, "checked") == "true",
             codeLang = attr(p, "code-lang"),
             headingLevel = attr(p, "heading")?.toIntOrNull()?.coerceIn(0, Paragraph.MAX_HEADING) ?: 0,
+            rule = attr(p, "rule") == "true",
+            breakBefore = props.breakBefore,
+            breakToPage = if (props.breakBefore) attr(p, "break-page")?.toIntOrNull()?.takeIf { it >= 0 } else null,
+            listStart = (p.parentNode as? Element)
+                ?.takeIf { (it.localName ?: it.nodeName) == "list-item" }
+                ?.let { attr(it, "start-value")?.toIntOrNull() },
         )
+        if (para.list != ListKind.ORDERED) para.listStart = null
         collectRuns(p, CharStyle.DEFAULT, charStyles, para.runs)
         // The size written on a heading's text is for older readers; the level sizes it here.
         if (para.headingLevel > 0) for (run in para.runs) run.style = run.style.copy(sizePt = null)
@@ -500,7 +575,14 @@ object FlowXml {
                 child is Element -> when (child.localName ?: child.nodeName) {
                     "span" -> collectRuns(
                         child,
-                        charStyles[attr(child, "style-name")] ?: style,
+                        // n-notes before 0.9.6 kept a link in the text style as xnotes:link.
+                        charStyles[attr(child, "style-name")]?.let { it.copy(link = style.link ?: it.link) } ?: style,
+                        charStyles,
+                        out,
+                    )
+                    "a" -> collectRuns(
+                        child,
+                        style.copy(link = attr(child, "href")?.trim()?.takeIf { it.isNotEmpty() }),
                         charStyles,
                         out,
                     )

@@ -1,6 +1,5 @@
 package com.xnotes.platform
 
-import com.xnotes.core.text.MarkdownParser
 import org.commonmark.ext.autolink.AutolinkExtension
 import org.commonmark.ext.gfm.strikethrough.StrikethroughExtension
 import org.commonmark.ext.gfm.tables.TablesExtension
@@ -15,6 +14,23 @@ import java.util.Base64
  * files are read entry by entry through [ZipRead]; nothing is ever written back.
  */
 object ReaderHtml {
+
+    private val MATH_FENCE = Regex("^\\s{0,3}\\\$\\\$\\s*$")
+
+    /** The "$" span opening at [at], as its closing offset and whether it is the doubled display form, or null. */
+    private fun mathSpan(text: String, at: Int): Pair<Int, Boolean>? {
+        val display = text.startsWith("$$", at)
+        val marker = if (display) "$$" else "$"
+        val from = at + marker.length
+        if (from >= text.length) return null
+        val close = text.indexOf(marker, from)
+        if (close < from + 1) return null
+        // "$x$" and "$ x $" are maths, "$5 and $10" is money.
+        if (text[from].isWhitespace() != text[close - 1].isWhitespace()) return null
+        if (text.substring(from, close).isBlank()) return null
+        if (!display && close + 1 < text.length && text[close + 1] == '$') return null
+        return close to display
+    }
     /** Reads a ZIP entry by path, or null when it is absent. */
     fun interface ZipRead { fun read(path: String): ByteArray? }
 
@@ -164,7 +180,7 @@ object ReaderHtml {
         for (line in body.split('\n')) {
             val trimmed = line.trimStart()
             val marker = Regex("^(`{3,}|~{3,})").find(trimmed)?.value
-            val mathFence = math != null && MarkdownParser.MATH_FENCE.matches(line)
+            val mathFence = math != null && MATH_FENCE.matches(line)
             when {
                 mathBlock != null -> {
                     if (!mathFence) { mathBlock.add(line.trim()); continue }
@@ -205,7 +221,7 @@ object ReaderHtml {
         val out = StringBuilder()
         var i = 0
         while (i < text.length) {
-            val span = if (text[i] == '$' && (i == 0 || text[i - 1] != '\\')) MarkdownParser.mathSpan(text, i) else null
+            val span = if (text[i] == '$' && (i == 0 || text[i - 1] != '\\')) mathSpan(text, i) else null
             if (span == null) { out.append(text[i]); i++; continue }
             val n = if (span.second) 2 else 1
             val html = math.html(text.substring(i + n, span.first).trim(), span.second)

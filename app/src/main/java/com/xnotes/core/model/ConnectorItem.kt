@@ -87,6 +87,8 @@ class ConnectorItem(
     override val kind = KIND
     override val resizable = true
     override var locked = false
+    override var group: Int? = null
+    override var sync: SyncMark? = null
 
     /** A straight connector's bends between its ends, in order; the other routings ignore them. */
     var waypoints: List<Pt> = emptyList()

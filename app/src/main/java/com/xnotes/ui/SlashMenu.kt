@@ -30,6 +30,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xnotes.R
+import com.xnotes.core.text.CalloutKind
+import com.xnotes.core.text.EmojiShortcodes
 import com.xnotes.core.text.SlashCommands
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
@@ -159,6 +161,65 @@ private fun SlashRow(
     }
 }
 
+/**
+ * The emoji a `:shortcode` being typed could be, hanging under the caret like the
+ * slash menu and read off the text the same way. Enter puts in the highlighted one.
+ */
+@Composable
+fun EmojiMenu(editor: Editor) {
+    editor.flowSelTick
+    editor.contentVersion
+    val query = editor.emojiQuery() ?: return
+    val matches = EmojiShortcodes.complete(query.text)
+    if (matches.isEmpty()) return
+    val anchor = editor.slashAnchor() ?: return
+    val palette = LocalPalette.current
+    val density = LocalDensity.current
+    val menuHeight = with(density) { (ROW_HEIGHT * matches.size + 8.dp).toPx() }
+    val menuWidth = with(density) { MENU_WIDTH.toPx() }
+    val gap = with(density) { 6.dp.toPx() }
+    val viewport = editor.viewportSize()
+    val below = anchor.bottom.toFloat() + gap
+    val y = if (below + menuHeight <= viewport.y) below else (anchor.top.toFloat() - menuHeight - gap)
+    val x = anchor.left.toFloat().coerceIn(0f, (viewport.x.toFloat() - menuWidth).coerceAtLeast(0f))
+    val armed = editor.emojiSelected.takeIf { it in matches.indices } ?: 0
+    Column(
+        modifier = Modifier
+            .offset(with(density) { x.toDp() }, with(density) { y.coerceAtLeast(0f).toDp() })
+            .width(MENU_WIDTH)
+            .clip(MaterialTheme.shapes.medium)
+            .background(palette.menuBg.toComposeColor())
+            .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium)
+            .padding(vertical = 4.dp),
+    ) {
+        for ((i, match) in matches.withIndex()) {
+            val (name, emoji) = match
+            val highlighted = i == armed
+            val fg = (if (highlighted) palette.selectionForeground else palette.text).toComposeColor()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(ROW_HEIGHT)
+                    .background(if (highlighted) palette.selectionBackground.toComposeColor() else Color.Transparent)
+                    .clickable { editor.pickEmoji(query, emoji) }
+                    .padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(emoji, fontSize = 18.sp)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    ":$name:",
+                    color = fg,
+                    fontSize = 13.sp,
+                    fontWeight = if (highlighted) FontWeight.SemiBold else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
 /** The entry's visible name. Keywords are ASCII; these are the translatable part. */
 @Composable
 private fun slashLabel(entry: SlashCommands.Entry): String = when (entry.kind) {
@@ -167,11 +228,26 @@ private fun slashLabel(entry: SlashCommands.Entry): String = when (entry.kind) {
     SlashCommands.Kind.BULLET -> stringResource(R.string.bullet_list)
     SlashCommands.Kind.ORDERED -> stringResource(R.string.ordered_list)
     SlashCommands.Kind.TODO -> stringResource(R.string.checkbox_item)
+    SlashCommands.Kind.QUOTE -> stringResource(R.string.quote)
+    SlashCommands.Kind.CALLOUT -> calloutLabel(CalloutKind.entries[entry.level])
     SlashCommands.Kind.CODE -> stringResource(R.string.code_block)
     SlashCommands.Kind.TABLE -> stringResource(R.string.insert_table)
+    SlashCommands.Kind.PAGE_BREAK -> stringResource(R.string.page_break)
     SlashCommands.Kind.SIZE -> stringResource(R.string.size_pt)
     SlashCommands.Kind.COLOR -> stringResource(R.string.colour)
     SlashCommands.Kind.MATH -> stringResource(R.string.equation)
     SlashCommands.Kind.DATE -> stringResource(R.string.insert_date)
     SlashCommands.Kind.TIME -> stringResource(R.string.insert_time)
+}
+
+/** A callout's title, as its title row and the slash menu show it. */
+@Composable
+fun calloutLabel(kind: CalloutKind): String = stringResource(calloutLabelRes(kind))
+
+fun calloutLabelRes(kind: CalloutKind): Int = when (kind) {
+    CalloutKind.NOTE -> R.string.callout_note
+    CalloutKind.TIP -> R.string.callout_tip
+    CalloutKind.IMPORTANT -> R.string.callout_important
+    CalloutKind.WARNING -> R.string.callout_warning
+    CalloutKind.CAUTION -> R.string.callout_caution
 }

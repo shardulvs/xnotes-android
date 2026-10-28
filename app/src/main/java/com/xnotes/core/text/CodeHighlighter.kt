@@ -21,7 +21,8 @@ interface CodeHighlighter {
 
 /**
  * Maps .scm capture names to colours by longest dotted prefix ("keyword.return"
- * falls back to "keyword"). Two presets keyed to the app's dark/light paper
+ * falls back to "keyword"), and Neovim-style roots ("conditional", "boolean") to
+ * the slot they belong to. Two presets keyed to the app's dark/light paper
  * (github-dark and github-light); the dark preset and user-imported themes also
  * carry a code-block [background].
  */
@@ -32,12 +33,26 @@ class HighlightTheme(private val colors: Map<String, Rgba>, val background: Rgba
         while (true) {
             colors[name]?.let { return it }
             val dot = name.lastIndexOf('.')
-            if (dot < 0) return null
+            if (dot < 0) return NEOVIM_ROOTS[name]?.let { colors[it] }
             name = name.substring(0, dot)
         }
     }
 
     companion object {
+        /** Roots that Neovim-style queries use instead of ours, onto the slot they belong to. */
+        private val NEOVIM_ROOTS = mapOf(
+            "conditional" to "keyword",
+            "repeat" to "keyword",
+            "include" to "keyword",
+            "exception" to "keyword",
+            "boolean" to "constant",
+            "float" to "number",
+            "character" to "string",
+            "parameter" to "variable",
+            "field" to "property",
+            "method" to "function",
+        )
+
         // github-dark (Primer palette), resolved from its Helix theme.
         val DARK = HighlightTheme(
             mapOf(
@@ -53,6 +68,10 @@ class HighlightTheme(private val colors: Map<String, Rgba>, val background: Rgba
                 "property" to Rgba(165, 214, 255, 255),
                 "variable" to Rgba(201, 209, 217, 255),
                 "punctuation" to Rgba(201, 209, 217, 255),
+                "tag" to Rgba(126, 231, 135, 255),
+                "diff.plus" to Rgba(63, 185, 80, 255),
+                "diff.minus" to Rgba(248, 81, 73, 255),
+                "diff.delta" to Rgba(210, 153, 34, 255),
             ),
             background = Rgba(13, 17, 23, 255),
         )
@@ -72,6 +91,10 @@ class HighlightTheme(private val colors: Map<String, Rgba>, val background: Rgba
                 "property" to Rgba(10, 48, 105, 255),
                 "variable" to Rgba(36, 41, 47, 255),
                 "punctuation" to Rgba(36, 41, 47, 255),
+                "tag" to Rgba(17, 99, 41, 255),
+                "diff.plus" to Rgba(26, 127, 55, 255),
+                "diff.minus" to Rgba(207, 34, 46, 255),
+                "diff.delta" to Rgba(154, 103, 0, 255),
             ),
         )
     }

@@ -17,6 +17,7 @@ internal object ViewSettingsJson {
     fun write(o: JSONObject, s: ViewSettings): JSONObject = o.apply {
         if (s.mode != ViewingMode.SINGLE) put("mode", s.mode.id)
         if (!s.verticalScroll) put("verticalScroll", false)
+        if (s.freeMovement) put("freeMovement", true)
         if (s.contrast != 100) put("contrast", s.contrast)
         if (s.invert != 0) put("invert", s.invert)
         if (s.brightness != 100) put("brightness", s.brightness)
@@ -31,6 +32,7 @@ internal object ViewSettingsJson {
     fun read(o: JSONObject): ViewSettings = ViewSettings(
         mode = ViewingMode.fromId(o.optString("mode", ViewingMode.SINGLE.id)),
         verticalScroll = o.optBoolean("verticalScroll", true),
+        freeMovement = o.optBoolean("freeMovement", false),
         contrast = o.optInt("contrast", 100).coerceIn(0, 200),
         invert = o.optInt("invert", 0).coerceIn(0, 100),
         brightness = o.optInt("brightness", 100).coerceIn(0, 200),
@@ -60,6 +62,7 @@ internal object ViewOverridesJson {
     fun write(o: JSONObject, s: ViewOverrides): JSONObject = o.apply {
         s.mode?.let { put("mode", it.id) }
         s.verticalScroll?.let { put("verticalScroll", it) }
+        s.freeMovement?.let { put("freeMovement", it) }
         s.contrast?.let { put("contrast", it) }
         s.invert?.let { put("invert", it) }
         s.brightness?.let { put("brightness", it) }
@@ -74,6 +77,7 @@ internal object ViewOverridesJson {
     fun read(o: JSONObject): ViewOverrides = ViewOverrides(
         mode = if (o.has("mode")) ViewingMode.fromId(o.optString("mode")) else null,
         verticalScroll = if (o.has("verticalScroll")) o.optBoolean("verticalScroll", true) else null,
+        freeMovement = if (o.has("freeMovement")) o.optBoolean("freeMovement", false) else null,
         contrast = if (o.has("contrast")) o.optInt("contrast", 100).coerceIn(0, 200) else null,
         invert = if (o.has("invert")) o.optInt("invert", 0).coerceIn(0, 100) else null,
         brightness = if (o.has("brightness")) o.optInt("brightness", 100).coerceIn(0, 200) else null,

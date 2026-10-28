@@ -76,6 +76,8 @@ class ShapeItem(
     override val resizable = true
     override var locked = false
     override var link: String? = null
+    override var group: Int? = null
+    override var sync: SyncMark? = null
 
     /** What a [ShapeKind.FUNCTION] plots; its sampled curve lives in [path]. */
     var function: FunctionSpec? = null
@@ -107,6 +109,9 @@ class ShapeItem(
 
     /** True for the kinds that hold their outline in [path] rather than drawing it from the box. */
     val isFree: Boolean get() = shape.isFree
+
+    /** True for a dropped colour's area: only fill, which an eraser takes whole and nothing glues to. */
+    val isFill: Boolean get() = shape == ShapeKind.FILL
 
     /** [p] from the shape's unturned frame onto the page: turned by [rotation] about the box centre. */
     fun toPage(p: Pt): Pt {
@@ -482,12 +487,23 @@ class ShapeItem(
      */
     fun touches(p: Pt, tolerance: Double): Boolean = hits(toLocal(p), max(strokeWidth / 2.0, tolerance)) || labelContains(p)
 
-    /** True if an eraser circle of [radius] at (cx,cy) touches the shape's geometry. */
+    /** True if an eraser circle of [radius] at (cx,cy) touches the shape's geometry; a fill's, even at its edge. */
     override fun intersectsCircle(cx: Double, cy: Double, radius: Double): Boolean {
         if (bounds().distanceTo(Pt(cx, cy)) > radius) return false // cheap AABB reject
+        if (isFill) return fillMeets(cx, cy, radius)
         // A circle turns into itself, so the test runs in the unturned frame.
         return hits(toLocal(Pt(cx, cy)), radius + strokeWidth / 2.0)
     }
+
+    /** True when page point [p] lands on the outline itself, within [tolerance] (or half its width, if wider); never its fill or label. */
+    fun onOutline(p: Pt, tolerance: Double): Boolean =
+        Outline.hits(localPaths(), toLocal(p), max(strokeWidth / 2.0, tolerance), filled = false)
+
+    /** The rings the shape's own fill covers, on the page, curves flattened to [tolerance]; none for an open kind. */
+    fun fillRings(tolerance: Double): List<List<Pt>> = paths()
+        .filter { it.role == PathRole.OUTLINE || it.role == PathRole.FILL_ONLY }
+        .flatMap { path -> path.contours.map { PathFlattener.flatten(it, tolerance) } }
+        .filter { it.size >= 3 }
 
     /** True when page point [p] lies inside the outline, filled or not: where a label would go. */
     fun encloses(p: Pt): Boolean {
@@ -507,16 +523,35 @@ class ShapeItem(
      * shape, else the stroked lines left outside the circle, cut cleanly at its edge, as ordinary ink.
      * A cut shape stops being a shape: its pieces are pen strokes in its colour and width, dashed
      * where it was dashed (a solid's hidden edges too) and neon where it glowed. A fill cannot
-     * survive a cut, so it goes, even when the eraser only crossed the fill; a filled head keeps
-     * its outline.
+     * survive a cut, so it goes; an eraser that only crosses the fill leaves the shape alone here,
+     * and takes just the fill instead (see [EraseRule]). A filled head keeps its outline. A
+     * dropped colour's fill and drawn text go whole.
      */
     fun erasedBy(cx: Double, cy: Double, radius: Double): List<CanvasItem>? {
         val c = Pt(cx, cy)
         if (bounds().distanceTo(c) > radius) return null
-        val fillHit = fillRgba != null && intersectsCircle(cx, cy, radius)
+        if (isFill || shape == ShapeKind.GLYPHS) return if (intersectsCircle(cx, cy, radius)) emptyList() else null
         val (hit, ink) = Outline.cut(paths(), pen(), neon, neonStrength, c, radius)
-            ?: return if (intersectsCircle(cx, cy, radius)) emptyList() else null
-        return if (hit || fillHit) ink else null
+            ?: return if (outlineMeets(cx, cy, radius)) emptyList() else null
+        return if (hit) ink else null
+    }
+
+    /** True when an eraser circle at ([cx], [cy]) with [radius] touches the outline itself; never the fill or label. */
+    fun outlineMeets(cx: Double, cy: Double, radius: Double): Boolean {
+        if (bounds().distanceTo(Pt(cx, cy)) > radius) return false
+        return Outline.hits(localPaths(), toLocal(Pt(cx, cy)), radius + strokeWidth / 2.0, filled = false)
+    }
+
+    /** True when an eraser circle at ([cx], [cy]) with [radius] touches the shape's fill at all, even its edge; false without one. */
+    fun fillMeets(cx: Double, cy: Double, radius: Double): Boolean {
+        if (fillRgba == null) return false
+        val c = Pt(cx, cy)
+        if (bounds().distanceTo(c) > radius) return false
+        val q = toLocal(c)
+        val rings = localGeometry().paths
+            .filter { it.role == PathRole.OUTLINE || it.role == PathRole.FILL_ONLY }
+            .flatMap { path -> path.contours.map { PathFlattener.flatten(it, Outline.HIT_FLATTEN) } }
+        return Outline.inRings(rings, q) || rings.any { Outline.nearPolyline(it, q, radius, closed = true) }
     }
 
     override fun geometry(): GeoHandle = ShapeHandle(start, end)
@@ -790,6 +825,9 @@ class ShapeItem(
         /** The kind a file gives drawn text, which readers that predate it skip rather than misdraw. */
         const val GLYPHS_KIND = "glyphs"
 
+        /** The kind a file gives a dropped colour's area, which readers that predate it skip. */
+        const val FILL_KIND = "fill"
+
         private const val LEGACY_FLATTEN = 0.25
 
         /** [a] folded into (-PI, PI]. */
@@ -818,6 +856,16 @@ class ShapeItem(
             return ShapeItem(
                 shape, box.topLeft, Pt(box.right, box.bottom), strokeRgba, strokeWidth,
                 fillRgba, neon, neonStrength, outline, dashed, dashLength, dashGap,
+            )
+        }
+
+        /** A dropped colour's area: the page-space [rings], holes by parity, filled solid in [color] and never stroked. */
+        fun fill(rings: List<List<Pt>>, color: Rgba): ShapeItem {
+            val contours = rings.filter { it.size >= 3 }.map { FreePath.lines(it, closed = true) }
+            val box = FreePath.bounds(contours) ?: Rect(0.0, 0.0, 0.0, 0.0)
+            return ShapeItem(
+                ShapeKind.FILL, box.topLeft, Pt(box.right, box.bottom), color, 0.0, color,
+                path = FreePath.normalize(contours, box),
             )
         }
 

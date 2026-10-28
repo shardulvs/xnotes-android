@@ -42,6 +42,8 @@ class TextItem(
     override val resizable = true
     override var locked = false
     override var link: String? = null
+    override var group: Int? = null
+    override var sync: SyncMark? = null
 
     val font get() = FontSpec(pointSize, face, bold, italic)
 

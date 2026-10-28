@@ -611,8 +611,9 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
             return
         }
         samplePresent()
-        // The whole publish step. Nothing is queued and nobody is waited on: the compositor is
-        // already holding this buffer and auto refresh has it looking at it every scanout.
+        // The whole publish step: nothing is queued and nobody is waited on. Some devices only
+        // composite this layer when another one queues a buffer, so the host keeps posting frames
+        // under it while a stroke is live.
         GLES30.glFlush()
     }
 

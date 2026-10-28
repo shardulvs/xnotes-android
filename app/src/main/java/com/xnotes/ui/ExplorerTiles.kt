@@ -24,6 +24,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -80,6 +82,7 @@ internal class TileHost(
     val selecting: () -> Boolean,
     val isCut: (BrowseEntry) -> Boolean,
     val isPinned: (BrowseEntry) -> Boolean,
+    val isNotePinned: (BrowseEntry) -> Boolean,
     val isDropTarget: (BrowseEntry) -> Boolean,
     val isPulsing: (BrowseEntry) -> Boolean,
     val onPulseDone: (BrowseEntry) -> Unit,
@@ -100,6 +103,7 @@ internal class EntryActions(
     val color: (BrowseEntry, Rgba?) -> Unit,
     val nameColor: (Rgba) -> Unit,
     val togglePin: (BrowseEntry) -> Unit,
+    val toggleNotePin: (BrowseEntry) -> Unit,
     val share: (BrowseEntry) -> Unit,
     val saveCopy: (BrowseEntry) -> Unit,
     val exportPdf: (BrowseEntry) -> Unit,
@@ -116,6 +120,12 @@ internal class ExplorerBody(
     /** Folders drawn in their own row above the files; empty when they're mixed in or hidden. */
     val folders: List<BrowseEntry>,
     val groups: List<EntryGroup>,
+    /** Notes pinned to the top of the top folder, on a shelf above everything there; empty elsewhere. */
+    val pinned: List<BrowseEntry> = emptyList(),
+    /** The heading over the folder's own items below [pinned]. */
+    val restLabel: String = "",
+    /** The folder a pinned note lives in, as its path under the top folder; null for one in the top folder itself. */
+    val pinnedWhere: (BrowseEntry) -> String? = { null },
     val metas: Map<String, DocMetaStore.Meta?>,
     /** Item counts for folders, by uri; empty when folder counts are off. */
     val counts: Map<String, Int>,
@@ -133,6 +143,9 @@ internal class ExplorerBody(
     val whereOf: ((BrowseEntry) -> String?)? = null,
 ) {
     val zone: ZoneId = ZoneId.systemDefault()
+
+    /** How many of the folder's own items show under [restLabel]. */
+    val restCount: Int get() = folders.size + groups.sumOf { it.items.size }
 
     fun label(e: BrowseEntry): String = if (e.isDir || showExtensions) e.name else DocumentKind.stripSuffix(e.name)
 
@@ -274,6 +287,8 @@ internal fun EntryMenuFor(b: ExplorerBody, e: BrowseEntry, expanded: Boolean, on
         onColor = { c -> m.color(e, c) },
         pinned = e.isDir && b.host.isPinned(e),
         onTogglePin = if (e.isDir) ({ m.togglePin(e) }) else null,
+        notePinned = !e.isDir && b.host.isNotePinned(e),
+        onToggleNotePin = if (e.isDir) null else ({ m.toggleNotePin(e) }),
         onNameColor = e.color?.let { c -> { m.nameColor(c) } },
         onMoveTo = { m.moveTo(e) },
         onPreview = if (e.isDir || readOnly) null else ({ m.preview(e) }),
@@ -651,14 +666,16 @@ internal fun formatClock(w: ExplorerWords, time: Long, clock24: Boolean, zone: Z
 }
 
 /**
- * What Home can open with above the top folder's items: a shelf of what was opened lately, the pinned folders,
- * then a heading for the folder itself.
+ * What Home can open with above the top folder's items: a shelf of what was opened lately, the pinned notes
+ * ([wholePins] shows their whole first pages) and folders, then a heading for the folder itself.
  */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 internal fun HomeShelves(
     b: ExplorerBody,
     recents: List<RecentEntry>,
+    pinnedNotes: List<BrowseEntry>,
+    wholePins: Boolean,
     pins: List<com.xnotes.settings.PinnedFolder>,
     rootName: String,
     counts: String,
@@ -670,13 +687,21 @@ internal fun HomeShelves(
     Column(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
         if (recents.isNotEmpty()) {
             ShelfTitle(stringResource(R.string.recent), stringResource(R.string.see_all), onSeeAll)
-            androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 items(recents.take(8).size) { i -> RecentCard(b, recents[i], onOpenRecent) }
             }
             Spacer(Modifier.height(20.dp))
         }
-        if (pins.isNotEmpty()) {
+        if (pins.isNotEmpty() || pinnedNotes.isNotEmpty()) {
             ShelfTitle(stringResource(R.string.pinned))
+        }
+        if (pinnedNotes.isNotEmpty()) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                items(pinnedNotes, key = { it.documentUri }) { PinnedCard(b, it, wholePins) }
+            }
+            Spacer(Modifier.height(if (pins.isNotEmpty()) 16.dp else 20.dp))
+        }
+        if (pins.isNotEmpty()) {
             androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 pins.forEach { pin ->
                     val shape = MaterialTheme.shapes.small
@@ -719,6 +744,60 @@ private fun RecentCard(b: ExplorerBody, r: RecentEntry, onOpen: (BrowseEntry) ->
         Text(b.label(e), color = palette.text.toComposeColor(), fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(openedLabel(b.words, r.opened, b.now, b.zone), color = palette.textDim.toComposeColor(), fontSize = 11.5.sp, maxLines = 1)
         r.where?.let { where ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Icon(XnotesIcons.folder, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(12.dp))
+                Text(where, color = palette.textDim.toComposeColor(), fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/**
+ * A note on the Pinned shelf: the top of its first page, or the whole page standing like the gallery's with
+ * [whole], then its name, its date and the folder it lives in when that isn't the top folder.
+ */
+@Composable
+internal fun PinnedCard(b: ExplorerBody, e: BrowseEntry, whole: Boolean) {
+    val palette = LocalPalette.current
+    val selecting = b.host.selecting()
+    val selected = b.host.isSelected(e)
+    val code = b.colorOf(e)?.let { codeTint(it, palette) }
+    val width = if (whole) 140.dp else 168.dp
+    Column(
+        Modifier
+            .width(width)
+            .alpha(if (b.host.isCut(e)) 0.4f else 1f)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { b.host.onClick(e) }
+            .registered(b, e),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        if (whole) {
+            // Every card keeps an upright page's height, so the names line up whatever shape stands on it.
+            val img = rememberThumb(b.editor, e, whole = true)
+            val (pageW, pageH) = pageFit(pageRatio(img, if (b.kind(e) == EntryKind.CANVAS) CANVAS_RATIO else A4_RATIO), width, width / A4_RATIO)
+            val sheet = RoundedCornerShape(3.dp)
+            Box(Modifier.size(width, width / A4_RATIO), contentAlignment = Alignment.BottomStart) {
+                Box(Modifier.size(pageW, pageH).clip(sheet).border(if (selected) 2.dp else 1.dp, if (selected) palette.accent.toComposeColor() else (code ?: palette.paperBorder.toComposeColor()), sheet)) {
+                    ThumbImage(img, whole = true, Modifier.fillMaxSize())
+                    if (selected) Box(Modifier.fillMaxSize().background(palette.selectionBackground.withAlpha(77).toComposeColor()))
+                    ThumbBadges(b, e, 6.dp)
+                    if (selecting) CheckRing(selected, Modifier.align(Alignment.TopStart).padding(6.dp))
+                }
+            }
+        } else {
+            val shape = MaterialTheme.shapes.medium
+            Box(Modifier.size(width).clip(shape).border(if (selected) 2.dp else 1.dp, if (selected) palette.accent.toComposeColor() else (code ?: palette.border.toComposeColor()), shape)) {
+                EntryThumb(b.editor, e, ThumbShape.TOP, Modifier.fillMaxSize())
+                if (selected) Box(Modifier.fillMaxSize().background(palette.selectionBackground.withAlpha(77).toComposeColor()))
+                ThumbBadges(b, e, 6.dp)
+                if (selecting) CheckRing(selected, Modifier.align(Alignment.TopStart).padding(6.dp))
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(b.label(e), color = palette.text.toComposeColor(), fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        val meta = b.metaText(e)
+        if (meta.isNotEmpty()) Text(meta, color = palette.textDim.toComposeColor(), fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        b.pinnedWhere(e)?.let { where ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 Icon(XnotesIcons.folder, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(12.dp))
                 Text(where, color = palette.textDim.toComposeColor(), fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)

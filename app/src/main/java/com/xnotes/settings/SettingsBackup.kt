@@ -1,92 +1,50 @@
 package com.xnotes.settings
 
 import org.json.JSONObject
-import java.io.File
-import java.io.InputStream
-import java.io.OutputStream
-import java.util.zip.ZipEntry
-import java.util.zip.ZipInputStream
-import java.util.zip.ZipOutputStream
 
 /**
- * Settings as one portable zip: `settings.json` plus the user's imported fonts, templates, stickers
- * and code theme. The Filen login is not in it (it stays in the keystore), nor the math add-on, which
- * downloads again; what only means something on this device (the chosen folder, recent files) is
- * left out on export and kept on import.
+ * What a settings backup carries from one device to another: the settings as [Settings.toJson]
+ * writes them, less what belongs to this device or its folders. An import takes on every key a
+ * backup holds and keeps the rest, so an older or newer backup still reads.
  */
 object SettingsBackup {
 
-    private const val SETTINGS_ENTRY = "settings.json"
+    const val FORMAT = "xnotes-settings"
+    const val VERSION = 1
 
-    /** Folders under the app's files dir that travel with the settings. */
-    private val ASSET_DIRS = listOf("fonts", "templates", "stamps", "theme")
+    /** Settings about this device or its folders: the notes folder, pins, recents, per-folder views, window state. */
+    private val DEVICE_SETTINGS = setOf(
+        "browse_root", "sidebar_visible", "backstage_rail", "pinned_folders", "folder_views", "recent_docs",
+        "last_folder", "render_scale", "finger_draw_auto_checked",
+    )
 
-    /** Top-level settings keys that only make sense on the device they were written on. */
-    private val DEVICE_KEYS = listOf("browse_root", "recent_docs")
+    /** The same among the preferences: performance switches, and paths to this device's own files. */
+    private val DEVICE_PREFS = setOf(
+        "max_cache_resolution", "disable_front_buffering", "start_fullscreen", "code_theme_path", "code_theme_name", "page_template_pdf",
+    )
 
-    private const val CODE_THEME = "theme/code.toml"
-
-    /** Write [settings] and the asset folders under [filesDir] to [out] as a zip. */
-    fun export(settings: JSONObject, filesDir: File, out: OutputStream) {
-        val portable = JSONObject(settings.toString())
-        for (k in DEVICE_KEYS) portable.remove(k)
-        ZipOutputStream(out).use { zip ->
-            zip.putNextEntry(ZipEntry(SETTINGS_ENTRY))
-            zip.write(portable.toString(2).toByteArray(Charsets.UTF_8))
-            zip.closeEntry()
-            for (dir in ASSET_DIRS) {
-                val root = File(filesDir, dir)
-                root.walkTopDown().filter { it.isFile }.forEach { f ->
-                    zip.putNextEntry(ZipEntry("$dir/" + f.relativeTo(root).invariantSeparatorsPath))
-                    f.inputStream().use { it.copyTo(zip) }
-                    zip.closeEntry()
-                }
-            }
-        }
+    /** [settings] as [Settings.toJson] wrote them, with what belongs to this device taken out. */
+    fun portable(settings: JSONObject): JSONObject {
+        val out = JSONObject(settings.toString())
+        for (k in DEVICE_SETTINGS) out.remove(k)
+        out.optJSONObject("prefs")?.let { p -> for (k in DEVICE_PREFS) p.remove(k) }
+        return out
     }
 
-    /**
-     * Read a zip made by [export], put its asset files under [filesDir] and return the settings to
-     * adopt: the imported ones with [current]'s device-only keys kept. Null, with nothing written,
-     * when [input] is not such a zip.
-     */
-    fun import(input: InputStream, current: JSONObject, filesDir: File): JSONObject? {
-        val staged = HashMap<String, ByteArray>()
-        var settings: JSONObject? = null
-        ZipInputStream(input).use { zip ->
-            while (true) {
-                val entry = zip.nextEntry ?: break
-                val name = entry.name
-                if (entry.isDirectory) continue
-                val bytes = zip.readBytes()
-                when {
-                    name == SETTINGS_ENTRY -> settings = runCatching { JSONObject(String(bytes, Charsets.UTF_8)) }.getOrNull()
-                    safeAssetPath(name) -> staged[name] = bytes
-                }
+    /** [current] with every key of [incoming] that may travel put in its place, preferences one by one. */
+    fun merged(current: JSONObject, incoming: JSONObject): JSONObject {
+        val out = JSONObject(current.toString())
+        for (k in incoming.keys()) {
+            if (k in DEVICE_SETTINGS) continue
+            if (k == "prefs") {
+                val mine = out.optJSONObject("prefs") ?: JSONObject()
+                val theirs = incoming.optJSONObject("prefs") ?: continue
+                for (pk in theirs.keys()) if (pk !in DEVICE_PREFS) mine.put(pk, theirs.get(pk))
+                out.put("prefs", mine)
+            } else {
+                out.put(k, incoming.get(k))
             }
         }
-        val incoming = settings ?: return null
-        for ((name, bytes) in staged) {
-            val file = File(filesDir, name)
-            file.parentFile?.mkdirs()
-            val tmp = File(file.parentFile, file.name + ".tmp")
-            tmp.writeBytes(bytes)
-            if (!tmp.renameTo(file)) { file.delete(); tmp.renameTo(file) }
-        }
-        for (k in DEVICE_KEYS) if (current.has(k)) incoming.put(k, current.get(k)) else incoming.remove(k)
-        // The code theme's path names the file on the device it came from; point it at the one just put down.
-        incoming.optJSONObject("prefs")?.let { prefs ->
-            if (prefs.has("code_theme_path")) {
-                if (CODE_THEME in staged) prefs.put("code_theme_path", File(filesDir, CODE_THEME).path)
-                else prefs.remove("code_theme_path")
-            }
-        }
-        return incoming
-    }
-
-    /** Only files inside the travelling folders, never a path that climbs out of them. */
-    private fun safeAssetPath(name: String): Boolean {
-        val parts = name.split('/')
-        return parts.size >= 2 && parts.first() in ASSET_DIRS && parts.none { it == ".." || it.isEmpty() }
+        return out
     }
 }

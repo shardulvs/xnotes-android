@@ -37,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -107,6 +108,7 @@ private fun QueryField(editor: Editor) {
         runCatching { focus.requestFocus() }
         field = field.copy(selection = TextRange(0, field.text.length))
     }
+    DisposableEffect(editor) { onDispose { editor.panelFieldFocused = false } }
     Row(
         Modifier
             .fillMaxWidth()
@@ -138,6 +140,7 @@ private fun QueryField(editor: Editor) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .focusRequester(focus)
+                    .onFocusChanged { editor.panelFieldFocused = it.isFocused }
                     .onPreviewKeyEvent { e ->
                         // A keyboard's Enter steps on, Shift+Enter back.
                         if (e.type == KeyEventType.KeyDown && (e.key == Key.Enter || e.key == Key.NumPadEnter)) {

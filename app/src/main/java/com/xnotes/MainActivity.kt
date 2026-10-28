@@ -23,6 +23,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -55,6 +57,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -78,6 +81,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -89,6 +93,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.xnotes.R
 import com.xnotes.platform.PdfOpenError
 import com.xnotes.ui.CanvasToastPill
+import com.xnotes.canvas.StylusButtonLatch
 import com.xnotes.ui.Editor
 import com.xnotes.ui.Toolbar
 import com.xnotes.ui.ToolbarAround
@@ -145,16 +150,21 @@ class MainActivity : ComponentActivity() {
     // cutout); this activity just applies it to the window. Fullscreen draws edge to edge and lets
     // the swipe-in transient bars overlay (no resize), non-fullscreen insets under the bars.
     private var editor: Editor? = null
-    // A PDF handed to us by another app ("Open with" / Share); consumed once the editor is ready.
-    private var pendingPdfImport by mutableStateOf<Uri?>(null)
+    // A PDF or markdown file handed to us by another app ("Open with" / Share); consumed once the editor is ready.
+    private var pendingImport by mutableStateOf<Uri?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         com.xnotes.platform.FontCatalog.init(this)
         com.xnotes.platform.TemplateLibrary.init(this)
+        com.xnotes.ui.AudioPlayback.init(this)
+        com.xnotes.ui.AudioRecording.init(this)
         setTheme(com.xnotes.R.style.Theme_Xnotes) // leave the dark launch/splash theme behind
         applyFullscreen(!deviceHasDisplayCutout(this)) // provisional; reconciled once the editor loads prefs
-        pendingPdfImport = pdfImportUri(intent)
+        // The intent that started the task comes back whenever Android rebuilds it, from a saved state
+        // or from Recents after the process died or the app was updated; it was handled the first time.
+        val rebuilt = savedInstanceState != null || (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
+        if (!rebuilt) pendingImport = importUri(intent)
         setContent {
             val context = LocalContext.current
             val ed = remember { Editor(context).also { editor = it } }
@@ -177,8 +187,8 @@ class MainActivity : ComponentActivity() {
                             ed,
                             fullscreen = ed.fullscreen,
                             onToggleFullscreen = ed::toggleFullscreen,
-                            importPdfUri = pendingPdfImport,
-                            onImportConsumed = { pendingPdfImport = null },
+                            importUri = pendingImport,
+                            onImportConsumed = { pendingImport = null },
                         )
                         androidx.compose.animation.AnimatedVisibility(
                             visible = !ready,
@@ -198,8 +208,9 @@ class MainActivity : ComponentActivity() {
     // before Compose focus routing, so the controller sees both press and release regardless of
     // which view holds focus. Other keys fall through to the normal dispatch.
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        // The pen writes in whichever pane has the focus, so its button belongs to that pane too.
+        // The pen writes in whichever pane has the focus, so its button keys go to that pane too.
         if (editor?.active?.onStylusButtonKey(event) == true) return true
+        if (editor?.active?.onVolumeKey(event) == true) return true
         return super.dispatchKeyEvent(event)
     }
 
@@ -208,6 +219,7 @@ class MainActivity : ComponentActivity() {
     // so the view tree never opens a touch target and the whole stroke is dropped. Rewrite them
     // here, the last point they are intact, and dispatch normally. A no-op on every other device.
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        StylusButtonLatch.clicks.onTouch(ev) // a side-button press with the pen tip down is a hold, never a click
         val standard = standardPenAction(ev.actionMasked)
         if (standard < 0 || ev.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) {
             return super.dispatchTouchEvent(ev)
@@ -221,18 +233,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // A PDF arriving while we're already running: singleTask reuses this instance via onNewIntent.
+    // A file arriving while we're already running: singleTask reuses this instance via onNewIntent.
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        pdfImportUri(intent)?.let { pendingPdfImport = it }
+        importUri(intent)?.let { pendingImport = it }
     }
 
-    // The PDF uri carried by an inbound VIEW ("Open with") or SEND ("Share") intent, else null.
-    private fun pdfImportUri(intent: Intent?): Uri? = when (intent?.action) {
-        Intent.ACTION_VIEW -> intent.data
+    // The PDF or markdown uri carried by an inbound VIEW ("Open with") or SEND ("Share") intent, else null.
+    private fun importUri(intent: Intent?): Uri? = when (intent?.action) {
+        // Only the import filters take VIEW, but a task started by another build's filters keeps its intent.
+        Intent.ACTION_VIEW -> intent.data?.takeIf { (intent.type ?: runCatching { contentResolver.getType(it) }.getOrNull()) in IMPORT_TYPES }
         Intent.ACTION_SEND ->
-            if (intent.type == "application/pdf")
+            if (intent.type in IMPORT_TYPES)
                 IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
             else null
         else -> null
@@ -247,6 +260,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) StylusButtonLatch.releaseKey() // a held pen key's key-up may not come back to this window
         if (hasFocus && editor?.fullscreen == true) applyFullscreen(true) // re-hide transient bars after they swipe in
     }
 
@@ -258,6 +272,12 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         editor?.persist()
+    }
+
+    // Playback never goes on with xnotes off screen; a split window that only lost focus is still on it.
+    override fun onStop() {
+        super.onStop()
+        com.xnotes.ui.AudioPlayback.pause()
     }
 
     @Suppress("DEPRECATION") // RUNNING_* still arrive below Android 14
@@ -287,7 +307,7 @@ private fun EditorScreen(
     editor: Editor,
     fullscreen: Boolean,
     onToggleFullscreen: () -> Unit,
-    importPdfUri: Uri? = null,
+    importUri: Uri? = null,
     onImportConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -317,7 +337,7 @@ private fun EditorScreen(
     var pendingInsert by remember { mutableStateOf<PendingInsert?>(null) }
     var pendingPageInsert by remember { mutableStateOf<PendingPageInsert?>(null) }
     var pendingImagePage by remember { mutableStateOf<PendingPageInsert?>(null) }
-    var pendingPhoto by remember { mutableStateOf<PendingPhoto?>(null) }
+    var pendingPagePhoto by remember { mutableStateOf<PendingPagePhoto?>(null) }
     var pendingImportInto by remember { mutableStateOf<String?>(null) }
     // The same, for the infinite canvas.
     var pendingCanvasInsert by remember { mutableStateOf<PendingInsert?>(null) }
@@ -496,6 +516,58 @@ private fun EditorScreen(
         }
     }
 
+    // Recording asks for the microphone the first time, and on Android 13 and later for notifications
+    // too, since the recording shows one while xnotes is off screen. Refusing notifications still records.
+    var pendingRecordPane by remember { mutableStateOf<Editor?>(null) }
+    // Notifications are asked for once a run when only they are missing; the system stops asking after two refusals anyway.
+    var askedNotifications by remember { mutableStateOf(false) }
+    val activity = context as? android.app.Activity
+    val recordPermissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
+        val pane = pendingRecordPane
+        pendingRecordPane = null
+        if (pane == null) return@rememberLauncherForActivityResult
+        if (grants[android.Manifest.permission.RECORD_AUDIO] == true) {
+            pane.startRecording()
+        } else {
+            // Once Android stops asking, only Settings can grant it, so the message offers the way there.
+            val asks = activity?.let { androidx.core.app.ActivityCompat.shouldShowRequestPermissionRationale(it, android.Manifest.permission.RECORD_AUDIO) } == true
+            val settings = context.getString(R.string.mic_settings) to {
+                runCatching {
+                    context.startActivity(
+                        Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }
+                Unit
+            }
+            pane.say(context.getString(R.string.err_mic_needed), if (asks) null else settings)
+        }
+    }
+
+    // A recording saved out of the note: its file copied as it is, off the main thread.
+    var pendingSaveAudio by remember { mutableStateOf<Pair<Editor, com.xnotes.core.model.AudioItem>?>(null) }
+    val saveAudioLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        val pending = pendingSaveAudio
+        pendingSaveAudio = null
+        if (uri == null || pending == null) return@rememberLauncherForActivityResult
+        val (pane, item) = pending
+        val file = item.audio.file
+        scope.launch {
+            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { resolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } } != null }.getOrDefault(false)
+            }
+            pane.say(context.getString(if (ok) R.string.audio_saved else R.string.err_save_audio))
+        }
+    }
+
+    // An audio file to attach, for the pane that asked; the editor copies it off the main thread.
+    var pendingAudioPane by remember { mutableStateOf<Editor?>(null) }
+    val attachAudioLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val pane = pendingAudioPane
+        pendingAudioPane = null
+        if (uri != null && pane != null) pane.attachAudio(uri)
+    }
+
     // A PDF picked from a page's menu in the side panel; its pages go in right after that page.
     val insertPdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val pending = pendingPdfInsert; pendingPdfInsert = null
@@ -544,30 +616,23 @@ private fun EditorScreen(
         }
     }
 
-    // A photo from the camera app, written straight into a cache file we hand it.
-    val takePhotoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { taken ->
-        val pending = pendingPhoto; pendingPhoto = null
+    // A photo from the camera app as a page of its own, written straight into a cache file we hand it.
+    val pagePhotoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { taken ->
+        val pending = pendingPagePhoto; pendingPagePhoto = null
         if (pending == null) return@rememberLauncherForActivityResult
         if (!taken || pending.file.length() == 0L) { pending.file.delete(); return@rememberLauncherForActivityResult }
         scope.launch {
-            val target = pending.editor
-            when {
-                pending.page != null -> target.insertImagePage(android.net.Uri.fromFile(pending.file), pending.file.name, pending.page)
-                target.canvasOpen -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { pending.file.readBytes() }
-                    .let { target.infinite.insertImage(it, pending.at) }
-                else -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { pending.file.readBytes() }
-                    .let { target.insertImageAt(it, pending.at) }
-            }
+            pending.editor.insertImagePage(android.net.Uri.fromFile(pending.file), pending.file.name, pending.page)
             pending.file.delete()
         }
     }
-    fun takePhoto(target: Editor, at: com.xnotes.core.geometry.Pt?, page: Int?) {
+    fun takePagePhoto(target: Editor, page: Int) {
         val dir = java.io.File(context.cacheDir, "camera").apply { mkdirs() }
         val file = java.io.File.createTempFile("photo", ".jpg", dir)
         val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-        pendingPhoto = PendingPhoto(target, file, at, page)
-        runCatching { takePhotoLauncher.launch(uri) }.onFailure {
-            pendingPhoto = null
+        pendingPagePhoto = PendingPagePhoto(target, file, page)
+        runCatching { pagePhotoLauncher.launch(uri) }.onFailure {
+            pendingPagePhoto = null
             file.delete()
             editor.message = context.getString(R.string.err_no_camera)
         }
@@ -591,14 +656,15 @@ private fun EditorScreen(
         }
     }
 
-    // A user page template (.xtemplate), checked and stored in the template library.
+    // A user page template (.xtemplate, plain or packaged), checked and stored in the template library.
     val importTemplateLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            runCatching { resolver.openInputStream(uri)?.use { it.readBytes() } }
-                .getOrNull()
-                ?.let { editor.importTemplate(it) }
-                ?: run { editor.message = context.getString(R.string.err_read_file) }
-        }
+        if (uri != null) editor.importTemplate(uri)
+    }
+
+    // A picture made into a one-image cover or page template, whichever the New note screen asked for.
+    var pendingTemplateKind by remember { mutableStateOf(com.xnotes.core.template.TemplateKind.PAGE) }
+    val templateFromImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) editor.templateFromImage(uri, pendingTemplateKind)
     }
 
     // A user font (.ttf/.otf), stored + registered by the editor.
@@ -652,6 +718,56 @@ private fun EditorScreen(
             if (i >= panes.size) action() else guarded(panes[i]) { step(i + 1) }
         }
         step(0)
+    }
+
+    // A settings backup written where the user picks, or read and held for the go-ahead to apply it.
+    val exportSettingsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { resolver.openOutputStream(uri, "wt")?.use { editor.exportSettings(it) } != null }.getOrDefault(false)
+            }
+            editor.message = context.getString(if (ok) R.string.settings_exported else R.string.err_export_settings)
+        }
+    }
+    var pendingBackup by remember { mutableStateOf<Editor.SettingsBackup?>(null) }
+    val importSettingsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val backup = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { resolver.openInputStream(uri)?.use { editor.readSettingsBackup(it) } }.getOrNull()
+            }
+            if (backup == null) editor.message = context.getString(R.string.err_import_settings) else pendingBackup = backup
+        }
+    }
+
+    // A photo the camera app is taking, into a cache file handed to it, for the pane that asked.
+    var pendingPhoto by remember { mutableStateOf<Pair<Editor, java.io.File>?>(null) }
+    val takePhotoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { taken ->
+        val (pane, file) = pendingPhoto ?: return@rememberLauncherForActivityResult
+        pendingPhoto = null
+        scope.launch {
+            val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                (if (taken) runCatching { file.readBytes() }.getOrNull() else null).also { file.delete() }
+            }
+            if (bytes == null || bytes.isEmpty()) return@launch
+            if (pane.canvasOpen) pane.infinite.insertImage(bytes) else pane.insertImageAt(bytes, null)
+        }
+    }
+
+    fun takePhoto(pane: Editor) {
+        val file = runCatching {
+            val dir = java.io.File(context.cacheDir, "camera").apply { mkdirs() }
+            java.io.File(dir, "photo-${System.currentTimeMillis()}.jpg")
+        }.getOrNull() ?: return
+        val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        pendingPhoto = pane to file
+        try {
+            takePhotoLauncher.launch(uri)
+        } catch (_: android.content.ActivityNotFoundException) {
+            pendingPhoto = null
+            pane.message = context.getString(R.string.err_no_camera)
+        }
     }
 
     // An image picked for the infinite canvas: read the bytes and hand them straight over.
@@ -888,37 +1004,34 @@ private fun EditorScreen(
         )
     }
 
-    LaunchedEffect(editor.message) {
-        editor.message?.let {
-            val action = editor.messageAction
-            editor.messageAction = null
-            val result = snackbar.showSnackbar(
-                it, actionLabel = action?.first,
-                duration = if (action != null) androidx.compose.material3.SnackbarDuration.Long else androidx.compose.material3.SnackbarDuration.Short,
-            )
-            if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) action?.second?.invoke()
-            editor.message = null
-        }
+    // A window over this screen that shows messages itself takes them while it is open.
+    LaunchedEffect(editor.message, editor.messageHosts) {
+        if (editor.messageHosts == 0) editor.showMessage(snackbar)
     }
     // The second pane raises its own messages; surface them through the same snackbar.
     val secondaryMessage = editor.secondary?.message
-    LaunchedEffect(secondaryMessage) {
-        if (secondaryMessage != null) {
+    val secondaryHosts = editor.secondary?.messageHosts ?: 0
+    LaunchedEffect(secondaryMessage, secondaryHosts) {
+        if (secondaryMessage != null && secondaryHosts == 0) {
             snackbar.showSnackbar(secondaryMessage)
             editor.secondary?.message = null
         }
     }
 
-    // A PDF opened from another app ("Open with"/Share): set up a pending import and land on the
-    // backstage so its name dialog appears, exactly like the in-app "Import PDF" button. With no
-    // folder chosen yet, fall back to App storage so the explorer renders and the note autosaves.
-    LaunchedEffect(importPdfUri) {
-        val src = importPdfUri ?: return@LaunchedEffect
+    // A PDF or markdown file opened from another app ("Open with"/Share): set up a pending import
+    // and land on the backstage so its name dialog appears, exactly like the in-app "Import PDF"
+    // button. With no folder chosen yet, fall back to App storage so the explorer renders and the
+    // note autosaves. A markdown file becomes a new note whose text it is.
+    LaunchedEffect(importUri) {
+        val src = importUri ?: return@LaunchedEffect
         onImportConsumed() // consume once; the body has no suspend point so it runs to completion
-        val stem = com.xnotes.core.util.Paths.stem(displayNameOf(resolver, src) ?: "Document")
+        val name = displayNameOf(resolver, src)
+        val markdown = runCatching { resolver.getType(src) }.getOrNull() in MARKDOWN_TYPES ||
+            name?.substringAfterLast('.', "")?.lowercase() in MARKDOWN_EXTENSIONS
+        val stem = com.xnotes.core.util.Paths.stem(name ?: "Document")
         guardedAll {
             if (editor.browseRoot == null) editor.useInternalStorage()
-            editor.requestImport(com.xnotes.ui.ImportKind.PDF, stem, src.toString())
+            editor.requestImport(com.xnotes.ui.ImportKind.PDF, stem, src.toString(), markdown = markdown)
             backstageView = com.xnotes.ui.BackstageView.HOME
             editor.goHomeAll()
         }
@@ -944,6 +1057,10 @@ private fun EditorScreen(
                 onExitApp = { (context as? android.app.Activity)?.finish() },
                 onImportCodeTheme = { importCodeThemeLauncher.launch(arrayOf("*/*")) },
                 onImportFont = { importFontLauncher.launch(arrayOf("*/*")) },
+                onBackup = { export ->
+                    if (export) exportSettingsLauncher.launch("n-notes-settings-${java.time.LocalDate.now()}.zip")
+                    else importSettingsLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
+                },
                 onImportPdf = { importPdfLauncher.launch(importMimeTypes) },
                 onOpenFile = { uri ->
                     val name = displayNameOf(resolver, Uri.parse(uri)).orEmpty()
@@ -972,6 +1089,11 @@ private fun EditorScreen(
                     val lone = com.xnotes.ui.lonePdf(picked)
                     if (lone != null) exportPdfLauncher.launch("${com.xnotes.core.util.DocumentKind.stripSuffix(lone.name)}.pdf")
                     else exportZipLauncher.launch("$name.zip")
+                },
+                onImportTemplate = { importTemplateLauncher.launch(arrayOf("*/*")) },
+                onTemplateFromImage = { kind ->
+                    pendingTemplateKind = kind
+                    templateFromImageLauncher.launch(arrayOf("image/*"))
                 },
             )
 
@@ -1007,8 +1129,61 @@ private fun EditorScreen(
                     pendingCanvasInsert = PendingInsert(pane, at)
                     insertCanvasImageLauncher.launch(arrayOf("image/*"))
                 },
+                onTakePhoto = { pane -> takePhoto(pane) },
+                onShareImage = { file ->
+                    runCatching { launchShare(file, file.nameWithoutExtension, "image/png") }
+                        .onFailure { editor.message = context.getString(R.string.err_share_image) }
+                },
+                onOpenFile = { pane, uri -> scope.launch { openInto(pane, uri) } },
                 onAddStickers = { addStickersLauncher.launch(arrayOf("image/*")) },
+                onInsertAudio = { pane ->
+                    pendingAudioPane = pane
+                    attachAudioLauncher.launch(arrayOf("audio/*", "application/ogg"))
+                },
+                onSaveAudio = { pane, item ->
+                    pendingSaveAudio = pane to item
+                    saveAudioLauncher.launch(audioFileName(item))
+                },
+                onShareAudio = { pane, item ->
+                    scope.launch {
+                        val shared = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            runCatching {
+                                val dir = java.io.File(context.cacheDir, "share").apply { mkdirs() }
+                                java.io.File(dir, audioFileName(item)).also { item.audio.file.copyTo(it, overwrite = true) }
+                            }.getOrNull()
+                        }
+                        if (shared == null) pane.say(context.getString(R.string.err_share_audio))
+                        else runCatching { launchShare(shared, item.name, audioMime(item.audio.ext)) }.onFailure { pane.say(context.getString(R.string.err_share_audio)) }
+                    }
+                },
+                onRecordAudio = { pane ->
+                    val mic = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) ==
+                        android.content.pm.PackageManager.PERMISSION_GRANTED
+                    val wanted = buildList {
+                        if (!mic) add(android.Manifest.permission.RECORD_AUDIO)
+                        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+                            androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) !=
+                            android.content.pm.PackageManager.PERMISSION_GRANTED
+                        ) add(android.Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                    if (mic && wanted.isEmpty()) {
+                        pane.startRecording()
+                    } else if (mic && !askedNotifications) {
+                        askedNotifications = true
+                        pendingRecordPane = pane
+                        recordPermissions.launch(arrayOf(android.Manifest.permission.RECORD_AUDIO) + wanted)
+                    } else if (mic) {
+                        pane.startRecording()
+                    } else {
+                        pendingRecordPane = pane
+                        recordPermissions.launch(wanted.toTypedArray())
+                    }
+                },
                 onImportTemplate = { importTemplateLauncher.launch(arrayOf("*/*")) },
+                onTemplateFromImage = { kind ->
+                    pendingTemplateKind = kind
+                    templateFromImageLauncher.launch(arrayOf("image/*"))
+                },
                 onSharePages = { pane, pages, asPdf -> sharePages(pane, pages, asPdf) },
                 onSavePagesAsPdf = { pane, pages -> savePagesAsPdf(pane, pages) },
                 onSavePagesAsImages = { pane, pages -> savePagesAsImages(pane, pages) },
@@ -1026,10 +1201,9 @@ private fun EditorScreen(
                             pendingImagePage = PendingPageInsert(pane, at)
                             imagePageLauncher.launch(arrayOf("image/*"))
                         }
-                        com.xnotes.ui.PageInsert.PHOTO -> takePhoto(pane, null, at)
+                        com.xnotes.ui.PageInsert.PHOTO -> takePagePhoto(pane, at)
                     }
                 },
-                onTakePhoto = { pane, at -> takePhoto(pane, at, null) },
                 onImagePage = { pane ->
                     pendingImagePage = PendingPageInsert(pane, pane.pageIndex + 1)
                     imagePageLauncher.launch(arrayOf("image/*"))
@@ -1086,6 +1260,23 @@ private fun EditorScreen(
             },
         )
     }
+    pendingBackup?.let { backup ->
+        com.xnotes.ui.AlertDialog(
+            onDismissRequest = { pendingBackup = null },
+            title = { androidx.compose.material3.Text(stringResource(R.string.import_settings_title)) },
+            text = { androidx.compose.material3.Text(stringResource(R.string.import_settings_confirm)) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { pendingBackup = null; editor.applySettingsBackup(backup) }) {
+                    androidx.compose.material3.Text(stringResource(R.string.replace))
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { pendingBackup = null }) {
+                    androidx.compose.material3.Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
     guardAction?.let { request ->
         val guarded = request.editor
         val action = request.action
@@ -1131,7 +1322,10 @@ private fun EditorScreen(
         // A batch counts files, so it gets a determinate ring; a single import has nothing to count.
         val batch = importer.importProgress
         if (batch != null) PdfImportBatchDialog(batch.done, batch.total) { importer.cancelImportInProgress() }
-        else PdfImportDialog(isPdf = importer.pendingImport?.kind != com.xnotes.ui.ImportKind.OPEN, onCancel = { importer.cancelImportInProgress() }) // the stream-copy stops at its next buffer
+        else PdfImportDialog(
+            label = importer.busyWith ?: if (importer.pendingImport?.markdown == true) R.string.importing_markdown else R.string.importing_pdf,
+            onCancel = { importer.cancelImportInProgress() }, // the stream-copy stops at its next buffer
+        )
     }
     // Tapping a note reads it off-thread (editor.opening). Only show the spinner once the read has run
     // long enough to matter, so opening a small note never flashes a dialog; a big PDF gets the loader.
@@ -1168,7 +1362,7 @@ private class PendingInsert(val editor: Editor, val at: com.xnotes.core.geometry
 private class PendingPageInsert(val editor: Editor, val at: Int)
 
 /** A photo being taken into [file]: for [editor]'s page [page] when set, else placed at [at]. */
-private class PendingPhoto(val editor: Editor, val file: java.io.File, val at: com.xnotes.core.geometry.Pt?, val page: Int?)
+private class PendingPagePhoto(val editor: Editor, val file: java.io.File, val page: Int)
 
 /** Side-panel pages of [editor] waiting on a SAF "Save as" destination. */
 private class PendingPages(val editor: Editor, val pages: List<Int>)
@@ -1194,6 +1388,31 @@ private class ExportProgress(val done: Int, val total: Int, val counting: String
 }
 
 /**
+ * A tap here, or any pen stroke, lets the side panel's page selection go; a finger that scrolls or
+ * pinches keeps it. Watched on the way in and never consumed, so whatever is under it still acts.
+ */
+private fun Modifier.endsPageSelection(editor: Editor): Modifier = pointerInput(editor) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        if (!editor.inPageSelectionMode) return@awaitEachGesture
+        if (down.type == PointerType.Stylus || down.type == PointerType.Eraser) {
+            editor.clearPageSelection()
+            return@awaitEachGesture
+        }
+        while (true) {
+            val e = awaitPointerEvent(PointerEventPass.Initial)
+            if (e.changes.any { it.id != down.id && it.pressed }) return@awaitEachGesture
+            val c = e.changes.firstOrNull { it.id == down.id } ?: return@awaitEachGesture
+            if ((c.position - down.position).getDistance() > viewConfiguration.touchSlop) return@awaitEachGesture
+            if (!c.pressed) {
+                editor.clearPageSelection()
+                return@awaitEachGesture
+            }
+        }
+    }
+}
+
+/**
  * What a pane can ask the screen around it to do: open a SAF picker, run an export, or change the
  * window. Each callback takes the pane it is acting for, because in a split there are two of them
  * and a picker's result has to come back to the one that opened it.
@@ -1206,18 +1425,48 @@ private class PaneActions(
     val onClosePane: (Editor) -> Unit,
     val onInsertImage: (Editor, com.xnotes.core.geometry.Pt?) -> Unit,
     val onInsertCanvasImage: (Editor, com.xnotes.core.geometry.Pt?) -> Unit,
+    /** Take a photo with the camera app and place it like an inserted picture, on the canvas when [Editor.canvasOpen]. */
+    val onTakePhoto: (Editor) -> Unit,
     val onAddStickers: () -> Unit,
+    val onInsertAudio: (Editor) -> Unit,
+    val onRecordAudio: (Editor) -> Unit,
+    val onSaveAudio: (Editor, com.xnotes.core.model.AudioItem) -> Unit,
+    val onShareAudio: (Editor, com.xnotes.core.model.AudioItem) -> Unit,
+    /** Hand a PNG the pane rendered (a selection or a capture) to the share sheet. */
+    val onShareImage: (java.io.File) -> Unit,
+    /** Open a stored note in [Editor]'s pane, as a tap on it in the explorer would. */
+    val onOpenFile: (Editor, String) -> Unit,
     val onImportTemplate: () -> Unit,
+    val onTemplateFromImage: (com.xnotes.core.template.TemplateKind) -> Unit,
     val onSharePages: (Editor, List<Int>, Boolean) -> Unit,
     val onSavePagesAsPdf: (Editor, List<Int>) -> Unit,
     val onSavePagesAsImages: (Editor, List<Int>) -> Unit,
     val onInsertPdf: (Editor, Int) -> Unit,
     val onInsertPages: (Editor, com.xnotes.ui.PageInsert, Int) -> Unit,
-    /** Take a photo and place it at the content point, or the page centre when null. */
-    val onTakePhoto: (Editor, com.xnotes.core.geometry.Pt?) -> Unit,
     /** Pick an image and add it as a page after the current one. */
     val onImagePage: (Editor) -> Unit,
 )
+
+/** A recording's file name when it leaves the app: its name, made safe for any folder, and its format. */
+private fun audioFileName(item: com.xnotes.core.model.AudioItem): String {
+    val stem = item.name.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), " ").trim().ifEmpty { "recording" }.take(96)
+    return "$stem.${item.audio.ext}"
+}
+
+/** The type another app is told a recording's file is. */
+private fun audioMime(ext: String): String = when (ext.lowercase()) {
+    "m4a", "mp4" -> "audio/mp4"
+    "aac" -> "audio/aac"
+    "mp3" -> "audio/mpeg"
+    "ogg" -> "audio/ogg"
+    "opus" -> "audio/opus"
+    "flac" -> "audio/flac"
+    "wav" -> "audio/wav"
+    "amr" -> "audio/amr"
+    "3gp" -> "audio/3gpp"
+    "webm" -> "audio/webm"
+    else -> "audio/*"
+}
 
 /** Neither pane of a split may be squeezed below this share of the split axis. */
 private const val MIN_PANE_RATIO = 0.18f
@@ -1335,6 +1584,7 @@ private fun EditorPane(
     val palette = LocalPalette.current
     val focusRequester = remember { FocusRequester() }
     val focused = app.active === editor
+    SideEffect { editor.openInPane = { uri -> actions.onOpenFile(editor, uri) } }
     // This pane owns the keyboard while it is the focused one; (re)grab it as that changes.
     LaunchedEffect(focused, editor.noteOpen) {
         if (focused && editor.noteOpen) runCatching { focusRequester.requestFocus() }
@@ -1348,114 +1598,137 @@ private fun EditorPane(
             }
         }
     }
-    Column(
-        modifier = modifier
-            .background(palette.bg.toComposeColor())
-            .then(takeFocus)
-            .focusRequester(focusRequester)
-            .focusable()
-            .onPreviewKeyEvent { ke ->
-                ke.type == KeyEventType.KeyDown && editor.handleKeyDown(ke.nativeKeyEvent)
-            },
-    ) {
-        val onClose = if (closable) ({ actions.onClosePane(editor) }) else null
-        // In a split, a hairline over the toolbar marks the pane the pen and the keyboard are in.
-        if (closable) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(2.dp)
-                    .background((if (focused) palette.accent else palette.border).toComposeColor()),
-            )
-        }
-        if (editor.canvasOpen) {
-            val canvas = editor.infinite
-            val bar: @Composable () -> Unit = {
-                com.xnotes.ui.InfiniteToolbar(
-                    canvas,
-                    onOpenBackstage = actions.onOpenBackstage,
-                    onInsertImage = { actions.onInsertCanvasImage(editor, null) },
-                    onTakePhoto = { actions.onTakePhoto(editor, null) },
-                    onClosePane = onClose,
+    // The colour a swatch drag carries rides over the whole pane, toolbar and page alike.
+    Box(modifier) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(palette.bg.toComposeColor())
+                .then(takeFocus)
+                .focusRequester(focusRequester)
+                .focusable()
+                .onPreviewKeyEvent { ke ->
+                    ke.type == KeyEventType.KeyDown && editor.handleKeyDown(ke.nativeKeyEvent)
+                },
+        ) {
+            val onClose = if (closable) ({ actions.onClosePane(editor) }) else null
+            // In a split, a hairline over the toolbar marks the pane the pen and the keyboard are in.
+            if (closable) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(2.dp)
+                        .background((if (focused) palette.accent else palette.border).toComposeColor()),
                 )
             }
-            ToolbarAround(bar, onCover = canvas::setToolbarCover) { floatingBar ->
-                Box(modifier = Modifier.fillMaxSize().clipToBounds()) {
-                    AndroidView(
-                        factory = { detached(canvas.surfaces) },
-                        modifier = Modifier.fillMaxSize(),
-                        update = { canvas.view.publish() },
+            if (editor.canvasOpen) {
+                val canvas = editor.infinite
+                val bar: @Composable () -> Unit = {
+                    com.xnotes.ui.InfiniteToolbar(
+                        canvas,
+                        onOpenBackstage = actions.onOpenBackstage,
+                        onInsertImage = { actions.onInsertCanvasImage(editor, null) },
+                        onClosePane = onClose,
+                        onInsertAudio = { actions.onInsertAudio(editor) },
+                        onRecordAudio = { actions.onRecordAudio(editor) },
+                        onTakePhoto = { actions.onTakePhoto(editor) },
                     )
-                    canvas.editingField?.let { field ->
-                        com.xnotes.ui.TextEditorOverlay(canvas, field)
-                    }
-                    floatingBar()
-                    com.xnotes.ui.SelectionMenu(canvas)
-                    com.xnotes.ui.TextStyleBar(canvas)
-                    com.xnotes.ui.LongPressMenu(canvas, onInsertImageAt = { c -> actions.onInsertCanvasImage(editor, c) }, onTakePhotoAt = { c -> actions.onTakePhoto(editor, c) })
-                    com.xnotes.ui.CanvasDebugOverlay(canvas)
-                    CanvasToastPill(canvas)
                 }
-            }
-        } else {
-            val bar: @Composable () -> Unit = {
-                Toolbar(
-                    editor,
-                    onToggleFullscreen = actions.onToggleFullscreen,
-                    onOpenBackstage = actions.onOpenBackstage,
-                    onInsertImage = { actions.onInsertImage(editor, null) },
-                    onAddStickers = actions.onAddStickers,
-                    onClosePane = onClose,
-                    onImportTemplate = actions.onImportTemplate,
-                    onTakePhoto = { actions.onTakePhoto(editor, null) },
-                    onImagePage = { actions.onImagePage(editor) },
-                )
-            }
-            ToolbarAround(bar, onCover = editor::setToolbarCover) { floatingBar ->
-                Row(modifier = Modifier.fillMaxSize()) {
-                    if (editor.sidebarVisible) {
-                        com.xnotes.ui.SidePanel(
-                            editor,
-                            onSharePages = { pages, asPdf -> actions.onSharePages(editor, pages, asPdf) },
-                            onSavePagesAsPdf = { pages -> actions.onSavePagesAsPdf(editor, pages) },
-                            onSavePagesAsImages = { pages -> actions.onSavePagesAsImages(editor, pages) },
-                            onInsertPdf = { after -> actions.onInsertPdf(editor, after) },
-                            onInsertPages = { kind, at -> actions.onInsertPages(editor, kind, at) },
-                        )
-                    }
-                    Box(modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
+                ToolbarAround(bar, onCover = canvas::setToolbarCover) { floatingBar ->
+                    Box(modifier = Modifier.fillMaxSize().clipToBounds()) {
                         AndroidView(
-                            factory = { detached(editor.surfaces) },
+                            factory = { detached(canvas.surfaces) },
                             modifier = Modifier.fillMaxSize(),
-                            update = { editor.view.requestRender() }, // repaint on (re)attach so a push never flashes blank
+                            update = { canvas.view.publish() },
                         )
-                        editor.editingField?.let { field ->
-                            com.xnotes.ui.TextEditorOverlay(editor, field)
+                        canvas.editingField?.let { field ->
+                            com.xnotes.ui.TextEditorOverlay(canvas, field)
                         }
                         floatingBar()
-                        com.xnotes.ui.SelectionMenu(editor)
-                        com.xnotes.ui.ScreenshotMenu(editor)
-                        com.xnotes.ui.CropMenu(editor)
-                        com.xnotes.ui.TextStyleBar(editor)
-                        com.xnotes.ui.LongPressMenu(editor, onInsertImageAt = { c -> actions.onInsertImage(editor, c) }, onTakePhotoAt = { c -> actions.onTakePhoto(editor, c) })
-                        com.xnotes.ui.FlowEditMenu(editor)
-                        com.xnotes.ui.PdfSelectionMenu(editor)
-                        com.xnotes.ui.MarkupNotePeek(editor)
-                        com.xnotes.ui.MarkupMenu(editor)
-                        com.xnotes.ui.MarkupNoteDialog(editor)
-                        com.xnotes.ui.SlashMenu(editor)
-                        com.xnotes.ui.FlowTableMenu(editor)
-                        com.xnotes.ui.TableChrome(editor)
-                        ZoomLockHint(editor)
-                        CanvasToastPill(editor)
+                        com.xnotes.ui.SelectionMenu(
+                            canvas,
+                            onSaveAudio = { actions.onSaveAudio(editor, it) },
+                            onShareAudio = { actions.onShareAudio(editor, it) },
+                            onShareImage = actions.onShareImage,
+                        )
+                        com.xnotes.ui.CropOverlay(canvas)
+                        com.xnotes.ui.TextStyleBar(canvas)
+                        com.xnotes.ui.LongPressMenu(canvas, onInsertImageAt = { c -> actions.onInsertCanvasImage(editor, c) })
+                        com.xnotes.ui.CanvasDebugOverlay(canvas)
+                        CanvasToastPill(canvas)
                     }
                 }
+            } else {
+                val bar: @Composable () -> Unit = {
+                    Box(Modifier.endsPageSelection(editor)) { Toolbar(
+                        editor,
+                        onToggleFullscreen = actions.onToggleFullscreen,
+                        onOpenBackstage = actions.onOpenBackstage,
+                        onInsertImage = { actions.onInsertImage(editor, null) },
+                        onAddStickers = actions.onAddStickers,
+                        onClosePane = onClose,
+                        onImportTemplate = actions.onImportTemplate,
+                        onInsertAudio = { actions.onInsertAudio(editor) },
+                        onRecordAudio = { actions.onRecordAudio(editor) },
+                        onTakePhoto = { actions.onTakePhoto(editor) },
+                        onImagePage = { actions.onImagePage(editor) },
+                    ) }
+                }
+                ToolbarAround(bar, onCover = editor::setToolbarCover) { floatingBar ->
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        if (editor.sidebarVisible) {
+                            com.xnotes.ui.SidePanel(
+                                editor,
+                                onSharePages = { pages, asPdf -> actions.onSharePages(editor, pages, asPdf) },
+                                onSavePagesAsPdf = { pages -> actions.onSavePagesAsPdf(editor, pages) },
+                                onSavePagesAsImages = { pages -> actions.onSavePagesAsImages(editor, pages) },
+                                onInsertPdf = { after -> actions.onInsertPdf(editor, after) },
+                                onInsertPages = { kind, at -> actions.onInsertPages(editor, kind, at) },
+                                onImportTemplate = actions.onImportTemplate,
+                                onTemplateFromImage = actions.onTemplateFromImage,
+                            )
+                        }
+                        Box(modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds().endsPageSelection(editor)) {
+                            AndroidView(
+                                factory = { detached(editor.surfaces) },
+                                modifier = Modifier.fillMaxSize(),
+                                update = { editor.view.requestRender() }, // repaint on (re)attach so a push never flashes blank
+                            )
+                            editor.editingField?.let { field ->
+                                com.xnotes.ui.TextEditorOverlay(editor, field)
+                            }
+                            floatingBar()
+                            com.xnotes.ui.SelectionMenu(
+                                editor,
+                                onSaveAudio = { actions.onSaveAudio(editor, it) },
+                                onShareAudio = { actions.onShareAudio(editor, it) },
+                                onShareImage = actions.onShareImage,
+                            )
+                            com.xnotes.ui.CropOverlay(editor)
+                            com.xnotes.ui.ScreenshotMenu(editor, onShare = actions.onShareImage)
+                            com.xnotes.ui.TextStyleBar(editor)
+                            com.xnotes.ui.LongPressMenu(editor, onInsertImageAt = { c -> actions.onInsertImage(editor, c) })
+                            com.xnotes.ui.FlowEditMenu(editor)
+                            com.xnotes.ui.PdfSelectionMenu(editor)
+                            com.xnotes.ui.MarkupNotePeek(editor)
+                            com.xnotes.ui.MarkupMenu(editor)
+                            com.xnotes.ui.MarkupNoteDialog(editor)
+                            com.xnotes.ui.SlashMenu(editor)
+                            com.xnotes.ui.EmojiMenu(editor)
+                            com.xnotes.ui.FlowTableMenu(editor)
+                            com.xnotes.ui.TableChrome(editor)
+                            ZoomLockHint(editor)
+                            CanvasToastPill(editor)
+                        }
+                    }
+                }
+                // Last children of the resized column: ride directly above the soft keyboard.
+                com.xnotes.ui.TextFormatBar(editor)
+                com.xnotes.ui.MathKeyboardPanel(editor)
+                com.xnotes.ui.TextBoxFormatBar(editor)
             }
-            // Last children of the resized column: ride directly above the soft keyboard.
-            com.xnotes.ui.TextFormatBar(editor)
-            com.xnotes.ui.MathKeyboardPanel(editor)
-            com.xnotes.ui.TextBoxFormatBar(editor)
         }
+        com.xnotes.ui.ColorDropOverlay(if (editor.canvasOpen) editor.infinite else editor)
     }
 }
 
@@ -1670,8 +1943,7 @@ private fun SavingDialog() {
  * cost is copying the (possibly large) source bytes — so it shows an animated spinner.
  */
 @Composable
-private fun PdfImportDialog(isPdf: Boolean, onCancel: () -> Unit) =
-    SpinnerDialog(if (isPdf) "Importing…" else "Importing note…", onCancel)
+private fun PdfImportDialog(label: Int, onCancel: () -> Unit) = SpinnerDialog(stringResource(label), onCancel)
 
 /**
  * Determinate "Importing PDFs…" dialog for a multi-file import: a ring filled by files finished plus
@@ -1854,6 +2126,13 @@ private fun BoxScope.ZoomLockHint(editor: Editor) {
 }
 
 /** Queries the storage provider for a document's user-visible file name, if available. */
+/** The types "Open with" and Share hand over for markdown, and its usual extensions. */
+private val MARKDOWN_TYPES = setOf("text/markdown", "text/x-markdown")
+private val MARKDOWN_EXTENSIONS = setOf("md", "markdown")
+
+/** What the import filters take: a PDF becomes a note on its pages, markdown a note of its text. */
+private val IMPORT_TYPES = MARKDOWN_TYPES + "application/pdf"
+
 private fun displayNameOf(resolver: android.content.ContentResolver, uri: Uri): String? = runCatching {
     resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
         if (c.moveToFirst()) {

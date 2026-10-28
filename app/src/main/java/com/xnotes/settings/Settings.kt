@@ -5,6 +5,8 @@ import com.xnotes.core.model.PagePattern
 import com.xnotes.core.model.PageTemplates
 import com.xnotes.core.model.PageStyle
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.model.TapeMode
+import com.xnotes.core.model.TapePattern
 import com.xnotes.core.pal.FontFace
 import com.xnotes.core.text.FlowDefaults
 import com.xnotes.core.text.FlowMargins
@@ -56,6 +58,8 @@ data class Settings(
     /** The tool armed when the app was last paused, re-armed on the next launch. */
     val lastTool: Tool = Tool.DEFAULT,
     val recentColors: List<Rgba> = emptyList(),
+    /** The colour circles of each [SwatchRole] the user recoloured; the rest keep their defaults. */
+    val swatches: Map<SwatchRole, List<Rgba>> = emptyMap(),
     /** Persisted SAF tree URI for the in-app file explorer's root folder, or null. */
     val browseRoot: String? = null,
     /** Whether the next launch opens the home screen (true) or the last-open note (false). */
@@ -92,6 +96,14 @@ data class Settings(
     fun rememberColor(c: Rgba): Settings =
         copy(recentColors = (listOf(c) + recentColors.filter { it != c }).take(24))
 
+    fun swatchesFor(role: SwatchRole): List<Rgba> = swatches[role] ?: role.defaults
+
+    fun withSwatch(role: SwatchRole, index: Int, color: Rgba): Settings {
+        val current = swatchesFor(role)
+        if (index !in current.indices) return this
+        return copy(swatches = swatches + (role to current.toMutableList().also { it[index] = color }))
+    }
+
     fun toJson(): JSONObject {
         val toolsObj = JSONObject()
         for (tool in ToolDefaults.persistedTools) {
@@ -107,6 +119,11 @@ data class Settings(
             .put("active_color", activeColor)
             .put("last_tool", lastTool.id)
             .put("recent_colors", JSONArray().apply { recentColors.forEach { put(rgbaArr(it)) } })
+            .apply {
+                if (swatches.isNotEmpty()) put("swatches", JSONObject().apply {
+                    swatches.forEach { (role, colors) -> put(role.id, JSONArray().apply { colors.forEach { put(rgbaArr(it)) } }) }
+                })
+            }
             .apply { browseRoot?.let { put("browse_root", it) } }
             .put("start_on_home", startOnHome)
             .put("sidebar_visible", sidebarVisible)
@@ -160,6 +177,7 @@ data class Settings(
                 lastTool = Tool.fromId(o.optString("last_tool", ""))
                     ?.takeIf { it in Tool.wheelOrder } ?: Tool.DEFAULT,
                 recentColors = rgbaList(o.optJSONArray("recent_colors")).take(24),
+                swatches = swatches(o.optJSONObject("swatches")),
                 browseRoot = o.optString("browse_root", "").ifEmpty { null },
                 startOnHome = o.optBoolean("start_on_home", true),
                 sidebarVisible = o.optBoolean("sidebar_visible", false),
@@ -180,6 +198,15 @@ data class Settings(
                 prefs = Preferences.fromJson(o.optJSONObject("prefs")),
                 fingerDrawAutoChecked = o.optBoolean("finger_draw_auto_checked", false),
             )
+        }
+
+        /** Each saved role padded or cut to [SwatchRole.COUNT], filling gaps from its defaults. */
+        private fun swatches(o: JSONObject?): Map<SwatchRole, List<Rgba>> {
+            if (o == null) return emptyMap()
+            return SwatchRole.entries.mapNotNull { role ->
+                val saved = rgbaList(o.optJSONArray(role.id))
+                if (saved.isEmpty()) null else role to List(SwatchRole.COUNT) { saved.getOrNull(it) ?: role.defaults[it] }
+            }.toMap()
         }
 
         private fun recentDocs(a: JSONArray?): List<RecentDoc> {
@@ -350,6 +377,8 @@ data class Settings(
             .put("highlighter_inverse", c.highlighterInverse)
             .put("markup_mode", c.markupMode.id)
             .put("markup_intensity", c.markupIntensity)
+            .put("tape_mode", c.tapeMode.id)
+            .put("tape_pattern", c.tapePattern.id)
             .put("rgba", rgbaArr(c.rgba))
             .apply { c.colorOverride?.let { put("color_override", rgbaArr(it)) } }
 
@@ -381,6 +410,8 @@ data class Settings(
                 markupMode = if (o.has("markup_mode")) MarkupMode.fromId(o.optString("markup_mode")) else d.markupMode,
                 markupIntensity = o.optDouble("markup_intensity", d.markupIntensity)
                     .coerceIn(ToolConfig.MARKUP_INTENSITY_MIN, 1.0),
+                tapeMode = if (o.has("tape_mode")) TapeMode.fromId(o.optString("tape_mode")) else d.tapeMode,
+                tapePattern = if (o.has("tape_pattern")) TapePattern.fromId(o.optString("tape_pattern")) else d.tapePattern,
                 colorOverride = o.optJSONArray("color_override")
                     ?.let { a -> Rgba.fromList((0 until a.length()).map { i -> a.optInt(i, 0) }) }
                     ?: d.colorOverride,

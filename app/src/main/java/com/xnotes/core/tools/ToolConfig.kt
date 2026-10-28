@@ -1,6 +1,9 @@
 package com.xnotes.core.tools
 
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.model.TapeItem
+import com.xnotes.core.model.TapeMode
+import com.xnotes.core.model.TapePattern
 
 /**
  * Eraser behaviour (spec 04 §2): STROKE removes a whole stroke on contact; AREA removes only the
@@ -72,8 +75,8 @@ data class ToolConfig(
      *  thickness whatever zoom you draw at. The eraser uses it to size its radius. */
     val scale: Boolean = true,
     /** Highlighter translucency: render-time alpha scale, default 0.35 (the historical value, so
-     *  legacy strokes that lack the field reload unchanged). Capped to [0.10, 0.90] by the UI so it
-     *  stays a MULTIPLY-blended marker. Only used by [Tool.HIGHLIGHTER]. */
+     *  legacy strokes that lack the field reload unchanged). Kept to [0.10, 1.0] by the UI; it stays
+     *  a MULTIPLY-blended marker at any alpha. Only used by [Tool.HIGHLIGHTER]. */
     val highlighterAlpha: Double = 0.35,
     /** Per-tool colour override: when set, new strokes from this tool use this colour instead of
      *  the toolbar's active ink colour. null = follow the toolbar (the default for every tool). */
@@ -93,10 +96,14 @@ data class ToolConfig(
     /** Eraser: also take off the PDF text markups it touches. Only used by [Tool.ERASER]. */
     val eraseMarkups: Boolean = true,
     /** Eraser: a pen scribbled over ink erases what it touches. Only used by [Tool.ERASER]. */
-    val scribbleErase: Boolean = true,
+    val scribbleErase: Boolean = false,
+    /** Tape: what a drag lays, a straight strip, a rectangle or a freehand band. Only used by [Tool.TAPE]. */
+    val tapeMode: TapeMode = TapeMode.STRAIGHT,
+    /** Tape: what is printed on it. Only used by [Tool.TAPE]. */
+    val tapePattern: TapePattern = TapePattern.SOLID,
 ) {
     companion object {
-        const val DEFAULT_MARKUP_INTENSITY = 0.5
+        const val DEFAULT_MARKUP_INTENSITY = 0.9
         const val MARKUP_INTENSITY_MIN = 0.1
     }
 }
@@ -117,14 +124,18 @@ object ToolDefaults {
         Tool.CALLIGRAPHY -> ToolConfig(baseWidth = 6.0, pressureEnabled = true, pressureMinFactor = 0.40, directionStrength = 0.60)
         Tool.SPEED -> ToolConfig(baseWidth = 4.0, pressureEnabled = true, pressureMinFactor = 0.35, directionStrength = 0.0, speedStrength = 0.8)
         Tool.TAPER -> ToolConfig(baseWidth = 4.0, pressureEnabled = true, pressureMinFactor = 0.45, directionStrength = 0.0, taperEnabled = true, taperMinFactor = DEFAULT_TAPER_TIP)
-        Tool.HIGHLIGHTER -> ToolConfig(baseWidth = 16.0, pressureEnabled = false, pressureMinFactor = 1.0, directionStrength = 0.0, highlighterAlpha = 0.50)
+        Tool.HIGHLIGHTER -> ToolConfig(baseWidth = 16.0, pressureEnabled = false, pressureMinFactor = 1.0, directionStrength = 0.0, highlighterAlpha = 0.90)
         Tool.ERASER -> ToolConfig(baseWidth = 24.0, pressureEnabled = false, pressureMinFactor = 1.0, directionStrength = 0.0)
         Tool.LASSO -> ToolConfig(baseWidth = 2.0, pressureEnabled = false, pressureMinFactor = 1.0, directionStrength = 0.0, selectWholeItems = true)
+        Tool.TAPE -> ToolConfig(
+            baseWidth = TapeItem.DEFAULT_WIDTH, pressureEnabled = false, pressureMinFactor = 1.0, directionStrength = 0.0,
+            tapePattern = TapePattern.STRIPES,
+        )
         else -> ToolConfig()
     }
 
     /** Tools whose config is persisted in settings (spec 09 §2). */
-    val persistedTools = listOf(Tool.PEN, Tool.DASHED, Tool.CALLIGRAPHY, Tool.SPEED, Tool.TAPER, Tool.HIGHLIGHTER, Tool.ERASER, Tool.SELECT, Tool.LASSO, Tool.MARKUP)
+    val persistedTools = listOf(Tool.PEN, Tool.DASHED, Tool.CALLIGRAPHY, Tool.SPEED, Tool.TAPER, Tool.HIGHLIGHTER, Tool.ERASER, Tool.SELECT, Tool.LASSO, Tool.MARKUP, Tool.TAPE)
 }
 
 /**
@@ -154,17 +165,17 @@ object ToolConversions {
 
     fun neonStrengthToIntensity(s: Double): Double = s * 100.0
 
-    /** Highlighter INTENSITY (10..90 percent opacity) -> alpha in [0.10, 0.90]. Capped below
-     *  1.0 so the highlighter stays translucent (its MULTIPLY blend is preserved). */
-    fun intensityToHighlighterAlpha(intensity: Double): Double = intensity.coerceIn(10.0, 90.0) / 100.0
+    /** Highlighter INTENSITY (10..100 percent opacity) -> alpha in [0.10, 1.0]. */
+    fun intensityToHighlighterAlpha(intensity: Double): Double = intensity.coerceIn(10.0, 100.0) / 100.0
 
     fun highlighterAlphaToIntensity(a: Double): Double = a * 100.0
 
-    /** WIDTH slider range per tool (spec 04 §5): 4..40 for the highlighter, 1..80 for the eraser
-     *  (its radius, default 24), else 1..20. */
+    /** WIDTH slider range per tool (spec 04 §5): 4..120 for the highlighter, 1..80 for the eraser
+     *  (its radius, default 24), tape's own range, else 1..20. */
     fun widthRange(tool: Tool): ClosedFloatingPointRange<Double> = when (tool) {
-        Tool.HIGHLIGHTER -> 4.0..40.0
+        Tool.HIGHLIGHTER -> 4.0..120.0
         Tool.ERASER -> 1.0..80.0
+        Tool.TAPE -> TapeItem.MIN_WIDTH..TapeItem.MAX_WIDTH
         else -> 1.0..20.0
     }
 }

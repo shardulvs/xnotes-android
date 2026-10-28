@@ -2,6 +2,7 @@ package com.xnotes.core.text
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -43,7 +44,9 @@ class MarkdownParserTest {
         assertTrue(paras[3].checked)
         assertFalse(paras[4].checked)
         assertEquals("quoted", paras[5].plainText())
-        assertEquals(1, paras[5].indent)
+        assertEquals(0, paras[5].indent)
+        assertNotNull(paras[5].quote)
+        assertTrue(paras.take(5).all { it.quote == null })
     }
 
     @Test
@@ -69,14 +72,32 @@ class MarkdownParserTest {
     }
 
     @Test
-    fun linksKeepStyledTextAndDropTheUrl() {
+    fun linksKeepTheirAddress() {
         val runs = parse("see [the docs](https://x.y) now")[0].runs
         assertEquals("see the docs now", runs.joinToString("") { it.text })
         val link = runs.first { it.text == "the docs" }
-        assertTrue(link.style.underline)
-        assertEquals(MarkdownParser.LINK_COLOR, link.style.color)
+        assertEquals("https://x.y", link.style.link)
+        assertFalse(link.style.underline)
+        assertEquals(null, link.style.color)
         val img = parse("![alt text](pic.png)")[0]
         assertEquals("alt text", img.plainText())
+        assertTrue(img.runs.all { it.style.link == null })
+    }
+
+    @Test
+    fun onlyAddressesThatOpenStayLinks() {
+        assertEquals(null, parse("[up](#setup)")[0].runs.single().style.link)
+        assertEquals(null, parse("[file](docs/a.md)")[0].runs.single().style.link)
+        assertEquals("https://www.a.org", parse("[a](www.a.org)")[0].runs.single().style.link)
+        assertEquals("mailto:x@y.z", parse("[mail](mailto:x@y.z)")[0].runs.single().style.link)
+    }
+
+    @Test
+    fun writtenOutAddressesBecomeLinks() {
+        val p = parse("go to <https://a.org> or www.b.org. Not `https://c.org`")[0]
+        assertEquals("https://a.org", p.runs.first { it.text == "https://a.org" }.style.link)
+        assertEquals("https://www.b.org", p.runs.first { it.text == "www.b.org" }.style.link)
+        assertEquals(null, p.runs.first { it.text == "https://c.org" }.style.link)
     }
 
     @Test
@@ -193,22 +214,216 @@ class MarkdownParserTest {
         assertTrue(parse("\$   \$")[0].runs.none { it.style.math })
     }
 
+    // --- CommonMark ---
+
     @Test
-    fun inlineHtmlStylesLikeMarkdownAndDropsOtherTags() {
-        val runs = parse("<b>bold</b> <em>it</em> <span class=\"x\">plain</span> <code>a<b</code> &amp; &#169;")[0].runs
-        assertEquals("bold it plain a<b & \u00A9", runs.joinToString("") { it.text })
-        assertTrue(runs.first { it.text == "bold" }.style.bold)
-        assertTrue(runs.first { it.text == "it" }.style.italic)
-        assertFalse(runs.first { it.text.contains("plain") }.style.bold)
-        assertTrue(runs.first { it.text == "a<b" }.style.code)
-        assertEquals("a < b", parse("a < b")[0].plainText())
+    fun wrappedLinesJoinAndBlankLinesLeaveOneGap() {
+        val paras = parse("one\ntwo\n\n\n\nthree")
+        assertEquals(listOf("one two", "", "three"), paras.map { it.plainText() })
     }
 
     @Test
-    fun blockHtmlBecomesLinesHeadingsAndItems() {
-        val paras = parse("<div>\n<h2>Title</h2>\none<br>two\n<li>item</li>\n</div>")
-        assertEquals(listOf("Title", "one", "two", "item"), paras.map { it.plainText() })
-        assertEquals(2, paras[0].headingLevel)
-        assertEquals(ListKind.BULLET, paras[3].list)
+    fun aHardBreakSplitsTheParagraph() {
+        assertEquals(listOf("a", "b"), parse("a  \nb").map { it.plainText() })
+        assertEquals(listOf("a", "b"), parse("a\\\nb").map { it.plainText() })
+    }
+
+    @Test
+    fun escapesStayLiteral() {
+        val p = parse("\\*not italic\\* and \\`tick\\`")[0]
+        assertEquals("*not italic* and `tick`", p.plainText())
+        assertTrue(p.runs.all { it.style == CharStyle.DEFAULT })
+    }
+
+    @Test
+    fun tripleStarsAreBoldAndItalic() {
+        val run = parse("***both***")[0].runs.single()
+        assertEquals("both", run.text)
+        assertTrue(run.style.bold)
+        assertTrue(run.style.italic)
+    }
+
+    @Test
+    fun doubleBackticksHoldABacktick() {
+        val run = parse("`` a ` b ``")[0].runs.single()
+        assertEquals("a ` b", run.text)
+        assertTrue(run.style.code)
+    }
+
+    @Test
+    fun aLoneTildeIsNotStrikethrough() {
+        val p = parse("~5 min~ and ~~gone~~")[0]
+        assertEquals("~5 min~ and ", p.runs[0].text)
+        assertTrue(p.runs.last().style.strike)
+    }
+
+    @Test
+    fun everyFenceKindIsCode() {
+        val tilde = parse("~~~py\nx = 1\n~~~").single()
+        assertEquals("python", tilde.codeLang)
+        val nested = parse("````md\n```\n````").single()
+        assertEquals("```", nested.plainText())
+        assertEquals("md", nested.codeLang)
+        assertEquals("python", parse("```python title=\"a.py\"\nx\n```").single().codeLang)
+        val indented = parse("text\n\n    code here")
+        assertEquals("", indented.last().codeLang)
+        assertEquals("code here", indented.last().plainText())
+    }
+
+    @Test
+    fun aFenceInsideAListItemIsCode() {
+        val paras = parse("- item\n\n  ```kotlin\n  val x = 1\n  ```")
+        assertEquals(ListKind.BULLET, paras[0].list)
+        val code = paras.last()
+        assertEquals("kotlin", code.codeLang)
+        assertEquals("val x = 1", code.plainText())
+        assertEquals(1, code.indent)
+    }
+
+    @Test
+    fun underlinedHeadingsAreHeadings() {
+        val paras = parse("Title\n=====\n\nSub\n---")
+        assertEquals(1, paras[0].headingLevel)
+        assertEquals("Sub", paras.last().plainText())
+        assertEquals(2, paras.last().headingLevel)
+    }
+
+    @Test
+    fun listItemsContinueAcrossLines() {
+        val paras = parse("- first\n  more\n- second\nlazy")
+        assertEquals(listOf("first more", "second lazy"), paras.map { it.plainText() })
+        assertTrue(paras.all { it.list == ListKind.BULLET })
+    }
+
+    @Test
+    fun aListInsideAQuoteKeepsItsMarker() {
+        val p = parse("> - item").single()
+        assertEquals(ListKind.BULLET, p.list)
+        assertEquals(0, p.indent)
+        assertNotNull(p.quote)
+        val deep = parse("> a\n> > deep")
+        assertTrue(deep[0].quote != null && deep[0].quote === deep.last().quote)
+    }
+
+    @Test
+    fun frontMatterIsDropped() {
+        assertEquals(listOf("body"), parse("---\ntitle: x\ntags: [a]\n---\nbody").map { it.plainText() })
+    }
+
+    @Test
+    fun footnotesStayAsWritten() {
+        val paras = parse("see[^1] there\n\n[^1]: the note")
+        assertEquals("see[^1] there", paras[0].plainText())
+        assertEquals("[^1]: the note", paras.last().plainText())
+    }
+
+    @Test
+    fun htmlStaysLiteral() {
+        assertEquals("a <b>c</b> d", parse("a <b>c</b> d")[0].plainText())
+        assertEquals("<details>", parse("<details>\n<summary>x</summary>")[0].plainText())
+    }
+
+    @Test
+    fun latexDelimitersAreMaths() {
+        val p = parse("so \\(x^2\\) holds")[0]
+        assertEquals("so x^2 holds", p.plainText())
+        val inline = p.runs.first { it.style.math }
+        assertFalse(inline.style.mathDisplay)
+        val display = parse("\\[ \\int_0^1 x \\]").single().runs.single()
+        assertEquals("\\int_0^1 x", display.text)
+        assertTrue(display.style.mathDisplay)
+        val block = parse("before\n\\[\n\\frac{a}{b}\n\\]\nafter")
+        assertEquals(3, block.size)
+        assertEquals("\\frac{a}{b}", block[1].runs.single().text)
+        assertTrue(block[1].runs.single().style.mathDisplay)
+    }
+
+    @Test
+    fun anUnclosedLatexParenIsJustAParen() {
+        assertEquals("a (b", parse("a \\(b")[0].plainText())
+    }
+
+    @Test
+    fun thematicBreaksAreRules() {
+        val paras = parse("a\n\n---\n\n***\nb")
+        assertEquals(2, paras.count { it.rule })
+        assertTrue(paras.filter { it.rule }.all { it.length == 0 })
+        assertEquals("b", paras.last().plainText())
+    }
+
+    @Test
+    fun latexPageBreaksBreakThePage() {
+        val paras = parse("a\n\n\\newpage\n\nb\n\n\\pagebreak")
+        assertEquals(listOf("a", "b", ""), paras.map { it.plainText() })
+        assertEquals(listOf(false, true, true), paras.map { it.breakBefore })
+    }
+
+    @Test
+    fun anOrderedListKeepsItsStartNumber() {
+        val paras = parse("3. a\n4. b\n\n1. fresh")
+        assertEquals(3, paras[0].listStart)
+        assertEquals(null, paras[1].listStart)
+        assertEquals(null, paras.last().listStart)
+    }
+
+    @Test
+    fun doubleEqualsHighlightsInTheGivenColour() {
+        val red = com.xnotes.core.model.Rgba(255, 0, 0, 255)
+        val p = MarkdownParser.parse("a ==marked **bold**== b and x == y", highlight = red)[0]
+        assertEquals("a marked bold b and x == y", p.plainText())
+        assertEquals(red, p.runs.first { it.text == "marked " }.style.highlight)
+        val bold = p.runs.first { it.text == "bold" }
+        assertTrue(bold.style.bold)
+        assertEquals(red, bold.style.highlight)
+        assertEquals(null, p.runs.last().style.highlight)
+        assertEquals(CharStyle.DEFAULT_HIGHLIGHT, parse("==x==")[0].runs.single().style.highlight)
+    }
+
+    // --- quotes and callouts ---
+
+    @Test
+    fun aQuoteIsOneContainerGapsAndAll() {
+        val paras = parse("> one\n>\n> two\n\nafter")
+        val q = paras[0].quote
+        assertNotNull(q)
+        assertEquals(listOf("one", "", "two"), paras.take(3).map { it.plainText() })
+        assertTrue(paras.take(3).all { it.quote === q })
+        assertEquals(null, paras.last().quote)
+    }
+
+    @Test
+    fun twoQuotesApartStayTwo() {
+        val paras = parse("> a\n\n> b")
+        assertTrue(paras.first().quote != null && paras.last().quote != null)
+        assertTrue(paras.first().quote !== paras.last().quote)
+    }
+
+    @Test
+    fun gitHubAlertsBecomeCallouts() {
+        for (kind in CalloutKind.entries) {
+            val paras = parse("> [!${kind.name}]\n> Body text\n> - item")
+            assertEquals(listOf("Body text", "item"), paras.map { it.plainText() })
+            assertTrue(paras.all { it.quote?.kind == kind })
+            assertTrue(paras[0].quote === paras[1].quote)
+        }
+        assertEquals(null, parse("> [!BOGUS]\n> x").last().quote?.kind)
+    }
+
+    @Test
+    fun codeCutsACalloutInTwo() {
+        val paras = parse("> [!TIP]\n> a\n> ```\n> code\n> ```\n> b")
+        val a = paras.first { it.plainText() == "a" }
+        val code = paras.first { it.codeLang != null }
+        val b = paras.first { it.plainText() == "b" }
+        assertEquals(null, code.quote)
+        assertEquals(CalloutKind.TIP, a.quote?.kind)
+        assertEquals(CalloutKind.TIP, b.quote?.kind)
+        assertTrue(a.quote !== b.quote)
+    }
+
+    @Test
+    fun pastedShortcodesBecomeEmojiOutsideCode() {
+        val p = parse("ship it :rocket: but not `:rocket:`")[0]
+        assertEquals("ship it 🚀 but not :rocket:", p.plainText())
     }
 }

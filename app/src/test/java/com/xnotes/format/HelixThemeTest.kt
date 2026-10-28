@@ -20,6 +20,9 @@ class HelixThemeTest {
         type = { fg = "aqua" }
         "variable.other.member" = { fg = "green" }
         punctuation = { fg = "turquoise" }
+        tag = "#f7768e"
+        "diff.plus" = "#449dab"
+        "diff.minus" = { fg = "#914c54" }
 
         "ui.background" = { bg = "#1a1b26" }
         "ui.text" = { fg = "fg" }
@@ -46,6 +49,9 @@ class HelixThemeTest {
         assertEquals(Rgba(0xbb, 0x9a, 0xf7, 255), theme.colorFor("escape"))
         assertEquals(Rgba(0x73, 0xda, 0xca, 255), theme.colorFor("property"))
         assertEquals(Rgba(0x56, 0x5f, 0x89, 255), theme.colorFor("comment"))
+        assertEquals(Rgba(0xf7, 0x76, 0x8e, 255), theme.colorFor("tag"))
+        assertEquals(Rgba(0x44, 0x9d, 0xab, 255), theme.colorFor("diff.plus"))
+        assertEquals(Rgba(0x91, 0x4c, 0x54, 255), theme.colorFor("diff.minus"))
         assertEquals(Rgba(0x1a, 0x1b, 0x26, 255), theme.background)
     }
 

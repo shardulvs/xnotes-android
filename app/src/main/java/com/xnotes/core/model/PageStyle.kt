@@ -21,9 +21,18 @@ object PageTemplates {
     val BUILT_IN = setOf(PagePattern.LINES.id, PagePattern.DOTS.id, PagePattern.GRID.id)
 
     fun isBuiltIn(key: String?) = key != null && key in BUILT_IN
+}
 
-    /** Whether a spacing or parameter set for template [a] still means something under [b]. */
-    fun compatible(a: String, b: String) = a == b || (isBuiltIn(a) && isBuiltIn(b))
+/** What a level sets on the template it shows, the Customize page's values; every template keeps its own. */
+data class TemplateSettings(
+    val patternColor: Rgba? = null,
+    val spacing: Double? = null,
+    val accentColor: Rgba? = null,
+    val params: Map<String, Double>? = null,
+    val colors: Map<String, Rgba>? = null,
+) {
+    val isEmpty: Boolean
+        get() = patternColor == null && spacing == null && accentColor == null && params.isNullOrEmpty() && colors.isNullOrEmpty()
 }
 
 /**
@@ -34,8 +43,8 @@ object PageTemplates {
  * (Default / explicit value / — for the template — an explicit None). Immutable: callers replace it
  * with a [copy]; sharing the reference across a [Page.deepCopy] is safe.
  *
- * [spacing] and [params] belong to a template, so they only inherit while the level holding them
- * has no template of its own or the same one ([PageTemplates.compatible]).
+ * Its [settings] belong to the template the level shows, so they only reach a page showing that
+ * same template.
  */
 data class PageStyle(
     val pageColor: Rgba? = null,
@@ -51,16 +60,19 @@ data class PageStyle(
     /** The template's colour parameters by name. */
     val colors: Map<String, Rgba>? = null,
 ) {
+    /** The part of this style its template owns. */
+    val settings: TemplateSettings
+        get() = TemplateSettings(patternColor, spacing, accentColor, params, colors)
+
+    fun withSettings(s: TemplateSettings) =
+        copy(patternColor = s.patternColor, spacing = s.spacing, accentColor = s.accentColor, params = s.params, colors = s.colors)
+
     /**
-     * This style set to template [key] (null inherits), dropping the spacing and parameters when
-     * they belonged to a different template. [inherited] is what the level shows with no template
-     * of its own.
+     * This style set to template [key] (null inherits), dropping its [settings] when the template
+     * shown changes. [inherited] is what the level shows with no template of its own.
      */
-    fun withTemplate(key: String?, inherited: String): PageStyle {
-        val from = template ?: inherited
-        val to = key ?: inherited
-        return if (PageTemplates.compatible(from, to)) copy(template = key) else copy(template = key, spacing = null, params = null, colors = null)
-    }
+    fun withTemplate(key: String?, inherited: String): PageStyle =
+        if ((template ?: inherited) == (key ?: inherited)) copy(template = key) else copy(template = key).withSettings(TemplateSettings())
 
     /** True when nothing is overridden — the codec writes no `style` object in this case. */
     val isEmpty: Boolean
@@ -71,7 +83,7 @@ data class PageStyle(
         const val DEFAULT_SPACING = 64.0 // content px (~10.8 mm at 150 dpi)
         const val MIN_SPACING = 16.0
         const val MAX_SPACING = 200.0
-        val DEFAULT_PATTERN_COLOR = Rgba(150, 150, 150, 64) // grey at ~25% opacity by default
+        val DEFAULT_PATTERN_COLOR = Rgba(150, 150, 150, 128) // grey at 50% opacity by default
         val DEFAULT_ACCENT_COLOR = Rgba(214, 72, 72, 150)
 
         /** Fixed (non-configurable) ruling thickness / dot radius, in content pixels. */
@@ -91,30 +103,49 @@ fun Page.resolvedPageColor(doc: Document, global: Rgba?): Rgba? =
 fun Page.resolvedTemplate(doc: Document): String =
     style.template ?: doc.style.template ?: PageTemplates.NONE
 
+/** The levels whose template settings apply to this page, nearest first: its own, and the note's while it shows the same template. */
+private fun Page.settingLevels(doc: Document): List<PageStyle> =
+    if ((doc.style.template ?: PageTemplates.NONE) == resolvedTemplate(doc)) listOf(style, doc.style) else listOf(style)
+
 fun Page.resolvedPatternColor(doc: Document): Rgba =
-    style.patternColor ?: doc.style.patternColor ?: PageStyle.DEFAULT_PATTERN_COLOR
+    settingLevels(doc).firstNotNullOfOrNull { it.patternColor } ?: PageStyle.DEFAULT_PATTERN_COLOR
 
 fun Page.resolvedAccentColor(doc: Document): Rgba =
-    style.accentColor ?: doc.style.accentColor ?: PageStyle.DEFAULT_ACCENT_COLOR
-
-/** The levels whose template parameters apply to this page, nearest first. */
-private fun Page.paramLevels(doc: Document): List<PageStyle> {
-    val key = resolvedTemplate(doc)
-    return listOf(style, doc.style).filter { s -> s.template.let { it == null || PageTemplates.compatible(it, key) } }
-}
+    settingLevels(doc).firstNotNullOfOrNull { it.accentColor } ?: PageStyle.DEFAULT_ACCENT_COLOR
 
 /** The template's spacing in content px, or null to use the template's own default. */
-fun Page.resolvedSpacing(doc: Document): Double? = paramLevels(doc).firstNotNullOfOrNull { it.spacing }
+fun Page.resolvedSpacing(doc: Document): Double? = settingLevels(doc).firstNotNullOfOrNull { it.spacing }
 
 /** The template's parameter values set anywhere in the chain, nearest level winning. */
 fun Page.resolvedParams(doc: Document): Map<String, Double> {
     val out = HashMap<String, Double>()
-    for (s in paramLevels(doc).asReversed()) s.params?.let { out.putAll(it) }
+    for (s in settingLevels(doc).asReversed()) s.params?.let { out.putAll(it) }
     return out
 }
 
 fun Page.resolvedColors(doc: Document): Map<String, Rgba> {
     val out = HashMap<String, Rgba>()
-    for (s in paramLevels(doc).asReversed()) s.colors?.let { out.putAll(it) }
+    for (s in settingLevels(doc).asReversed()) s.colors?.let { out.putAll(it) }
     return out
+}
+
+/**
+ * Copy into each page what older notes let it borrow from the note's style across templates: the
+ * colours always, the spacing and parameters between built-in rulings or from no template at all.
+ */
+fun Document.keepBorrowedTemplateSettings() {
+    val noteKey = style.template ?: PageTemplates.NONE
+    for (page in pages) {
+        val key = page.style.template ?: continue
+        if (key == PageTemplates.NONE || key == noteKey) continue
+        var s = page.style
+        if (s.patternColor == null) s = s.copy(patternColor = style.patternColor)
+        if (s.accentColor == null) s = s.copy(accentColor = style.accentColor)
+        if (style.template == null || (PageTemplates.isBuiltIn(key) && PageTemplates.isBuiltIn(noteKey))) {
+            if (s.spacing == null) s = s.copy(spacing = style.spacing)
+            style.params?.let { s = s.copy(params = it + (s.params ?: emptyMap())) }
+            style.colors?.let { s = s.copy(colors = it + (s.colors ?: emptyMap())) }
+        }
+        page.style = s
+    }
 }

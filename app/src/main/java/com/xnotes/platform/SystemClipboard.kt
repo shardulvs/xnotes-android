@@ -35,6 +35,18 @@ object SystemClipboard {
     /** Whether there is anything here worth offering a paste for. */
     fun hasImage(context: Context): Boolean = imageUri(context) != null || svgBytes(context) != null
 
+    /** Write [bmp] as a PNG to the FileProvider-exposed cache and make it the primary clip; false when that failed. */
+    fun putImage(context: Context, bmp: android.graphics.Bitmap, label: String): Boolean = runCatching {
+        val dir = java.io.File(context.cacheDir, "clipboard").apply { mkdirs() }
+        dir.listFiles()?.forEach { it.delete() }
+        val file = java.io.File(dir, "capture.png")
+        java.io.FileOutputStream(file).use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newUri(context.contentResolver, label, uri))
+        true
+    }.getOrDefault(false)
+
     /** The clipboard's image as bytes, reading the uri or falling back to copied SVG source. */
     fun imageBytes(context: Context): ByteArray? {
         imageUri(context)?.let { uri ->

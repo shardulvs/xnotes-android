@@ -29,6 +29,10 @@ class FakeRenderer : Renderer {
     /** Ribbon runs as `from to count`, so a test can see which points a pass actually painted. */
     val ribbonRuns = mutableListOf<Pair<Int, Int>>()
 
+    /** Where each [drawImage] landed, and each [clipRect], in call order. */
+    val images = mutableListOf<Rect>()
+    val clips = mutableListOf<Rect>()
+
     /** Dashed runs as `from to count` paired with the phase they started at. */
     val dashRuns = mutableListOf<Triple<Int, Int, Double>>()
 
@@ -60,7 +64,7 @@ class FakeRenderer : Renderer {
     override fun saveLayerAlpha(bounds: Rect, alpha: Double) { ops += "saveLayerAlpha" }
     override fun translate(dx: Double, dy: Double) { ops += "translate" }
     override fun scale(sx: Double, sy: Double) { ops += "scale" }
-    override fun clipRect(rect: Rect) { ops += "clipRect" }
+    override fun clipRect(rect: Rect) { ops += "clipRect"; clips += rect }
     override fun clear() { ops += "clear" }
     override fun fillBackground(rect: Rect, color: Rgba) { ops += "fillBackground" }
     override fun fillRect(rect: Rect, color: Rgba) { ops += "fillRect" }
@@ -89,7 +93,7 @@ class FakeRenderer : Renderer {
         ops += "drawRaster"
         rasterDests += dest
     }
-    override fun drawImage(image: ImageData, dest: Rect, orientation: Int, angle: Double, flip: Flip) { ops += "drawImage" }
+    override fun drawImage(image: ImageData, dest: Rect, orientation: Int, angle: Double, flip: Flip) { ops += "drawImage"; images += dest }
     override fun drawText(text: String, rect: Rect, font: FontSpec, color: Rgba, flags: TextFlags) { ops += "drawText" }
     override fun drawTextTurned(text: String, rect: Rect, font: FontSpec, color: Rgba, flags: TextFlags, angle: Double) {
         ops += "drawTextTurned:$text@$angle"

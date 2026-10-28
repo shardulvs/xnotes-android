@@ -1,7 +1,0 @@
-- Scribble over ink to erase it
-- Export many notes to PDF at once, into a zip that keeps your folders
-- Mirror a selection, shape or image left-right or upside down
-- Drag a shape left or up to draw it mirrored
-- Lasso and band now pick only what they touch or surround
-- Moving a shape no longer takes what's inside it along
-- Minor fixes and improvements

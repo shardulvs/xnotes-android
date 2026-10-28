@@ -86,15 +86,12 @@ class ShapeEraseTest {
         assertTrue(pts.any { it.distanceTo(Pt(0.0, 100.0)) < 1e-6 })
     }
 
-    @Test fun aFilledShapeLosesItsFillAndKeepsItsOutline() {
+    @Test fun aFilledShapeCutOnItsEdgeLosesItsFill() {
         val filled = ShapeItem(ShapeKind.RECTANGLE, Pt(0.0, 0.0), Pt(100.0, 100.0), red, 3.0, Rgba(255, 0, 0, 64))
         val edge = filled.erasedBy(50.0, 0.0, 10.0)!!
         assertEquals("cut on its edge: the rest of the outline as ink", 1, edge.size)
         assertTrue(edge.single() is Stroke)
-        val inside = filled.erasedBy(50.0, 50.0, 10.0)!!
-        assertEquals("only the fill touched: the whole outline as ink", 1, inside.size)
-        val (first, last) = ends(inside.single())
-        assertEquals("a closed ring", 0.0, first.distanceTo(last), 1e-6)
+        assertNull("only the fill touched: the eraser takes just the fill then", filled.erasedBy(50.0, 50.0, 10.0))
         assertNull(filled.erasedBy(200.0, 50.0, 10.0))
     }
 

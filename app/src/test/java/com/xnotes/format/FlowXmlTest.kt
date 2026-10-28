@@ -17,6 +17,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import com.xnotes.core.text.CalloutKind
+import com.xnotes.core.text.FlowQuote
+import org.junit.Assert.assertNotNull
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -250,4 +253,109 @@ class FlowXmlTest {
         assertFalse("xnotes:math" in FlowXml.write(flow).decodeToString())
     }
 
+    @Test
+    fun aRuleRoundTripsAndPlainParagraphsDoNotMentionIt() {
+        val flow = TextFlow().apply {
+            paragraphs.add(Paragraph(mutableListOf(Run("a"))))
+            paragraphs.add(Paragraph(rule = true))
+        }
+        val xml = String(FlowXml.write(flow))
+        assertEquals(1, Regex("xnotes:rule").findAll(xml).count())
+        val back = roundTrip(flow).paragraphs
+        assertFalse(back[0].rule)
+        assertTrue(back[1].rule)
+    }
+
+    @Test
+    fun aPageBreakRoundTripsAsOdfBreakBefore() {
+        val flow = TextFlow().apply {
+            paragraphs.add(Paragraph(mutableListOf(Run("a"))))
+            paragraphs.add(Paragraph(mutableListOf(Run("b")), indent = 1, breakBefore = true))
+        }
+        val xml = String(FlowXml.write(flow))
+        assertTrue(xml.contains("fo:break-before=\"page\""))
+        val back = roundTrip(flow).paragraphs
+        assertFalse(back[0].breakBefore)
+        assertTrue(back[1].breakBefore)
+        assertEquals(1, back[1].indent)
+    }
+
+    @Test
+    fun aBreakToAPageRoundTripsBesideTheOdfBreak() {
+        val flow = TextFlow().apply {
+            paragraphs.add(Paragraph(mutableListOf(Run("a"))))
+            paragraphs.add(Paragraph(mutableListOf(Run("b")), breakBefore = true, breakToPage = 4))
+            paragraphs.add(Paragraph(mutableListOf(Run("c")), breakToPage = 7))
+        }
+        val xml = String(FlowXml.write(flow))
+        assertTrue(xml.contains("xnotes:break-page=\"4\""))
+        assertFalse(xml.contains("xnotes:break-page=\"7\""))
+        val back = roundTrip(flow).paragraphs
+        assertEquals(4, back[1].breakToPage)
+        assertEquals(null, back[2].breakToPage)
+    }
+
+    @Test
+    fun aListStartRoundTripsAsOdfStartValue() {
+        val flow = TextFlow().apply {
+            paragraphs.add(Paragraph(mutableListOf(Run("a")), list = ListKind.ORDERED, listStart = 4))
+            paragraphs.add(Paragraph(mutableListOf(Run("b")), list = ListKind.ORDERED))
+        }
+        assertTrue(String(FlowXml.write(flow)).contains("text:start-value=\"4\""))
+        val back = roundTrip(flow).paragraphs
+        assertEquals(4, back[0].listStart)
+        assertEquals(null, back[1].listStart)
+    }
+
+    @Test
+    fun aLinkRoundTripsAsOdfTextA() {
+        val flow = TextFlow().apply {
+            paragraphs.add(
+                Paragraph(
+                    mutableListOf(
+                        Run("go "),
+                        Run("bold", CharStyle(bold = true, link = "https://a.org/?x=1&y=2")),
+                        Run(" on", CharStyle(link = "https://a.org/?x=1&y=2")),
+                        Run(" end"),
+                    ),
+                ),
+            )
+        }
+        val xml = String(FlowXml.write(flow))
+        assertEquals(1, Regex("<text:a ").findAll(xml).count())
+        assertTrue(xml.contains("xlink:href=\"https://a.org/?x=1&amp;y=2\""))
+        val runs = roundTrip(flow).paragraphs.single().runs
+        assertEquals(listOf("go ", "bold", " on", " end"), runs.map { it.text })
+        assertEquals(listOf(null, "https://a.org/?x=1&y=2", "https://a.org/?x=1&y=2", null), runs.map { it.style.link })
+        assertTrue(runs[1].style.bold)
+    }
+
+    @Test
+    fun aFlowWithoutLinksDeclaresNoXlink() {
+        val flow = TextFlow().apply { paragraphs.add(Paragraph(mutableListOf(Run("a")))) }
+        assertFalse(String(FlowXml.write(flow)).contains("xlink"))
+    }
+
+    @Test
+    fun quotesAndCalloutsRoundTripAsContainers() {
+        val note = FlowQuote(CalloutKind.NOTE)
+        val other = FlowQuote(CalloutKind.NOTE)
+        val plain = FlowQuote()
+        val flow = TextFlow().apply {
+            paragraphs.add(Paragraph(mutableListOf(Run("a")), quote = note))
+            paragraphs.add(Paragraph(mutableListOf(Run("b")), list = ListKind.BULLET, quote = note))
+            paragraphs.add(Paragraph(mutableListOf(Run("c")), quote = other))
+            paragraphs.add(Paragraph(mutableListOf(Run("d"))))
+            paragraphs.add(Paragraph(mutableListOf(Run("e")), quote = plain))
+        }
+        val xml = String(FlowXml.write(flow))
+        assertTrue(xml.contains("xnotes:callout=\"note\""))
+        val back = roundTrip(flow).paragraphs
+        assertTrue(back[0].quote != null && back[0].quote === back[1].quote)
+        assertTrue(back[2].quote != null && back[2].quote !== back[1].quote)
+        assertEquals(CalloutKind.NOTE, back[2].quote?.kind)
+        assertEquals(null, back[3].quote)
+        assertEquals(null, back[4].quote?.kind)
+        assertNotNull(back[4].quote)
+    }
 }

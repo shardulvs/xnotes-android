@@ -13,8 +13,9 @@ class PlacedLink(val page: Int, val rect: Rect, val link: TextLink, val para: In
 }
 
 /**
- * The links of a laid-out flow. Prose, headings, lists and tables link their addresses; code
- * does not, the way a Markdown renderer leaves an address in code alone, and neither does maths.
+ * The links of a laid-out flow: the text the user linked, and the addresses written out in
+ * prose, headings, lists and tables. Code does not link its addresses, the way a Markdown
+ * renderer leaves an address in code alone, and neither does maths.
  */
 object FlowLinks {
 
@@ -22,13 +23,36 @@ object FlowLinks {
     fun find(flow: TextFlow): Map<Int, List<TextLink>> {
         val found = HashMap<Int, List<TextLink>>()
         for ((i, para) in flow.paragraphs.withIndex()) {
-            if (para.codeLang != null) continue
-            val links = LinkFinder.find(para.plainText())
-            if (links.isEmpty()) continue
-            val kept = links.filter { link -> !touchesCodeOrMath(para.runs, link) }
+            val linked = linkedRuns(para.runs)
+            val written = if (para.codeLang != null) {
+                emptyList()
+            } else {
+                LinkFinder.find(para.plainText()).filter { link ->
+                    !touchesCodeOrMath(para.runs, link) && linked.none { it.start < link.end && link.start < it.end }
+                }
+            }
+            val kept = (linked + written).sortedBy { it.start }
             if (kept.isNotEmpty()) found[i] = kept
         }
         return found
+    }
+
+    /** The stretches of [runs] linked to an address, neighbouring runs with the same one joined. */
+    private fun linkedRuns(runs: List<com.xnotes.core.text.Run>): List<TextLink> {
+        val out = mutableListOf<TextLink>()
+        var at = 0
+        for (run in runs) {
+            val end = at + run.text.length
+            val uri = run.style.link
+            val last = out.lastOrNull()
+            when {
+                uri == null -> Unit
+                last != null && last.end == at && last.uri == uri -> out[out.lastIndex] = last.copy(end = end)
+                else -> out += TextLink(at, end, uri)
+            }
+            at = end
+        }
+        return out
     }
 
     fun place(flow: TextFlow, frame: FlowFrame, found: Map<Int, List<TextLink>> = find(flow)): List<PlacedLink> {

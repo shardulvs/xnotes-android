@@ -19,7 +19,7 @@ object Glue {
 
     /** The points a connector may glue to on [item], with their outward normals; none for ink. */
     fun points(item: CanvasItem): List<ConnectionPoint> = when (item) {
-        is ShapeItem -> if (item.shape == ShapeKind.GLYPHS) emptyList() else item.connectionPoints()
+        is ShapeItem -> if (item.shape == ShapeKind.GLYPHS || item.isFill) emptyList() else item.connectionPoints()
         is TextItem -> box(item.bounds(), 0.0)
         is ImageItem -> box(item.rect, item.angle)
         is ConnectorItem -> item.connectionPoints()

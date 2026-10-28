@@ -20,7 +20,10 @@ enum class Tool(val id: String) {
     IMAGE("image"),
 
     /** Marks a PDF's text: highlights and lines along it, or selects it ([MarkupMode]). */
-    MARKUP("markup");
+    MARKUP("markup"),
+
+    /** Lays tape over the page to hide what is under it until a tap peels it back. */
+    TAPE("tape");
 
     /** Tools that produce ink via the stroke engine. */
     val isStroke: Boolean get() = this == PEN || this == DASHED || this == CALLIGRAPHY ||
@@ -33,7 +36,7 @@ enum class Tool(val id: String) {
      * usable by finger either way.
      */
     val fingerPansWhenOff: Boolean get() = isStroke ||
-        this == SELECT || this == LASSO || this == SCREENSHOT || this == SHAPE || this == ERASER || this == MARKUP ||
+        this == SELECT || this == LASSO || this == SCREENSHOT || this == SHAPE || this == ERASER || this == MARKUP || this == TAPE ||
         this == TABLE
 
     /** Render-time ink alpha scale: the highlighter is translucent (spec 03 §3). */
@@ -46,6 +49,6 @@ enum class Tool(val id: String) {
         val DEFAULT = PAN
 
         /** Quick-tool-wheel order (spec 06 §11 / 10 §7). */
-        val wheelOrder = listOf(PEN, DASHED, CALLIGRAPHY, SPEED, TAPER, HIGHLIGHTER, ERASER, SELECT, LASSO, SCREENSHOT, SHAPE, TEXT, MARKUP, PAN)
+        val wheelOrder = listOf(PEN, DASHED, CALLIGRAPHY, SPEED, TAPER, HIGHLIGHTER, ERASER, SELECT, LASSO, SCREENSHOT, TAPE, SHAPE, TEXT, MARKUP, PAN)
     }
 }

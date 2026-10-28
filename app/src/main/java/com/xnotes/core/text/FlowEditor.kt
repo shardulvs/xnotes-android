@@ -57,6 +57,7 @@ class FlowEditor(private val flow: TextFlow) {
             val insStyle = style ?: styleForInsert(para, start.offset)
             deleteWithin(para, start.offset, end.offset)
             insertWithin(para, start.offset, text, insStyle)
+            if (para.rule && para.length > 0) para.rule = false
             val caret = FlowPos(start.para, start.offset + text.length)
             if (before.matches(para)) return null to caret
             para.touch()
@@ -86,6 +87,12 @@ class FlowEditor(private val flow: TextFlow) {
                 cellStart = i == 0 && props.cellStart,
                 // A heading continues only into the remainder it was split into.
                 headingLevel = if (i == 0 || (i == lines.lastIndex && tail.isNotEmpty())) props.headingLevel else 0,
+                // A rule stays only where nothing was typed into it, and never continues.
+                rule = i == 0 && props.rule && runs.isEmpty(),
+                breakBefore = i == 0 && props.breakBefore,
+                breakToPage = if (i == 0 && props.breakBefore) props.breakToPage else null,
+                listStart = if (i == 0) props.listStart else null,
+                quote = props.quote,
             ).also { normalize(it) }
         }
         val removed = flow.paragraphs.subList(start.para, end.para + 1).toList()
@@ -124,13 +131,19 @@ class FlowEditor(private val flow: TextFlow) {
             mutate(para)
             para.indent = para.indent.coerceIn(0, Paragraph.MAX_INDENT)
             para.headingLevel = para.headingLevel.coerceIn(0, Paragraph.MAX_HEADING)
+            if (para.list != ListKind.ORDERED) para.listStart = null
+            // A quote holds prose, headings and lists; code and rules step out of it.
+            if (para.codeLang != null || para.rule) para.quote = null
             if (para.table != null) {
-                // Cells hold rich text only: no lists, code lines, headings or indents.
+                // Cells hold rich text only: no lists, code lines, headings, rules, breaks, quotes or indents.
                 para.list = ListKind.NONE
                 para.checked = false
                 para.codeLang = null
                 para.indent = 0
                 para.headingLevel = 0
+                para.rule = false
+                para.breakBefore = false
+                para.quote = null
             }
             if (!before.matches(para)) {
                 para.touch()
@@ -224,12 +237,17 @@ class FlowEditor(private val flow: TextFlow) {
      * the same reach over which the caret shows its source. Its closing edge
      * belongs to whatever comes next, so typing on past an equation writes beside
      * it; that boundary has to match the one reveal uses, or text would land
-     * inside a formula that is not showing what it is doing with it. An empty
+     * inside a formula that is not showing what it is doing with it. A link
+     * likewise only grows from inside it, never at either end. An empty
      * heading has nothing to copy, so it types as a heading's own text.
      */
     private fun styleForInsert(para: Paragraph, offset: Int): CharStyle {
-        val base = styleOfCharAt(para, if (offset > 0) offset - 1 else 0)
+        var base = styleOfCharAt(para, if (offset > 0) offset - 1 else 0)
             ?: if (para.headingLevel > 0) Paragraph.HEADING_STYLE else CharStyle.DEFAULT
+        if (base.link != null) {
+            val inside = offset > 0 && offset < para.length && styleOfCharAt(para, offset)?.link == base.link
+            if (!inside) base = base.copy(link = null)
+        }
         if (!base.math) return base
         var seen = 0
         for (run in para.runs) {

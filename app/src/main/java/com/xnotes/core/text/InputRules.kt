@@ -1,6 +1,8 @@
 package com.xnotes.core.text
 
 import com.xnotes.core.history.Command
+import com.xnotes.core.model.Rgba
+import com.xnotes.core.pdf.LinkFinder
 
 /**
  * Markdown shortcuts applied while typing: the markers convert the paragraph and
@@ -22,16 +24,21 @@ object InputRules {
     // prefix the user just completed with the trigger space.
     private val HEADING = Regex("^(#{1,4}) $")
     private val TASK = Regex("^(\\s*)\\[([ xX]?)] $")
-    private val ORDERED = Regex("^(\\s*)\\d{1,9}[.)] $")
+    private val ORDERED = Regex("^(\\s*)(\\d{1,9})[.)] $")
     private val BULLET = Regex("^(\\s*)[-*+] $")
-    private val QUOTE = Regex("^(>+) $")
+    private val QUOTE = Regex("^>+ $")
+    private val CALLOUT = Regex("^\\[!([A-Za-z]+)] $")
     private val FENCE = Regex("^\\s{0,3}```\\s*([A-Za-z0-9+#-]*)\\s*$")
+    private val RULE = Regex("^ {0,3}([-*_])(?: *\\1){2,} *$")
+    private val LINK = Regex("\\[([^\\[\\]]+)]\\(([^()\\s]+)\\)$")
 
-    private enum class Emph(val apply: (CharStyle) -> CharStyle) {
-        BOLD({ it.copy(bold = true) }),
-        ITALIC({ it.copy(italic = true) }),
-        STRIKE({ it.copy(strike = true) }),
-        CODE({ it.copy(code = true) }),
+    /** What a marker does to a style; a highlight takes the colour the caller hands over. */
+    private enum class Emph(val apply: (CharStyle, Rgba) -> CharStyle) {
+        BOLD({ s, _ -> s.copy(bold = true) }),
+        ITALIC({ s, _ -> s.copy(italic = true) }),
+        STRIKE({ s, _ -> s.copy(strike = true) }),
+        HIGHLIGHT({ s, c -> s.copy(highlight = c) }),
+        CODE({ s, _ -> s.copy(code = true) }),
     }
 
     /** Emphasis markers longest first, so ** is tried before *. */
@@ -39,6 +46,7 @@ object InputRules {
         "**" to Emph.BOLD,
         "__" to Emph.BOLD,
         "~~" to Emph.STRIKE,
+        "==" to Emph.HIGHLIGHT,
         "*" to Emph.ITALIC,
         "_" to Emph.ITALIC,
     )
@@ -49,16 +57,32 @@ object InputRules {
         val list: ListKind? = null,
         val checked: Boolean = false,
         val indent: Int? = null,
-        val indentDelta: Int = 0,
+        val start: Int? = null,
+        val quote: Boolean = false,
     ) : Rule
 
     private class Inline(val open: Int, val marker: String, val emph: Emph) : Rule
 
-    private class Math(val open: Int, val display: Boolean = false) : Rule
+    /** A formula opening at [open]; each of its two markers is [marker] characters long. */
+    private class Math(val open: Int, val display: Boolean = false, val marker: Int = if (display) 2 else 1) : Rule
 
     private class Fence(val lang: String) : Rule
 
-    private enum class Strip : Rule { CODE, LIST, LIST_EXIT, HEADING, INDENT }
+    /** `[text](url)` just closed at [open]: [text] links to [uri]. */
+    private class LinkUp(val open: Int, val text: String, val uri: String) : Rule
+
+    /** An address typed out over [start, end) gets the link it names. */
+    private class AutoLink(val start: Int, val end: Int, val uri: String) : Rule
+
+    /** The shortcode from [start] to the caret just closed: it becomes [emoji]. */
+    private class Emoji(val start: Int, val emoji: String) : Rule
+
+    private object HRule : Rule
+
+    /** `[!kind] ` typed at the start of a plain quote: the whole quote becomes that callout. */
+    private class Callout(val prefix: Int, val kind: CalloutKind) : Rule
+
+    private enum class Strip : Rule { BREAK, RULE, CODE, LIST, LIST_EXIT, QUOTE_EXIT, HEADING, QUOTE, INDENT }
 
     // --- detection ---
 
@@ -74,8 +98,8 @@ object InputRules {
         val text = para.plainText()
         if (pos.offset > text.length) return null
         val before = text.take(pos.offset)
-        if (!typed.endsWith(" ")) return inlineRule(before)
-        return if (para.table != null) null else blockRule(before)
+        if (!typed.endsWith(" ")) return emojiRule(para, before) ?: inlineRule(before)
+        return (if (para.table != null) null else blockRule(para, before)) ?: autoLinkRule(para, before)
     }
 
     /**
@@ -89,31 +113,43 @@ object InputRules {
             FENCE.matchEntire(para.plainText())?.let {
                 return Fence(MarkdownParser.normalizeLang(it.groupValues[1].lowercase()))
             }
+            if (RULE.matches(para.plainText())) return HRule
         }
-        // Enter on an empty list item steps out of it rather than making another.
-        if (para.length != 0 || para.list == ListKind.NONE) return null
-        return Strip.LIST_EXIT
+        // Enter on an empty list item steps out of it rather than making another, and
+        // on an empty line of a quote steps out of the quote.
+        if (para.length != 0) return null
+        return when {
+            para.list != ListKind.NONE -> Strip.LIST_EXIT
+            para.quote != null -> Strip.QUOTE_EXIT
+            else -> null
+        }
     }
 
     /**
      * The rule a backspace at the very start of [pos]'s paragraph triggers: strip
-     * one block property (code line, list, heading, then indent) instead of
+     * one block property (page break, rule, code line, list, heading, quote, then indent) instead of
      * merging into the line above. Null when the key should just delete.
      */
     fun forBackspace(flow: TextFlow, pos: FlowPos): Rule? {
         val para = flow.paragraphs.getOrNull(pos.para) ?: return null
         if (para.table != null) return null
         return when {
+            para.breakBefore -> Strip.BREAK
+            para.rule -> Strip.RULE
             para.codeLang != null -> if (para.length == 0) Strip.CODE else null
             para.list != ListKind.NONE -> Strip.LIST
             para.headingLevel > 0 -> Strip.HEADING
+            para.quote != null -> Strip.QUOTE
             para.indent > 0 -> Strip.INDENT
             else -> null
         }
     }
 
-    private fun blockRule(before: String): Rule? {
+    private fun blockRule(para: Paragraph, before: String): Rule? {
         val n = before.length
+        if (para.quote?.kind == null && para.quote != null) {
+            CALLOUT.matchEntire(before)?.let { m -> CalloutKind.fromId(m.groupValues[1])?.let { return Callout(n, it) } }
+        }
         HEADING.matchEntire(before)?.let { return Block(n, heading = it.groupValues[1].length) }
         TASK.matchEntire(before)?.let {
             return Block(
@@ -123,9 +159,12 @@ object InputRules {
                 indent = indentOf(it.groupValues[1]),
             )
         }
-        ORDERED.matchEntire(before)?.let { return Block(n, list = ListKind.ORDERED, indent = indentOf(it.groupValues[1])) }
+        ORDERED.matchEntire(before)?.let {
+            val start = it.groupValues[2].toInt().takeIf { s -> s != 1 }
+            return Block(n, list = ListKind.ORDERED, indent = indentOf(it.groupValues[1]), start = start)
+        }
         BULLET.matchEntire(before)?.let { return Block(n, list = ListKind.BULLET, indent = indentOf(it.groupValues[1])) }
-        QUOTE.matchEntire(before)?.let { return Block(n, indentDelta = it.groupValues[1].length) }
+        if (QUOTE.matches(before)) return Block(n, quote = true)
         return null
     }
 
@@ -135,6 +174,7 @@ object InputRules {
 
     private fun inlineRule(before: String): Rule? {
         mathRule(before)?.let { return it }
+        linkRule(before)?.let { return it }
         if (before.endsWith("`")) {
             val close = before.length - 1
             val open = before.lastIndexOf('`', close - 1)
@@ -148,11 +188,50 @@ object InputRules {
         return null
     }
 
+    /** The `:name:` that just closed, outside code and maths, when it names an emoji. */
+    private fun emojiRule(para: Paragraph, before: String): Rule? {
+        if (!before.endsWith(":")) return null
+        val (start, emoji) = EmojiShortcodes.closedAt(before) ?: return null
+        var at = 0
+        for (run in para.runs) {
+            val end = at + run.text.length
+            if (end > start && at < before.length && (run.style.code || run.style.math)) return null
+            at = end
+        }
+        return Emoji(start, emoji)
+    }
+
+    /** The `[text](url)` that just closed, when the url is an address a link can open. */
+    private fun linkRule(before: String): Rule? {
+        if (!before.endsWith(")")) return null
+        val m = LINK.find(before) ?: return null
+        val uri = MarkdownParser.linkTarget(m.groupValues[2]) ?: return null
+        return LinkUp(m.range.first, m.groupValues[1], uri)
+    }
+
+    /**
+     * The address the space just typed ends, as a link, when it is not one already. Trailing
+     * punctuation stays out of it, so "see www.a.org. " links just the host.
+     */
+    private fun autoLinkRule(para: Paragraph, before: String): Rule? {
+        val text = before.dropLast(1)
+        val l = LinkFinder.find(text).lastOrNull() ?: return null
+        if (text.substring(l.end).any { it.isWhitespace() }) return null
+        var at = 0
+        for (run in para.runs) {
+            val end = at + run.text.length
+            if (end > l.start && at < l.end && (run.style.link != null || run.style.code || run.style.math)) return null
+            at = end
+        }
+        return AutoLink(l.start, l.end, l.uri)
+    }
+
     /**
      * The "$...$" that just closed, or null. Doubled markers are tried first, so
      * "$$x$$" is one display equation and never the inline one hiding inside it.
      */
     private fun mathRule(before: String): Rule? {
+        latexRule(before)?.let { return it }
         if (!before.endsWith("$")) return null
         if (before.endsWith("$$")) {
             val close = before.length - 2
@@ -165,6 +244,22 @@ object InputRules {
         if (open < 0 || close - open < 2) return null
         if (open > 0 && before[open - 1] == '$') return null
         return if (pads(before, open + 1, close)) Math(open) else null
+    }
+
+    /**
+     * The "\(...\)" or "\[...\]" that just closed, or null. LaTeX's own
+     * delimiters say maths outright, so unlike a dollar they need no padding rule.
+     */
+    private fun latexRule(before: String): Rule? {
+        val display = when {
+            before.endsWith("\\)") -> false
+            before.endsWith("\\]") -> true
+            else -> return null
+        }
+        val close = before.length - 2
+        val open = before.lastIndexOf(if (display) "\\[" else "\\(", close - 1)
+        if (open < 0 || before.substring(open + 2, close).isBlank()) return null
+        return Math(open, display, marker = 2)
     }
 
     /**
@@ -206,12 +301,23 @@ object InputRules {
 
     // --- application ---
 
-    /** Apply [rule], detected at [pos], and return its command, caret and typing style. */
-    fun apply(flow: TextFlow, pos: FlowPos, rule: Rule): Result = when (rule) {
+    /** Apply [rule], detected at [pos], and return its command, caret and typing style; ==text== takes [highlight]. */
+    fun apply(flow: TextFlow, pos: FlowPos, rule: Rule, highlight: Rgba = CharStyle.DEFAULT_HIGHLIGHT): Result = when (rule) {
         is Block -> applyBlock(flow, pos, rule)
-        is Inline -> applyInline(flow, pos, rule)
+        is Inline -> applyInline(flow, pos, rule, highlight)
         is Math -> applyMath(flow, pos, rule)
         is Fence -> applyFence(flow, pos, rule)
+        is LinkUp -> applyLink(flow, pos, rule)
+        is Emoji -> FlowEditor(flow).replaceRange(FlowRange(FlowPos(pos.para, rule.start), pos), rule.emoji)
+            .let { (cmd, caret) -> Result(cmd, caret) }
+        is Callout -> applyCallout(flow, pos, rule)
+        is AutoLink -> Result(
+            FlowEditor(flow).setCharStyle(FlowRange(FlowPos(pos.para, rule.start), FlowPos(pos.para, rule.end))) {
+                it.copy(link = rule.uri)
+            },
+            pos,
+        )
+        HRule -> applyRule(flow, pos)
         is Strip -> applyStrip(flow, pos, rule)
     }
 
@@ -225,9 +331,15 @@ object InputRules {
             if (b.list != null) {
                 p.list = b.list
                 p.checked = b.checked
+                p.listStart = b.start
             }
             if (b.indent != null) p.indent = b.indent
-            p.indent += b.indentDelta
+            // A quote typed next to one joins it, the way consecutive ">" lines are one quote.
+            if (b.quote && p.quote == null) {
+                p.quote = flow.paragraphs.getOrNull(pos.para - 1)?.quote
+                    ?: flow.paragraphs.getOrNull(pos.para + 1)?.quote
+                    ?: FlowQuote()
+            }
         }?.let { cmds += it }
         var pending: CharStyle? = null
         if (b.heading > 0) {
@@ -242,7 +354,7 @@ object InputRules {
         return Result(ed.combined(cmds), caret, pending)
     }
 
-    private fun applyInline(flow: TextFlow, pos: FlowPos, r: Inline): Result {
+    private fun applyInline(flow: TextFlow, pos: FlowPos, r: Inline, highlight: Rgba): Result {
         val p = pos.para
         val ed = FlowEditor(flow)
         // The style outside the markers, so typing on past the run is not emphasized.
@@ -253,7 +365,7 @@ object InputRules {
         ed.deleteRange(FlowRange(FlowPos(p, close), FlowPos(p, pos.offset))).first?.let { cmds += it }
         ed.deleteRange(FlowRange(FlowPos(p, r.open), FlowPos(p, content))).first?.let { cmds += it }
         val end = r.open + (close - content)
-        ed.setCharStyle(FlowRange(FlowPos(p, r.open), FlowPos(p, end))) { r.emph.apply(it) }?.let { cmds += it }
+        ed.setCharStyle(FlowRange(FlowPos(p, r.open), FlowPos(p, end))) { r.emph.apply(it, highlight) }?.let { cmds += it }
         return Result(ed.combined(cmds), FlowPos(p, end), outside)
     }
 
@@ -264,7 +376,7 @@ object InputRules {
      */
     private fun applyMath(flow: TextFlow, pos: FlowPos, r: Math): Result {
         val p = pos.para
-        val marker = if (r.display) 2 else 1
+        val marker = r.marker
         val ed = FlowEditor(flow)
         val outside = ed.charStyleAt(FlowPos(p, r.open))
         val text = flow.paragraphs[p].plainText()
@@ -294,11 +406,60 @@ object InputRules {
         return Result(ed.combined(cmds), caret, CharStyle.DEFAULT)
     }
 
+    /** The marker goes and every paragraph of the quote takes one new callout of [r]'s kind. */
+    private fun applyCallout(flow: TextFlow, pos: FlowPos, r: Callout): Result {
+        val ed = FlowEditor(flow)
+        val caret = FlowPos(pos.para, 0)
+        val cmds = mutableListOf<Command>()
+        ed.deleteRange(FlowRange(caret, FlowPos(pos.para, r.prefix))).first?.let { cmds += it }
+        val old = flow.paragraphs[pos.para].quote
+        var first = pos.para
+        var last = pos.para
+        while (first > 0 && flow.paragraphs[first - 1].quote === old) first--
+        while (last + 1 < flow.paragraphs.size && flow.paragraphs[last + 1].quote === old) last++
+        val callout = FlowQuote(r.kind)
+        ed.setParaStyle(FlowRange(FlowPos(first, 0), FlowPos(last, 0))) { it.quote = callout }?.let { cmds += it }
+        return Result(ed.combined(cmds), caret)
+    }
+
+    /** The brackets and address go, and the text left between them links to it. */
+    private fun applyLink(flow: TextFlow, pos: FlowPos, r: LinkUp): Result {
+        val p = pos.para
+        val ed = FlowEditor(flow)
+        val outside = ed.charStyleAt(FlowPos(p, r.open))
+        val textEnd = r.open + 1 + r.text.length
+        val cmds = mutableListOf<Command>()
+        ed.deleteRange(FlowRange(FlowPos(p, textEnd), pos)).first?.let { cmds += it }
+        ed.deleteRange(FlowRange(FlowPos(p, r.open), FlowPos(p, r.open + 1))).first?.let { cmds += it }
+        val end = r.open + r.text.length
+        ed.setCharStyle(FlowRange(FlowPos(p, r.open), FlowPos(p, end))) { it.copy(link = r.uri) }?.let { cmds += it }
+        return Result(ed.combined(cmds), FlowPos(p, end), outside.copy(link = null))
+    }
+
+    /** The line becomes a rule and Enter goes on to the line after it, as it would have anyway. */
+    private fun applyRule(flow: TextFlow, pos: FlowPos): Result {
+        val ed = FlowEditor(flow)
+        val start = FlowPos(pos.para, 0)
+        val cmds = mutableListOf<Command>()
+        ed.deleteRange(FlowRange(start, FlowPos(pos.para, flow.paragraphs[pos.para].length))).first?.let { cmds += it }
+        ed.setParaStyle(FlowRange.caret(start)) {
+            it.rule = true
+            it.list = ListKind.NONE
+            it.checked = false
+            it.headingLevel = 0
+        }?.let { cmds += it }
+        val (split, caret) = ed.insertText(start, "\n")
+        split?.let { cmds += it }
+        return Result(ed.combined(cmds), caret, CharStyle.DEFAULT)
+    }
+
     private fun applyStrip(flow: TextFlow, pos: FlowPos, rule: Strip): Result {
         val ed = FlowEditor(flow)
         val caret = FlowPos(pos.para, 0)
         val len = flow.paragraphs[pos.para].length
         return when (rule) {
+            Strip.BREAK -> Result(ed.setParaStyle(FlowRange.caret(caret)) { it.breakBefore = false }, caret)
+            Strip.RULE -> Result(ed.setParaStyle(FlowRange.caret(caret)) { it.rule = false }, caret, CharStyle.DEFAULT)
             Strip.CODE -> Result(ed.setParaStyle(FlowRange.caret(caret)) { it.codeLang = null }, caret, CharStyle.DEFAULT)
             Strip.LIST -> Result(
                 ed.setParaStyle(FlowRange.caret(caret)) {
@@ -328,6 +489,7 @@ object InputRules {
                 }
                 Result(ed.combined(cmds), caret, CharStyle.DEFAULT)
             }
+            Strip.QUOTE, Strip.QUOTE_EXIT -> Result(ed.setParaStyle(FlowRange.caret(caret)) { it.quote = null }, caret)
             Strip.INDENT -> Result(ed.setParaStyle(FlowRange.caret(caret)) { it.indent-- }, caret)
         }
     }

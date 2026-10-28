@@ -10,6 +10,7 @@ import com.xnotes.core.model.Outline
 import com.xnotes.core.model.Page
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.Stroke
+import com.xnotes.core.model.TapeItem
 import com.xnotes.core.shapes.ShapePath
 import com.xnotes.core.vector.PathFlattener
 
@@ -22,7 +23,8 @@ data class Selected(val pageIndex: Int, val item: CanvasItem)
  * The band and the lasso share one rule: an item is in when the ring they draw touches what the
  * item draws, or goes all the way round it. What an item draws is its ink, a shape's or a
  * connector's outline, an image's edge or a text box's frame, never a shape's fill or label, so a
- * ring round writing inside a box that stays clear of the box's outline leaves the box out.
+ * ring round writing inside a box that stays clear of the box's outline leaves the box out. A
+ * dropped colour and a tape draw only fill, so their outer edge stands in for an outline.
  *
  * A locked item is not a member of anything, whichever way the selection was drawn. Putting that
  * here rather than at each call site is what makes it true of the band and the lasso on both
@@ -101,10 +103,22 @@ object SelectionMath {
 
     private fun drawnOf(item: CanvasItem): Drawn = when (item) {
         is Stroke -> Drawn(listOf(Line(List(item.sampleCount) { Pt(item.xAt(it), item.yAt(it)) }, false)), item.config.baseWidth / 2.0)
-        is ShapeItem -> outlines(item.paths(), item.strokeWidth)
+        is ShapeItem -> if (item.isFill) fillEdge(item) else outlines(item.paths(), item.strokeWidth)
         is ConnectorItem -> outlines(item.paths(), item.strokeWidth)
         is ImageItem -> Drawn(listOf(Line(item.corners(), true)), 0.0)
+        // Tape is all body, like a dropped colour, so its edge stands in for an outline.
+        is TapeItem -> Drawn(item.shape.outline.map { Line(it.pts, it.closed) }, 0.0)
         else -> Drawn(listOf(Line(corners(item.bounds()), true)), 0.0)
+    }
+
+    /**
+     * A dropped colour's outer edge: the rings that bound it, never its holes, whose edges sit under
+     * lines drawn inside it. So a ring round writing inside a filled area leaves the fill out.
+     */
+    private fun fillEdge(fill: ShapeItem): Drawn {
+        val rings = fill.fillRings(Outline.HIT_FLATTEN)
+        val outer = rings.filter { ring -> rings.count { it !== ring && Geometry.pointInPolygon(it, ring[0]) } % 2 == 0 }
+        return Drawn(outer.map { Line(it, true) }, 0.0)
     }
 
     private fun outlines(paths: List<ShapePath>, width: Double) = Drawn(

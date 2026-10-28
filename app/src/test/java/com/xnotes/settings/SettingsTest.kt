@@ -33,6 +33,7 @@ class SettingsTest {
                 invert = 100,
                 keepImages = true,
                 scrollbar = true,
+                freeMovement = true,
             ),
         )
         val back = Settings.fromJson(original.toJson())
@@ -102,14 +103,26 @@ class SettingsTest {
         assertTrue(Settings.fromJson(json).configFor(Tool.ERASER).eraseMarkups)
     }
 
-    @Test fun scribbleToEraseIsOnUnlessSwitchedOff() {
-        assertTrue(Settings().configFor(Tool.ERASER).scribbleErase)
-        val off = Settings().configFor(Tool.ERASER).copy(scribbleErase = false)
-        val json = Settings(tools = mapOf(Tool.ERASER to off)).toJson()
-        assertFalse(Settings.fromJson(json).configFor(Tool.ERASER).scribbleErase)
-        // Settings saved before the switch existed read as on.
-        json.getJSONObject("tools").getJSONObject("eraser").remove("scribble_erase")
+    @Test fun theTapeToolsModeAndPatternRoundTrip() {
+        val d = Settings().configFor(Tool.TAPE)
+        assertEquals(com.xnotes.core.model.TapeItem.DEFAULT_WIDTH, d.baseWidth, 0.0)
+        assertEquals("new tape is striped", com.xnotes.core.model.TapePattern.STRIPES, d.tapePattern)
+        val tape = d.copy(tapeMode = com.xnotes.core.model.TapeMode.FREEHAND, tapePattern = com.xnotes.core.model.TapePattern.DOTS, baseWidth = 64.0)
+        val json = Settings(tools = mapOf(Tool.TAPE to tape)).toJson()
+        val back = Settings.fromJson(json).configFor(Tool.TAPE)
+        assertEquals(com.xnotes.core.model.TapeMode.FREEHAND, back.tapeMode)
+        assertEquals(com.xnotes.core.model.TapePattern.DOTS, back.tapePattern)
+        assertEquals(64.0, back.baseWidth, 0.0)
+    }
+
+    @Test fun scribbleToEraseIsOffUnlessSwitchedOn() {
+        assertFalse(Settings().configFor(Tool.ERASER).scribbleErase)
+        val on = Settings().configFor(Tool.ERASER).copy(scribbleErase = true)
+        val json = Settings(tools = mapOf(Tool.ERASER to on)).toJson()
         assertTrue(Settings.fromJson(json).configFor(Tool.ERASER).scribbleErase)
+        // Settings saved before the switch existed read as off.
+        json.getJSONObject("tools").getJSONObject("eraser").remove("scribble_erase")
+        assertFalse(Settings.fromJson(json).configFor(Tool.ERASER).scribbleErase)
     }
 
     @Test fun everyTapGestureMappingRoundTrips() {
@@ -163,21 +176,14 @@ class SettingsTest {
         assertEquals(PageSize.mmToPx(215.9, 150), h, 1e-6)
     }
 
-    @Test fun anExplicitOrientationOverridesTheDefault() {
-        val prefs = Preferences(defaultPageSize = PageSize.A4, defaultPageOrientation = Orientation.PORTRAIT)
-        val (w, h) = prefs.newPagePixels(150, Orientation.LANDSCAPE)
-        assertEquals(PageSize.mmToPx(297.0, 150), w, 1e-6)
-        assertEquals(PageSize.mmToPx(210.0, 150), h, 1e-6)
-    }
-
     @Test fun anOutOfRangeCustomSideIsPulledBackIn() {
         val o = JSONObject().put(
             "prefs",
             JSONObject().put("custom_page_width_mm", 9000.0).put("custom_page_height_mm", 0.0),
         )
         val back = Settings.fromJson(o).prefs
-        assertEquals(Preferences.CUSTOM_PAGE_MAX_MM, back.customPageWidthMm, 1e-9)
-        assertEquals(Preferences.CUSTOM_PAGE_MIN_MM, back.customPageHeightMm, 1e-9)
+        assertEquals(PageSize.CUSTOM_MAX_MM, back.customPageWidthMm, 1e-9)
+        assertEquals(PageSize.CUSTOM_MIN_MM, back.customPageHeightMm, 1e-9)
     }
 
     @Test fun malformedAppearanceFallsBackToSystem() {
@@ -210,6 +216,36 @@ class SettingsTest {
         s = s.rememberColor(Rgba(5, 5, 5))
         assertEquals(Rgba(5, 5, 5, 255), s.recentColors.first())
         assertEquals(24, s.recentColors.size)
+    }
+
+    @Test fun swatchesStartAtTheirDefaultsAndWriteNothing() {
+        val s = Settings.fromJson(JSONObject())
+        SwatchRole.entries.forEach { assertEquals(it.defaults, s.swatchesFor(it)) }
+        assertEquals(false, s.toJson().has("swatches"))
+    }
+
+    @Test fun aRecolouredSwatchRoundTripsAndLeavesOtherRolesAlone() {
+        val s = Settings().withSwatch(SwatchRole.LINES, 2, Rgba(1, 2, 3))
+        val back = Settings.fromJson(s.toJson())
+        assertEquals(Rgba(1, 2, 3), back.swatchesFor(SwatchRole.LINES)[2])
+        assertEquals(SwatchRole.LINES.defaults[0], back.swatchesFor(SwatchRole.LINES)[0])
+        assertEquals(SwatchRole.PAPER.defaults, back.swatchesFor(SwatchRole.PAPER))
+    }
+
+    @Test fun aShortSavedSwatchListIsPaddedFromTheDefaults() {
+        val o = JSONObject().put(
+            "swatches",
+            JSONObject().put("accent", org.json.JSONArray().put(org.json.JSONArray().put(9).put(9).put(9).put(255))),
+        )
+        val accent = Settings.fromJson(o).swatchesFor(SwatchRole.ACCENT)
+        assertEquals(SwatchRole.COUNT, accent.size)
+        assertEquals(Rgba(9, 9, 9), accent[0])
+        assertEquals(SwatchRole.ACCENT.defaults[4], accent[4])
+    }
+
+    @Test fun recolouringAMissingSwatchChangesNothing() {
+        val s = Settings()
+        assertEquals(s, s.withSwatch(SwatchRole.PAPER, SwatchRole.COUNT, Rgba(1, 1, 1)))
     }
 
     @Test fun pageColorNullByDefault() {

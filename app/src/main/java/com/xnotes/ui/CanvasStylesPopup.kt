@@ -27,6 +27,7 @@ import com.xnotes.R
 import com.xnotes.core.infinite.CanvasBackground
 import com.xnotes.core.model.PagePattern
 import com.xnotes.core.model.PageStyle
+import com.xnotes.settings.SwatchRole
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
 import kotlin.math.roundToInt
@@ -90,12 +91,10 @@ fun CanvasStylesPopup(editor: InfiniteEditor, onDismiss: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                ColorPickerDot(
-                    background.patternColor.copy(a = 255), // the hue at full strength; opacity is its own control
-                    custom = true,
-                    onPick = { apply(background.copy(patternColor = it.copy(a = background.patternColor.a))) },
-                    dismissOnPick = false,
-                ) { d, p -> PageColorGridPopup(background.patternColor.copy(a = 255), d, p) }
+                // The hue at full strength; opacity is its own control.
+                SwatchCircles(editor.swatchStore, SwatchRole.LINES, background.patternColor.copy(a = 255)) {
+                    apply(background.copy(patternColor = it.copy(a = background.patternColor.a)))
+                }
             }
             SliderRow(
                 stringResource(R.string.caption_opacity),
@@ -114,17 +113,9 @@ fun CanvasStylesPopup(editor: InfiniteEditor, onDismiss: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 ModeChip(stringResource(R.string.paper_theme), background.paperColor == null) { apply(background.copy(paperColor = null)) }
-                pageColorPresets.forEach { c ->
-                    ColorDot(c.toComposeColor(), background.paperColor == c) {
-                        apply(background.copy(paperColor = c))
-                    }
+                SwatchCircles(editor.swatchStore, SwatchRole.PAPER, background.paperColor) {
+                    apply(background.copy(paperColor = it))
                 }
-                ColorPickerDot(
-                    background.paperColor,
-                    custom = background.paperColor != null && background.paperColor !in pageColorPresets,
-                    onPick = { apply(background.copy(paperColor = it)) },
-                    dismissOnPick = false,
-                ) { d, p -> PageColorGridPopup(background.paperColor, d, p) }
             }
 
             Spacer(Modifier.size(8.dp))
@@ -143,7 +134,7 @@ fun CanvasStylesPopup(editor: InfiniteEditor, onDismiss: () -> Unit) {
                 }
                 Spacer(Modifier.size(4.dp))
             }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ModeChip(stringResource(R.string.reset), selected = false) { apply(CanvasBackground()) }
             }
         }

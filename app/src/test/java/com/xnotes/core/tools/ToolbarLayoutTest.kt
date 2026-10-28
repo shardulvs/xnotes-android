@@ -28,7 +28,7 @@ class ToolbarLayoutTest {
             d.sections[3].entries.map { it.item },
         )
         assertEquals(
-            listOf(ToolbarItem.WAND, ToolbarItem.SHAPE, ToolbarItem.RULER, ToolbarItem.TEXT, ToolbarItem.TEXT_BOX, ToolbarItem.MARKUP),
+            listOf(ToolbarItem.WAND, ToolbarItem.TAPE, ToolbarItem.SHAPE, ToolbarItem.RULER, ToolbarItem.TEXT, ToolbarItem.TEXT_BOX, ToolbarItem.MARKUP),
             d.sections[4].entries.map { it.item },
         )
         assertEquals(listOf(ToolbarItem.FULLSCREEN), d.sections[10].entries.map { it.item })
@@ -236,5 +236,23 @@ class ToolbarLayoutTest {
             ToolbarLayout.CANVAS_DEFAULT,
             ToolbarLayout.fromRaw(emptyList(), ToolbarLayout.CANVAS_ITEMS, ToolbarLayout.CANVAS_DEFAULT),
         )
+    }
+
+    @Test fun missingTapeSlotsInRightAfterTheWandOnBothBars() {
+        // A layout stored before tape existed, with the wand moved and hidden: tape follows it.
+        val note = ToolbarLayout.fromRaw(listOf(listOf("pen" to true, "wand" to false, "shape" to true)))
+        val noteItems = note.items()
+        assertEquals(noteItems.indexOf(ToolbarItem.WAND) + 1, noteItems.indexOf(ToolbarItem.TAPE))
+        assertTrue(note.sections.flatMap { it.entries }.single { it.item == ToolbarItem.TAPE }.visible)
+        val canvas = ToolbarLayout.fromRaw(listOf(listOf("wand" to true, "shape" to true)), ToolbarLayout.CANVAS_ITEMS, ToolbarLayout.CANVAS_DEFAULT)
+        assertEquals(listOf(ToolbarItem.WAND, ToolbarItem.TAPE, ToolbarItem.SHAPE), canvas.items().take(3))
+    }
+
+    @Test fun bothDefaultsSetTapeRightAfterTheWand() {
+        for (d in listOf(ToolbarLayout.DEFAULT, ToolbarLayout.CANVAS_DEFAULT)) {
+            val items = d.items()
+            assertEquals(items.indexOf(ToolbarItem.WAND) + 1, items.indexOf(ToolbarItem.TAPE))
+        }
+        assertTrue(ToolbarItem.TAPE in ToolbarLayout.CANVAS_ITEMS)
     }
 }

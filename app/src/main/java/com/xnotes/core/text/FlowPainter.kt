@@ -21,6 +21,7 @@ object FlowPainter {
      * [breaks] holds, per paragraph, offsets where a backend writing text needs a run to end and
      * the next begin, so each piece can be tagged on its own (a link inside a word, for one).
      * Without [math] the formulas are left out, for a caller that draws them with [paintMath].
+     * [chrome] adds what only the screen shows, such as where page breaks sit.
      */
     fun paintPage(
         r: Renderer,
@@ -29,8 +30,12 @@ object FlowPainter {
         region: Rect,
         breaks: Map<Int, IntArray> = emptyMap(),
         math: Boolean = true,
+        chrome: Boolean = false,
     ) {
         val page = frame.pages.getOrNull(pageIndex) ?: return
+        if (chrome) {
+            for (b in page.breaks) if (b.y >= region.top - b.font.pointSize && b.y <= region.bottom + b.font.pointSize) paintBreak(r, frame, b)
+        }
         if (r.writesText) r.beginMark(Mark.Decoration)
         for (table in page.tables) {
             if (table.bottom < region.top || table.top > region.bottom) continue
@@ -38,7 +43,12 @@ object FlowPainter {
             paintTableRules(r, table)
         }
         paintCodeChips(r, frame, page.lines, region)
+        paintQuoteBars(r, frame, page)
         if (r.writesText) r.endMark()
+        for (t in page.callouts) {
+            if (t.bottom < region.top || t.top > region.bottom) continue
+            paintCalloutTitle(r, frame, t)
+        }
         for (line in page.lines) {
             if (line.bottom < region.top || line.top > region.bottom) continue
             paintLine(r, frame, line, breaks[line.paraIndex], math)
@@ -51,9 +61,75 @@ object FlowPainter {
         for (line in page.lines) {
             if (line.mathStarts.isEmpty() || line.bottom < region.top || line.top > region.bottom) continue
             for (seg in line.segs) {
-                if (seg.math) drawFormula(r, line, seg, seg.style.color ?: frame.defaultColor)
+                if (seg.math) drawFormula(r, line, seg, inkOf(seg.style, frame))
             }
         }
+    }
+
+    /** One bar down each run of lines a quote or callout holds on this page, its title row included. */
+    private fun paintQuoteBars(r: Renderer, frame: FlowFrame, page: PageFlow) {
+        val lines = page.lines
+        var i = 0
+        while (i < lines.size) {
+            val id = lines[i].quoteId
+            if (id < 0) {
+                i++
+                continue
+            }
+            var j = i
+            while (j + 1 < lines.size && lines[j + 1].quoteId == id) j++
+            val title = page.callouts.firstOrNull { it.quoteId == id }
+            val top = minOf(lines[i].top, title?.top ?: lines[i].top)
+            val kind = lines[i].callout
+            val color = if (kind == null) frame.defaultColor.withAlpha(QUOTE_ALPHA) else calloutColor(kind, frame)
+            r.fillRect(Rect(lines[i].quoteBar, top, QUOTE_BAR, lines[j].bottom - top), color)
+            i = j + 1
+        }
+    }
+
+    /** A callout's icon and title, in its colour. */
+    private fun paintCalloutTitle(r: Renderer, frame: FlowFrame, t: CalloutTitle) {
+        val color = calloutColor(t.kind, frame)
+        if (r.writesText) r.beginMark(Mark.Decoration)
+        val s = t.iconSize
+        CalloutIcons.paint(r, t.kind, t.x, t.baseline - s * ICON_RISE, s, color)
+        if (r.writesText) {
+            r.endMark()
+            r.beginMark(Mark.FlowTitle(t.para))
+        }
+        r.drawTextRun(t.label, t.labelX, t.baseline, t.font, color)
+        if (r.writesText) r.endMark()
+    }
+
+    /**
+     * GitHub's alert colours, the darker set on light paper and the lighter on dark, told
+     * apart by the text colour the frame resolved: light text means dark paper.
+     */
+    fun calloutColor(kind: CalloutKind, frame: FlowFrame): Rgba {
+        val c = frame.defaultColor
+        val darkPaper = 0.299 * c.r + 0.587 * c.g + 0.114 * c.b > 128
+        return when (kind) {
+            CalloutKind.NOTE -> if (darkPaper) Rgba(68, 147, 248, 255) else Rgba(9, 105, 218, 255)
+            CalloutKind.TIP -> if (darkPaper) Rgba(63, 185, 80, 255) else Rgba(26, 127, 55, 255)
+            CalloutKind.IMPORTANT -> if (darkPaper) Rgba(171, 125, 248, 255) else Rgba(130, 80, 223, 255)
+            CalloutKind.WARNING -> if (darkPaper) Rgba(210, 153, 34, 255) else Rgba(154, 103, 0, 255)
+            CalloutKind.CAUTION -> if (darkPaper) Rgba(248, 81, 73, 255) else Rgba(209, 36, 47, 255)
+        }
+    }
+
+    /** A page break's dashed line, broken around its label. */
+    private fun paintBreak(r: Renderer, frame: FlowFrame, b: BreakMark) {
+        val color = frame.defaultColor.withAlpha(BREAK_ALPHA)
+        fun dashes(from: Double, to: Double) {
+            var x = from
+            while (x < to) {
+                r.fillRect(Rect(x, b.y - BREAK_LINE / 2.0, minOf(BREAK_DASH, to - x), BREAK_LINE), color)
+                x += BREAK_DASH + BREAK_GAP
+            }
+        }
+        dashes(b.left, b.labelX - BREAK_LABEL_PAD)
+        dashes(b.labelX + b.labelW + BREAK_LABEL_PAD, b.right)
+        r.drawTextRun(b.label, b.labelX, b.baseline, b.font, color)
     }
 
     /** [seg]'s formula, or a stand-in while it is pending or the backend is still setting it. */
@@ -177,7 +253,7 @@ object FlowPainter {
         // after it: a reader copies in content order, so trailing them all behind would scramble it.
         var next = line.startChar
         for (seg in line.segs) {
-            val color = inkColor(seg.style, frame)
+            val color = inkOf(seg.style, frame)
             if (tag) {
                 for (k in next until seg.start) {
                     r.beginMark(Mark.FlowText(para, k, k + 1))
@@ -201,7 +277,7 @@ object FlowPainter {
         if (tag) {
             // A line wrapped at a space keeps it, so the words either side of the break stay two words.
             val last = line.segs.lastOrNull()
-            val color = last?.style?.color ?: frame.defaultColor
+            val color = last?.style?.let { inkOf(it, frame) } ?: frame.defaultColor
             for (k in next until line.endChar) {
                 r.beginMark(Mark.FlowText(para, k, k + 1))
                 r.drawTextRun(" ", line.caretX(k), line.baseline, last?.font ?: line.font, color)
@@ -215,12 +291,16 @@ object FlowPainter {
             r.endMark()
         }
         if (tag) r.beginMark(Mark.Decoration)
+        if (line.rule) {
+            val t = (line.height / RULE_THICKNESS_PER_LINE).coerceAtLeast(1.0)
+            val mid = (line.top + line.bottom) / 2.0
+            r.fillRect(Rect(line.codeLeft, mid - t / 2.0, line.codeRight - line.codeLeft, t), frame.defaultColor.withAlpha(RULE_ALPHA))
+        }
         val ascent = line.baseline - line.top
         val descent = line.bottom - line.baseline
         val thickness = (line.height / 14.0).coerceAtLeast(1.0)
         for (deco in line.decos) {
-            val color = inkColor(deco.style, frame)
-            // A hyperlink is underlined even without the explicit underline style.
+            val color = inkOf(deco.style, frame)
             if (deco.style.underline || deco.style.link != null) {
                 r.fillRect(Rect(deco.x0, line.baseline + descent * 0.35, deco.x1 - deco.x0, thickness), color)
             }
@@ -252,10 +332,6 @@ object FlowPainter {
         }
     }
 
-    /** A run's ink colour: its own colour, else the link colour for a hyperlink, else the flow default. */
-    private fun inkColor(style: CharStyle, frame: FlowFrame): Rgba =
-        style.color ?: if (style.link != null) LINK_COLOR else frame.defaultColor
-
     private fun paintMarker(r: Renderer, frame: FlowFrame, line: PlacedLine, m: Marker) {
         val color = frame.defaultColor
         val ascent = line.baseline - line.top
@@ -280,12 +356,16 @@ object FlowPainter {
         if (r.writesText) r.drawTextRun(" ", m.rect.right - FlowLayout.MARKER_GAP, line.baseline, m.font, color)
     }
 
+    /** What [style]'s text draws in: its own colour, else a link's, else the flow's. */
+    private fun inkOf(style: CharStyle, frame: FlowFrame): Rgba =
+        style.color ?: if (style.link != null) LINK_COLOR else frame.defaultColor
+
+    /** A link's look unless its text picks a colour: this blue, underlined. */
+    val LINK_COLOR = Rgba(100, 160, 255, 255)
+
     /** Code line/chip backgrounds: neutral translucent grey, legible on light and dark paper. */
     val CODE_BG = Rgba(128, 128, 128, 42)
     val CHIP_BG = Rgba(128, 128, 128, 56)
-
-    /** Hyperlink ink: an azure that reads on both light and dark paper. */
-    val LINK_COLOR = Rgba(90, 156, 255, 255)
 
     /**
      * Chips behind a formula showing its source. Both are translucent tints so
@@ -296,6 +376,23 @@ object FlowPainter {
     val MATH_BG = Rgba(88, 140, 216, 44)
     val MATH_ERROR_BG = Rgba(214, 74, 68, 52)
     val MATH_ERROR_RULE = Rgba(214, 74, 68, 190)
+
+    /** A quote's bar: this wide, and for a plain quote the text colour toned down this far. */
+    private const val QUOTE_BAR = 4.0
+    private const val QUOTE_ALPHA = 90
+
+    /** How much of a callout icon stands above its title's baseline. */
+    private const val ICON_RISE = 0.9
+
+    private const val BREAK_ALPHA = 110
+    private const val BREAK_LINE = 1.5
+    private const val BREAK_DASH = 8.0
+    private const val BREAK_GAP = 6.0
+    private const val BREAK_LABEL_PAD = 10.0
+
+    /** A horizontal rule: a fraction of a line thick, in the text colour toned down. */
+    private const val RULE_THICKNESS_PER_LINE = 10.0
+    private const val RULE_ALPHA = 90
 
     const val CODE_PAD = 6.0
     const val CHIP_PAD = 3.0

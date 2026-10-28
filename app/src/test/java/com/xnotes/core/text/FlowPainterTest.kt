@@ -190,4 +190,40 @@ class FlowPainterTest {
         val runs = r.inner.ops.filter { it.startsWith("drawTextRun:") }.map { it.substringAfter(':').substringBefore('@') }
         assertEquals(listOf("abcdefghijklm", " ", "nopq"), runs)
     }
+
+    @Test
+    fun aRuleDrawsOneLineAcrossTheColumn() {
+        val flow = TextFlow().apply { paragraphs.add(Paragraph(rule = true, indent = 1)) }
+        val frame = frameOf(flow)
+        val line = frame.pages[0].lines.single()
+        assertTrue(line.rule)
+        assertEquals(FlowLayout.INDENT_STEP_PX, line.codeLeft, 1e-9)
+        val ops = paint(frame).ops
+        assertEquals(1, ops.count { it == "fillRect" })
+        assertTrue(ops.none { it.startsWith("drawTextRun") })
+    }
+
+    @Test
+    fun aLinkIsFoundUnderAFingerAndDrawsUnderlined() {
+        val flow = TextFlow().apply {
+            paragraphs.add(Paragraph(mutableListOf(Run("ab "), Run("cd", CharStyle(link = "https://x.org")))))
+        }
+        val frame = frameOf(flow)
+        val line = frame.pages[0].lines.single()
+        val mid = (line.caretX(3) + line.caretX(5)) / 2.0
+        assertEquals("https://x.org", frame.linkAt(0, com.xnotes.core.geometry.Pt(mid, line.baseline), 2.0))
+        assertEquals(null, frame.linkAt(0, com.xnotes.core.geometry.Pt(line.caretX(1), line.baseline), 2.0))
+        assertEquals(1, paint(frame).ops.count { it == "fillRect" })
+    }
+
+    @Test
+    fun aCalloutPaintsItsBarIconAndTitle() {
+        val flow = TextFlow().apply {
+            paragraphs.add(Paragraph(mutableListOf(Run("x")), quote = FlowQuote(CalloutKind.WARNING)))
+        }
+        val ops = paint(frameOf(flow)).ops
+        assertTrue(ops.any { it.startsWith("drawTextRun:Warning@") })
+        assertTrue(ops.any { it.startsWith("strokePolygon") })
+        assertTrue(ops.indexOfFirst { it == "fillRect" } < ops.indexOfFirst { it.startsWith("drawTextRun:x@") })
+    }
 }

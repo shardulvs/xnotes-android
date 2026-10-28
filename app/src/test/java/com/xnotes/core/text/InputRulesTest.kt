@@ -93,9 +93,13 @@ class InputRulesTest {
     }
 
     @Test
-    fun angleBracketsIndentAndStack() {
-        assertEquals(1, typed("> a").indent)
-        assertEquals(2, typed(">> a").indent)
+    fun anAngleBracketMakesAQuote() {
+        val p = typed("> a")
+        assertEquals("a", p.plainText())
+        assertEquals(0, p.indent)
+        assertNotNull(p.quote)
+        assertEquals(null, p.quote!!.kind)
+        assertNotNull(typed(">> a").quote)
     }
 
     @Test
@@ -330,6 +334,8 @@ class InputRulesTest {
             assertEquals(md, pasted.indent, mine.indent)
             assertEquals(md, pasted.checked, mine.checked)
             assertEquals(md, pasted.headingLevel, mine.headingLevel)
+            assertEquals(md, pasted.quote?.kind, mine.quote?.kind)
+            assertEquals(md, pasted.quote != null, mine.quote != null)
             assertEquals(md, pasted.runs.size, mine.runs.size)
             for (i in pasted.runs.indices) {
                 assertEquals(md, pasted.runs[i].text, mine.runs[i].text)
@@ -533,4 +539,205 @@ class InputRulesTest {
         assertFalse(run.text.first().isWhitespace())
     }
 
+    // --- rules ---
+
+    @Test
+    fun threeDashesAndEnterMakeARuleAndGoOnBelowIt() {
+        for (marker in listOf("---", "***", "___", "-----")) {
+            val flow = TextFlow()
+            val caret = type(flow, "$marker\nnext")
+            assertTrue(marker, flow.paragraphs[0].rule)
+            assertEquals(0, flow.paragraphs[0].length)
+            assertEquals("next", flow.paragraphs[1].plainText())
+            assertFalse(flow.paragraphs[1].rule)
+            assertEquals(FlowPos(1, 4), caret)
+        }
+    }
+
+    @Test
+    fun twoDashesOrShortcutsOffLeaveTheTextAlone() {
+        val flow = TextFlow()
+        type(flow, "--\n")
+        assertFalse(flow.paragraphs[0].rule)
+        val off = TextFlow().apply { paragraphs.add(para("---")) }
+        assertNull(InputRules.forEnter(off, FlowPos(0, 3), markdown = false))
+    }
+
+    @Test
+    fun backspaceOnARuleMakesItAnEmptyLine() {
+        val flow = TextFlow().apply { paragraphs.add(Paragraph(rule = true)) }
+        val strip = InputRules.forBackspace(flow, FlowPos(0, 0))
+        assertNotNull(strip)
+        InputRules.apply(flow, FlowPos(0, 0), strip!!)
+        assertFalse(flow.paragraphs[0].rule)
+    }
+
+    @Test
+    fun typingIntoARuleTurnsItBackIntoText() {
+        val flow = TextFlow().apply { paragraphs.add(Paragraph(rule = true)) }
+        FlowEditor(flow).insertText(FlowPos(0, 0), "x")
+        assertFalse(flow.paragraphs[0].rule)
+        assertEquals("x", flow.paragraphs[0].plainText())
+    }
+
+    @Test
+    fun backspaceTakesAPageBreakOutFirst() {
+        val flow = TextFlow().apply {
+            paragraphs.add(para("a"))
+            paragraphs.add(Paragraph(mutableListOf(Run("b")), list = ListKind.BULLET, breakBefore = true))
+        }
+        InputRules.apply(flow, FlowPos(1, 0), InputRules.forBackspace(flow, FlowPos(1, 0))!!)
+        assertFalse(flow.paragraphs[1].breakBefore)
+        assertEquals(ListKind.BULLET, flow.paragraphs[1].list)
+    }
+
+    @Test
+    fun splittingAParagraphLeavesItsBreakOnTheFirstHalf() {
+        val flow = TextFlow().apply { paragraphs.add(Paragraph(mutableListOf(Run("ab")), breakBefore = true)) }
+        FlowEditor(flow).insertText(FlowPos(0, 1), "\n")
+        assertTrue(flow.paragraphs[0].breakBefore)
+        assertFalse(flow.paragraphs[1].breakBefore)
+    }
+
+    @Test
+    fun aTypedNumberStartsTheListThere() {
+        assertEquals(3, typed("3. a").listStart)
+        assertEquals(null, typed("1. a").listStart)
+        val flow = TextFlow()
+        type(flow, "7) a\nb")
+        assertEquals(7, flow.paragraphs[0].listStart)
+        assertEquals(null, flow.paragraphs[1].listStart)
+        assertEquals(ListKind.ORDERED, flow.paragraphs[1].list)
+    }
+
+    @Test
+    fun latexDelimitersConvertLikeDollars() {
+        val inline = typed("so \\( x^2 \\) here")
+        assertEquals("so x^2 here", inline.plainText())
+        val f = inline.runs.first { it.style.math }
+        assertEquals("x^2", f.text)
+        assertFalse(f.style.mathDisplay)
+        val display = typed("\\[\\sum_i i\\]").runs.single()
+        assertEquals("\\sum_i i", display.text)
+        assertTrue(display.style.mathDisplay)
+        assertTrue(typed("a \\(b").runs.none { it.style.math })
+        assertTrue(typed("\\( \\)").runs.none { it.style.math })
+    }
+
+    @Test
+    fun typedAndPastedLatexDelimitersAgree() {
+        val typed = typed("\\(a+b\\)")
+        val pasted = MarkdownParser.parse("\\(a+b\\)").single()
+        assertEquals(pasted.plainText(), typed.plainText())
+        assertEquals(pasted.runs.single().style.math, typed.runs.single().style.math)
+    }
+
+    @Test
+    fun doubleEqualsHighlightsAsYouType() {
+        val p = typed("a ==hot== b")
+        assertEquals("a hot b", p.plainText())
+        assertEquals(CharStyle.DEFAULT_HIGHLIGHT, p.runs.first { it.text == "hot" }.style.highlight)
+        assertEquals(null, p.runs.last().style.highlight)
+        assertTrue(typed("x == y ==").runs.all { it.style.highlight == null })
+    }
+
+    // --- links ---
+
+    @Test
+    fun bracketsAndAnAddressMakeALink() {
+        val p = typed("see [docs](https://x.org) now")
+        assertEquals("see docs now", p.plainText())
+        assertEquals("https://x.org", p.runs.first { it.text == "docs" }.style.link)
+        assertEquals(null, p.runs.last().style.link)
+        assertEquals("[a](notes)", typed("[a](notes)").plainText())
+    }
+
+    @Test
+    fun anAddressLinksOnTheSpaceAfterIt() {
+        val p = typed("go https://x.org/a, then")
+        assertEquals("go https://x.org/a, then", p.plainText())
+        assertEquals("https://x.org/a", p.runs.first { it.text == "https://x.org/a" }.style.link)
+        assertTrue(p.runs.filter { it.text != "https://x.org/a" }.all { it.style.link == null })
+        assertEquals("mailto:a@b.co", typed("a@b.co ").runs.first().style.link)
+    }
+
+    @Test
+    fun typingAtALinksEndDoesNotGrowIt() {
+        val flow = TextFlow().apply {
+            paragraphs.add(Paragraph(mutableListOf(Run("ab", CharStyle(link = "https://x.org")))))
+        }
+        FlowEditor(flow).insertText(FlowPos(0, 2), "c")
+        FlowEditor(flow).insertText(FlowPos(0, 1), "z")
+        FlowEditor(flow).insertText(FlowPos(0, 0), "y")
+        assertEquals(listOf("y" to null, "azb" to "https://x.org", "c" to null), flow.paragraphs[0].runs.map { it.text to it.style.link })
+    }
+
+    // --- quotes and callouts ---
+
+    @Test
+    fun enterCarriesTheQuoteOnAndAnEmptyLineStepsOut() {
+        val flow = TextFlow()
+        type(flow, "> a\nb\n\nc")
+        val q = flow.paragraphs[0].quote
+        assertNotNull(q)
+        assertTrue(flow.paragraphs[1].quote === q)
+        // Like leaving a list, the empty line itself steps out and takes what is typed next.
+        assertEquals(3, flow.paragraphs.size)
+        assertEquals("c", flow.paragraphs[2].plainText())
+        assertEquals(null, flow.paragraphs[2].quote)
+    }
+
+    @Test
+    fun aTypedAlertMarkerTurnsTheWholeQuoteIntoACallout() {
+        val flow = TextFlow()
+        type(flow, "> first\nsecond")
+        type(flow, "[!warning] ", FlowPos(0, 0))
+        assertEquals("first", flow.paragraphs[0].plainText())
+        val q = flow.paragraphs[0].quote
+        assertEquals(CalloutKind.WARNING, q?.kind)
+        assertTrue(flow.paragraphs[1].quote === q)
+    }
+
+    @Test
+    fun aCalloutIsNeverRetyped() {
+        val flow = TextFlow().apply {
+            paragraphs.add(Paragraph(quote = FlowQuote(CalloutKind.NOTE)))
+        }
+        type(flow, "[!tip] ")
+        assertEquals("[!tip] ", flow.paragraphs[0].plainText())
+        assertEquals(CalloutKind.NOTE, flow.paragraphs[0].quote?.kind)
+    }
+
+    @Test
+    fun aQuoteTypedUnderOneJoinsIt() {
+        val q = FlowQuote(CalloutKind.TIP)
+        val flow = TextFlow().apply {
+            paragraphs.add(Paragraph(mutableListOf(Run("a")), quote = q))
+            paragraphs.add(Paragraph())
+        }
+        type(flow, "> b", FlowPos(1, 0))
+        assertTrue(flow.paragraphs[1].quote === q)
+    }
+
+    @Test
+    fun backspaceTakesTheQuoteAfterTheListAndCodeLeavesIt() {
+        val flow = TextFlow().apply {
+            paragraphs.add(Paragraph(mutableListOf(Run("a")), list = ListKind.BULLET, quote = FlowQuote()))
+        }
+        InputRules.apply(flow, FlowPos(0, 0), InputRules.forBackspace(flow, FlowPos(0, 0))!!)
+        assertEquals(ListKind.NONE, flow.paragraphs[0].list)
+        assertNotNull(flow.paragraphs[0].quote)
+        InputRules.apply(flow, FlowPos(0, 0), InputRules.forBackspace(flow, FlowPos(0, 0))!!)
+        assertEquals(null, flow.paragraphs[0].quote)
+        flow.paragraphs[0].quote = FlowQuote()
+        FlowEditor(flow).setParaStyle(FlowRange.caret(FlowPos(0, 0))) { it.codeLang = "" }
+        assertEquals(null, flow.paragraphs[0].quote)
+    }
+
+    @Test
+    fun aClosedShortcodeTurnsIntoItsEmoji() {
+        assertEquals("party 🎉 now", typed("party :tada: now").plainText())
+        assertEquals("10:30:00", typed("10:30:00").plainText())
+        assertEquals(":nope:", typed(":nope:").plainText())
+    }
 }

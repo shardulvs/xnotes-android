@@ -54,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -64,6 +65,7 @@ import androidx.compose.ui.unit.sp
 import com.xnotes.R
 import com.xnotes.settings.ExplorerSortKey
 import com.xnotes.settings.ExplorerView
+import com.xnotes.settings.ThumbShape
 import com.xnotes.settings.TileSize
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
@@ -81,16 +83,22 @@ internal fun gridColumns(screenWidthDp: Int, size: TileSize): Int {
     return Math.round(screenWidthDp / tile).coerceIn(1, 10)
 }
 
-internal fun galleryColumns(screenWidthDp: Int, size: TileSize): Int {
-    val tile = when (size) { TileSize.S -> 240f; TileSize.M -> 320f; TileSize.L -> 440f; TileSize.XL -> 600f }
-    return Math.round(screenWidthDp / tile).coerceIn(1, 8)
+/** Columns the gallery shows at [size]: as many upright pages as stand side by side in [width], the explorer's beside the rail. */
+internal fun galleryColumns(width: Dp, size: TileSize): Int {
+    val page = (galleryShelf(size) - 14.dp) * A4_RATIO + 8.dp
+    return ((width + GALLERY_GAP) / (page + GALLERY_GAP)).toInt().coerceAtLeast(1)
 }
 
 internal fun galleryShelf(size: TileSize): Dp = when (size) { TileSize.S -> 170.dp; TileSize.M -> 220.dp; TileSize.L -> 290.dp; TileSize.XL -> 380.dp }
 
+private val GALLERY_GAP = 28.dp
+
 internal fun timelineCard(size: TileSize): Dp = when (size) { TileSize.S -> 110.dp; TileSize.M -> 140.dp; TileSize.L -> 180.dp; TileSize.XL -> 230.dp }
 
-/** Grid: the chip row, folders in a row of chips (or mixed in as cards), then file cards under their group headings. */
+/**
+ * Grid: the chip row, the top folder's pinned notes on a shelf, folders in a row of chips (or mixed in as cards),
+ * then file cards under their group headings.
+ */
 @Composable
 internal fun GridBody(b: ExplorerBody, state: LazyGridState, columns: Int, chips: @Composable (Dp) -> Unit, top: (LazyGridScope.() -> Unit)?, modifier: Modifier = Modifier) {
     LazyVerticalGrid(
@@ -103,6 +111,9 @@ internal fun GridBody(b: ExplorerBody, state: LazyGridState, columns: Int, chips
     ) {
         item(key = "chips", span = { GridItemSpan(maxLineSpan) }, contentType = "chips") { chips(48.dp) }
         top?.invoke(this)
+        if (b.pinned.isNotEmpty()) {
+            item(key = "pinned", span = { GridItemSpan(maxLineSpan) }, contentType = "pinned") { PinnedShelf(b, whole = b.view.thumb == ThumbShape.PAGE) }
+        }
         if (b.folders.isNotEmpty()) {
             items(b.folders, key = { it.documentUri }, contentType = { "folder" }) { FolderChipTile(b, it) }
             item(span = { GridItemSpan(maxLineSpan) }, contentType = "gap") { Spacer(Modifier.height(4.dp)) }
@@ -120,7 +131,7 @@ internal fun GridBody(b: ExplorerBody, state: LazyGridState, columns: Int, chips
     }
 }
 
-/** List: the chip row and a header of sortable column names, both scrolling away with one row per item. */
+/** List: the chip row, the top folder's pinned notes on a shelf and a header of sortable column names, all scrolling away with one row per item. */
 @Composable
 internal fun ListBody(
     b: ExplorerBody,
@@ -134,6 +145,10 @@ internal fun ListBody(
     val inset = 8.dp + (if (b.view.compactRows) 28.dp else 40.dp) + 14.dp + (if (b.host.selecting()) 32.dp else 0.dp)
     LazyColumn(state = state, modifier = modifier, contentPadding = PaddingValues(top = EXPLORER_HEADER, bottom = 88.dp)) {
         item(key = "chips", contentType = "chips") { chips(48.dp) }
+        top?.invoke(this)
+        if (b.pinned.isNotEmpty()) {
+            item(key = "pinned", contentType = "pinned") { PinnedShelf(b, whole = false, Modifier.padding(top = 4.dp, bottom = 8.dp)) }
+        }
         item(key = "columnHeads", contentType = "columnHeads") {
             Row(Modifier.fillMaxWidth().height(36.dp).padding(end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 ColumnHead(stringResource(R.string.sort_name), ExplorerSortKey.NAME, b, onSort, Modifier.weight(1f).padding(start = inset))
@@ -148,7 +163,6 @@ internal fun ListBody(
             }
             Hairline()
         }
-        top?.invoke(this)
         items(b.folders, key = { it.documentUri }, contentType = { "row" }) { e ->
             ListRow(b, e, wide)
             Hairline()
@@ -196,41 +210,69 @@ private fun ColumnHead(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun GalleryBody(b: ExplorerBody, state: LazyGridState, columns: Int, chips: @Composable (Dp) -> Unit, top: (LazyGridScope.() -> Unit)?, modifier: Modifier = Modifier) {
-    val palette = LocalPalette.current
-    val shelf = galleryShelf(b.view.tileSize)
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(columns),
-        state = state,
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(28.dp),
-        verticalArrangement = Arrangement.spacedBy(22.dp),
-        contentPadding = PaddingValues(top = EXPLORER_HEADER, bottom = 88.dp),
-    ) {
-        // Shorter than elsewhere since the shelves' wider row spacing already follows it.
-        item(key = "chips", span = { GridItemSpan(maxLineSpan) }, contentType = "chips") { chips(40.dp) }
-        top?.invoke(this)
-        if (b.folders.isNotEmpty()) {
-            item(span = { GridItemSpan(maxLineSpan) }, contentType = "folders") {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    b.folders.forEach { GalleryFolderChip(b, it) }
-                }
+    BoxWithConstraints(modifier) {
+        val column = (maxWidth - GALLERY_GAP * (columns - 1)) / columns
+        // Upright pages fill their column, though never much taller than the size's own shelf.
+        val shelf = minOf(galleryShelf(b.view.tileSize) * 1.15f, (column - 8.dp) / A4_RATIO + 14.dp)
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(columns),
+            state = state,
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.spacedBy(GALLERY_GAP),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
+            contentPadding = PaddingValues(top = EXPLORER_HEADER, bottom = 88.dp),
+        ) {
+            // Shorter than elsewhere since the shelves' wider row spacing already follows it.
+            item(key = "chips", span = { GridItemSpan(maxLineSpan) }, contentType = "chips") { chips(40.dp) }
+            top?.invoke(this)
+            if (b.pinned.isNotEmpty()) {
+                item(key = "pinned", span = { GridItemSpan(maxLineSpan) }, contentType = "pinned") { PinnedShelf(b, whole = true) }
             }
-        }
-        b.groups.forEach { g ->
-            if (g.label.isNotEmpty()) {
-                item(key = "group:${g.key}", span = { GridItemSpan(maxLineSpan) }, contentType = "header") {
-                    Row(Modifier.height(28.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        if (g.color != null) Box(Modifier.size(10.dp).clip(CircleShape).background(codeTint(g.color, palette)))
-                        Text(g.label, color = palette.text.toComposeColor(), fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                        Text("${g.items.size}", color = palette.textDim.toComposeColor(), fontSize = 13.sp)
-                        Hairline(Modifier.weight(1f).padding(start = 6.dp))
+            if (b.folders.isNotEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }, contentType = "folders") {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        b.folders.forEach { GalleryFolderChip(b, it) }
                     }
                 }
             }
-            items(g.items, key = { it.documentUri }, contentType = { if (it.isDir) "folder" else "page" }) { e ->
-                if (e.isDir) FolderCardTile(b, e) else GalleryItem(b, e, shelf)
+            b.groups.forEach { g ->
+                if (g.label.isNotEmpty()) {
+                    item(key = "group:${g.key}", span = { GridItemSpan(maxLineSpan) }, contentType = "header") {
+                        SectionHeader(g.label, g.items.size, g.color)
+                    }
+                }
+                items(g.items, key = { it.documentUri }, contentType = { if (it.isDir) "folder" else "page" }) { e ->
+                    if (e.isDir) FolderCardTile(b, e) else GalleryItem(b, e, shelf)
+                }
             }
         }
+    }
+}
+
+/** A gallery shelf's or a section's heading: its icon or colour, label and count over a hairline running to the edge. */
+@Composable
+private fun SectionHeader(label: String, count: Int, color: com.xnotes.core.model.Rgba? = null, icon: ImageVector? = null) {
+    val palette = LocalPalette.current
+    Row(Modifier.height(28.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (icon != null) Icon(icon, null, tint = palette.accent.toComposeColor(), modifier = Modifier.size(16.dp))
+        if (color != null) Box(Modifier.size(10.dp).clip(CircleShape).background(codeTint(color, palette)))
+        Text(label, color = palette.text.toComposeColor(), fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        Text("$count", color = palette.textDim.toComposeColor(), fontSize = 13.sp)
+        Hairline(Modifier.weight(1f).padding(start = 6.dp))
+    }
+}
+
+/** The top folder's pinned notes on a shelf of their own that scrolls sideways, closed by the heading over the folder's own items. */
+@Composable
+private fun PinnedShelf(b: ExplorerBody, whole: Boolean, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxWidth()) {
+        SectionHeader(stringResource(R.string.pinned), b.pinned.size, icon = XnotesIcons.pin)
+        Spacer(Modifier.height(12.dp))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            items(b.pinned, key = { it.documentUri }) { PinnedCard(b, it, whole) }
+        }
+        Spacer(Modifier.height(16.dp))
+        SectionHeader(b.restLabel, b.restCount)
     }
 }
 

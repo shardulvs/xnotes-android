@@ -16,6 +16,7 @@ data class DrawStyle(val color: Rgba, val width: Double) {
                 item.invalidate() // the ribbon's half-widths are baked from the config
             }
             is ShapeItem -> {
+                if (item.isFill) return // a dropped colour's area has no outline to restyle
                 // A fill in the outline's own colour is a tint of it and follows it, keeping its alpha;
                 // a fill given a colour of its own keeps that.
                 item.fillRgba = item.fillRgba?.let { f ->
@@ -28,6 +29,11 @@ data class DrawStyle(val color: Rgba, val width: Double) {
                 }
                 item.strokeRgba = color
                 item.strokeWidth = width
+            }
+            is TapeItem -> {
+                item.rgba = color
+                // A rectangle's width is its height, which the box's handles set, not a pen width.
+                if (item.mode != TapeMode.RECTANGLE) item.shape = item.shape.copy(width = width.coerceIn(TapeItem.MIN_WIDTH, TapeItem.MAX_WIDTH))
             }
             is ConnectorItem -> {
                 item.label = item.label?.let { l ->
@@ -49,9 +55,10 @@ data class DrawStyle(val color: Rgba, val width: Double) {
         /** [item]'s current style, or null when it has no colour and width to change. */
         fun of(item: CanvasItem): DrawStyle? = when (item) {
             is Stroke -> DrawStyle(item.config.rgba, item.config.baseWidth)
-            is ShapeItem -> DrawStyle(item.strokeRgba, item.strokeWidth)
+            is ShapeItem -> if (item.isFill) null else DrawStyle(item.strokeRgba, item.strokeWidth)
             is ConnectorItem -> DrawStyle(item.strokeRgba, item.strokeWidth)
             is TableItem -> DrawStyle(item.strokeRgba, item.strokeWidth)
+            is TapeItem -> DrawStyle(item.rgba, item.shape.width)
             else -> null
         }
 

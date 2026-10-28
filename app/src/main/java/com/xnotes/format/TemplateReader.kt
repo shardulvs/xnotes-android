@@ -4,6 +4,7 @@ import com.xnotes.core.geometry.Rect
 import com.xnotes.core.template.EllipseKind
 import com.xnotes.core.template.Expr
 import com.xnotes.core.template.Fit
+import com.xnotes.core.template.ImageFit
 import com.xnotes.core.template.ParamType
 import com.xnotes.core.template.RepeatAxis
 import com.xnotes.core.template.TAlign
@@ -13,6 +14,7 @@ import com.xnotes.core.template.TFont
 import com.xnotes.core.template.TNode
 import com.xnotes.core.template.TStyle
 import com.xnotes.core.template.Template
+import com.xnotes.core.template.TemplateKind
 import com.xnotes.core.template.TemplateParam
 import com.xnotes.core.template.TextPart
 import java.io.StringReader
@@ -105,6 +107,7 @@ object TemplateReader {
                 tags = (top["tags"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
                 params = params,
                 root = root,
+                kind = if (top["kind"] == "cover") TemplateKind.COVER else TemplateKind.PAGE,
             )
         }
 
@@ -195,8 +198,30 @@ object TemplateReader {
                 "polyline", "polygon" -> TNode.Poly(s, points(m["points"]), m["type"] == "polygon")
                 "path" -> path(m, s)
                 "text" -> text(m, s)
+                "image" -> image(m, s)
                 else -> null
             }
+        }
+
+        private fun image(m: Map<*, *>, s: TStyle): TNode.Image {
+            val src = (m["src"] as? String)?.takeIf { TemplatePackage.validSrc(it) } ?: throw Unusable()
+            val fit = when (m["fit"]) {
+                "cover" -> ImageFit.COVER
+                "stretch" -> ImageFit.STRETCH
+                else -> ImageFit.CONTAIN
+            }
+            val (px, py) = when (m["position"]) {
+                "top" -> 0.5 to 0.0
+                "bottom" -> 0.5 to 1.0
+                "left" -> 0.0 to 0.5
+                "right" -> 1.0 to 0.5
+                "top left" -> 0.0 to 0.0
+                "top right" -> 1.0 to 0.0
+                "bottom left" -> 0.0 to 1.0
+                "bottom right" -> 1.0 to 1.0
+                else -> 0.5 to 0.5
+            }
+            return TNode.Image(s, src, len(m, "x", Expr.ZERO), len(m, "y", Expr.ZERO), len(m, "w", Expr.FULL), len(m, "h", Expr.FULL), fit, px, py)
         }
 
         private fun repeat(m: Map<*, *>, s: TStyle, depth: Int): TNode.Repeat {

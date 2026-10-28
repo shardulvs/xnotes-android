@@ -3,6 +3,8 @@ package com.xnotes.format
 import com.xnotes.core.geometry.Flip
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
+import com.xnotes.core.model.AudioData
+import com.xnotes.core.model.AudioItem
 import com.xnotes.core.model.Bookmark
 import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.ConnectorEnd
@@ -16,16 +18,24 @@ import com.xnotes.core.model.Page
 import com.xnotes.core.model.PagePattern
 import com.xnotes.core.model.PageTemplates
 import com.xnotes.core.model.PageSize
+import com.xnotes.core.model.PageSizeChoice
 import com.xnotes.core.model.PageMargins
 import com.xnotes.core.model.PageStyle
+import com.xnotes.core.model.PageTurn
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.Routing
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.ShapeLabel
 import com.xnotes.core.model.TableItem
 import com.xnotes.core.model.Stroke
+import com.xnotes.core.model.SyncMark
+import com.xnotes.core.model.TapeItem
+import com.xnotes.core.model.TapeMode
+import com.xnotes.core.model.TapePattern
+import com.xnotes.core.model.TapeShape
 import com.xnotes.core.model.TextItem
 import com.xnotes.core.model.TextStyle
+import com.xnotes.core.model.keepBorrowedTemplateSettings
 import com.xnotes.core.pal.FontFace
 import com.xnotes.core.pal.ImageCodec
 import com.xnotes.core.pal.TextMeasurer
@@ -37,6 +47,7 @@ import com.xnotes.core.shapes.Elbow
 import com.xnotes.core.shapes.FreePath
 import com.xnotes.core.shapes.Head
 import com.xnotes.core.shapes.ShapeKind
+import com.xnotes.core.tools.InkPalette
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
 import com.xnotes.core.tools.ToolDefaults
@@ -156,6 +167,8 @@ class DocumentCodec(
         val started = System.nanoTime()
         // Named up front by the same walk the manifest makes, so the entries can go in before it.
         val assets = imageAssets(doc)
+        // Walked once for the whole save: a recording's file can be swapped for its .m4a meanwhile.
+        val audio = audioAssets(doc)
         ZipOutputStream(out).use { zos ->
             // ALWAYS LEVEL 1. Do not put this back to the default 6, ever, however tempting the
             // file size looks. A manifest is nearly all sample digits and they compress about as
@@ -167,14 +180,12 @@ class DocumentCodec(
             // manifest in place: nothing sits behind it, so it can grow or shrink without moving a
             // byte of the (possibly enormous) PDF ahead of it. See [ZipTail]. Entry order means
             // nothing to a reader, which matches entries by name, so old builds read this fine.
-            // Each image streams straight from its temp file, never as a byte[], so a note full of
-            // large images doesn't materialize them all in the heap on every save.
-            for ((name, file) in assets) zos.putStored(name, file, isCancelled)
-            // The source PDF streams straight from disk for the same reason. [isCancelled] lets a
-            // long copy abort (e.g. import cancel).
-            doc.pdfFile?.let { zos.putStored("assets/source.pdf", it, isCancelled) }
+            // Each image, packaged template and the source PDF streams straight from its file, never
+            // as a byte[], so a note full of large assets doesn't materialize them in the heap on
+            // every save. [isCancelled] lets a long copy abort (e.g. import cancel).
+            for ((name, file) in storedEntries(doc, assets, audio)) zos.putStored(name, file, isCancelled)
             val assetsDone = System.nanoTime()
-            writeTail(zos, doc, assets, timing)
+            writeTail(zos, doc, assets, timing, audio)
             timing?.assetsMs = (assetsDone - started) / 1_000_000L
             timing?.manifestMs = (System.nanoTime() - assetsDone) / 1_000_000L
         }
@@ -190,6 +201,7 @@ class DocumentCodec(
         doc: Document,
         assets: List<Pair<String, File>>,
         timing: WriteTiming? = null,
+        audio: List<Pair<String, File>> = audioAssets(doc),
     ) {
         // The flow lives in its own ODF entry, written only when non-empty (or carrying
         // custom defaults) so untouched notes stay byte-identical to old readers.
@@ -209,7 +221,7 @@ class DocumentCodec(
         zos.putNextEntry(ZipEntry("manifest.json").apply { method = ZipEntry.DEFLATED })
         val probe = DeflateProbe(zos)
         val w = java.io.BufferedWriter(java.io.OutputStreamWriter(probe, Charsets.UTF_8), 32 * 1024)
-        writeManifest(JsonWrite(w), doc, assets)
+        writeManifest(JsonWrite(w), doc, assets, audio)
         w.flush()
         zos.closeEntry()
         timing?.deflateMs = probe.nanos / 1_000_000L
@@ -218,14 +230,34 @@ class DocumentCodec(
 
     /** [page]'s map into PDF user space: its source page's, else its own points with y up. */
     private fun geometryOf(doc: Document, page: Page): PdfPageGeometry =
-        page.pdfPage?.let { pdfGeometry(doc, it) } ?: PdfPageGeometry.flipped(page.height * 72.0 / doc.dpi)
+        page.pdfKey?.let { pdfGeometry(doc, it) } ?: PdfPageGeometry.flipped(page.height * 72.0 / doc.dpi)
 
     /** The embedded templates [doc]'s styles name, in key order; built-in rulings need none. */
-    internal fun usedTemplates(doc: Document): List<Pair<String, String>> {
+    internal fun usedTemplates(doc: Document): List<Pair<String, String>> =
+        usedTemplateKeys(doc).mapNotNull { k -> doc.templates[k]?.let { k to it } }
+
+    private fun usedTemplateKeys(doc: Document): Set<String> {
         val keys = sortedSetOf<String>()
         doc.style.template?.let { keys.add(it) }
         for (page in doc.pages) page.style.template?.let { keys.add(it) }
-        return keys.mapNotNull { k -> doc.templates[k]?.let { k to it } }
+        return keys
+    }
+
+    /**
+     * Every STORED entry ahead of the tail, in the order it is written: [images], the recordings,
+     * the packaged templates the styles name, then the source PDF. An in-place save checks a bundle
+     * against this.
+     */
+    internal fun storedEntries(
+        doc: Document,
+        images: List<Pair<String, File>>,
+        audio: List<Pair<String, File>> = audioAssets(doc),
+    ): List<Pair<String, File>> {
+        val out = ArrayList(images)
+        out.addAll(audio)
+        for (key in usedTemplateKeys(doc)) doc.templatePackages[key]?.let { out.add("$TEMPLATE_ASSET$key$TEMPLATE_EXT" to it) }
+        doc.pdfFile?.let { out.add("assets/source.pdf" to it) }
+        return out
     }
 
     /**
@@ -247,9 +279,24 @@ class DocumentCodec(
         return out
     }
 
+    /**
+     * The recordings' entries, walked and named like [imageAssets]': the manifest takes them
+     * positionally from this list. Each keeps its own format's extension, which a reader reads back.
+     */
+    internal fun audioAssets(doc: Document): List<Pair<String, File>> {
+        val out = ArrayList<Pair<String, File>>()
+        for (page in doc.pages) {
+            for (item in page.items) {
+                if (item !is AudioItem) continue
+                out.add("$AUDIO_ASSET%03d.%s".format(out.size, audioExt(item.audio.ext)) to item.audio.file)
+            }
+        }
+        return out
+    }
+
     // --- model -> streaming json ---
 
-    private fun writeManifest(j: JsonWrite, doc: Document, assets: List<Pair<String, File>>) {
+    private fun writeManifest(j: JsonWrite, doc: Document, assets: List<Pair<String, File>>, audio: List<Pair<String, File>>) {
         j.beginObject()
         j.name("format").value(FORMAT)
         j.name("version").value(VERSION)
@@ -267,10 +314,12 @@ class DocumentCodec(
         j.endArray()
         j.name("pages").beginArray()
         val nextAsset = intArrayOf(0)
-        for (page in doc.pages) writePage(j, page, assets, nextAsset)
+        val nextAudio = intArrayOf(0)
+        for (page in doc.pages) writePage(j, page, assets, nextAsset, audio, nextAudio)
         j.endArray()
         writeStyle(j, doc.style)
         writeMargins(j, doc.margins)
+        doc.newPageSize?.let { writeNewPageSize(j, it) }
         j.endObject()
     }
 
@@ -279,12 +328,16 @@ class DocumentCodec(
         page: Page,
         assets: List<Pair<String, File>>,
         nextAsset: IntArray,
+        audio: List<Pair<String, File>>,
+        nextAudio: IntArray,
     ) {
         j.beginObject()
         j.name("width").value(page.width)
         j.name("height").value(page.height)
         j.name("pdf_page")
         page.pdfPage?.let { j.value(it) } ?: j.nullValue()
+        if (page.pdfPage != null && page.pdfTurn != 0) j.name("pdf_turn").value(page.pdfTurn)
+        if (page.cover) j.name("cover").value(true)
         j.name("items").beginArray()
         // Ids only for what a connector on this page glues to; a page without connectors writes none.
         val ids = GlueIds.of(page.items)
@@ -297,10 +350,15 @@ class DocumentCodec(
                     val name = assets.getOrNull(nextAsset[0]++)?.first ?: continue
                     writeImage(j, item, name, ids[item])
                 }
+                is AudioItem -> {
+                    val name = audio.getOrNull(nextAudio[0]++)?.first ?: continue
+                    writeAudio(j, item, name)
+                }
                 is TextItem -> writeText(j, item, ids[item])
                 is ShapeItem -> writeShape(j, item, ids[item])
                 is ConnectorItem -> writeConnector(j, item, ids)
                 is TableItem -> writeTable(j, item)
+                is TapeItem -> writeTape(j, item)
                 else -> {} // unrecognized kind: not written
             }
         }
@@ -361,8 +419,10 @@ class DocumentCodec(
         if (s.smoothScale != 1.0) j.name("smooth_scale").value(s.smoothScale)
         // Straight-line strokes must reload un-smoothed, else the EMA pulls their far end inward.
         if (s.straight) j.name("straight").value(true)
+        s.sync?.let { writeSync(j, it) }
         if (s.locked) j.name("locked").value(true)
         s.link?.let { j.name("link").value(it) }
+        s.group?.let { j.name("group").value(it) }
         j.endObject()
     }
 
@@ -379,9 +439,31 @@ class DocumentCodec(
         if (item.orientation != 0) j.name("orientation").value(item.orientation)
         if (item.angle != 0.0) j.name("angle").value(item.angle)
         if (item.flip != Flip.NONE) j.name("flip").value(item.flip.id)
+        item.sync?.let { writeSync(j, it) }
         if (item.locked) j.name("locked").value(true)
         item.link?.let { j.name("link").value(it) }
+        item.group?.let { j.name("group").value(it) }
         j.endObject()
+    }
+
+    private fun writeAudio(j: JsonWrite, a: AudioItem, assetName: String) {
+        j.beginObject()
+        j.name("kind").value(AudioItem.KIND)
+        j.name("asset").value(assetName)
+        j.name("rect").beginArray().value(a.rect.x).value(a.rect.y).value(a.rect.w).value(a.rect.h).endArray()
+        j.name("rid").value(a.rid)
+        j.name("name").value(a.name)
+        j.name("duration_ms").value(a.audio.durationMs)
+        if (a.audio.peaks.isNotEmpty()) j.name("peaks").value(java.util.Base64.getEncoder().encodeToString(a.audio.peaks))
+        if (a.locked) j.name("locked").value(true)
+        a.group?.let { j.name("group").value(it) }
+        j.endObject()
+    }
+
+    /** Only on an item added during a recording, so every other item writes exactly as before. */
+    private fun writeSync(j: JsonWrite, m: SyncMark) {
+        j.name("rec").value(m.rid)
+        j.name("rec_ms").value(m.ms)
     }
 
     private fun writeText(j: JsonWrite, t: TextItem, id: Int?) {
@@ -404,8 +486,10 @@ class DocumentCodec(
         if (t.strike) j.name("strike").value(true)
         if (t.align != com.xnotes.core.pal.HAlign.LEFT) j.name("align").value(t.align.name.lowercase())
         if (t.math) j.name("math").value(true)
+        t.sync?.let { writeSync(j, it) }
         if (t.locked) j.name("locked").value(true)
         t.link?.let { j.name("link").value(it) }
+        t.group?.let { j.name("group").value(it) }
         j.endObject()
     }
 
@@ -413,10 +497,15 @@ class DocumentCodec(
         // A shape older readers cannot draw goes down as the polygon they can, its real geometry after.
         val standIn = s.legacyOutline()
         val drawn = standIn?.let { Rect.bounding(it) }
-        // Drawn text has no shape an older reader could stand in, so it goes under a kind they skip.
-        val glyphs = s.shape == ShapeKind.GLYPHS
+        // Drawn text and a dropped colour's area have no shape an older reader could stand in, so each goes under a kind they skip.
+        val ownKind = when (s.shape) {
+            ShapeKind.GLYPHS -> ShapeItem.GLYPHS_KIND
+            ShapeKind.FILL -> ShapeItem.FILL_KIND
+            else -> null
+        }
+        val own = ownKind != null
         j.beginObject()
-        j.name("kind").value(if (glyphs) ShapeItem.GLYPHS_KIND else ShapeItem.KIND)
+        j.name("kind").value(ownKind ?: ShapeItem.KIND)
         id?.let { j.name("id").value(it) }
         j.name("shape").value(s.legacyId())
         j.name("start").beginArray().value(drawn?.left ?: s.start.x).value(drawn?.top ?: s.start.y).endArray()
@@ -427,12 +516,12 @@ class DocumentCodec(
         j.name("fill_rgba")
         s.fillRgba?.let { writeRgba(j, it) } ?: j.nullValue()
         // Polygon/polyline carry their vertices (absolute content px); other kinds omit them.
-        (standIn ?: s.vertices()?.takeUnless { glyphs })?.let { verts ->
+        (standIn ?: s.vertices()?.takeUnless { own })?.let { verts ->
             j.name("points").beginArray()
             for (p in verts) j.beginArray().value(p.x).value(p.y).endArray()
             j.endArray()
         }
-        if (standIn != null || glyphs) {
+        if (standIn != null || own) {
             // A mirrored shape names its kind under a key readers before flips skip, so they keep the stand-in.
             if (!s.isFree || s.shape == ShapeKind.FUNCTION || s.shape == ShapeKind.SPLINE) j.name(if (s.flip == Flip.NONE) "geom" else "flip_geom").value(s.shape.id)
             if (s.flip != Flip.NONE) j.name("flip").value(s.flip.id)
@@ -440,7 +529,7 @@ class DocumentCodec(
             j.name("rect").beginArray().value(f.x).value(f.y).value(f.w).value(f.h).endArray()
             if (s.rotation != 0.0) j.name("angle").value(s.rotation)
             // A spline's points are not the line its stand-in draws, so they are always written.
-            s.path?.takeIf { s.isFree && (glyphs || s.shape == ShapeKind.SPLINE || !FreePath.isVertexList(it)) }?.let { j.name("path").value(FreePath.toSvg(it)) }
+            s.path?.takeIf { s.isFree && (own || s.shape == ShapeKind.SPLINE || !FreePath.isVertexList(it)) }?.let { j.name("path").value(FreePath.toSvg(it)) }
         }
         if (s.n != s.shape.defaultN) j.name("n").value(s.n)
         if (s.headStart != s.shape.defaultHeadStart) j.name("head_start").value(s.headStart.id)
@@ -481,8 +570,10 @@ class DocumentCodec(
                 j.name("function_ymax").value(it.yMax)
             }
         }
+        s.sync?.let { writeSync(j, it) }
         if (s.locked) j.name("locked").value(true)
         s.link?.let { j.name("link").value(it) }
+        s.group?.let { j.name("group").value(it) }
         j.endObject()
     }
 
@@ -497,6 +588,7 @@ class DocumentCodec(
         j.name("stroke_width").value(t.strokeWidth)
         if (t.locked) j.name("locked").value(true)
         t.link?.let { j.name("link").value(it) }
+        t.group?.let { j.name("group").value(it) }
         j.endObject()
     }
 
@@ -505,6 +597,24 @@ class DocumentCodec(
      * then as itself: its routing, its two ends (glued ones naming their item's id and point) and its
      * route. Its style and label are a shape's.
      */
+    /** A tape: its mode, the points it runs along and its width, colour and pattern. Peeling is never saved. */
+    private fun writeTape(j: JsonWrite, t: TapeItem) {
+        val s = t.shape
+        j.beginObject()
+        j.name("kind").value(TapeItem.KIND)
+        j.name("mode").value(s.mode.id)
+        j.name("points").beginArray()
+        for (p in s.points) j.beginArray().value(p.x).value(p.y).endArray()
+        j.endArray()
+        j.name("width").value(s.width)
+        j.name("rgba")
+        writeRgba(j, t.rgba)
+        if (t.pattern != TapePattern.SOLID) j.name("pattern").value(t.pattern.id)
+        if (t.locked) j.name("locked").value(true)
+        t.group?.let { j.name("group").value(it) }
+        j.endObject()
+    }
+
     private fun writeConnector(j: JsonWrite, c: ConnectorItem, ids: Map<CanvasItem, Int>) {
         val line = PathFlattener.flatten(c.body(), STAND_IN_FLATTEN)
         val drawn = Rect.bounding(line)
@@ -559,7 +669,9 @@ class DocumentCodec(
             if (c.labelAt != 0.5) j.name("at").value(c.labelAt)
             j.endObject()
         }
+        c.sync?.let { writeSync(j, it) }
         if (c.locked) j.name("locked").value(true)
+        c.group?.let { j.name("group").value(it) }
         j.endObject()
     }
 
@@ -630,6 +742,16 @@ class DocumentCodec(
     var forkShapesRead = 0
         private set
 
+    /** The size of pages added to the note, written only when it sets one (else they copy the page before). */
+    private fun writeNewPageSize(j: JsonWrite, c: PageSizeChoice) {
+        j.name("new_page_size").beginObject()
+        j.name("size").value(c.size.name.lowercase())
+        j.name("orientation").value(c.orientation.toName())
+        j.name("custom_width_mm").value(c.customWidthMm)
+        j.name("custom_height_mm").value(c.customHeightMm)
+        j.endObject()
+    }
+
     /**
      * Read a `.xnote` from [input]. When [pdfDir] is non-null an embedded source PDF, and when
      * [imageDir] is non-null the inserted images, are streamed out to fresh temp files in those dirs
@@ -647,7 +769,9 @@ class DocumentCodec(
         var flowBytes: ByteArray? = null
         var markupBytes: ByteArray? = null
         val templates = HashMap<String, String>()
+        val packages = HashMap<String, File>()
         val imageFiles = HashMap<String, File>()
+        val audioFiles = HashMap<String, File>()
         var pdfFile: File? = null
         ZipInputStream(input).use { zis ->
             var entry: ZipEntry? = zis.nextEntry
@@ -688,6 +812,23 @@ class DocumentCodec(
                             imageFiles[name] = f
                             timing?.assetsMs += (System.nanoTime() - started) / 1_000_000L
                         }
+                    } else if (name.startsWith(AUDIO_ASSET)) {
+                        // A recording streams to disk beside the images; it is played from the file.
+                        if (imageDir != null) {
+                            val started = System.nanoTime()
+                            val f = File.createTempFile("aud", null, imageDir)
+                            FileOutputStream(f).use { zis.copyTo(it) }
+                            audioFiles[name] = f
+                            timing?.assetsMs += (System.nanoTime() - started) / 1_000_000L
+                        }
+                    } else if (name.startsWith(TEMPLATE_ASSET) && name.endsWith(TEMPLATE_EXT)) {
+                        // A packaged template goes to disk like an image, so its pictures never sit in the heap.
+                        val key = name.substring(TEMPLATE_ASSET.length, name.length - TEMPLATE_EXT.length)
+                        if (imageDir != null && TEMPLATE_KEY.matches(key)) {
+                            val f = File.createTempFile("tpl", TEMPLATE_EXT, imageDir)
+                            FileOutputStream(f).use { zis.copyTo(it) }
+                            packages[key] = f
+                        }
                     } else if (name == FlowXml.ENTRY_NAME) {
                         flowBytes = zis.readBytes()
                     } else if (name == MarkupsXfdf.ENTRY_NAME) {
@@ -710,8 +851,10 @@ class DocumentCodec(
         val doc = Document(dpi = m.dpi)
         doc.created = m.created
         doc.templates = templates
+        doc.templatePackages = packages
         doc.style = m.style
         doc.margins = m.margins
+        doc.newPageSize = m.newPageSize
 
         if (m.hasPdf) {
             doc.pdfFile = pdfFile
@@ -727,6 +870,7 @@ class DocumentCodec(
             return doc
         }
         doc.pages.addAll(m.pages)
+        if (m.writer < OWN_TEMPLATE_SETTINGS_SINCE) doc.keepBorrowedTemplateSettings()
         markupBytes?.let { MarkupsXfdf.readInto(doc.pages, it) }
 
         // Image entries stream out of the zip after the manifest, so image items materialize only
@@ -734,15 +878,21 @@ class DocumentCodec(
         for ((page, specs, glue) in m.pageImages) {
             var dropped = 0
             for (spec in specs) {
-                val item = materializeImage(spec, imageFiles)
+                val item = when (spec) {
+                    is PendingImage -> materializeImage(spec, imageFiles)
+                    is PendingAudio -> materializeAudio(spec, audioFiles, m.dpi)
+                }
                 if (item == null) {
                     dropped++
                 } else {
                     page.items.add(spec.index - dropped, item)
-                    glue.named(item, spec.id)
+                    if (spec is PendingImage) glue.named(item, spec.id)
                 }
             }
         }
+        // A recording whose item did not survive leaves its file behind; nothing else will delete it.
+        val used = m.pageImages.flatMap { it.second }.filterIsInstance<PendingAudio>().map { it.asset }.toSet()
+        for ((name, f) in audioFiles) if (name !in used) f.delete()
         // Every page's items are in, so connectors can glue to whatever their ends name.
         for (glue in m.pageGlue) glue.resolve()
 
@@ -780,16 +930,19 @@ class DocumentCodec(
         var hasPdf = false
         var style = PageStyle()
         var margins = PageMargins()
+        var newPageSize: PageSizeChoice? = null
         val bookmarks = ArrayList<Bookmark>()
         val pages = ArrayList<Page>()
-        val pageImages = ArrayList<Triple<Page, List<PendingImage>, GlueRead>>()
+        val pageImages = ArrayList<Triple<Page, List<Pending>, GlueRead>>()
         val pageGlue = ArrayList<GlueRead>()
     }
 
-    /** An image item parsed before its asset entry has streamed out of the zip. */
+    /** An item parsed before its asset entry has streamed out of the zip, and the slot it goes back to. */
+    private sealed class Pending(val index: Int, val asset: String)
+
     private class PendingImage(
-        val index: Int,
-        val asset: String,
+        index: Int,
+        asset: String,
         val rect: Rect?,
         val srcW: Int,
         val srcH: Int,
@@ -799,7 +952,21 @@ class DocumentCodec(
         val locked: Boolean,
         val id: Int?,
         val link: String?,
-    )
+        val sync: SyncMark?,
+        val group: Int? = null,
+    ) : Pending(index, asset)
+
+    private class PendingAudio(
+        index: Int,
+        asset: String,
+        val rect: Rect?,
+        val rid: Int,
+        val name: String,
+        val durationMs: Int,
+        val peaks: ByteArray,
+        val locked: Boolean,
+        val group: Int? = null,
+    ) : Pending(index, asset)
 
     /**
      * A note's page count, PDF flag and created time, read from [ch] through the zip's central directory
@@ -863,6 +1030,7 @@ class DocumentCodec(
                 "has_pdf" -> m.hasPdf = boolOr(p, false)
                 "style" -> m.style = parseStyle(p)
                 "margins" -> m.margins = parseMargins(p)
+                "new_page_size" -> m.newPageSize = parseNewPageSize(p)
                 "bookmarks" -> parseBookmarks(p, m.bookmarks)
                 "pages" -> parsePages(p, m)
                 else -> p.skipValue()
@@ -908,10 +1076,12 @@ class DocumentCodec(
             var width = fallbackW
             var height = fallbackH
             var pdfPage: Int? = null
+            var pdfTurn = 0
+            var cover = false
             var style = PageStyle()
             var margins = PageMargins()
             val items = mutableListOf<CanvasItem>()
-            val pending = ArrayList<PendingImage>()
+            val pending = ArrayList<Pending>()
             val glue = GlueRead()
             p.beginObject()
             while (p.hasNext()) {
@@ -919,6 +1089,8 @@ class DocumentCodec(
                     "width" -> width = doubleOr(p, fallbackW)
                     "height" -> height = doubleOr(p, fallbackH)
                     "pdf_page" -> pdfPage = intOrNull(p)
+                    "pdf_turn" -> pdfTurn = intOrNull(p) ?: 0
+                    "cover" -> cover = boolOr(p, false)
                     "style" -> style = parseStyle(p)
                     "margins" -> margins = parseMargins(p)
                     "items" -> parseItems(p, items, pending, glue)
@@ -933,7 +1105,12 @@ class DocumentCodec(
                 height = prev?.height ?: fallbackH
                 pdfPage = null
             }
-            val page = Page(width = width, height = height, items = items, pdfPage = pdfPage, style = style, margins = margins)
+            val page = Page(
+                width = width, height = height, items = items, pdfPage = pdfPage, style = style, margins = margins,
+                pdfTurn = if (pdfPage == null) 0 else PageTurn.normalize(pdfTurn),
+            )
+            // Only the first page can be the cover; a flag anywhere else is dropped.
+            page.cover = cover && m.pages.isEmpty()
             m.pages.add(page)
             m.pageGlue.add(glue)
             if (pending.isNotEmpty()) m.pageImages.add(Triple(page, pending, glue))
@@ -941,7 +1118,7 @@ class DocumentCodec(
         p.endArray()
     }
 
-    private fun parseItems(p: JsonPull, items: MutableList<CanvasItem>, pending: MutableList<PendingImage>, glue: GlueRead) {
+    private fun parseItems(p: JsonPull, items: MutableList<CanvasItem>, pending: MutableList<Pending>, glue: GlueRead) {
         if (p.peek() != JsonPull.Token.BEGIN_ARRAY) return p.skipValue()
         p.beginArray()
         while (p.hasNext()) parseItem(p, items, pending, glue)
@@ -952,6 +1129,7 @@ class DocumentCodec(
     private class ItemScratch {
         var locked = false
         var link: String? = null
+        var group: Int? = null
         var kind: String? = null
         var id: Int? = null
         var connector: ConnectorScratch? = null
@@ -1008,6 +1186,15 @@ class DocumentCodec(
         var functionYMax: Double? = null
         var tableCols: List<Double>? = null
         var tableRows: List<Double>? = null
+        var rid = 0
+        var name = ""
+        var durationMs = 0
+        var peaks: ByteArray? = null
+        var rec: Int? = null
+        var recMs = 0
+        var mode: String? = null
+        var pattern: String? = null
+        var tapeWidth: Double? = null
     }
 
     /** Stroke config fields as written; null = absent, so defaults resolve exactly as before. */
@@ -1029,7 +1216,7 @@ class DocumentCodec(
         var highlighterInverse: Boolean? = null
     }
 
-    private fun parseItem(p: JsonPull, items: MutableList<CanvasItem>, pending: MutableList<PendingImage>, glue: GlueRead) {
+    private fun parseItem(p: JsonPull, items: MutableList<CanvasItem>, pending: MutableList<Pending>, glue: GlueRead) {
         if (p.peek() != JsonPull.Token.BEGIN_OBJECT) return p.skipValue()
         val s = ItemScratch()
         p.beginObject()
@@ -1051,7 +1238,7 @@ class DocumentCodec(
                 "orientation" -> s.orientation = intOr(p, 0)
                 "angle" -> s.angle = doubleOr(p, 0.0)
                 "pos" -> s.pos = ptOrNull(p)
-                "width" -> s.width = doubleOr(p, TextItem.DEFAULT_WIDTH)
+                "width" -> s.width = doubleOr(p, TextItem.DEFAULT_WIDTH).also { s.tapeWidth = it }
                 "height" -> s.height = doubleOr(p, 0.0)
                 "text" -> s.text = stringOr(p, "")
                 "rgba" -> s.rgba = rgbaOrNull(p)
@@ -1093,11 +1280,21 @@ class DocumentCodec(
                 "rows" -> s.tableRows = doubleListOrNull(p)
                 "locked" -> s.locked = boolOr(p, false)
                 "link" -> s.link = stringOr(p, "").ifEmpty { null }
+                "group" -> s.group = intOrNull(p)
+                "rid" -> s.rid = intOr(p, 0)
+                "name" -> s.name = stringOr(p, "")
+                "duration_ms" -> s.durationMs = intOr(p, 0)
+                "peaks" -> s.peaks = stringOrNull(p)?.let { runCatching { java.util.Base64.getDecoder().decode(it) }.getOrNull() }
+                "rec" -> s.rec = intOrNull(p)
+                "rec_ms" -> s.recMs = intOr(p, 0)
+                "mode" -> s.mode = stringOrNull(p)
+                "pattern" -> s.pattern = stringOrNull(p)
                 else -> p.skipValue()
             }
         }
         p.endObject()
         val before = items.size
+        val sync = s.rec?.let { SyncMark(it, s.recMs) }
         when (s.kind) {
             Stroke.KIND -> items.add(buildStroke(s))
             ImageItem.KIND -> {
@@ -1106,9 +1303,15 @@ class DocumentCodec(
                     pending.add(
                         PendingImage(
                             items.size + pending.size, asset, s.rect, s.srcW, s.srcH,
-                            s.orientation, s.angle, Flip.fromId(s.flip), s.locked, s.id, s.link,
+                            s.orientation, s.angle, Flip.fromId(s.flip), s.locked, s.id, s.link, sync, s.group,
                         ),
                     )
+                }
+            }
+            AudioItem.KIND -> {
+                val asset = s.asset
+                if (!asset.isNullOrEmpty()) {
+                    pending.add(PendingAudio(items.size + pending.size, asset, s.rect, s.rid, s.name, s.durationMs, s.peaks ?: ByteArray(0), s.locked, s.group))
                 }
             }
             TextItem.KIND -> items.add(
@@ -1133,11 +1336,12 @@ class DocumentCodec(
                     math = s.textMath,
                 ),
             )
-            ShapeItem.KIND, ShapeItem.GLYPHS_KIND -> {
+            ShapeItem.KIND, ShapeItem.GLYPHS_KIND, ShapeItem.FILL_KIND -> {
                 val c = s.connector
                 items.add(if (c != null && s.kind == ShapeItem.KIND) buildConnector(s, c, glue) else buildShape(s))
             }
             TableItem.KIND -> buildTable(s)?.let { items.add(it) }
+            TapeItem.KIND -> buildTape(s)?.let { items.add(it) }
             else -> {} // unrecognized kind: skipped (forgiving)
         }
         if (items.size > before) glue.named(items[before], s.id)
@@ -1145,6 +1349,20 @@ class DocumentCodec(
         if (s.locked && items.size > before) items[before].locked = true
         // Links are additive too; images carry theirs on the PendingImage since they materialize later.
         if (s.link != null && items.size > before) items[before].link = s.link
+        if (s.group != null && items.size > before) items[before].group = s.group
+        if (sync != null && items.size > before) items[before].sync = sync
+    }
+
+    /** A tape, or null without the points it runs along. A strip or a rectangle keeps its axis's two ends. */
+    private fun buildTape(s: ItemScratch): TapeItem? {
+        val mode = TapeMode.fromId(s.mode)
+        val points = s.points ?: return null
+        val width = s.tapeWidth?.takeIf { it.isFinite() && it > 0.0 } ?: TapeItem.DEFAULT_WIDTH
+        return TapeItem(
+            TapeShape(mode, if (mode == TapeMode.FREEHAND) points else points.take(2), width),
+            s.rgba ?: InkPalette.DEFAULT,
+            TapePattern.fromId(s.pattern),
+        )
     }
 
     private fun buildStroke(s: ItemScratch): Stroke {
@@ -1498,6 +1716,31 @@ class DocumentCodec(
         return PageMargins(clamp(left), clamp(top), clamp(right), clamp(bottom))
     }
 
+    /** The note's size for added pages; null (copy the page before) when absent or naming a size this build lacks. */
+    private fun parseNewPageSize(p: JsonPull): PageSizeChoice? {
+        if (p.peek() != JsonPull.Token.BEGIN_OBJECT) {
+            p.skipValue()
+            return null
+        }
+        var size: PageSize? = null
+        var orientation = Orientation.PORTRAIT
+        var width = PageSize.A4.shortMm
+        var height = PageSize.A4.longMm
+        p.beginObject()
+        while (p.hasNext()) {
+            when (p.nextName()) {
+                "size" -> size = stringOrNull(p)?.let { name -> PageSize.entries.firstOrNull { it.name.equals(name, ignoreCase = true) } }
+                "orientation" -> orientation = Orientation.fromName(stringOrNull(p))
+                "custom_width_mm" -> width = doubleOrNull(p)?.takeIf { it.isFinite() } ?: width
+                "custom_height_mm" -> height = doubleOrNull(p)?.takeIf { it.isFinite() } ?: height
+                else -> p.skipValue()
+            }
+        }
+        p.endObject()
+        fun clamp(mm: Double) = mm.coerceIn(PageSize.CUSTOM_MIN_MM, PageSize.CUSTOM_MAX_MM)
+        return size?.let { PageSizeChoice(it, orientation, clamp(width), clamp(height)) }
+    }
+
     private fun materializeImage(spec: PendingImage, imageFiles: Map<String, File>): ImageItem? {
         val file = imageFiles[spec.asset] ?: return null
         var w = spec.srcW
@@ -1510,7 +1753,23 @@ class DocumentCodec(
         }
         val rect = spec.rect ?: Rect(0.0, 0.0, w.toDouble(), h.toDouble())
         return ImageItem(ImageData(file, w, h), rect, spec.orientation, spec.angle, spec.flip)
-            .also { it.locked = spec.locked; it.link = spec.link }
+            .also {
+                it.locked = spec.locked
+                it.link = spec.link
+                it.sync = spec.sync
+                it.group = spec.group
+            }
+    }
+
+    private fun materializeAudio(spec: PendingAudio, audioFiles: Map<String, File>, dpi: Int): AudioItem? {
+        val file = audioFiles[spec.asset] ?: return null
+        val rect = spec.rect?.takeIf { it.w > 0.0 && it.h > 0.0 } ?: AudioItem.boxAt(Pt.ZERO, dpi).let { it.translate(-it.x, -it.y) }
+        val ext = audioExt(spec.asset.substringAfterLast('.', ""))
+        return AudioItem(AudioData(file, ext, spec.durationMs, spec.peaks), rect, spec.name, spec.rid, textMeasurer)
+            .also {
+                it.locked = spec.locked
+                it.group = spec.group
+            }
     }
 
     // --- streaming value helpers (mirroring org.json's forgiving opt* coercions) ---
@@ -1655,11 +1914,14 @@ class DocumentCodec(
 
         /** The com.xnotes versionCode stamped into manifests this build writes ("writer"), kept
          *  in step with the release that carries it. Old readers ignore the unknown key. */
-        const val WRITER = 48
+        const val WRITER = 67
 
         /** Writers at/after this versionCode reduce ink samples at pen-up; ink from older
          *  writers (or files with no "writer" at all) is compacted once at load instead. */
         private const val SIMPLIFIED_SINCE = 43
+
+        /** Pages in notes from writers before this versionCode borrowed template settings; they are copied in at load. */
+        private const val OWN_TEMPLATE_SETTINGS_SINCE = 67
 
         private const val NOT_XNOTE = "Not an xnotes document"
 
@@ -1667,6 +1929,15 @@ class DocumentCodec(
         private const val STAND_IN_FLATTEN = 0.25
 
         private const val TEMPLATE_DIR = "templates/"
+
+        /** A recording is a STORED asset too, its format's extension after the number. */
+        private const val AUDIO_ASSET = "assets/audio-"
+
+        /** [ext] as an entry may carry it: short and plain, or the generic "m4a". */
+        internal fun audioExt(ext: String): String = ext.lowercase().takeIf { Regex("[a-z0-9]{1,5}").matches(it) } ?: "m4a"
+
+        /** A packaged template is a STORED asset, a name older readers skip rather than misread as text. */
+        private const val TEMPLATE_ASSET = "assets/template-"
         private const val TEMPLATE_EXT = ".xtemplate"
 
         /** What a template key may look like: it becomes part of a zip entry name. */

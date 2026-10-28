@@ -44,7 +44,7 @@ class TemplateEval(private val outliner: GlyphOutliner? = null) {
         } catch (_: Full) {
             // Past the shape cap (SPEC §11): keep what was laid out so far.
         }
-        return TemplateOutput(run.layers.map { (c, prims) -> TemplateLayer(c, prims) })
+        return TemplateOutput(run.layers)
     }
 
     private object Full : RuntimeException() {
@@ -79,7 +79,9 @@ class TemplateEval(private val outliner: GlyphOutliner? = null) {
     private inner class Run(val page: TemplatePage, val maxPrims: Int) : ExprEnv {
         val vars = HashMap<String, Double>()
         val colorParams = HashMap<String, Rgba>()
-        val layers = LinkedHashMap<Rgba, ArrayList<TPrim>>()
+        /** In compositing order: a colour's layer where its first shape is, an image's where it is. */
+        val layers = ArrayList<TemplateLayer>()
+        private val byColor = HashMap<Rgba, ArrayList<TPrim>>()
         private var count = 0
         private val glyphs = HashMap<String, GlyphRun?>()
         private val tt = DoubleArray(2)
@@ -147,7 +149,7 @@ class TemplateEval(private val outliner: GlyphOutliner? = null) {
             if (a <= 0) return
             if (count >= maxPrims) throw Full
             val key = if (a == color.a) color else color.copy(a = a)
-            layers.getOrPut(key) { ArrayList() }.add(prim)
+            byColor.getOrPut(key) { ArrayList<TPrim>().also { layers.add(TemplateLayer(key, it)) } }.add(prim)
             count++
         }
 
@@ -164,6 +166,7 @@ class TemplateEval(private val outliner: GlyphOutliner? = null) {
                     is TNode.Poly -> poly(n, box, clip, st)
                     is TNode.Path -> path(n, box, clip, st)
                     is TNode.Text -> text(n, box, clip, st)
+                    is TNode.Image -> image(n, box, clip, st)
                 }
             } catch (_: TemplateEvalException) {
                 // An invalid node is skipped with its children (SPEC §3).
@@ -421,6 +424,21 @@ class TemplateEval(private val outliner: GlyphOutliner? = null) {
                 }
             }
             strokeRun(ring, true, clip, st)
+        }
+
+        private fun image(n: TNode.Image, box: Rect, clip: Rect, st: Style) {
+            val x = box.x + ev(n.x, box, Axis.X)
+            val y = box.y + ev(n.y, box, Axis.Y)
+            val w = ev(n.w, box, Axis.X)
+            val h = ev(n.h, box, Axis.Y)
+            if (w <= 0.0 || h <= 0.0) return
+            val r = Rect(x, y, w, h)
+            val shown = TemplateClip.intersect(r, clip) ?: return
+            val a = (255 * st.opacity).roundToInt()
+            if (a <= 0) return
+            if (count >= maxPrims) throw Full
+            layers.add(TemplateLayer(Rgba(255, 255, 255, a), emptyList(), TImage(n.src, r, shown, n.fit, n.posX, n.posY)))
+            count++
         }
 
         private fun ellipse(n: TNode.Ellipse, box: Rect, clip: Rect, st: Style) {

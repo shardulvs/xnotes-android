@@ -71,6 +71,7 @@ class SessionStoreTest {
             keepImages = true,
             rotation = 270,
             scrollbar = true,
+            freeMovement = true,
         )
         SessionStore(dir, codec(), pdfDir(), imageDir()).save(Document.blank(1), zoom = 1.0, scrollX = 0.0, scrollY = 0.0, zoomLocked = false, viewOverrides = vo, writeDocument = true)
 

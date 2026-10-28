@@ -13,10 +13,10 @@ androidsvg = "1.4"
 argon2kt = "1.6.0"
 work = "2.9.1"
 mlkitDigitalInk = "18.1.0"
-commonmark = "0.30.0"
 kxml2 = "2.3.0"
 latex = "1.5.0-kt2.1.0"
 onnxruntime = "1.30.0"
+commonmark = "0.30.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -40,15 +40,24 @@ androidsvg = { group = "com.caverock", name = "androidsvg-aar", version.ref = "a
 argon2kt = { group = "com.lambdapioneer.argon2kt", name = "argon2kt", version.ref = "argon2kt" }
 androidx-work-runtime = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
 mlkit-digital-ink = { group = "com.google.mlkit", name = "digital-ink-recognition", version.ref = "mlkitDigitalInk" }
-commonmark = { group = "org.commonmark", name = "commonmark", version.ref = "commonmark" }
-commonmark-gfm-tables = { group = "org.commonmark", name = "commonmark-ext-gfm-tables", version.ref = "commonmark" }
-commonmark-gfm-strikethrough = { group = "org.commonmark", name = "commonmark-ext-gfm-strikethrough", version.ref = "commonmark" }
-commonmark-task-list-items = { group = "org.commonmark", name = "commonmark-ext-task-list-items", version.ref = "commonmark" }
 commonmark-autolink = { group = "org.commonmark", name = "commonmark-ext-autolink", version.ref = "commonmark" }
 latex-base = { group = "io.github.huarangmeng", name = "latex-base", version.ref = "latex" }
 latex-parser = { group = "io.github.huarangmeng", name = "latex-parser", version.ref = "latex" }
 latex-renderer = { group = "io.github.huarangmeng", name = "latex-renderer", version.ref = "latex" }
 onnxruntime-android = { group = "com.microsoft.onnxruntime", name = "onnxruntime-android", version.ref = "onnxruntime" }
+commonmark-core = { group = "org.commonmark", name = "commonmark", version.ref = "commonmark" }
+commonmark-tables = { group = "org.commonmark", name = "commonmark-ext-gfm-tables", version.ref = "commonmark" }
+commonmark-strikethrough = { group = "org.commonmark", name = "commonmark-ext-gfm-strikethrough", version.ref = "commonmark" }
+commonmark-tasks = { group = "org.commonmark", name = "commonmark-ext-task-list-items", version.ref = "commonmark" }
+commonmark-footnotes = { group = "org.commonmark", name = "commonmark-ext-footnotes", version.ref = "commonmark" }
+commonmark-frontmatter = { group = "org.commonmark", name = "commonmark-ext-yaml-front-matter", version.ref = "commonmark" }
+commonmark-alerts = { group = "org.commonmark", name = "commonmark-ext-gfm-alerts", version.ref = "commonmark" }
+
+[bundles]
+commonmark = [
+    "commonmark-core", "commonmark-tables", "commonmark-strikethrough", "commonmark-tasks",
+    "commonmark-footnotes", "commonmark-frontmatter", "commonmark-alerts",
+]
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -76,6 +76,8 @@ internal class PdfTags(private val doc: PDDocument, private val setup: Setup) {
 
     fun flowLabel(para: Int): StructNode? = flow?.labelOf(para)
 
+    fun flowTitle(para: Int): StructNode? = flow?.titleOf(para)
+
     fun formula(para: Int, start: Int, latex: String): StructNode? {
         val parent = flow?.textOf(para) ?: return null
         return formulas.getOrPut(key(para, start)) { inline(parent, "Formula").apply { alt = latex } }
@@ -363,6 +365,7 @@ internal class PageTagger(private val tags: PdfTags, val page: PdfTags.PageTags,
             else -> null
         }
         is Mark.FlowMarker -> tags.flowLabel(m.para)
+        is Mark.FlowTitle -> tags.flowTitle(m.para)
         is Mark.Drawing -> page.ink()
         is Mark.Image -> page.image(m)
         is Mark.TextBox -> if (kind == Kind.TEXT) page.textBox(m, boxLink) else null
