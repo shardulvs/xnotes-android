@@ -554,6 +554,14 @@ class SettingsTest {
         assertTrue(c.fill)
     }
 
+    @Test fun documentTabModeDefaultsAndRoundTrips() {
+        assertEquals("auto", Preferences.fromJson(JSONObject()).documentTabsMode)
+        for (mode in listOf("compact", "expanded")) {
+            assertEquals(mode, Preferences.fromJson(Preferences(documentTabsMode = mode).toJson()).documentTabsMode)
+        }
+        assertEquals("auto", Preferences.fromJson(JSONObject().put("document_tabs_mode", "invalid")).documentTabsMode)
+    }
+
     @Test fun aChosenConnectorAndItsPageRoundTrip() {
         val shape = com.xnotes.core.tools.ShapeConfig().choose(com.xnotes.core.shapes.ConnectorPresets.byKey("uml_aggregation_elbow")!!)
             .copy(connectorPage = 1)

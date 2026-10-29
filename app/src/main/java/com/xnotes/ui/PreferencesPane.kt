@@ -577,6 +577,18 @@ fun PreferencesPane(
                     Chip(stringResource(label), look.size == size) { updateHome(prefs.copy(toolbarLook = look.copy(size = size))) }
                 }
             }
+            FieldLabel(stringResource(R.string.pref_document_tabs_mode))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for ((mode, label) in listOf(
+                    "auto" to R.string.document_tabs_auto,
+                    "compact" to R.string.document_tabs_compact,
+                    "expanded" to R.string.document_tabs_expanded,
+                )) {
+                    Chip(stringResource(label), prefs.documentTabsMode == mode) {
+                        updateHome(prefs.copy(documentTabsMode = mode))
+                    }
+                }
+            }
             FieldLabel(stringResource(R.string.pref_toolbar_colours_n, editor.toolbarColorCount))
             Slider(
                 value = editor.toolbarColorCount.toFloat(),

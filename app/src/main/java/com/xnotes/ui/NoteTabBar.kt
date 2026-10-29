@@ -55,6 +55,7 @@ fun NoteTabBar(
     onSelect: (String) -> Unit,
     onClose: (String) -> Unit,
     modifier: Modifier = Modifier,
+    floatingSurface: Boolean = false,
 ) {
     val palette = LocalPalette.current
     // All tabs are equal-width, so the indicator can be positioned arithmetically.
@@ -74,7 +75,7 @@ fun NoteTabBar(
         val highlightWidth by animateFloatAsState(targetWidth, highlightMotion, label = "tabHighlightWidth")
     Row(
         Modifier.fillMaxWidth()
-            .background(palette.bg.toComposeColor())
+            .background((if (floatingSurface) palette.panel else palette.bg).toComposeColor())
             .horizontalScroll(rememberScrollState())
             .height(42.dp)
             .drawBehind {
