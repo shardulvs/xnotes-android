@@ -357,12 +357,25 @@ private fun EditorScreen(
     val createLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream"),
     ) { uri ->
-        uri?.let {
-            runCatching { resolver.takePersistableUriPermission(it, rwFlags) }
-            val name = displayNameOf(resolver, it)
-            runCatching { resolver.openOutputStream(it, "wt")?.use { o -> savePane.save(o, it.toString(), name) } }
-                .onSuccess { val p = pendingAfterSave; pendingAfterSave = null; p?.invoke() }
-                .onFailure { editor.message = context.getString(R.string.err_save_note); pendingAfterSave = null }
+        if (uri == null) {
+            pendingAfterSave = null
+        } else {
+            runCatching { resolver.takePersistableUriPermission(uri, rwFlags) }
+            val name = displayNameOf(resolver, uri)
+            if (savePane.canvasOpen) {
+                savePane.saveCanvasToThen(uri.toString(), name) { ok ->
+                    val pending = pendingAfterSave; pendingAfterSave = null
+                    if (ok) pending?.invoke()
+                }
+            } else {
+                runCatching { resolver.openOutputStream(uri, "wt")?.use { o -> savePane.save(o, uri.toString(), name) } != null }
+                    .onSuccess { ok ->
+                        val pending = pendingAfterSave; pendingAfterSave = null
+                        if (ok && !savePane.dirty) pending?.invoke()
+                        else editor.message = context.getString(R.string.err_save_note)
+                    }
+                    .onFailure { editor.message = context.getString(R.string.err_save_note); pendingAfterSave = null }
+            }
         }
     }
 
@@ -592,11 +605,19 @@ private fun EditorScreen(
     /** Open the "Save as" picker for [target], remembering which pane its result belongs to. */
     fun launchSaveAs(target: Editor) {
         savePane = target
-        createLauncher.launch("${target.title}.xnote")
+        createLauncher.launch(if (target.canvasOpen) "${target.infinite.document.title}.xcanvas" else "${target.title}.xnote")
     }
 
     fun saveOrPrompt() {
         val target = editor.active
+        if (target.canvasOpen) {
+            val uri = target.infinite.document.path
+            if (uri == null) launchSaveAs(target)
+            else target.saveCanvasToThen(uri, target.infinite.document.displayName) { ok ->
+                if (!ok) launchSaveAs(target)
+            }
+            return
+        }
         val uri = target.currentUri
         if (uri == null) { launchSaveAs(target); return }
         // The write is off the main thread now, so the Save-As fallback fires from its callback.
@@ -608,7 +629,12 @@ private fun EditorScreen(
         when {
             // A canvas keeps its own autosave, and dirty/autosaveUri describe the paged buffer
             // underneath it, so asking about those here would prompt over a note nobody is looking at.
-            target.canvasOpen -> action()
+            target.canvasOpen -> {
+                target.infinite.commitText()
+                if (target.canvasAutosaveUri == null && target.infinite.document.dirty)
+                    guardAction = GuardRequest(target, action)
+                else action()
+            }
             target.autosaveUri != null -> action() // autosaved notes are flushed on doc-swap; no prompt
             target.dirty -> guardAction = GuardRequest(target, action)
             else -> action()
@@ -705,8 +731,9 @@ private fun EditorScreen(
         }
     }
 
-    fun activateTab(uri: String, secondary: Boolean = false) {
-        val target = if (secondary) editor.secondaryPane() else editor
+    fun activateTab(uri: String) {
+        val target = editor.active
+        val secondary = target.pane == com.xnotes.ui.Pane.SECONDARY
         val other = if (target === editor) editor.secondary else editor
         if (other?.noteOpen == true && (if (other.canvasOpen) other.infinite.document.path else other.currentUri) == uri) {
             editor.focusPane(other.pane)
@@ -1226,14 +1253,16 @@ private fun EditorScreen(
         com.xnotes.ui.AlertDialog(
             onDismissRequest = { guardAction = null },
             title = { androidx.compose.material3.Text(stringResource(R.string.unsaved_changes)) },
-            text = { androidx.compose.material3.Text(stringResource(R.string.unsaved_changes_prompt, guarded.title)) },
+            text = { androidx.compose.material3.Text(stringResource(R.string.unsaved_changes_prompt, if (guarded.canvasOpen) guarded.infinite.document.title else guarded.title)) },
             confirmButton = {
                 androidx.compose.material3.TextButton(onClick = {
                     guardAction = null
-                    val uri = guarded.currentUri
-                    if (uri != null) {
-                        // Off-thread: what the prompt was guarding runs once the bytes have landed.
-                        guarded.saveToThen(uri) { action() }
+                    val uri = if (guarded.canvasOpen) guarded.infinite.document.path else guarded.currentUri
+                    if (guarded.canvasOpen && uri != null) {
+                        guarded.saveCanvasToThen(uri, guarded.infinite.document.displayName) { ok -> if (ok) action() }
+                    } else if (uri != null) {
+                        // Proceed only after a successful save.
+                        guarded.saveToThen(uri) { ok -> if (ok) action() }
                     } else {
                         pendingAfterSave = action
                         launchSaveAs(guarded)

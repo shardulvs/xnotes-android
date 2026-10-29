@@ -889,6 +889,36 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             }.getOrDefault(false)
         }
 
+    /** Save an explicitly requested canvas before leaving it, and continue only on success. */
+    fun saveCanvasToThen(uri: String, name: String?, onDone: (Boolean) -> Unit) {
+        val canvas = infinite
+        canvas.commitText()
+        val doc = canvas.document
+        val snapshot = doc.snapshotForWrite()
+        val wasDirty = doc.dirty
+        doc.dirty = false
+        canvasDebounceJob?.cancel()
+        val pending = canvasWriteJob
+        savingNote = true
+        canvasWriteJob = autosaveScope.launch {
+            pending?.join()
+            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                writeCanvasSafely(uri, snapshot)
+            }
+            savingNote = false
+            if (ok && canvas.document === doc) {
+                doc.path = uri
+                if (name != null) doc.displayName = name
+                canvasAutosaveUri = if (browseRoot?.let { isUnderTree(uri, it) } == true) uri else null
+                invalidateThumb(uri)
+            } else if (!ok) {
+                if (wasDirty && canvas.document === doc) doc.dirty = true
+                message = appContext.getString(R.string.err_save_note)
+            }
+            onDone(ok && !doc.dirty)
+        }
+    }
+
     private fun scheduleCanvasAutosave() {
         val uri = canvasAutosaveUri ?: return
         canvasDebounceJob?.cancel()
