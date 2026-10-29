@@ -48,4 +48,44 @@ class CanvasSaveTest : InstrumentationTestCase() {
         assertFalse(saved)
         instrumentation.runOnMainSync { assertTrue(editor.infinite.document.dirty) }
     }
+    fun testNewCanvasAutosavesIntoConfiguredFolder() {
+        val latch = CountDownLatch(1)
+        var saved = false
+        lateinit var editor: Editor
+        instrumentation.runOnMainSync {
+            editor = Editor(instrumentation.targetContext)
+            editor.useInternalStorage()
+            editor.newCanvas()
+            editor.infinite.document.dirty = true
+            editor.saveNewCanvasToThen { saved = it; latch.countDown() }
+        }
+        assertTrue("save timed out", latch.await(30, TimeUnit.SECONDS))
+        assertTrue("new canvas was not saved", saved)
+        instrumentation.runOnMainSync {
+            val doc = editor.infinite.document
+            assertFalse(doc.dirty)
+            assertNotNull(doc.path)
+            assertTrue(doc.displayName!!.endsWith(".xcanvas"))
+            assertNotNull(instrumentation.targetContext.contentResolver.openInputStream(Uri.parse(doc.path)).also { it?.close() })
+        }
+    }
+
+    fun testNewCanvasRemainsDirtyWhenFolderIsUnavailable() {
+        val latch = CountDownLatch(1)
+        var saved = true
+        lateinit var editor: Editor
+        instrumentation.runOnMainSync {
+            editor = Editor(instrumentation.targetContext)
+            editor.updateBrowseRoot("content://invalid.pr359.provider/tree/root")
+            editor.newCanvas()
+            editor.infinite.document.dirty = true
+            editor.saveNewCanvasToThen { saved = it; latch.countDown() }
+        }
+        assertTrue("save timed out", latch.await(30, TimeUnit.SECONDS))
+        assertFalse(saved)
+        instrumentation.runOnMainSync {
+            assertTrue(editor.infinite.document.dirty)
+            assertNull(editor.infinite.document.path)
+        }
+    }
 }

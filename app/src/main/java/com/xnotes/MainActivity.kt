@@ -631,9 +631,20 @@ private fun EditorScreen(
             // underneath it, so asking about those here would prompt over a note nobody is looking at.
             target.canvasOpen -> {
                 target.infinite.commitText()
-                if (target.canvasAutosaveUri == null && target.infinite.document.dirty)
-                    guardAction = GuardRequest(target, action)
-                else action()
+                val doc = target.infinite.document
+                if (target.canvasAutosaveUri == null && doc.dirty && doc.path != null) {
+                    target.saveCanvasToThen(doc.path!!, doc.displayName) { ok -> if (ok) action() }
+                } else if (target.canvasAutosaveUri == null && doc.dirty) {
+                    target.saveNewCanvasToThen { ok ->
+                        if (ok) {
+                            doc.path?.let { uri ->
+                                noteTabs = noteTabs.open(uri, doc.displayName ?: doc.title,
+                                    target.pane == com.xnotes.ui.Pane.SECONDARY)
+                            }
+                            action()
+                        }
+                    }
+                } else action()
             }
             target.autosaveUri != null -> action() // autosaved notes are flushed on doc-swap; no prompt
             target.dirty -> guardAction = GuardRequest(target, action)
