@@ -11,6 +11,8 @@ import com.xnotes.core.model.AudioItem
 import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.ConnectorEnd
 import com.xnotes.core.model.ConnectorItem
+import com.xnotes.core.model.CutEdge
+import com.xnotes.core.model.ImageCrop
 import com.xnotes.core.model.ImageData
 import com.xnotes.core.model.ImageItem
 import com.xnotes.core.model.PagePattern
@@ -261,6 +263,12 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         if (s.smoothScale != 1.0) j.name("smooth_scale").value(s.smoothScale)
         // Straight-line strokes must reload un-smoothed, else the EMA pulls their far end inward.
         if (s.straight) j.name("straight").value(true)
+        // Ink room cut on a note keeps its edges when pasted here.
+        if (s.cuts.isNotEmpty()) {
+            j.name("cuts").beginArray()
+            for (c in s.cuts) j.beginArray().value(c.x).value(c.y).value(c.nx).value(c.ny).endArray()
+            j.endArray()
+        }
         s.sync?.let { writeSync(j, it) }
         if (s.locked) j.name("locked").value(true)
         s.group?.let { j.name("group").value(it) }
@@ -279,6 +287,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         if (item.orientation != 0) j.name("orientation").value(item.orientation)
         if (item.angle != 0.0) j.name("angle").value(item.angle)
         if (item.flip != Flip.NONE) j.name("flip").value(item.flip.id)
+        item.part?.let { j.name("part").beginArray().value(it.x).value(it.y).value(it.w).value(it.h).endArray() }
         item.sync?.let { writeSync(j, it) }
         if (item.locked) j.name("locked").value(true)
         item.group?.let { j.name("group").value(it) }
@@ -623,6 +632,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         val id: Int?,
         val sync: SyncMark?,
         val group: Int? = null,
+        val part: Rect? = null,
     ) : Pending(index, asset)
 
     private class PendingAudio(
@@ -773,6 +783,8 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         var pattern: String? = null
         var tapeWidth: Double? = null
         var rgba: Rgba? = null
+        var cuts: List<CutEdge> = emptyList()
+        var part: Rect? = null
     }
 
     /** Stroke config fields as written; null = absent, so defaults resolve exactly as before. */
@@ -847,6 +859,8 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                 "pattern" -> s.pattern = stringOrNull(p)
                 "width" -> s.tapeWidth = doubleOrNull(p)
                 "rgba" -> s.rgba = rgbaOrNull(p)
+                "cuts" -> s.cuts = parseCuts(p)
+                "part" -> s.part = rectOrNull(p)?.let { partWithin(it) }
                 else -> p.skipValue()
             }
         }
@@ -861,7 +875,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                     pending.add(
                         PendingImage(
                             items.size + pending.size, asset, s.rect, s.srcW, s.srcH,
-                            s.orientation, s.angle, Flip.fromId(s.flip), s.locked, s.id, sync, s.group,
+                            s.orientation, s.angle, Flip.fromId(s.flip), s.locked, s.id, sync, s.group, s.part,
                         ),
                     )
                 }
@@ -920,6 +934,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         )
         val stroke = Stroke(tool, config, emptyList(), s.speedScale, s.straight, s.smoothScale)
         s.samples?.let { stroke.setSamples(it.xs, it.ys, it.ps, it.ts, it.n) }
+        stroke.cuts = s.cuts
         return stroke
     }
 
@@ -1159,7 +1174,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             h = probed.height
         }
         val rect = spec.rect ?: Rect(0.0, 0.0, w.toDouble(), h.toDouble())
-        return ImageItem(ImageData(file, w, h), rect, spec.orientation, spec.angle, spec.flip)
+        return ImageItem(ImageData(file, w, h), rect, spec.orientation, spec.angle, spec.flip, spec.part)
             .also {
                 it.locked = spec.locked
                 it.sync = spec.sync
@@ -1258,6 +1273,35 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         }
         p.endArray()
         return if (count >= 2) Pt(x, y) else null
+    }
+
+    /** The edges an item was cut along, the broken ones left out. */
+    private fun parseCuts(p: JsonPull): List<CutEdge> {
+        if (p.peek() != JsonPull.Token.BEGIN_ARRAY) {
+            p.skipValue()
+            return emptyList()
+        }
+        val out = ArrayList<CutEdge>()
+        p.beginArray()
+        while (p.hasNext()) {
+            val v = doublesOrNull(p) ?: continue
+            if (v.size < 4) continue
+            val len = kotlin.math.hypot(v[2], v[3])
+            if (len > 1e-9) out += CutEdge(v[0], v[1], v[2] / len, v[3] / len)
+        }
+        p.endArray()
+        return out
+    }
+
+    /** A picture's part as written, kept to the picture; null when there is nothing of it left, or all of it. */
+    private fun partWithin(r: Rect): Rect? {
+        val l = r.left.coerceIn(0.0, 1.0)
+        val t = r.top.coerceIn(0.0, 1.0)
+        val rr = r.right.coerceIn(0.0, 1.0)
+        val b = r.bottom.coerceIn(0.0, 1.0)
+        if (rr - l <= 1e-9 || b - t <= 1e-9) return null
+        val part = Rect.ltrb(l, t, rr, b)
+        return if (ImageCrop.isWhole(part)) null else part
     }
 
     private fun rectOrNull(p: JsonPull): Rect? {
