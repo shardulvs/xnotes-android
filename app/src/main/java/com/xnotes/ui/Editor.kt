@@ -7498,6 +7498,16 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private fun handleFlowKey(e: android.view.KeyEvent): Boolean {
         val ctrl = e.isCtrlPressed
         val shift = e.isShiftPressed
+        // A physical keyboard AltGr carries no flag of its own: it arrives as Alt (and often as
+        // Ctrl too), and the layout has already composed what the chord stands for - AltGr+Q on a
+        // QWERTZ board comes back as "@" before any rule below reads the modifiers as commands.
+        // Ctrl on its own still means a shortcut, so an unbound Ctrl chord stays global.
+        if (e.isAltPressed && e.unicodeChar != 0) {
+            val composed = deadKeys.accept(e.unicodeChar) ?: return true // a dead key waiting for its letter
+            flowText.applyReplace(flowText.selection, composed)
+            return true
+        }
+
         when {
             // Escape backs out of the slash menu first; a second one ends the session.
             e.keyCode == android.view.KeyEvent.KEYCODE_ESCAPE ->
