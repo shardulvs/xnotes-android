@@ -74,6 +74,18 @@ class Stroke(
     private var cachedGeometry: StrokeGeometry? = null
     private var cachedRawBounds: Rect? = null
     private var cachedBounds: Rect? = null
+    private var cachedClipped: Rect? = null
+
+    /**
+     * The edges room cut this stroke along. It keeps every sample, so the ribbon is built exactly as
+     * it was drawn, and paints, bounds and hits only what lies inside them. Replaced whole.
+     */
+    @Volatile
+    var cuts: List<CutEdge> = emptyList()
+        set(value) {
+            field = value
+            cachedClipped = null
+        }
 
     /**
      * The ribbon while the pen is still down, grown a sample at a time rather than rebuilt (see
@@ -94,6 +106,7 @@ class Stroke(
     /** Copy constructor: duplicates the sample arrays without materializing a single [Sample]. */
     constructor(src: Stroke) : this(src.tool, src.config, emptyList(), src.speedScale, src.straight, src.smoothScale) {
         pts = src.pts.detached()
+        cuts = src.cuts
     }
 
     // --- sample access ---
@@ -255,6 +268,7 @@ class Stroke(
         cachedGeometry = null
         cachedRawBounds = null
         cachedBounds = null
+        cachedClipped = null
     }
 
     /**
@@ -355,6 +369,21 @@ class Stroke(
     }
 
     override fun paint(r: Renderer) {
+        if (cuts.isEmpty()) return paintInk(r)
+        val region = clipRegion() ?: return
+        r.save()
+        r.clipPolygon(region)
+        paintInk(r)
+        r.restore()
+    }
+
+    /** What a cut stroke may paint into: its whole paint area cut down by its edges, or null when none of it shows. */
+    private fun clipRegion(): List<Pt>? {
+        val area = if (config.neon && tool != Tool.HIGHLIGHTER) ribbonBounds().outset(neonGlowRadius() * 2 + 4) else ribbonBounds()
+        return CutEdges.clip(area.outset(2.0), cuts).takeIf { it.size >= 3 }
+    }
+
+    private fun paintInk(r: Renderer) {
         val g = geometry()
         val color = renderColor
         when {
@@ -394,7 +423,12 @@ class Stroke(
      * MULTIPLY, so a self-overlapping highlight isn't re-tessellated every frame.
      */
     fun paintHighlighterRibbon(r: Renderer) {
+        if (cuts.isEmpty()) return paintFills(r, geometry(), renderColor.withAlpha(255))
+        val region = clipRegion() ?: return
+        r.save()
+        r.clipPolygon(region)
         paintFills(r, geometry(), renderColor.withAlpha(255))
+        r.restore()
     }
 
     /**
@@ -518,6 +552,34 @@ class Stroke(
 
 
     override fun bounds(): Rect {
+        val c = cuts
+        if (c.isEmpty()) return ribbonBounds()
+        cachedClipped?.let { return it }
+        return clippedBounds(c).also { cachedClipped = it }
+    }
+
+    /**
+     * The box of what shows once [c] cuts the ribbon: each stretch between two samples boxed with
+     * both their discs and cut down, so a stroke cut across its widest part is not boxed by it.
+     */
+    private fun clippedBounds(c: List<CutEdge>): Rect {
+        val g = geometry()
+        val n = g.pointCount
+        if (n == 0) return CutEdges.clipBox(ribbonBounds(), c) ?: Rect(xAt(0), yAt(0), 0.0, 0.0)
+        var out: Rect? = null
+        fun add(i: Int, j: Int) {
+            val l = minOf(g.cx(i) - g.hw(i), g.cx(j) - g.hw(j))
+            val t = minOf(g.cy(i) - g.hw(i), g.cy(j) - g.hw(j))
+            val r = maxOf(g.cx(i) + g.hw(i), g.cx(j) + g.hw(j))
+            val b = maxOf(g.cy(i) + g.hw(i), g.cy(j) + g.hw(j))
+            CutEdges.clipBox(Rect.ltrb(l, t, r, b), c)?.let { box -> out = out?.union(box) ?: box }
+        }
+        if (n == 1) add(0, 0) else for (i in 0 until n - 1) add(i, i + 1)
+        return out ?: Rect(g.cx(0), g.cy(0), 0.0, 0.0)
+    }
+
+    /** The ribbon's box as if no room had cut it. */
+    private fun ribbonBounds(): Rect {
         // A live ribbon keeps a running box over its settled points, so a growing stroke's bounds
         // cost what its moving tail costs rather than a walk of every point it has laid down.
         wet?.let { return it.bounds() }
@@ -554,10 +616,15 @@ class Stroke(
         cachedGeometry = null
         cachedRawBounds = cachedRawBounds?.translate(dx, dy)
         cachedBounds = cachedBounds?.translate(dx, dy)
+        if (cuts.isNotEmpty()) {
+            val box = cachedClipped
+            cuts = cuts.map { it.moved(dx, dy) }
+            cachedClipped = box?.translate(dx, dy)
+        }
     }
 
     override fun snapshotGeometry(): GeometrySnapshot = pts.let {
-        StrokeSnapshot(it.ox, it.oy, it.xa.copyOf(it.n), it.ya.copyOf(it.n), it.pa.copyOf(it.n), it.ta?.copyOf(it.n), config)
+        StrokeSnapshot(it.ox, it.oy, it.xa.copyOf(it.n), it.ya.copyOf(it.n), it.pa.copyOf(it.n), it.ta?.copyOf(it.n), config, cuts)
     }
 
     override fun restoreGeometry(snap: GeometrySnapshot) {
@@ -568,6 +635,7 @@ class Stroke(
             snap.xs.size,
         )
         config = snap.config
+        cuts = snap.cuts
         invalidate()
     }
 
@@ -598,12 +666,14 @@ class Stroke(
                 dashGap = config.dashGap * k,
             )
         }
+        if (cuts.isNotEmpty()) cuts = cuts.map { it.mapped(t) }
         invalidate()
     }
 
     /** `p` within the swept disc: inside any sample's disc (catching the dot, ends and joins) or
      *  inside the ribbon body. */
     override fun contains(p: Pt): Boolean {
+        if (cuts.isNotEmpty() && !CutEdges.keeps(cuts, p.x, p.y)) return false
         val g = geometry()
         for (i in 0 until g.pointCount) {
             val h = g.hw(i)
@@ -656,15 +726,16 @@ class Stroke(
         if (s.n == 0) return false
         // Reject against the *raw* sample box (the smoothed geometry lags inward).
         if (rawBounds().distanceTo(Pt(cx, cy)) > radius) return false
+        val c = cuts
+        if (c.isNotEmpty() && !CutEdges.keeps(c, cx, cy, radius)) return false
         // A straight stroke carries only its two endpoints, so a mid-line tap falls between
         // samples; test the segments they span (point-to-line) instead of the sample points.
         if (straight) {
-            val c = Pt(cx, cy)
-            if (s.n == 1) return c.distanceTo(Pt(s.ox + s.xa[0], s.oy + s.ya[0])) <= radius
-            for (i in 1 until s.n) {
-                val a = Pt(s.ox + s.xa[i - 1], s.oy + s.ya[i - 1])
-                val b = Pt(s.ox + s.xa[i], s.oy + s.ya[i])
-                if (Geometry.distancePointToSegment(c, a, b) <= radius) return true
+            val p = Pt(cx, cy)
+            val line = List(s.n) { Pt(s.ox + s.xa[it], s.oy + s.ya[it]) }
+            for (run in CutEdges.clipLine(line, c)) {
+                if (run.size == 1 && p.distanceTo(run[0]) <= radius) return true
+                for (i in 1 until run.size) if (Geometry.distancePointToSegment(p, run[i - 1], run[i]) <= radius) return true
             }
             return false
         }
@@ -672,12 +743,30 @@ class Stroke(
         val lx = cx - s.ox
         val ly = cy - s.oy
         val r2 = radius * radius
+        val reach = config.baseWidth
         for (i in 0 until s.n) {
             val dx = s.xa[i] - lx
             val dy = s.ya[i] - ly
-            if (dx * dx + dy * dy <= r2) return true
+            if (dx * dx + dy * dy <= r2 && (c.isEmpty() || CutEdges.keeps(c, s.ox + s.xa[i], s.oy + s.ya[i], reach))) return true
         }
         return false
+    }
+
+    /** True when some of the ink shows through [cuts]: a sample lies inside them, or near enough that its disc reaches in. */
+    fun showsInk(): Boolean {
+        val c = cuts
+        val s = pts
+        if (c.isEmpty()) return s.n > 0
+        val reach = config.baseWidth / 2.0
+        for (i in 0 until s.n) if (CutEdges.keeps(c, s.ox + s.xa[i], s.oy + s.ya[i], reach)) return true
+        return false
+    }
+
+    /** The sample path cut into the runs that show through [cuts], for the rings that select by what an item draws. */
+    fun visibleRuns(): List<List<Pt>> {
+        val s = pts
+        val line = List(s.n) { Pt(s.ox + s.xa[it], s.oy + s.ya[it]) }
+        return CutEdges.clipLine(line, cuts)
     }
 
     /**
@@ -695,6 +784,7 @@ class Stroke(
         val s = pts
         if (s.n == 0) return null
         if (rawBounds().distanceTo(Pt(cx, cy)) > radius) return null
+        if (cuts.isNotEmpty() && !CutEdges.keeps(cuts, cx, cy, radius)) return null
         // A straight stroke is just two endpoints — it has no mid-line samples to split on, so any
         // contact erases the whole segment (consistent with how the eraser hit-tests it).
         if (straight) return if (intersectsCircle(cx, cy, radius)) emptyList() else null
@@ -718,7 +808,9 @@ class Stroke(
             }
         }
         if (runStart >= 0) fragments.add(fragment(s, runStart, s.n))
-        return if (anyErased) fragments else null
+        if (!anyErased) return null
+        // A cut stroke's pieces keep its edges; one that lies wholly past them would paint nothing.
+        return if (cuts.isEmpty()) fragments else fragments.filter { it.showsInk() }
     }
 
     /** A new stroke from [src]'s samples `[from, to)`, copied so it shares no backing storage. */
@@ -736,6 +828,7 @@ class Stroke(
             src.ta?.copyOfRange(from, to),
             m,
         )
+        s.cuts = cuts
         return s
     }
 
@@ -824,4 +917,5 @@ private class StrokeSnapshot(
     val ps: FloatArray,
     val ts: FloatArray?,
     val config: ToolConfig,
+    val cuts: List<CutEdge>,
 ) : GeometrySnapshot

@@ -24,7 +24,7 @@ class ToolbarLayoutTest {
             d.sections[2].entries.map { it.item },
         )
         assertEquals(
-            listOf(ToolbarItem.PAN, ToolbarItem.SELECT, ToolbarItem.LASSO, ToolbarItem.SCREENSHOT),
+            listOf(ToolbarItem.PAN, ToolbarItem.SELECT, ToolbarItem.LASSO, ToolbarItem.INSERT_SPACE, ToolbarItem.SCREENSHOT),
             d.sections[3].entries.map { it.item },
         )
         assertEquals(
@@ -254,5 +254,15 @@ class ToolbarLayoutTest {
             assertEquals(items.indexOf(ToolbarItem.WAND) + 1, items.indexOf(ToolbarItem.TAPE))
         }
         assertTrue(ToolbarItem.TAPE in ToolbarLayout.CANVAS_ITEMS)
+    }
+
+    @Test fun insertSpaceSlotsInRightAfterTheLassoOnTheNoteBarOnly() {
+        val note = ToolbarLayout.fromRaw(listOf(listOf("pan" to true, "lasso" to true, "screenshot" to true)))
+        val items = note.items()
+        assertEquals(items.indexOf(ToolbarItem.LASSO) + 1, items.indexOf(ToolbarItem.INSERT_SPACE))
+        assertTrue(ToolbarItem.INSERT_SPACE !in ToolbarLayout.CANVAS_ITEMS)
+        assertTrue(ToolbarItem.INSERT_SPACE !in ToolbarLayout.CANVAS_DEFAULT.items())
+        val canvas = ToolbarLayout.fromRaw(listOf(listOf("lasso" to true, "insert_space" to true)), ToolbarLayout.CANVAS_ITEMS, ToolbarLayout.CANVAS_DEFAULT)
+        assertTrue(ToolbarItem.INSERT_SPACE !in canvas.items())
     }
 }

@@ -45,8 +45,8 @@ object PageTurn {
     /**
      * Turn [page] of [doc] [turns] quarter turns clockwise, in place. Ink, shapes and pictures turn
      * with it; text boxes and recordings, which always stand upright, keep their place on it. Its PDF
-     * page turns too, and the markups on its text with it. Margins it inherits are written onto the
-     * page when turning would change them.
+     * page turns too, and the markups on its text with it, and so does the room opened on it. Margins
+     * it inherits are written onto the page when turning would change them.
      */
     fun turn(page: Page, doc: Document, turns: Int) {
         val q = normalize(turns)
@@ -54,9 +54,10 @@ object PageTurn {
         val t = affine(page.width, page.height, q)
         if (page.pdfPage != null) {
             val toPts = 72.0 / doc.dpi
-            page.markups = page.markups.map { markup(it, page.width * toPts, page.height * toPts, q) }
+            page.markups = page.markups.map { markup(it, page.sourceWidth * toPts, page.sourceHeight * toPts, q) }
             page.pdfTurn = normalize(page.pdfTurn + q)
         }
+        page.rooms = Rooms.turned(page.rooms, page.width, page.height, q)
         for (item in page.items) {
             if (item is TextItem || item is AudioItem) {
                 val c = item.bounds().center
@@ -84,6 +85,7 @@ class PageShape private constructor(
     private val margins: PageMargins,
     private val markups: List<TextMarkup>,
     private val pdfTurn: Int,
+    private val rooms: List<Room>,
     private val geometry: List<Pair<CanvasItem, GeometrySnapshot>>,
 ) {
     fun restore(page: Page) {
@@ -92,12 +94,16 @@ class PageShape private constructor(
         page.margins = margins
         page.markups = markups
         page.pdfTurn = pdfTurn
+        page.rooms = rooms
         for ((item, snap) in geometry) item.restoreGeometry(snap)
     }
 
     companion object {
         fun of(page: Page) = PageShape(
-            page.width, page.height, page.margins, page.markups, page.pdfTurn, page.items.map { it to it.snapshotGeometry() },
+            page.width, page.height, page.margins, page.markups, page.pdfTurn, page.rooms, page.items.map { it to it.snapshotGeometry() },
         )
+
+        /** [page]'s shape without its items, for an edit that puts its items back itself. */
+        fun bare(page: Page) = PageShape(page.width, page.height, page.margins, page.markups, page.pdfTurn, page.rooms, emptyList())
     }
 }
