@@ -83,7 +83,7 @@ import com.xnotes.ui.theme.Palette
 /** How near ink a finger tap during playback may land to play from it, in dp. */
 private const val INK_TAP_DP = 8.0
 
-class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongPressMenuHost, TextEditHost, ColorDropHost, AudioHost, CropHost {
+class InfiniteEditor(context: Context) : ToolPopupHost, PenMenuHost, SelectionMenuHost, LongPressMenuHost, TextEditHost, ColorDropHost, AudioHost, CropHost {
 
     private val appContext = context.applicationContext
 
@@ -449,8 +449,11 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     }
 
     /** Run the action a finger or stylus tap is mapped to, as the paged editor does. */
-    fun dispatchTapGesture(action: String) {
+    fun dispatchTapGesture(action: String, at: Pt? = null) {
         when (action) {
+            "tool_settings" -> if (penMenu.at != null || penMenuTool != null) {
+                penMenu.toggle(at ?: Pt(view.width / 2.0, view.height / 2.0))
+            }
             "undo" -> undo()
             "redo" -> redo()
             "toggle_pan" -> toggleTool(Tool.PAN)
@@ -613,6 +616,12 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     /** Where a held finger opened the paste menu, or null when no menu is open. */
     override var contextMenu: ContextMenuTarget? by mutableStateOf(null)
+
+    /** The armed tool's settings, opened at the pen by the side button (see [PenMenuState]). */
+    override val penMenu = PenMenuState()
+
+    // The canvas's own toolbar has no text or markup settings to show.
+    override val penMenuTool: Tool? get() = tool.takeIf { it.hasSettings && it != Tool.TEXT && it != Tool.MARKUP }
 
     override val clipboardHasImage: Boolean
         get() = com.xnotes.platform.SystemClipboard.hasImage(appContext)

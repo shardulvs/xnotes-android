@@ -429,6 +429,7 @@
     <string name="toggle_pan">Toggle pan</string>
     <string name="toggle_eraser">Toggle eraser</string>
     <string name="toggle_previous">Toggle previous tool</string>
+    <string name="open_tool_settings">Open tool settings</string>
     <string name="pref_filename_template_help">YYYY YY MM DD HH mm ss expand to the creation date and time. # becomes the number that keeps the name free in its folder.</string>
     <string name="pref_next_note_named">The next note would be named %1$s</string>
     <string name="pref_side_margin_px">"Side margin  %1$d px"</string>

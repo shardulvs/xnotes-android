@@ -1170,7 +1170,7 @@ internal fun DropdownMenu(
     expanded: Boolean,
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
-    properties: PopupProperties = PopupProperties(focusable = true),
+    properties: PopupProperties = PopupProperties(focusable = LocalMenuFocusable.current),
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val palette = LocalPalette.current
@@ -1183,8 +1183,13 @@ internal fun DropdownMenu(
         containerColor = palette.menuBg.toComposeColor(),
         border = BorderStroke(1.dp, palette.border.toComposeColor()),
     ) {
-        // A menu or tip opened from inside this one hangs off its own row, not beside the rail.
-        CompositionLocalProvider(LocalMenuOffset provides DpOffset.Zero, LocalTipSide provides TipSide.BELOW) { content() }
+        // A menu or tip opened from inside this one hangs off its own row, not beside the rail, and
+        // takes focus as usual even when this one does not.
+        CompositionLocalProvider(
+            LocalMenuOffset provides DpOffset.Zero,
+            LocalTipSide provides TipSide.BELOW,
+            LocalMenuFocusable provides true,
+        ) { content() }
     }
 }
 

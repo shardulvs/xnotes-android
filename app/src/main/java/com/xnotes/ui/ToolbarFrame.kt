@@ -69,6 +69,9 @@ internal val LocalBar = staticCompositionLocalOf { barMetrics(ToolbarSize.REGULA
 /** Where a menu opens from its anchor; a side rail sets it so its menus open beside the rail. */
 internal val LocalMenuOffset = compositionLocalOf { DpOffset.Zero }
 
+/** Whether a [DropdownMenu] takes focus; the pen menu's do not (see [PenMenuState]). */
+internal val LocalMenuFocusable = compositionLocalOf { true }
+
 /** How far a floating bar sits in from the canvas edge. */
 private val FLOAT_MARGIN = 8.dp
 

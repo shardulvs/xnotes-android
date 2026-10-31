@@ -375,6 +375,7 @@
     <string name="toggle_pan">切换平移</string>
     <string name="toggle_eraser">切换橡皮擦</string>
     <string name="toggle_previous">切换上一个工具</string>
+    <string name="open_tool_settings">打开工具设置</string>
     <string name="pref_filename_template_help">YYYY YY MM DD HH mm ss 会展开为创建日期和时间。# 会变为序号以确保文件夹中的名称不重复。</string>
     <string name="pref_next_note_named">下一个笔记将命名为 %1$s</string>
     <string name="pref_side_margin_px">"侧边距  %1$d px"</string>
