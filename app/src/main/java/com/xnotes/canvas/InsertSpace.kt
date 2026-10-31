@@ -21,7 +21,8 @@ import java.util.IdentityHashMap
  * down opens room there, everything past the cut following the pen, and a drag up from inside room
  * closes the strip the pen sweeps (or, on a page turned since, a drag back across a room standing
  * sideways). The page shows the room as the pen goes ([RoomView]) and the edit is made, as one undo
- * step, when it lifts. Room shows as a tinted band while the tool is armed.
+ * step, when it lifts. Room shows as a tinted band while the tool is armed, with a button at its
+ * top right that closes all of it.
  */
 internal class InsertSpaceGesture(
     private val state: CanvasState,
@@ -48,11 +49,84 @@ internal class InsertSpaceGesture(
 
     val active: Boolean get() = kind != null
 
-    /** A hovering pen at [content], or null when it left: shows where a press would cut. */
-    fun hoverAt(content: Pt?) {
+    /** A hovering pen at [content], [viewport] on screen, or null when it left: shows where a press would cut, unless it is over a room's button. */
+    fun hoverAt(content: Pt?, viewport: Pt? = null) {
         val was = hover
-        hover = content?.let { c -> state.pageIndexAtContent(c)?.let { it to state.toPageSpace(it, c) } }
+        val onButton = viewport != null && buttonAt(viewport) != null
+        hover = if (onButton) null else content?.let { c -> state.pageIndexAtContent(c)?.let { it to state.toPageSpace(it, c) } }
         if (was != hover) requestRender()
+    }
+
+    /** The button that closes [room], on note page [page], centred at [center] in viewport px. */
+    class RoomButton(val page: Int, val room: Room, val center: Pt)
+
+    /**
+     * Every room's button on the pages in view: at the top right of the part of its band the screen
+     * shows, so a band the view cuts still offers one. None while a drag is under way.
+     */
+    fun buttons(): List<RoomButton> {
+        if (kind != null) return emptyList()
+        val d = state.devicePxPerDp
+        val radius = BUTTON_RADIUS_DP * d
+        val inset = BUTTON_INSET_DP * d
+        val clear = Rect(state.insetLeft, state.insetTop, state.clearW, state.clearH)
+        val visible = state.visibleContentRect()
+        val out = ArrayList<RoomButton>()
+        for (i in state.drawablePageRange()) {
+            val pr = state.pageRects.getOrNull(i) ?: continue
+            if (!pr.intersects(visible)) continue
+            val page = state.document.pages[i]
+            if (page.rooms.isEmpty()) continue
+            val cover = state.footprint(page)
+            for (room in page.rooms) {
+                val band = if (room.sideways) Rect(room.at, cover.top, room.size, cover.h) else Rect(cover.left, room.at, cover.w, room.size)
+                val c = intersect(state.fromPageSpaceRect(i, band), pr) ?: continue
+                val a = state.contentToViewport(c.topLeft)
+                val b = state.contentToViewport(Pt(c.right, c.bottom))
+                val shown = intersect(Rect.fromPoints(a, b), clear) ?: continue
+                val x = if (shown.w >= 2 * (radius + inset)) shown.right - inset - radius else shown.centerX
+                val y = if (shown.h >= 2 * (radius + inset)) shown.top + inset + radius else shown.centerY
+                out += RoomButton(i, room, Pt(x, y))
+            }
+        }
+        return out
+    }
+
+    /** The button a press at viewport [p] lands on, or null. */
+    fun buttonAt(p: Pt): RoomButton? {
+        val reach = BUTTON_HIT_DP * state.devicePxPerDp
+        return buttons().lastOrNull { it.center.distanceTo(p) <= reach }
+    }
+
+    /**
+     * Close all of [b]'s room, as one done edit: what lay in it goes, ink and pictures across its
+     * edges are cut there, what cannot be cut stays, and the far band comes back. True when it closed.
+     */
+    fun closeRoom(b: RoomButton): Boolean {
+        val page = state.document.pages.getOrNull(b.page) ?: return false
+        val room = page.rooms.firstOrNull { it == b.room } ?: return false
+        val a = room.at
+        val end = room.end
+        val fates = RoomCut.fates(page, room.sideways, a, end)
+        val movers = page.items.filter { fates[it] == RoomCut.Fate.MOVES }
+        val glue = GlueFollow.of(movers, page.items, { it in page.items }, rigid = false)
+        // What stays put, and the connectors the edit places afresh, leave the old layers before the
+        // edit, so the moment until rebuilt ones land shows them where they end up.
+        val keep = RoomCut.anchored(page, room.sideways, a, end) + glue.items
+        for (item in keep) if (lifted.add(item)) repair(page, item.paintBounds())
+        val view = RoomView(page, room.sideways, a, end, a - end, keep, state.footprint(page))
+        val command = RoomCut.close(page, room, a, end)
+        if (command == null) {
+            drop(page)
+            return false
+        }
+        history.push(command)
+        state.document.dirty = true
+        lifted.clear()
+        state.settleRoom(view)
+        state.clampScroll()
+        requestRender()
+        return true
     }
 
     /** A press at [content]; false when it is on no page. */
@@ -267,8 +341,30 @@ internal class InsertSpaceGesture(
         else -> page.rooms
     }
 
-    /** In viewport space: the room's height beside the pen while it drags. */
-    fun drawLabel(r: Renderer) {
+    /** In viewport space: each room's close button, and the room's height beside the pen while it drags. */
+    fun drawViewport(r: Renderer) {
+        drawButtons(r)
+        drawLabel(r)
+    }
+
+    /** Each room's close button: an accent disc with a cross, ringed in paper so it reads over ink. */
+    private fun drawButtons(r: Renderer) {
+        val d = state.devicePxPerDp
+        val pal = state.palette
+        val radius = BUTTON_RADIUS_DP * d
+        val arm = BUTTON_CROSS_DP * d
+        val cross = Pen(pal.onAccent, BUTTON_LINE_DP * d)
+        for (b in buttons()) {
+            val c = b.center
+            r.fillCircle(c, radius + BUTTON_RING_DP * d, pal.paper)
+            r.fillCircle(c, radius, pal.accent)
+            r.strokePolyline(listOf(Pt(c.x - arm, c.y - arm), Pt(c.x + arm, c.y + arm)), cross)
+            r.strokePolyline(listOf(Pt(c.x - arm, c.y + arm), Pt(c.x + arm, c.y - arm)), cross)
+        }
+    }
+
+    /** The room's height beside the pen while it drags. */
+    private fun drawLabel(r: Renderer) {
         val k = kind
         if (k != Kind.OPEN && k != Kind.CLOSE) return
         val v = penViewport ?: return
@@ -319,5 +415,15 @@ internal class InsertSpaceGesture(
 
         /** How far from the pen its label sits, in dp. */
         const val LABEL_OFFSET_DP = 18.0
+
+        /** A room's close button: its disc, its distance in from the band's corner, its cross and the paper ring round it. */
+        const val BUTTON_RADIUS_DP = 12.0
+        const val BUTTON_INSET_DP = 6.0
+        const val BUTTON_CROSS_DP = 4.0
+        const val BUTTON_LINE_DP = 2.0
+        const val BUTTON_RING_DP = 1.5
+
+        /** How far from a button's centre a press still takes it, in dp. */
+        const val BUTTON_HIT_DP = 22.0
     }
 }

@@ -51,6 +51,6 @@ enum class Tool(val id: String) {
         val DEFAULT = PAN
 
         /** Quick-tool-wheel order (spec 06 §11 / 10 §7). */
-        val wheelOrder = listOf(PEN, DASHED, CALLIGRAPHY, SPEED, TAPER, HIGHLIGHTER, ERASER, SELECT, LASSO, SCREENSHOT, TAPE, SHAPE, TEXT, MARKUP, PAN)
+        val wheelOrder = listOf(PEN, DASHED, CALLIGRAPHY, SPEED, TAPER, HIGHLIGHTER, ERASER, SELECT, LASSO, INSERT_SPACE, SCREENSHOT, TAPE, SHAPE, TEXT, MARKUP, PAN)
     }
 }

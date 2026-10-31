@@ -2927,8 +2927,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 toolbarColors = toolbarColors,
                 toolbarColorCount = toolbarColorCount,
                 activeColor = activeColorIndex,
-                // Insert space hands back to the tool before it after one drag, so that is the tool to come back to.
-                lastTool = if (tool == Tool.INSERT_SPACE) controller.previousTool ?: Tool.DEFAULT else tool,
+                lastTool = tool,
                 sidebarVisible = sidebarVisible,
                 renderScale = renderScale,
             )
