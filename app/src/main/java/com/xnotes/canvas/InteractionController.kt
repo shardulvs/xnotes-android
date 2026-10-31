@@ -1487,6 +1487,22 @@ class InteractionController(
             color, strokeWidth, shapeConfig.fillFor(rec.kind, color), stroke.config.neon, stroke.config.neonStrength,
             dashed, stroke.config.dashLength, stroke.config.dashGap,
         )
+        if (rec.kind == ShapeKind.LINE) {
+            // Keep the recognized line live until lift, using the shape tool's endpoint drag.
+            // Its ink style and starting point come from the stroke, not the selected shape preset.
+            pendingShape = shape
+            shapePageIndex = pageIndex
+            liveStroke = null
+            strokePageIndex = null
+            strokeDismissedSelection = false
+            dwellEligible = false
+            cancelDwell()
+            frontInk?.wet(null, null)
+            mode = PointerMode.SHAPE
+            onHaptic()
+            requestRender()
+            return
+        }
         page.items.add(shape)
         state.appendToCache(page, shape)
         history.push(AddItem(page, shape))

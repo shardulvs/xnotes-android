@@ -1798,6 +1798,15 @@ class InfiniteInteraction(
         onWetStroke(null)
         dwellEligible = false
         cancelDwell()
+        if (rec.kind == ShapeKind.LINE) {
+            // Continue with the shape tool's fixed-start endpoint drag, committing only on lift.
+            pendingShape = shape
+            mode = CanvasPointerMode.SHAPE
+            setInteractive(false, false)
+            onPendingShape(shape)
+            requestRender()
+            return
+        }
         onCommitShape(shape)
         mode = CanvasPointerMode.IDLE
         // Leave the new shape selected, as a note does, so it can be resized or turned straight
