@@ -2,8 +2,11 @@ package com.xnotes.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
@@ -12,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -24,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -38,6 +43,26 @@ import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
 import kotlin.math.roundToInt
+
+/** The bar's grip: six dots that say the bar drags, as a window's title bar does. */
+@Composable
+private fun BarGrip() {
+    val palette = LocalPalette.current
+    Box(Modifier.width(26.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
+        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            repeat(3) {
+                Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                    repeat(2) {
+                        Box(
+                            Modifier.size(3.dp).clip(CircleShape)
+                                .background(palette.textDim.toComposeColor()),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
 
 /**
  * Floating font/size bar for the active text box (the one being edited, or a lone
@@ -82,9 +107,23 @@ fun TextStyleBar(editor: TextEditHost) {
                 .onSizeChanged { measuredWidthPx = it.width.toFloat() }
                 .clip(MaterialTheme.shapes.medium)
                 .background(palette.menuBg.toComposeColor())
-                .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium),
+                .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium)
+                // The bar is the box's title bar. Keyed on the flag alone, so a box that moves under
+                // the finger keeps the gesture it started; a tap still reaches the controls.
+                .pointerInput(editor.canMoveEditingBox) {
+                    if (!editor.canMoveEditingBox) return@pointerInput
+                    detectDragGestures(
+                        onDragStart = { editor.beginEditingBoxDrag() },
+                        onDragEnd = { editor.endEditingBoxDrag() },
+                        onDragCancel = { editor.endEditingBoxDrag() },
+                    ) { change, drag ->
+                        editor.dragEditingBox(drag.x, drag.y)
+                        change.consume()
+                    }
+                },
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (editor.canMoveEditingBox) BarGrip()
             FacePicker(current = bar.face) { editor.setTextFace(it) }
             Box(
                 Modifier.width(1.dp).fillMaxHeight().padding(vertical = 8.dp)

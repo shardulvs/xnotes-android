@@ -386,6 +386,8 @@ class InteractionController(
     var screenshotRect: Rect? = null
         private set
     private var screenshotOrigin = Pt.ZERO
+    /** The edited box's geometry when its style bar started sliding it, for one undo step. */
+    private var boxDragOldGeom: GeoHandle? = null
 
     // ERASE
     private val eraseRemovals = mutableListOf<Pair<Page, CanvasItem>>()
@@ -819,6 +821,18 @@ class InteractionController(
         }
         val isFinger = toolType == MotionEvent.TOOL_TYPE_FINGER
         val free = FreePointer.isFree(tool, effectiveTool, isFinger)
+
+        // A press on a handle of the edited box resizes it with the edit still open, taken before
+        // the pan/commit rule below so a tap on a handle never commits the box.
+        val editedBox = editingText
+        if (editedBox != null) {
+            val grab = ResizeMath.hitHandle(editingResizeHandles(), content, HANDLE_HIT / state.zoom)
+            if (grab != null) {
+                tapCandidate = false
+                beginResize(Selected(editingPageIndex, editedBox), grab)
+                return
+            }
+        }
 
         // A press off the box while editing. With a finger we defer: a tap commits (re-arming the
         // prior tool), a drag scrolls the page with the edit kept live (decided in handleUp's PAN
@@ -1946,6 +1960,59 @@ class InteractionController(
         return shape.dotNear(local, dotReach()) || shape.touches(local, OUTLINE_GRAB / state.zoom)
     }
 
+    /** The eight resize handles of the edited box, in content space, held [EDIT_HANDLE_REACH_DP]
+     *  outside its bounds so the Compose field over them never takes them. */
+    private fun editingResizeHandles(): List<ResizeHandle> {
+        val item = editingText ?: return emptyList()
+        if (state.pageRects.getOrNull(editingPageIndex) == null) return emptyList()
+        val reach = EDIT_HANDLE_REACH_DP * state.devicePxPerDp / state.zoom
+        return ResizeMath.boxHandles(item.bounds().outset(reach))
+            .map { ResizeHandle(it.id, state.fromPageSpace(editingPageIndex, it.content)) }
+    }
+
+    // --- MOVING THE EDITED BOX (from its style bar) ---
+
+    /** True while a text box (not a shape's label) is open, so its style bar can slide it. */
+    val canMoveEditingBox: Boolean get() = editingText != null
+
+    /** The bar's drag began: remember the box's geometry, so the whole slide is one undo step. */
+    fun beginEditingBoxDrag() {
+        if (boxDragOldGeom == null) boxDragOldGeom = editingText?.geometry()
+    }
+
+    /** Slide the edited box by a viewport-space drag of its style bar, read in page space so a
+     *  turned page moves the box the way the bar moves on screen. */
+    fun dragEditingBox(dxViewport: Double, dyViewport: Double) {
+        val item = editingText ?: return
+        if (state.pageRects.getOrNull(editingPageIndex) == null) return
+        if (boxDragOldGeom == null) boxDragOldGeom = item.geometry()
+        val h = item.geometry() as? TextHandle ?: return
+        val d = state.vectorToPageSpace(Pt(dxViewport / state.zoom, dyViewport / state.zoom))
+        item.setGeometry(TextHandle(Pt(h.pos.x + d.x, h.pos.y + d.y), h.width, h.height))
+        editingField()?.let { onTextEditStart(it) }
+        requestRender()
+    }
+
+    /** The bar's drag ended: one ResizeItem for the whole slide, and none for a brand-new box. */
+    fun endEditingBoxDrag() {
+        val item = editingText
+        val old = boxDragOldGeom
+        boxDragOldGeom = null
+        if (item != null && old != null) {
+            val new = item.geometry()
+            if (new != old) {
+                // A brand-new box travels with the AddItem pushed on commit, as when it is resized.
+                if (!editingIsNew) {
+                    history.push(ResizeItem(item, old, new))
+                    state.document.dirty = true
+                }
+                onContentChanged()
+            }
+        }
+        editingField()?.let { onTextEditStart(it) }
+        requestRender()
+    }
+
     /** If [content] grabs a resize or rotate handle of the settled selection, begin that gesture
      *  and return true. Handles only; the caller handles an inside-the-bounds move. Shared by the
      *  select and lasso tools so both grab handles the same way. */
@@ -2198,8 +2265,14 @@ class InteractionController(
             is ImageItem -> item.setGeometry(RectHandle(ResizeMath.resizeImage(item.rect, handle, local)))
             is TextItem -> {
                 // Resize against the displayed bounds (grown-to-fit height) so handles track the box.
-                val (pos, w, h) = ResizeMath.resizeText(item.pos, item.width, item.bounds().h, handle, local)
+                // The handle sits a reach outside the box: read the pointer pulled back by it.
+                val reach = if (item === editingText) EDIT_HANDLE_REACH_DP * state.devicePxPerDp / state.zoom else 0.0
+                val dir = ResizeMath.handleDirection(handle)
+                val at = if (reach == 0.0) local else Pt(local.x - dir.x * reach, local.y - dir.y * reach)
+                val (pos, w, h) = ResizeMath.resizeText(item.pos, item.width, item.bounds().h, handle, at)
                 item.setGeometry(TextHandle(pos, w, h))
+                // Keep the Compose field on the box as it grows: the overlay draws it from this.
+                if (item === editingText) editingField()?.let { onTextEditStart(it) }
             }
             is TapeItem -> {
                 val s = item.shape
@@ -2228,8 +2301,12 @@ class InteractionController(
             val new = item.geometry()
             if (new != old) {
                 changed = true
-                history.push(ResizeItem(item, old, new))
-                state.document.dirty = true
+                // A brand-new box isn't in the page yet: its geometry travels with the AddItem
+                // pushed on commit, so a ResizeItem would name something the page doesn't hold.
+                if (!(item === editingText && editingIsNew)) {
+                    history.push(ResizeItem(item, old, new))
+                    state.document.dirty = true
+                }
                 // The resized item stays lifted (overlay-drawn); the ink cache it was already
                 // lifted out of needs no repair — it is repainted at its new size on deselect.
                 onContentChanged()
@@ -4682,6 +4759,12 @@ class InteractionController(
                 }
                 drawEditDots(r)
                 drawConnectorChrome(r)
+            } else if (editingText != null && (mode == PointerMode.IDLE || mode == PointerMode.RESIZE)) {
+                // The edited box's own handles, while the field is up (see editingResizeHandles).
+                val side = HANDLE_SIZE / state.zoom
+                for (h in editingResizeHandles()) {
+                    r.fillRect(Rect(h.content.x - side / 2, h.content.y - side / 2, side, side), state.palette.accent)
+                }
             }
 
             // Where a connector can glue, while one is armed or an end is being dragged.
@@ -5042,6 +5125,9 @@ class InteractionController(
         /** Touch radius (viewport px) around a handle centre — larger than the drawn
          *  square so a fingertip can grab it without the squares obscuring content. */
         const val HANDLE_HIT = 24.0
+
+        /** How far (dp) outside an edited box its handles sit: its Compose field covers the bounds. */
+        const val EDIT_HANDLE_REACH_DP = 14.0
 
         /** Gap (viewport px) from the selection's top edge up to the rotate grip. */
         const val ROTATE_ARM = 28.0
