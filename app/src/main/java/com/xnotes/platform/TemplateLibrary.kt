@@ -10,7 +10,9 @@ import com.xnotes.core.model.Document
 import com.xnotes.core.model.ImageData
 import com.xnotes.core.model.Page
 import com.xnotes.core.model.PageTemplates
-import com.xnotes.core.model.marginStrips
+import com.xnotes.core.model.Rooms
+import com.xnotes.core.model.sourceHeight
+import com.xnotes.core.model.sourceWidth
 import com.xnotes.core.model.resolvedAccentColor
 import com.xnotes.core.model.resolvedColors
 import com.xnotes.core.model.resolvedParams
@@ -481,15 +483,14 @@ object TemplateLibrary {
     /**
      * Paint [page]'s template into [r] in page-local content px. [cover] is the page's whole paper,
      * margins included; [region] is the part being painted. A page showing an imported PDF gets its
-     * template in the margins only, so the PDF itself is never drawn over. [minLine] is the thinnest
-     * line in content px, so a thumbnail's ruling stays visible.
+     * template in the margins and the room inserted into it only, so the PDF itself is never drawn
+     * over. [minLine] is the thinnest line in content px, so a thumbnail's ruling stays visible.
      */
     fun paint(r: Renderer, doc: Document, page: Page, cover: Rect, region: Rect, minLine: Double = 0.0) {
         val key = page.resolvedTemplate(doc)
         val t = template(doc, key) ?: return
         val mm = doc.dpi / 25.4
-        val content = Rect(0.0, 0.0, page.width, page.height)
-        val papers = if (page.pdfPage == null) listOf(cover) else marginStrips(cover, content)
+        val papers = if (page.pdfPage == null) listOf(cover) else Rooms.paper(cover, page.rooms, page.sourceWidth, page.sourceHeight)
         val values = values(t, doc, page)
         val ink = page.resolvedPatternColor(doc)
         val accent = page.resolvedAccentColor(doc)
