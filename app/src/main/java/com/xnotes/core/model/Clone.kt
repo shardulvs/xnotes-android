@@ -10,7 +10,7 @@ import com.xnotes.core.pal.TextMeasurer
  */
 fun CanvasItem.deepCopy(measurer: TextMeasurer): CanvasItem = when (this) {
     is Stroke -> Stroke(this)
-    is ImageItem -> ImageItem(image, rect, orientation, angle, flip)
+    is ImageItem -> ImageItem(image, rect, orientation, angle, flip, part)
     is AudioItem -> AudioItem(audio, rect, name, rid, measurer)
     // The shape is immutable, so the copy can share it; a copy starts covered.
     is TapeItem -> TapeItem(shape, rgba, pattern)

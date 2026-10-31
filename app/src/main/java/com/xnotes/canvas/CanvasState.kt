@@ -57,6 +57,7 @@ class HighlighterCacheEntry(
     val geom: StrokeGeometry,
     val opaque: Rgba,
     val cover: Rect,
+    val cuts: List<com.xnotes.core.model.CutEdge> = emptyList(),
 )
 
 /** How a freshly opened document's initial view is chosen (see [CanvasState.establishInitialView]). */
@@ -1290,7 +1291,7 @@ class CanvasState(
         val g = stroke.geometry()
         val opaque = stroke.renderColor.withAlpha(255)
         val existing = hlCaches[stroke]
-        if (existing != null && existing.geom === g && existing.opaque == opaque &&
+        if (existing != null && existing.geom === g && existing.opaque == opaque && existing.cuts === stroke.cuts &&
             (zoomingInProgress || abs(existing.res - res) < 1e-6)
         ) {
             return existing
@@ -1308,7 +1309,7 @@ class CanvasState(
         r.scale(res, res)
         r.translate(-cover.left, -cover.top)
         stroke.paintHighlighterRibbon(r)
-        return HighlighterCacheEntry(surface, res, g, opaque, cover)
+        return HighlighterCacheEntry(surface, res, g, opaque, cover, stroke.cuts)
     }
 
     /**
