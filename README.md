@@ -12,9 +12,9 @@
 
 <p align="center">
   <a href="https://f-droid.org/en/packages/com.xnotes"><img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png" height="70" alt="Get it on F-Droid" /></a>
+  <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://add/https://github.com/shardulvs/xnotes-android"><img src="https://raw.githubusercontent.com/ImranR98/Obtainium/fcd1807c8f8d2b8a5e27d4214ac4d472ed045598/assets/graphics/badge_obtainium.png" height="70" alt="Get it on Obtainium" /></a>
   <a href="https://play.google.com/store/apps/details?id=com.xnotes"><img src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" height="70" alt="Get it on Google Play" /></a>
 </p>
-
 <p align="center">
   <img src="docs/screenshots/editor.png" width="90%" alt="The xnotes editor with a PDF open in dark mode, annotated by hand with a note, an arrow, a highlight and an underline, and page thumbnails down the left" />
   <br />
