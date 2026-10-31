@@ -36,6 +36,37 @@ class ShapeLabelTest {
         assertEquals(t.centerY, r.centerY, 1e-9)
     }
 
+    @Test fun importedTextBoxKeepsItsTopLeftAnchorAcrossWidthChanges() {
+        fun box(width: Double): ShapeItem = ShapeItem(
+            ShapeKind.RECTANGLE, Pt(40.0, 80.0), Pt(40.0 + width, 120.0),
+            Rgba(0, 0, 0, 0), 0.0, fillRgba = null,
+        ).apply { label = ShapeLabel("one\ntwo\nthree", style, measurer) }
+        val narrow = box(80.0)
+        val wide = box(200.0)
+        assertTrue(narrow.isTextOnlyBox())
+        assertEquals(40.0, narrow.labelRect()!!.left, 1e-9)
+        assertEquals(80.0, narrow.labelRect()!!.top, 1e-9)
+        assertEquals(40.0, wide.labelRect()!!.left, 1e-9)
+        assertEquals(80.0, wide.labelRect()!!.top, 1e-9)
+        assertFalse(labelled().isTextOnlyBox())
+    }
+
+    @Test fun shearedImportedTextHostStillUsesTheFastTextPath() {
+        val shape = ShapeItem(
+            ShapeKind.RECTANGLE, Pt(40.0, 80.0), Pt(240.0, 160.0),
+            Rgba(0, 0, 0, 0), 0.0,
+        ).apply { label = ShapeLabel("a long imported text block", style, measurer) }
+        assertTrue(shape.isTextOnlyBox())
+        // Resizing a transformed rectangle can turn its invisible host into a free polygon.
+        shape.applyTransform(Affine(1.0, 0.0, 0.3, 1.0, 0.0, 0.0))
+        assertEquals(ShapeKind.POLYGON, shape.shape)
+        assertTrue(shape.isTextOnlyBox())
+        assertEquals(shape.box.left, shape.labelRect()!!.left, 1e-9)
+        assertEquals(shape.box.top, shape.labelRect()!!.top, 1e-9)
+        shape.applyTransform(Affine.scaleAbout(Pt.ZERO, 0.7, 1.0))
+        assertTrue(shape.isTextOnlyBox())
+    }
+
     @Test fun aThinShapeStillWrapsTwoLinesWide() {
         val s = labelled(w = 4.0)
         assertEquals(2 * 13.0, s.labelRect()!!.w, 1e-9)

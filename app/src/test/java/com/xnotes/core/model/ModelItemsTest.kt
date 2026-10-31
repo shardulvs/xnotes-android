@@ -93,6 +93,37 @@ class ModelItemsTest {
         assertEquals(1 * lh, t.bounds().h, 1e-9)
     }
 
+    @Test fun textItemBoundsCacheReflowUntilLayoutInputsChange() {
+        val delegate = FakeTextMeasurer()
+        var layouts = 0
+        val measurer = object : com.xnotes.core.pal.TextMeasurer by delegate {
+            override fun measure(text: String, font: com.xnotes.core.pal.FontSpec, wrapWidth: Double,
+                flags: com.xnotes.core.pal.TextFlags): Rect {
+                layouts++
+                return delegate.measure(text, font, wrapWidth, flags)
+            }
+        }
+        val item = TextItem(Pt(1.0, 2.0), width = 150.0, text = "paragraph", measurer = measurer)
+        repeat(12) { item.bounds() }
+        assertEquals(1, layouts)
+        item.translate(20.0, 30.0)
+        item.height = 500.0
+        item.bounds()
+        assertEquals(1, layouts)
+        item.width = 200.0
+        item.bounds()
+        assertEquals(2, layouts)
+        item.text = "new paragraph"
+        item.bounds()
+        assertEquals(3, layouts)
+        item.pointSize = 16.0
+        item.bounds()
+        assertEquals(4, layouts)
+        item.face = com.xnotes.core.pal.FontFace.SANS
+        item.bounds()
+        assertEquals(5, layouts)
+    }
+
     @Test fun textItemEmptyPaintsNothing() {
         val r = FakeRenderer()
         TextItem(Pt(0.0, 0.0), measurer = FakeTextMeasurer()).paint(r)

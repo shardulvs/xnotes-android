@@ -9,6 +9,7 @@ import com.xnotes.core.pal.TextMeasurer
 import com.xnotes.core.shapes.FreePath
 import com.xnotes.core.shapes.ShapeKind
 import com.xnotes.core.vector.VectorContour
+import kotlin.math.roundToInt
 
 /**
  * A shape's typed label: plain text in a text box's [style], wrapped to the kind's text rect and
@@ -36,6 +37,27 @@ class ShapeLabel(val text: String, val style: TextStyle, val measurer: TextMeasu
         val h = measurer.measure(text.ifEmpty { " " }, font, width, FLAGS).h
         measured = Measured(width, h)
         return h
+    }
+
+    /** Editable text boxes use the same line-breaking coordinate system at every font size.
+     *  Android's hinting/line breaker otherwise shifts word boundaries during uniform scaling.
+     *  Normalizing layout width by font size keeps the logical wrap invariant. */
+    fun normalizedWidth(width: Double): Int =
+        if (style.pointSize <= 0.0) width.toInt().coerceAtLeast(1)
+        else (width * NORMALIZED_POINT_SIZE / style.pointSize)
+            .coerceIn(1.0, 32768.0).roundToInt()
+
+    val normalizedFont: FontSpec get() = FontSpec(NORMALIZED_POINT_SIZE, style.face)
+
+    @Volatile private var measuredNormalized: Measured? = null
+
+    fun normalizedHeight(width: Double): Double {
+        measuredNormalized?.let { if (it.width == width) return it.height }
+        val refWidth = normalizedWidth(width).toDouble()
+        val height = measurer.measure(text.ifEmpty { " " }, normalizedFont, refWidth, FLAGS).h *
+            style.pointSize / NORMALIZED_POINT_SIZE
+        measuredNormalized = Measured(width, height)
+        return height
     }
 
     @Volatile
@@ -93,6 +115,9 @@ class ShapeLabel(val text: String, val style: TextStyle, val measurer: TextMeasu
     fun sameAs(other: ShapeLabel?): Boolean = other != null && other.text == text && other.style == style
 
     companion object {
+        /** Shared reference size for stable line breaking in uniformly scaled editable boxes. */
+        const val NORMALIZED_POINT_SIZE = 48.0
+
         /**
          * A new label's style for [item]: the given type, in its line's colour, unless a solid fill
          * of that colour would swallow it, when black or white reads better on the fill.

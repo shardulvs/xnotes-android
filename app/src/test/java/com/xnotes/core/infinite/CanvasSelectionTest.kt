@@ -2,6 +2,7 @@ package com.xnotes.core.infinite
 
 import com.xnotes.canvas.HandleId
 import com.xnotes.canvas.SelectionMath
+import com.xnotes.core.FakeTextMeasurer
 import com.xnotes.core.geometry.Affine
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
@@ -14,6 +15,9 @@ import com.xnotes.core.model.ImageItem
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.Routing
 import com.xnotes.core.model.ShapeItem
+import com.xnotes.core.model.ShapeLabel
+import com.xnotes.core.model.TextStyle
+import com.xnotes.core.pal.FontFace
 import com.xnotes.core.model.Stroke
 import com.xnotes.core.stroke.Sample
 import com.xnotes.core.shapes.Axis
@@ -184,6 +188,91 @@ class CanvasSelectionTest {
     }
 
     // --- resizing ---
+
+    private fun importedText(): ShapeItem = ShapeItem(
+        ShapeKind.RECTANGLE, Pt(0.0, 0.0), Pt(100.0, 50.0),
+        Rgba(0, 0, 0, 0), strokeWidth = 0.0,
+    ).apply {
+        label = ShapeLabel("An editable imported paragraph",
+            TextStyle(Rgba(0, 0, 0), 12.0, FontFace.SANS), FakeTextMeasurer())
+    }
+
+    @Test fun aTextCornerScalesItsFontAndUndoRestoresBothFontAndBox() {
+        val item = importedText()
+        val sel = CanvasSelection(docOf(item))
+        sel.select(listOf(item))
+        sel.beginTransform()
+        sel.resizeLive(HandleId.BR, Pt(200.0, 100.0))
+        assertEquals(200.0, item.box.w, 1e-6)
+        assertEquals(24.0, item.label!!.style.pointSize, 1e-6)
+
+        val command = sel.buildCommand(movedOnly = false)!!
+        command.undo()
+        assertEquals(100.0, item.box.w, 1e-6)
+        assertEquals(12.0, item.label!!.style.pointSize, 1e-6)
+        command.redo()
+        assertEquals(200.0, item.box.w, 1e-6)
+        assertEquals(24.0, item.label!!.style.pointSize, 1e-6)
+    }
+
+    @Test fun aTextCornerCannotShrinkBelowReadableFontSize() {
+        val item = importedText()
+        val sel = CanvasSelection(docOf(item))
+        sel.select(listOf(item))
+        sel.beginTransform()
+        val preview = sel.previewResize(HandleId.BR, Pt(1.0, 1.0))!!
+        assertEquals(100.0 * (3.0 / 12.0), sel.box!!.halfW * 2.0, 1e-6)
+        assertEquals(100.0 * (3.0 / 12.0), preview.apply(Pt(100.0, 0.0)).x, 1e-6)
+        sel.resizeLive(HandleId.BR, Pt(1.0, 1.0))
+        assertEquals(3.0, item.label!!.style.pointSize, 1e-6)
+    }
+
+    @Test fun aTextSideCannotCollapseIntoAnUnreadableColumn() {
+        val item = importedText()
+        val minWidth = item.label!!.lineHeight * 2.0
+        val sel = CanvasSelection(docOf(item))
+        sel.select(listOf(item))
+        sel.beginTransform()
+        sel.previewResize(HandleId.R, Pt(1.0, 25.0))
+        assertEquals(minWidth, sel.box!!.halfW * 2.0, 1e-6)
+        sel.resizeLive(HandleId.R, Pt(1.0, 25.0))
+        assertEquals(minWidth, item.box.w, 1e-6)
+        assertEquals(12.0, item.label!!.style.pointSize, 1e-6)
+    }
+
+    @Test fun topEdgeAnchorTracksTopResizeButNotBottomResize() {
+        val item = importedText()
+        val textTop = Pt(item.box.centerX, item.box.top)
+        val sel = CanvasSelection(docOf(item))
+        sel.select(listOf(item))
+        sel.beginTransform()
+        val bottomMap = sel.previewResize(HandleId.B, Pt(50.0, 100.0))!!
+        assertEquals(textTop.y, bottomMap.apply(textTop).y, 1e-6)
+        val topMap = sel.previewResize(HandleId.T, Pt(50.0, -30.0))!!
+        assertEquals(-30.0, topMap.apply(textTop).y, 1e-6)
+    }
+
+    @Test fun aTextSideHandleOnlyReflowsItWithoutScalingFont() {
+        val item = importedText()
+        val sel = CanvasSelection(docOf(item))
+        sel.select(listOf(item))
+        sel.beginTransform()
+        sel.resizeLive(HandleId.R, Pt(200.0, 25.0))
+        assertEquals(200.0, item.box.w, 1e-6)
+        assertEquals(12.0, item.label!!.style.pointSize, 1e-6)
+    }
+
+    @Test fun aTextCornerDragDoesNotCompoundFontSizeAcrossSamples() {
+        val item = importedText()
+        val sel = CanvasSelection(docOf(item))
+        sel.select(listOf(item))
+        sel.beginTransform()
+        sel.resizeLive(HandleId.BR, Pt(200.0, 100.0))
+        sel.resizeLive(HandleId.BR, Pt(150.0, 75.0))
+        assertEquals(18.0, item.label!!.style.pointSize, 1e-6)
+        sel.resizeLive(HandleId.BR, Pt(100.0, 50.0))
+        assertEquals(12.0, item.label!!.style.pointSize, 1e-6)
+    }
 
     @Test fun aCornerDragScalesTheSelection() {
         val a = box(0.0, 0.0, 100.0, 100.0)
@@ -428,6 +517,29 @@ class CanvasSelectionTest {
         val inSpan = span(zoomedIn[0].mesh)
         val outSpan = span(zoomedOut[0].mesh)
         assertTrue("the outline must stay one thickness on screen", outSpan > inSpan)
+    }
+
+    @Test fun aVeryTallSelectionOnlyBuildsVisibleOutlineDashes() {
+        val accent = Rgba(0, 255, 0, 255)
+        val tall = com.xnotes.core.geometry.Obb(Pt(100.0, 4000.0), 150.0, 4000.0, 0.0)
+        val full = OverlayTessellator.selection(tall, 0.5, accent, 0.01)
+        val clipped = OverlayTessellator.selection(tall, 0.5, accent, 0.01,
+            visibleRect = Rect(-300.0, 0.0, 800.0, 2200.0))
+        val allVertices = full.sumOf { it.mesh.vertexCount }
+        val visibleVertices = clipped.sumOf { it.mesh.vertexCount }
+        assertTrue("Only onscreen dashes should be tessellated: $visibleVertices / $allVertices",
+            visibleVertices < allVertices / 2)
+        assertTrue(clipped.isNotEmpty())
+    }
+
+    @Test fun aRotatedSelectionClipsWithoutLosingItsVisibleEdges() {
+        val accent = Rgba(0, 255, 0, 255)
+        val tall = com.xnotes.core.geometry.Obb(Pt(0.0, 0.0), 200.0, 3000.0, 0.4)
+        val visible = Rect(-600.0, -600.0, 1200.0, 1200.0)
+        val clipped = OverlayTessellator.selection(tall, 0.5, accent, 0.01,
+            visibleRect = visible)
+        assertTrue(clipped.isNotEmpty())
+        assertTrue(clipped.sumOf { it.mesh.vertexCount } > 0)
     }
 
     @Test fun theBandAndLassoProduceGeometry() {

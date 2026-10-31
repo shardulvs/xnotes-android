@@ -421,12 +421,19 @@ class AndroidRenderer(private val canvas: Canvas) : Renderer {
 
     override fun drawText(text: String, rect: Rect, font: FontSpec, color: Rgba, flags: TextFlags) {
         if (text.isEmpty()) return
-        val paint = AndroidText.textPaint(font, color.toArgb())
-        val layout = AndroidText.layout(text, rect.w.toInt(), paint, flags)
-        canvas.save()
-        canvas.translate(rect.left.toFloat(), rect.top.toFloat())
-        layout.draw(canvas)
-        canvas.restore()
+        android.os.Trace.beginSection("Xnotes.text.draw")
+        try {
+            val layout = AndroidText.drawLayout(text, rect.w.toInt(), font, color.toArgb(), flags)
+            canvas.save()
+            try {
+                canvas.translate(rect.left.toFloat(), rect.top.toFloat())
+                layout.draw(canvas)
+            } finally {
+                canvas.restore()
+            }
+        } finally {
+            android.os.Trace.endSection()
+        }
     }
 
     override fun drawTextTurned(text: String, rect: Rect, font: FontSpec, color: Rgba, flags: TextFlags, angle: Double) {

@@ -21,6 +21,11 @@ import com.xnotes.core.model.TapeItem
 import com.xnotes.core.model.TapeMode
 import com.xnotes.core.tape.TapeGeometry
 
+/** Allow smaller text via corner handles; this is deliberately below the toolbar's 6 pt floor. */
+private const val MIN_TEXT_CORNER_PT = 3.0
+/** Keep a small nonzero text-column width while allowing tighter reflow. */
+private const val MIN_TEXT_SIDE_LINE_HEIGHTS = 2.0
+
 /**
  * What is selected on the canvas, and the arithmetic of moving, scaling and rotating it.
  *
@@ -155,9 +160,18 @@ class CanvasSelection(private val doc: InfiniteDocument) {
      * Put every item back where the drag began and bake [transform] over it. Called per frame, so
      * the drag is always one transform of the original rather than a chain of small ones.
      */
-    fun applyLive(transform: Affine) {
+    fun applyLive(transform: Affine, textScale: Double? = null) {
         for (i in items.indices) items[i].restoreGeometry(startSnapshots[i])
-        for (item in items) item.applyTransform(transform)
+        for (item in items) {
+            item.applyTransform(transform)
+            if (textScale != null && item is ShapeItem && item.isTextOnlyBox()) {
+                // Restore the original label on every sample, then scale once from that size.
+                // This keeps the font proportional to a corner resize without compounding it.
+                val original = item.label ?: continue
+                val points = (original.style.pointSize * textScale).coerceIn(1.0, 512.0)
+                item.label = original.withStyle(original.style.copy(pointSize = points))
+            }
+        }
         follow.follow(transform)
         doc.itemsChanged(items)
         doc.itemsChanged(follow.items)
@@ -228,12 +242,47 @@ class CanvasSelection(private val doc: InfiniteDocument) {
      * Scale a handle drag in the box's own frame, anchored at the opposite handle. [margin] is how
      * far outside the box the handle sits ([chromeMargin]), which the box edge keeps behind it.
      */
+    private fun boundedTextResize(handle: HandleId, pointer: Pt, margin: Double): ResizeMath.ObbResize? {
+        val from = startBox ?: return null
+        val raw = ResizeMath.obbResize(from, handle, pointer, margin)
+        val text = (items.singleOrNull() as? ShapeItem)?.takeIf { it.isTextOnlyBox() }
+            ?: return raw
+        val label = text.label ?: return raw
+        if (from.halfW <= 1e-6 || from.halfH <= 1e-6 || label.style.pointSize <= 0.0) return raw
+        // Editable text has a small font/column floor; zoom can improve sharpness, not physical size.
+        // Only text-only hosts get these limits; other shapes preserve their resize behavior.
+        val minScale = when (handle) {
+            in CORNERS -> (MIN_TEXT_CORNER_PT / label.style.pointSize).coerceAtMost(1.0)
+            HandleId.L, HandleId.R -> (label.lineHeight * MIN_TEXT_SIDE_LINE_HEIGHTS / (from.halfW * 2.0)).coerceAtMost(1.0)
+            HandleId.T, HandleId.B -> (label.lineHeight / (from.halfH * 2.0)).coerceAtMost(1.0)
+            else -> return raw
+        }
+        val sx = if (handle in CORNERS || handle == HandleId.L || handle == HandleId.R)
+            maxOf(minScale, raw.obb.halfW / from.halfW) else 1.0
+        val sy = if (handle in CORNERS || handle == HandleId.T || handle == HandleId.B)
+            maxOf(minScale, raw.obb.halfH / from.halfH) else 1.0
+        if (sx == raw.obb.halfW / from.halfW && sy == raw.obb.halfH / from.halfH) return raw
+        val local = Rect(-from.halfW, -from.halfH, from.halfW * 2.0, from.halfH * 2.0)
+        val anchor = ResizeMath.scaleForHandle(local, handle, Pt.ZERO).anchor
+        val worldAnchor = from.localToWorld(anchor)
+        return ResizeMath.ObbResize(
+            Affine.scaleAlongAxes(worldAnchor, from.angle, sx, sy),
+            Obb(from.localToWorld(Pt(anchor.x * (1.0 - sx), anchor.y * (1.0 - sy))),
+                from.halfW * sx, from.halfH * sy, from.angle),
+        )
+    }
+
     fun resizeLive(handle: HandleId, pointer: Pt, margin: Double = 0.0) {
         if (handle == HandleId.START || handle == HandleId.END) return dragTapeEnd(handle, pointer)
         val from = startBox ?: return
-        val result = boxResize(from, handle, pointer, margin)
+        val result = if (loneTapeBox != null) boxResize(from, handle, pointer, margin)
+            else boundedTextResize(handle, pointer, margin) ?: return
         box = result.obb
-        applyLive(result.transform)
+        // Corner handles scale the letters along with the box; edge handles only reflow them.
+        // ResizeMath already locks corner scales to one factor on both axes.
+        val textScale = if (handle in CORNERS && from.halfW > 0.0)
+            result.obb.halfW / from.halfW else null
+        applyLive(result.transform, textScale)
         // A pill stops at its smallest by itself, so its box is read back from it.
         if (items.all { it is AudioItem }) box = boxOf(items)
     }
@@ -244,7 +293,8 @@ class CanvasSelection(private val doc: InfiniteDocument) {
      */
     fun previewResize(handle: HandleId, pointer: Pt, margin: Double = 0.0): Affine? {
         val from = startBox ?: return null
-        val result = boxResize(from, handle, pointer, margin)
+        val result = if (loneTapeBox != null) boxResize(from, handle, pointer, margin)
+            else boundedTextResize(handle, pointer, margin) ?: return null
         box = result.obb
         return result.transform
     }

@@ -84,11 +84,35 @@ object OverlayTessellator {
         vertexDots: List<Pt> = emptyList(),
         edgeDots: List<Pt> = emptyList(),
         knobs: List<Pt> = emptyList(),
+        visibleRect: Rect? = null,
     ): List<MeshPart> {
         if (zoom <= 0.0) return emptyList()
         val outline = MeshBuilder()
         val half = OUTLINE_PX / zoom / 2.0
-        dashInto(outline, box.corners(), half, closed = true, zoom = zoom, devicePxPerDp = devicePxPerDp, tolerance = tolerance)
+        val corners = box.corners()
+        if (visibleRect == null) {
+            dashInto(outline, corners, half, closed = true, zoom = zoom,
+                devicePxPerDp = devicePxPerDp, tolerance = tolerance)
+        } else {
+            // A very tall text box may span tens of screens. Tessellating every offscreen
+            // dash on each pen sample made even a uniform-only move stall on the UI thread.
+            var phase = 0.0
+            for (i in corners.indices) {
+                val a = corners[i]
+                val b = corners[(i + 1) % corners.size]
+                val len = a.distanceTo(b)
+                val clip = clipSegment(a, b, visibleRect)
+                if (clip != null) {
+                    val start = Pt(a.x + (b.x - a.x) * clip.first,
+                        a.y + (b.y - a.y) * clip.first)
+                    val end = Pt(a.x + (b.x - a.x) * clip.second,
+                        a.y + (b.y - a.y) * clip.second)
+                    dashSquareInto(outline, start, end, half, zoom,
+                        devicePxPerDp, phase + len * clip.first)
+                }
+                phase += len
+            }
+        }
 
         // The stem out to the grip, so it reads as attached rather than floating. Solid: it is a
         // join, not a boundary, and a dashed one at this length would be two ticks and a gap.
@@ -300,10 +324,59 @@ object OverlayTessellator {
         return lassoRun(points, from, points.size - from, zoom, accent, tolerance, phase, devicePxPerDp)
     }
 
-    /**
-     * [points] as a dashed ribbon into [b]. The dash is an on-screen length, so it comes back out
-     * of the zoom into content px; [phase] lets a line split into runs keep one rhythm.
-     */
+    /** Visible portion of a line, expressed as its original 0..1 parameter interval.
+     * Keeping the original distance preserves the dash phase as the box moves or the view pans. */
+    private fun clipSegment(a: Pt, b: Pt, visible: Rect): Pair<Double, Double>? {
+        val dx = b.x - a.x
+        val dy = b.y - a.y
+        var enter = 0.0
+        var leave = 1.0
+        fun clip(p: Double, q: Double): Boolean {
+            if (kotlin.math.abs(p) < 1e-12) return q >= 0.0
+            val t = q / p
+            if (p < 0.0) {
+                if (t > leave) return false
+                if (t > enter) enter = t
+            } else {
+                if (t < enter) return false
+                if (t < leave) leave = t
+            }
+            return true
+        }
+        if (!clip(-dx, a.x - visible.left) || !clip(dx, visible.right - a.x) ||
+            !clip(-dy, a.y - visible.top) || !clip(dy, visible.bottom - a.y)) return null
+        return if (leave > enter) enter to leave else null
+    }
+
+    /** Four vertices per dash instead of two round-cap discs (40+ vertices each). At a 1.6px
+     * outline, square caps are visually equivalent but spare the UI thread thousands of triangles. */
+    private fun dashSquareInto(
+        mesh: MeshBuilder, a: Pt, b: Pt, half: Double, zoom: Double,
+        devicePxPerDp: Double, phase: Double,
+    ) {
+        val on = DASH_ON_DP * devicePxPerDp / zoom
+        val gap = DASH_GAP_DP * devicePxPerDp / zoom
+        for (run in MeshBuilder.dashRuns(listOf(a, b), on, gap, closed = false, phase = phase)) {
+            for (i in 0 until run.size - 1) {
+                val p = run[i]
+                val q = run[i + 1]
+                val dx = q.x - p.x
+                val dy = q.y - p.y
+                val len = kotlin.math.hypot(dx, dy)
+                if (len < 1e-9) continue
+                val nx = -dy / len * half
+                val ny = dx / len * half
+                val v0 = mesh.vertex(p.x + nx, p.y + ny, nx, ny)
+                val v1 = mesh.vertex(p.x - nx, p.y - ny, -nx, -ny)
+                val v2 = mesh.vertex(q.x + nx, q.y + ny, nx, ny)
+                val v3 = mesh.vertex(q.x - nx, q.y - ny, -nx, -ny)
+                mesh.triangle(v0, v1, v3)
+                mesh.triangle(v0, v3, v2)
+            }
+        }
+    }
+
+    /** Draw dashed runs while preserving the phase of the complete outline. */
     private fun dashInto(
         b: MeshBuilder,
         points: List<Pt>,

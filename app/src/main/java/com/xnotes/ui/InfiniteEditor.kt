@@ -1,6 +1,7 @@
 package com.xnotes.ui
 
 import android.content.Context
+import android.os.Trace
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,12 +41,18 @@ import com.xnotes.core.infinite.InfiniteDocument
 import com.xnotes.core.infinite.GlowSpec
 import com.xnotes.core.infinite.InkPass
 import com.xnotes.core.infinite.ItemMesher
+import com.xnotes.core.infinite.isRigidTextQuadMotion
+import com.xnotes.core.infinite.textWrapChanged
+import com.xnotes.core.infinite.textBitmapScale
+import com.xnotes.core.infinite.textRasterZoomTier
+import com.xnotes.core.infinite.shouldRefineTextBitmap
 import com.xnotes.core.infinite.Waypoint
 import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.DrawStyle
 import com.xnotes.core.model.ImageData
 import com.xnotes.core.model.ImageItem
 import com.xnotes.core.model.PageLayers
+import com.xnotes.core.model.deepCopy
 import com.xnotes.core.model.forExport
 import com.xnotes.core.model.deepCopyAll
 import com.xnotes.core.model.Rgba
@@ -131,6 +138,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         onSelectionChanged = { publishOverlay() },
         onCommitSelection = { commitSelection(it) },
         onLiftSelection = { items, at -> scene.setLift(items, at) },
+        onTextResizeStart = { startTextResizePreview(it) },
+        onTextResizeMove = { previewTextResize(it) },
+        onTextResizeEnd = { cancelled -> finishTextResizePreview(cancelled) },
         devicePxPerDp = { devicePxPerDp },
         onMinimapPress = { vx, vy -> minimapTap(vx, vy) },
         onContextMenu = { vp, content, locked -> contextMenu = ContextMenuTarget(vp.x, vp.y, content, locked) },
@@ -247,6 +257,57 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         }
     }
 
+    /** Text reflow must never triangulate on the input thread, even on a cache miss. */
+    private val textExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "xnotes-text-mesh").apply { isDaemon = true; priority = Thread.MIN_PRIORITY }
+    }
+    private val preparedText = java.util.IdentityHashMap<ShapeItem, com.xnotes.core.infinite.PreparedShapeText>()
+    private val textMeshes = com.xnotes.core.util.LatestWork<CanvasItem>(
+        textExecutor, minimumStartIntervalMs = 60L,
+    ) { callback -> view.post { callback() } }
+
+    // Imported editable text has a cheap native layout/raster path, independent of vector meshing.
+    private val textRasterExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "xnotes-text-raster").apply { isDaemon = true; priority = Thread.NORM_PRIORITY - 1 }
+    }
+    private val textRasters = com.xnotes.core.util.LatestWork<CanvasItem>(
+        textRasterExecutor, minimumStartIntervalMs = 12L,
+    ) { callback -> view.post { callback() } }
+
+    private data class TextRaster(val bitmap: android.graphics.Bitmap, val corners: DoubleArray,
+        val bounds: Rect, val durationMs: Double, val rasterScale: Double)
+
+    /** A bitmap already rendered at this wrap width; its four corners may move without reflow. */
+    private data class PresentedText(val label: ShapeLabel, val corners: DoubleArray,
+        val preview: Boolean = false, val rasterScale: Double = 1.0)
+    private val presentedText = java.util.IdentityHashMap<ShapeItem, PresentedText>()
+
+    /** Refine only after camera movement settles: the current bitmap remains on the GPU
+     * throughout every pinch and pan, and the worker never recalculates line breaks on input. */
+    private val textZoomRefinement = Runnable { refineVisibleTextResolution() }
+
+    private fun scheduleTextZoomRefinement() {
+        view.removeCallbacks(textZoomRefinement)
+        view.postDelayed(textZoomRefinement, 190L)
+    }
+
+    private fun refineVisibleTextResolution() {
+        if (textResizeState != null || editingLabel != null) return
+        val detail = textRasterZoomTier(viewport.zoom)
+        for (item in document.itemsIn(viewport.cullRect(96.0))) {
+            val shape = item as? ShapeItem ?: continue
+            if (!shape.isTextOnlyBox() || shape.labelHidden) continue
+            val current = presentedText[shape] ?: continue
+            if (current.preview || shape.label?.sameAs(current.label) != true) continue
+            val rect = shape.labelRect() ?: continue
+            val wanted = textBitmapScale(rect.w, rect.h, scene.maxTextTextureSide,
+                preview = false, targetScale = detail)
+            if (shouldRefineTextBitmap(current.rasterScale, wanted)) {
+                pushTextOnlyBox(shape, forceRaster = true)
+            }
+        }
+    }
+
     /** Where inserted images are written; supplied by the host so both editors share one dir. */
     var imageDir: java.io.File? = null
 
@@ -263,8 +324,13 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
         override fun onItemRemoved(item: CanvasItem) {
             itemsRevision++
+            if (textResizeState?.item === item) textResizeState = null
             // Drop any mesh job still running for it, so its result cannot file the record again.
             if (item is ImageItem) vectorMeshGen.remove(item)
+            textMeshes.cancel(item)
+            textRasters.cancel(item)
+            preparedText.remove(item)
+            presentedText.remove(item)
             scene.remove(item)
             if (item === AudioPlayback.session?.item) AudioPlayback.closeIfGone(this@InfiniteEditor)
         }
@@ -283,6 +349,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
         override fun onReset() {
             itemsRevision++
+            textResizeState = null
             rebuildScene()
             view.publish()
             AudioPlayback.closeIfGone(this@InfiniteEditor)
@@ -324,14 +391,287 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             if (!pushVectorImage(item)) scene.upsertImage(item, item.paintBounds())
             return
         }
+        if (item is ShapeItem && item.isTextOnlyBox() && !item.labelHidden && !item.label?.text.isNullOrEmpty()) {
+            pushTextOnlyBox(item)
+            return
+        }
+        presentedText.remove(item)
+        textRasters.cancel(item)
+        val labelled = item as? com.xnotes.core.model.Labelled
+        if (labelled?.label != null && !labelled.labelHidden) {
+            pushLabelledItem(item)
+            return
+        }
+        // Hiding/removing a label also invalidates any older visible-text result.
+        textMeshes.cancel(item)
+        preparedText.remove(item)
         val started = System.nanoTime()
-        val meshed = ItemMesher.mesh(item)
+        Trace.beginSection("Xnotes.item.mesh")
+        val meshed = try { ItemMesher.mesh(item) } finally { Trace.endSection() }
         scene.lastTessellateMs = (System.nanoTime() - started) / 1_000_000.0
         if (meshed == null || meshed.isEmpty) {
             scene.remove(item)
             return
         }
         scene.upsert(item, meshed.parts, meshed.bounds, committingWetStroke)
+    }
+
+    /**
+     * Live text reflow is an optional, low-rate *bitmap* preview. The model and full-quality raster
+     * remain untouched until release. Every preview is positioned relative to the original
+     * top-edge midpoint: centred horizontally, top-anchored vertically, without glyph scaling.
+     */
+    private data class TextResizeState(
+        val item: ShapeItem,
+        val source: ShapeItem,
+        val originalTextTop: Pt,
+        val owner: InfiniteDocument,
+        var lastQueuedAt: Long = 0L,
+        @Volatile var lastPublishedBreaks: IntArray? = null,
+    )
+    private data class TextResizeRaster(
+        val bitmap: android.graphics.Bitmap?,
+        val corners: DoubleArray?,
+        val lineEnds: IntArray,
+        val durationMs: Double,
+    )
+    private var textResizeState: TextResizeState? = null
+
+    private fun startTextResizePreview(item: ShapeItem) {
+        textResizeState?.let { textRasters.cancel(it.item) }
+        textResizeState = TextResizeState(
+            item, item.deepCopy(textMeasurer) as ShapeItem,
+            item.toPage(Pt(item.box.centerX, item.box.top)), document,
+        )
+    }
+
+    private fun finishTextResizePreview(cancelled: Boolean) {
+        val state = textResizeState ?: return
+        textResizeState = null
+        textRasters.cancel(state.item)
+        if (cancelled && document === state.owner && document.holds(state.item)) {
+            // No model edit happened: bring its original native layout back after cancellation.
+            presentedText.remove(state.item)
+            pushTextOnlyBox(state.item)
+        }
+    }
+
+    private fun previewTextResize(transform: com.xnotes.core.geometry.Affine) {
+        val state = textResizeState ?: return
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - state.lastQueuedAt < 90L) return
+        state.lastQueuedAt = now
+        textRasters.submit(state.item, compute = {
+            val started = System.nanoTime()
+            Trace.beginSection("Xnotes.text.preview")
+            try {
+                val snapshot = state.source.deepCopy(textMeasurer) as ShapeItem
+                snapshot.applyTransform(transform)
+                val label = requireNotNull(snapshot.label)
+                val host = snapshot.box
+                val width = maxOf(host.w, label.lineHeight * ShapeLabel.MIN_WIDTH_LINES).coerceAtLeast(1.0)
+                val layout = com.xnotes.platform.AndroidText.drawLayout(
+                    label.text, label.normalizedWidth(width),
+                    label.normalizedFont, label.style.rgba.toArgb(), ShapeLabel.FLAGS,
+                )
+                val glyphScale = label.style.pointSize / ShapeLabel.NORMALIZED_POINT_SIZE
+                val ends = IntArray(layout.lineCount) { layout.getLineEnd(it) }
+                if (!textWrapChanged(state.lastPublishedBreaks, ends)) {
+                    TextResizeRaster(null, null, ends, (System.nanoTime() - started) / 1_000_000.0)
+                } else {
+                    val height = (layout.height * glyphScale).coerceAtLeast(1.0)
+                    // Skinny, very tall text must not be crushed to a 1024px texture: give
+                    // extreme aspect ratios up to 4 MiB, retaining glyph sharpness.
+                    val scale = textBitmapScale(width, height, scene.maxTextTextureSide,
+                        preview = true)
+                    val bitmap = android.graphics.Bitmap.createBitmap(
+                        kotlin.math.ceil(width * scale).toInt().coerceAtLeast(1),
+                        kotlin.math.ceil(height * scale).toInt().coerceAtLeast(1),
+                        android.graphics.Bitmap.Config.ARGB_8888,
+                    )
+                    try {
+                        val canvas = android.graphics.Canvas(bitmap)
+                        canvas.scale((scale * glyphScale).toFloat(),
+                            (scale * glyphScale).toFloat())
+                        layout.draw(canvas)
+                    } catch (e: Exception) {
+                        bitmap.recycle()
+                        throw e
+                    }
+                    val area = Rect(host.left, host.top, width, height)
+                    val pts = listOf(area.topLeft, Pt(area.right, area.top),
+                        Pt(area.right, area.bottom), Pt(area.left, area.bottom)).map(snapshot::toPage)
+                    // Remove the sampled top-edge shift: the current GPU lift tracks the latest
+                    // top anchor even when the preview worker finishes after more pointer moves.
+                    val moved = transform.apply(state.originalTextTop)
+                    val dx = moved.x - state.originalTextTop.x
+                    val dy = moved.y - state.originalTextTop.y
+                    val corners = doubleArrayOf(
+                        pts[0].x - dx, pts[0].y - dy, pts[1].x - dx, pts[1].y - dy,
+                        pts[3].x - dx, pts[3].y - dy, pts[2].x - dx, pts[2].y - dy,
+                    )
+                    TextResizeRaster(bitmap, corners, ends,
+                        (System.nanoTime() - started) / 1_000_000.0)
+                }
+            } finally { Trace.endSection() }
+        }, publish = { result ->
+            if (textResizeState === state && document === state.owner && state.owner.holds(state.item)) {
+                if (result.bitmap != null && result.corners != null) {
+                    state.lastPublishedBreaks = result.lineEnds
+                    val pts = (0 until 4).map { i ->
+                        Pt(result.corners[2 * i], result.corners[2 * i + 1])
+                    }
+                    presentedText[state.item] = PresentedText(state.source.label!!,
+                        result.corners, preview = true)
+                    scene.lastTessellateMs = result.durationMs
+                    scene.upsertText(state.item, result.bitmap, result.corners, Rect.bounding(pts))
+                    view.publish()
+                }
+            } else result.bitmap?.recycle()
+        }, failed = { e -> android.util.Log.e("InfiniteEditor", "Live text preview failed", e) },
+            previewGroup = state.item, discard = { it.bitmap?.recycle() })
+    }
+
+    /** Reflow with Android's native StaticLayout, then upload a single RGBA quad instead of glyph meshes. */
+    private fun pushTextOnlyBox(item: ShapeItem, forceRaster: Boolean = false) {
+        textMeshes.cancel(item)
+        preparedText.remove(item)
+        val owner = document
+        val snapshot = item.deepCopy(textMeasurer) as ShapeItem
+        val label = snapshot.label ?: return
+        val rect = snapshot.labelRect() ?: return
+        val cornerPts = snapshot.labelCorners()
+        val corners = doubleArrayOf(
+            cornerPts[0].x, cornerPts[0].y, cornerPts[1].x, cornerPts[1].y,
+            cornerPts[3].x, cornerPts[3].y, cornerPts[2].x, cornerPts[2].y,
+        )
+        val bounds = snapshot.paintBounds()
+        val previous = presentedText[item]
+        val requestedScale = if (forceRaster) textRasterZoomTier(viewport.zoom)
+            else previous?.rasterScale ?: 1.0
+        if (!forceRaster && previous != null && !previous.preview && label.sameAs(previous.label) &&
+            isRigidTextQuadMotion(previous.corners, corners)) {
+            // Translation and rotation only relocate the existing textured quad. Rebuilding
+            // a bitmap on release used to draw a translation-only placeholder for a turn,
+            // causing a visible jump until the rotation raster arrived.
+            textRasters.cancel(item)
+            presentedText[item] = PresentedText(label, corners, rasterScale = previous.rasterScale)
+            scene.relocateText(item, corners, bounds)
+            // A move can cancel a pending zoom refinement. Request it again once the gesture ends.
+            val wanted = textBitmapScale(rect.w, rect.h, scene.maxTextTextureSide,
+                preview = false, targetScale = textRasterZoomTier(viewport.zoom))
+            if (shouldRefineTextBitmap(previous.rasterScale, wanted)) scheduleTextZoomRefinement()
+            return
+        }
+        if (!forceRaster && previous != null && label.text == previous.label.text &&
+            label.style.face == previous.label.style.face &&
+            label.style.rgba == previous.label.style.rgba) {
+            if (label.style.pointSize != previous.label.style.pointSize) {
+                // Corner scaling intentionally changes the font size: retain the scaled preview
+                // until its full-resolution raster arrives.
+                scene.relocateText(item, corners, bounds)
+            } else {
+                // Side resizing changes wrapping, not glyph size. Keep the old bitmap rigid while
+                // the worker prepares the new lines, including during the pointer-up transition.
+                // The label is horizontally centred: preserve the previous lines' centre,
+                // not the old bitmap's left edge, until the new wrap replaces it.
+                val dx = (corners[0] + corners[2] -
+                    previous.corners[0] - previous.corners[2]) / 2.0
+                val dy = (corners[1] + corners[3] -
+                    previous.corners[1] - previous.corners[3]) / 2.0
+                val shifted = previous.corners.copyOf()
+                for (i in 0 until 4) {
+                    shifted[2 * i] += dx
+                    shifted[2 * i + 1] += dy
+                }
+                val rigidBounds = Rect.bounding((0 until 4).map { i ->
+                    Pt(shifted[2 * i], shifted[2 * i + 1])
+                })
+                presentedText[item] = PresentedText(previous.label, shifted, previous.preview,
+                    previous.rasterScale)
+                scene.relocateText(item, shifted, rigidBounds)
+            }
+        }
+        textRasters.submit(item, compute = {
+            val started = System.nanoTime()
+            Trace.beginSection("Xnotes.text.raster")
+            try {
+                val width = rect.w.coerceAtLeast(1.0)
+                val height = rect.h.coerceAtLeast(1.0)
+                // Keep the 8 MiB allocation cap, but use the actual GPU texture limit.
+                // Tall narrow paragraphs can fit at full resolution without downsampling.
+                val scale = textBitmapScale(width, height, scene.maxTextTextureSide,
+                    preview = false, targetScale = requestedScale)
+                val pxWidth = kotlin.math.ceil(width * scale).toInt().coerceAtLeast(1)
+                val pxHeight = kotlin.math.ceil(height * scale).toInt().coerceAtLeast(1)
+                val bitmap = android.graphics.Bitmap.createBitmap(pxWidth, pxHeight,
+                    android.graphics.Bitmap.Config.ARGB_8888)
+                try {
+                    val canvas = android.graphics.Canvas(bitmap)
+                    canvas.scale(scale.toFloat(), scale.toFloat())
+                    val layout = com.xnotes.platform.AndroidText.drawLayout(label.text,
+                        label.normalizedWidth(width), label.normalizedFont,
+                        label.style.rgba.toArgb(), ShapeLabel.FLAGS)
+                    val glyphScale = label.style.pointSize / ShapeLabel.NORMALIZED_POINT_SIZE
+                    // Canonical line breaks, drawn at the chosen font size in document pixels.
+                    canvas.scale(glyphScale.toFloat(), glyphScale.toFloat())
+                    layout.draw(canvas)
+                } catch (e: Exception) {
+                    bitmap.recycle()
+                    throw e
+                }
+                TextRaster(bitmap, corners, bounds, (System.nanoTime() - started) / 1_000_000.0,
+                    rasterScale = scale)
+            } finally { Trace.endSection() }
+        }, publish = { ready ->
+            if (textResizeState?.item !== item && document === owner && owner.holds(item) &&
+                item.isTextOnlyBox() && !item.labelHidden) {
+                scene.lastTessellateMs = ready.durationMs
+                presentedText[item] = PresentedText(label, ready.corners, rasterScale = ready.rasterScale)
+                scene.upsertText(item, ready.bitmap, ready.corners, ready.bounds)
+                val wantedNow = textBitmapScale(rect.w, rect.h, scene.maxTextTextureSide,
+                    preview = false, targetScale = textRasterZoomTier(viewport.zoom))
+                if (shouldRefineTextBitmap(ready.rasterScale, wantedNow)) scheduleTextZoomRefinement()
+                view.publish()
+            } else ready.bitmap.recycle()
+        }, failed = { e -> android.util.Log.e("InfiniteEditor", "Text raster failed", e) },
+            previewGroup = item, discard = { it.bitmap.recycle() })
+    }
+
+    private fun pushLabelledItem(item: CanvasItem) {
+        val owner = document
+        // The worker sees an independent geometry snapshot, never the live gesture model.
+        val snapshot = item.deepCopy(textMeasurer)
+        if (item is ShapeItem) {
+            val reused = preparedText[item]?.rigidCopyFor(item)
+            if (reused != null) {
+                textMeshes.cancel(item)
+                scene.upsert(item, reused.parts, reused.bounds)
+                preparedText[item] = com.xnotes.core.infinite.PreparedShapeText(snapshot as ShapeItem, reused)
+                return
+            }
+        }
+        val labelled = snapshot as com.xnotes.core.model.Labelled
+        labelled.labelHidden = (item as com.xnotes.core.model.Labelled).labelHidden
+        textMeshes.submit(item, compute = {
+            val started = System.nanoTime()
+            Trace.beginSection("Xnotes.text.mesh")
+            try { ItemMesher.mesh(snapshot) to (System.nanoTime() - started) / 1_000_000.0 }
+            finally { Trace.endSection() }
+        }, publish = { (meshed, ms) ->
+            if (document === owner && owner.holds(item)) {
+                scene.lastTessellateMs = ms
+                if (meshed == null || meshed.isEmpty) {
+                    preparedText.remove(item)
+                    scene.remove(item)
+                } else {
+                    if (item is ShapeItem) preparedText[item] = com.xnotes.core.infinite.PreparedShapeText(snapshot as ShapeItem, meshed)
+                    scene.upsert(item, meshed.parts, meshed.bounds)
+                }
+                view.publish()
+            }
+        }, failed = { e -> android.util.Log.e("InfiniteEditor", "Text mesh failed", e) },
+            previewGroup = labelled.label)
     }
 
     /**
@@ -400,6 +740,10 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     private fun rebuildScene() {
         scene.reset()
         vectorMeshGen.clear()
+        textMeshes.clear()
+        textRasters.clear()
+        preparedText.clear()
+        presentedText.clear()
         scene.batch { for (item in document.items) pushItem(item) }
         scene.setOrder(document.items)
     }
@@ -1571,6 +1915,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
                 vertexDots = shape?.vertexDots()?.map { it.at }.orEmpty(),
                 edgeDots = shape?.edgeDots(OverlayTessellator.EDGE_DOT_MIN_PX / zoom)?.map { it.at }.orEmpty(),
                 knobs = shape?.knobDots().orEmpty(),
+                visibleRect = viewport.cullRect(64.0),
             )
             val b = OverlayTessellator.selectionBounds(box, zoom)
             bounds = bounds?.union(b) ?: b
@@ -2370,6 +2715,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         refreshSelectionMenu()
         // The minimap maps everything drawn, so its extent moves with the content, not the view.
         view.contentBounds = document.contentBounds()
+        scheduleTextZoomRefinement()
     }
 
     private fun refresh() {

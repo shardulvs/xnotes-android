@@ -102,6 +102,10 @@ class InfiniteInteraction(
     private val onCommitSelection: (com.xnotes.core.history.Command?) -> Unit = {},
     /** Draw [items] displaced by the drag so far, rather than moving them. An empty list ends it. */
     private val onLiftSelection: (List<CanvasItem>, LiftTransform) -> Unit = { _, _ -> },
+    /** Raster previews for lone editable text; UI geometry stays untouched until release. */
+    private val onTextResizeStart: (ShapeItem) -> Unit = {},
+    private val onTextResizeMove: (Affine) -> Unit = {},
+    private val onTextResizeEnd: (Boolean) -> Unit = {},
     /** Content pixels per dp, so the speed pen judges gesture speed independently of zoom. */
     private val devicePxPerDp: () -> Double = { 1.0 },
     /** A press that landed on the minimap; returns true when it was consumed as navigation. */
@@ -233,6 +237,7 @@ class InfiniteInteraction(
     // A lifted resize leaves shapes out and bakes them every frame: they keep their outline width
     // through a resize, which a mesh scaled by the shader cannot.
     private var bakedInLift: Set<CanvasItem> = emptySet()
+    private var liveTextReflow = false
     private var liftItems: List<CanvasItem> = emptyList()
 
     // How far outside the box a resize's handle sat, which the box edge keeps behind the pointer.
@@ -754,6 +759,7 @@ class InfiniteInteraction(
         if (mode == CanvasPointerMode.SLIDE) abandonSlide()
         if (mode == CanvasPointerMode.POLYGON) showPolygonDraft(null)
         if ((mode == CanvasPointerMode.ROTATE || mode == CanvasPointerMode.RESIZE) && liftedTransform) {
+            if (liveTextReflow) onTextResizeEnd(true)
             selection()?.previewBack()
             if (bakedInLift.isNotEmpty()) selection()?.applyLiveTo(bakedInLift, Affine.IDENTITY)
             selection()?.unfollow()
@@ -1199,12 +1205,23 @@ class InfiniteInteraction(
         transformPointer = at
         liftedTransform = sel.items.all { it is Stroke || it is ShapeItem || isVectorImage(it) }
         if (!liftedTransform) return
-        bakedInLift = if (resize) sel.items.filterTo(HashSet()) { it is ShapeItem } else emptySet()
+        // Text stays on the lifted GPU path with *translation only* during side resizes.
+        // A worker prepares occasional new line arrangements without stretching glyphs.
+        liveTextReflow = resize &&
+            (grabHandle == HandleId.L || grabHandle == HandleId.R ||
+                grabHandle == HandleId.T || grabHandle == HandleId.B) &&
+            (sel.items.singleOrNull() as? ShapeItem)?.isTextOnlyBox() == true
+        if (liveTextReflow) onTextResizeStart(sel.items.single() as ShapeItem)
+        // Other shapes still bake their outlines so stroke widths do not get scaled.
+        bakedInLift = if (resize) sel.items.filterTo(HashSet()) {
+            it is ShapeItem && !it.isTextOnlyBox()
+        } else emptySet()
         liftItems = if (bakedInLift.isEmpty()) sel.items else sel.items.filter { it !in bakedInLift }
         onLiftSelection(liftItems, LiftTransform.NONE)
     }
 
     private fun endLift() {
+        liveTextReflow = false
         liftedTransform = false
         bakedInLift = emptySet()
         liftItems = emptyList()
@@ -1225,7 +1242,18 @@ class InfiniteInteraction(
         if (liftedTransform) {
             val map = sel.previewResize(handle, at, transformMargin) ?: return
             if (bakedInLift.isNotEmpty()) sel.applyLiveTo(bakedInLift, map)
-            onLiftSelection(liftItems, LiftTransform.of(map, sel.transformPivot ?: Pt.ZERO))
+            val onlyText = sel.items.singleOrNull() as? ShapeItem
+            val sideHandle = handle == HandleId.L || handle == HandleId.R ||
+                handle == HandleId.T || handle == HandleId.B
+            val lift = if (sideHandle && onlyText?.isTextOnlyBox() == true) {
+                // Horizontal wrap is centred, but the first text line is pinned to the box's
+                // *top*. Scaling T/B about the box centre displaced its lines by half a drag.
+                // The top-edge midpoint respects both rules, including on rotated boxes.
+                if (liveTextReflow) onTextResizeMove(map)
+                val textTop = onlyText.toPage(Pt(onlyText.box.centerX, onlyText.box.top))
+                com.xnotes.core.infinite.fixedSizeTextLift(textTop, map)
+            } else LiftTransform.of(map, sel.transformPivot ?: Pt.ZERO)
+            onLiftSelection(liftItems, lift)
         } else {
             sel.resizeLive(handle, at, transformMargin)
         }
@@ -1258,6 +1286,7 @@ class InfiniteInteraction(
         // Finger up on a lifted drag: apply the whole thing to the model once, then hand the drawing
         // back to it.
         if (liftedTransform) {
+            if (liveTextReflow) onTextResizeEnd(false)
             if (handle != null) sel.resizeLive(handle, transformPointer, transformMargin)
             else sel.rotateLive(transformPointer)
             onLiftSelection(emptyList(), LiftTransform.NONE)

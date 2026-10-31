@@ -239,11 +239,21 @@ class ShapeItem(
                 return Rect(c.x - w / 2.0, c.y - h / 2.0, w, h)
             }
         }
-        val t = localGeometry().textRect
+        // A text-only host has no outline to pad, so its full box is the wrapping width.
+        val textOnly = isTextOnlyBox()
+        val t = if (textOnly) box else localGeometry().textRect
         val w = max(t.w, l.lineHeight * ShapeLabel.MIN_WIDTH_LINES)
-        val h = l.height(w)
+        val h = if (textOnly) l.normalizedHeight(w) else l.height(w)
+        // Text imported onto an infinite canvas uses an invisible rectangle as its editable
+        // host. Anchor its first line to the top-left: centring by h moved every line vertically
+        // whenever a horizontal resize changed wrapping, sometimes far outside the handles.
+        if (isTextOnlyBox()) return Rect(t.left, t.top, w, h)
         return Rect(t.centerX - w / 2.0, t.centerY - h / 2.0, w, h)
     }
+
+    /** Editable text imported into the infinite canvas, represented by an invisible shape. */
+    fun isTextOnlyBox(): Boolean = (shape == ShapeKind.RECTANGLE || shape == ShapeKind.POLYGON) &&
+        label != null && strokeWidth == 0.0 && strokeRgba.a == 0 && fillRgba == null
 
     /** Where a connector may glue, on the page, each with its ways out turned with the shape; none for a line or arrow. */
     fun connectionPoints(): List<ConnectionPoint> {
@@ -545,7 +555,7 @@ class ShapeItem(
         }
     }
 
-    override fun snapshotGeometry(): GeometrySnapshot = ShapeSnapshot(shape, start, end, path, rotation, adj.copyOf(), n, labelAt, flip)
+    override fun snapshotGeometry(): GeometrySnapshot = ShapeSnapshot(shape, start, end, path, rotation, adj.copyOf(), n, labelAt, flip, label)
 
     override fun restoreGeometry(snap: GeometrySnapshot) {
         if (snap !is ShapeSnapshot) return
@@ -558,6 +568,7 @@ class ShapeItem(
         n = snap.n
         labelAt = snap.labelAt
         flip = snap.flip
+        label = snap.label
     }
 
     /**
@@ -862,11 +873,13 @@ private class ShapeSnapshot(
     val n: Int,
     val labelAt: Double,
     val flip: Flip,
+    val label: ShapeLabel?,
 ) : GeometrySnapshot {
     // Value equality, so a drag that changed nothing records nothing.
     override fun equals(other: Any?): Boolean = other is ShapeSnapshot && shape == other.shape &&
         start == other.start && end == other.end && path === other.path && rotation == other.rotation &&
-        adj.contentEquals(other.adj) && n == other.n && labelAt == other.labelAt && flip == other.flip
+        adj.contentEquals(other.adj) && n == other.n && labelAt == other.labelAt && flip == other.flip &&
+        (label === other.label || label?.sameAs(other.label) == true)
 
     override fun hashCode(): Int = start.hashCode() * 31 + end.hashCode()
 }

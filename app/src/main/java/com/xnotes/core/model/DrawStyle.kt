@@ -16,6 +16,15 @@ data class DrawStyle(val color: Rgba, val width: Double) {
                 item.invalidate() // the ribbon's half-widths are baked from the config
             }
             is ShapeItem -> {
+                if (item.isTextOnlyBox()) {
+                    // Text-only boxes have a transparent, zero-width shape as their host.
+                    // Never restyle that host: doing so disables the optimized text renderer
+                    // and its resize/reflow behavior after changing the selected style.
+                    item.label = item.label?.let { l ->
+                        l.withStyle(l.style.copy(rgba = color, pointSize = width))
+                    }
+                    return
+                }
                 if (item.isFill) return // a dropped colour's area has no outline to restyle
                 // A fill in the outline's own colour is a tint of it and follows it, keeping its alpha;
                 // a fill given a colour of its own keeps that.
@@ -51,7 +60,11 @@ data class DrawStyle(val color: Rgba, val width: Double) {
         /** [item]'s current style, or null when it has no colour and width to change. */
         fun of(item: CanvasItem): DrawStyle? = when (item) {
             is Stroke -> DrawStyle(item.config.rgba, item.config.baseWidth)
-            is ShapeItem -> if (item.isFill) null else DrawStyle(item.strokeRgba, item.strokeWidth)
+            is ShapeItem -> when {
+                item.isTextOnlyBox() -> item.label?.let { DrawStyle(it.style.rgba, it.style.pointSize) }
+                item.isFill -> null
+                else -> DrawStyle(item.strokeRgba, item.strokeWidth)
+            }
             is ConnectorItem -> DrawStyle(item.strokeRgba, item.strokeWidth)
             is TapeItem -> DrawStyle(item.rgba, item.shape.width)
             else -> null

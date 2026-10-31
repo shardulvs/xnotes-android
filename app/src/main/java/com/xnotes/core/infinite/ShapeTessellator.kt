@@ -1,8 +1,7 @@
 package com.xnotes.core.infinite
 
-import com.xnotes.core.vector.VectorContour
-
 import com.xnotes.core.geometry.Pt
+import com.xnotes.core.geometry.Affine
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.ConnectorItem
 import com.xnotes.core.model.Rgba
@@ -13,10 +12,14 @@ import com.xnotes.core.pal.Pen
 import com.xnotes.core.shapes.PathRole
 import com.xnotes.core.shapes.ShapePainter
 import com.xnotes.core.shapes.ShapePath
+import com.xnotes.core.util.WeightedLruCache
+import com.xnotes.core.vector.VectorContour
+import com.xnotes.core.vector.VectorSeg
 import com.xnotes.core.vector.PathFlattener
 import com.xnotes.core.vector.Triangulator
 import kotlin.math.abs
 import kotlin.math.atan2
+import kotlin.math.roundToLong
 
 /**
  * Turns a [ShapeItem] into triangles: the fills first, then the outline over them, each with its
@@ -54,22 +57,133 @@ object ShapeTessellator {
 
     /**
      * The label as filled glyphs in its own colour, set where the note sets it and turned with the
-     * shape; null without one, or while it is being typed and the editor shows it instead.
+     * shape; empty without one, or while it is being typed and the editor shows it instead.
      */
-    fun labelPart(shape: ShapeItem): MeshPart? {
-        if (shape.labelHidden) return null
-        return glyphPart(shape.label ?: return null, shape.labelRect() ?: return null, shape::toPage)
+    fun labelParts(shape: ShapeItem): List<MeshPart> {
+        if (shape.labelHidden) return emptyList()
+        return glyphParts(shape.label ?: return emptyList(), shape.labelRect() ?: return emptyList(), Affine.rotateAbout(shape.box.center, shape.rotation))
     }
 
-    /** A connector's label as filled glyphs, upright where it sits on the line; null without one or while typed. */
-    fun labelPart(connector: ConnectorItem): MeshPart? {
-        if (connector.labelHidden) return null
-        return glyphPart(connector.label ?: return null, connector.labelRect() ?: return null) { it }
+    /** A connector's label, upright where it sits on the line. */
+    fun labelParts(connector: ConnectorItem): List<MeshPart> {
+        if (connector.labelHidden) return emptyList()
+        return glyphParts(connector.label ?: return emptyList(), connector.labelRect() ?: return emptyList(), Affine.IDENTITY)
     }
 
-    /** [l]'s glyphs set in [frame] and moved onto the page by [toPage], in the label's colour. */
-    private fun glyphPart(l: ShapeLabel, frame: Rect, toPage: (Pt) -> Pt): MeshPart? =
-        textPart(l.outline(frame.w), l.style.rgba) { toPage(Pt(frame.left + it.x, frame.top + it.y)) }
+    /** Position-independent shape key; rounding removes native float placement noise (< .001 px). */
+    private class ContourKey(val coordinates: LongArray, val closed: Boolean) {
+        override fun hashCode() = 31 * coordinates.contentHashCode() + closed.hashCode()
+        override fun equals(other: Any?) = other is ContourKey && closed == other.closed && coordinates.contentEquals(other.coordinates)
+    }
+
+    private val contourMeshes = WeightedLruCache<ContourKey, MeshData>(8 * 1024 * 1024) { key, mesh ->
+        64 + key.coordinates.size * 8 + mesh.positions.size * 8 + mesh.offsets.size * 8 + mesh.indices.size * 4
+    }
+
+    private fun contourKey(contour: VectorContour): ContourKey {
+        val values = LongArray(contour.segments.sumOf { if (it is VectorSeg.Line) 3 else 7 })
+        var index = 0
+        val origin = contour.start
+        fun point(p: Pt) {
+            values[index++] = ((p.x - origin.x) * CONTOUR_PRECISION).roundToLong()
+            values[index++] = ((p.y - origin.y) * CONTOUR_PRECISION).roundToLong()
+        }
+        for (seg in contour.segments) {
+            values[index++] = if (seg is VectorSeg.Line) 1 else 3
+            if (seg is VectorSeg.Cubic) { point(seg.c1); point(seg.c2) }
+            point(seg.end)
+        }
+        return ContourKey(values, contour.closed)
+    }
+
+    private fun contourMesh(key: ContourKey): MeshData {
+        val segments = ArrayList<VectorSeg>()
+        var index = 0
+        fun point(): Pt = Pt(key.coordinates[index++].toDouble() / CONTOUR_PRECISION,
+            key.coordinates[index++].toDouble() / CONTOUR_PRECISION)
+        while (index < key.coordinates.size) {
+            val kind = key.coordinates[index++]
+            segments += if (kind == 1L) VectorSeg.Line(point()) else VectorSeg.Cubic(point(), point(), point())
+        }
+        val ring = PathFlattener.flatten(VectorContour(Pt.ZERO, segments, key.closed), GLYPH_FLATTEN)
+        if (ring.size < 3) return MeshData.EMPTY
+        val positions = DoubleArray(ring.size * 2)
+        for (i in ring.indices) { positions[i * 2] = ring[i].x; positions[i * 2 + 1] = ring[i].y }
+        val indices = IntArray((ring.size - 2) * 3)
+        for (i in 1 until ring.size - 1) {
+            indices[(i - 1) * 3] = 0
+            indices[(i - 1) * 3 + 1] = i
+            indices[(i - 1) * 3 + 2] = i + 1
+        }
+        return MeshData(positions, DoubleArray(positions.size), indices)
+    }
+
+    private class PlacedContour(val mesh: MeshData, val x: Double, val y: Double)
+    private class PreparedLine(val contours: List<PlacedContour>, val vertices: Int, val indices: Int)
+
+    // A width change often moves existing lines without changing their glyph shapes. Their contour
+    // lists retain identity in AndroidTextMeasurer; skip contour hashing/lookup on every reflow.
+    // Bounded separately from the canonical contour geometry cache.
+    private val preparedLines = java.util.IdentityHashMap<List<VectorContour>, PreparedLine>()
+
+    @Synchronized
+    private fun preparedLine(contours: List<VectorContour>): PreparedLine {
+        preparedLines[contours]?.let { return it }
+        val placed = ArrayList<PlacedContour>(contours.size)
+        var vertices = 0
+        var indices = 0
+        for (contour in contours) {
+            val key = contourKey(contour)
+            val mesh = contourMeshes.getOrPut(key) { contourMesh(key) }
+            if (mesh.isEmpty) continue
+            placed += PlacedContour(mesh, contour.start.x, contour.start.y)
+            vertices += mesh.vertexCount
+            indices += mesh.indices.size
+        }
+        val prepared = PreparedLine(placed, vertices, indices)
+        if (preparedLines.size >= 256) preparedLines.clear()
+        preparedLines[contours] = prepared
+        return prepared
+    }
+
+    /** Reflow places cached glyph contours. Signed fans preserve holes and overlapping glyphs. */
+    private fun glyphParts(l: ShapeLabel, frame: Rect, map: Affine): List<MeshPart> {
+        val placed = ArrayList<PlacedContour>()
+        var vertices = 0
+        var indexCount = 0
+        for (line in l.measurer.outlineLines(l.text, l.font, frame.w, ShapeLabel.FLAGS)) {
+            val prepared = preparedLine(line.contours)
+            val dx = frame.left + line.origin.x
+            val dy = frame.top + line.origin.y
+            for (contour in prepared.contours) {
+                placed += PlacedContour(contour.mesh, dx + contour.x, dy + contour.y)
+            }
+            vertices += prepared.vertices
+            indexCount += prepared.indices
+        }
+        if (indexCount == 0) return emptyList()
+        val positions = DoubleArray(vertices * 2)
+        val indices = IntArray(indexCount)
+        var vertexBase = 0
+        var indexBase = 0
+        for (contour in placed) {
+            val local = contour.mesh.positions
+            val base = vertexBase * 2
+            for (i in local.indices step 2) {
+                val x = local[i] + contour.x
+                val y = local[i + 1] + contour.y
+                positions[base + i] = map.a * x + map.c * y + map.e
+                positions[base + i + 1] = map.b * x + map.d * y + map.f
+            }
+            val sourceIndices = contour.mesh.indices
+            for (i in sourceIndices.indices) indices[indexBase + i] = vertexBase + sourceIndices[i]
+            vertexBase += contour.mesh.vertexCount
+            indexBase += sourceIndices.size
+        }
+        return listOf(MeshPart(MeshData(positions, DoubleArray(positions.size), indices), l.style.rgba, InkPass.NONZERO))
+    }
+
+    private const val CONTOUR_PRECISION = 1024.0
 
     /** Glyph outlines as filled triangles in [color], each point put in place by [place]; null for none. */
     fun textPart(glyphs: List<VectorContour>, color: Rgba, place: (Pt) -> Pt): MeshPart? {

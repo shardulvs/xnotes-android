@@ -317,7 +317,7 @@ class ShapeTessellatorTest {
         val s = ShapeItem(ShapeKind.RECTANGLE, Pt(0.0, 0.0), Pt(200.0, 100.0), Rgba(0, 0, 0, 255), 2.0)
         s.label = ShapeLabel("ab c", TextStyle(red, 10.0, FontFace.SANS), FakeTextMeasurer())
         s.applyTransform(com.xnotes.core.geometry.Affine.rotateAbout(s.box.center, 0.3))
-        val part = ShapeTessellator.labelPart(s)!!
+        val part = ShapeTessellator.labelParts(s).single()
         assertEquals(red, part.color)
         assertEquals("a glyph square per visible character, two triangles each", 6, part.mesh.triangleCount)
         val frame = s.labelRect()!!.outset(1e-6)
@@ -328,7 +328,40 @@ class ShapeTessellatorTest {
         val meshed = ItemMesher.mesh(s)!!
         assertEquals("outline, then the words over it", red, meshed.parts.last().color)
         s.labelHidden = true
-        assertEquals(null, ShapeTessellator.labelPart(s))
+        assertTrue(ShapeTessellator.labelParts(s).isEmpty())
         assertEquals(1, ItemMesher.mesh(s)!!.parts.size)
     }
+    @Test fun reusableLinesArePlacedIndependentlyAndKeepTheirColourAfterResize() {
+        val fake = FakeTextMeasurer()
+        val font = com.xnotes.core.pal.FontSpec(10.0)
+        val contours = fake.outline("a", font, 100.0, com.xnotes.core.pal.TextFlags())
+        val measurer = object : com.xnotes.core.pal.TextMeasurer by fake {
+            override fun outlineLines(text: String, font: com.xnotes.core.pal.FontSpec,
+                wrapWidth: Double, flags: com.xnotes.core.pal.TextFlags) = listOf(
+                com.xnotes.core.pal.TextOutlineLine(contours, Pt(wrapWidth / 4, -5.0)),
+                com.xnotes.core.pal.TextOutlineLine(contours, Pt(wrapWidth / 3, 8.0)),
+            )
+        }
+        val s = shape(ShapeKind.RECTANGLE)
+        for (width in listOf(100.0, 160.0, 100.0)) {
+            s.end = Pt(width, 60.0)
+            val color = Rgba(width.toInt(), 20, 30)
+            s.label = ShapeLabel("a\na", TextStyle(color, 10.0, FontFace.SANS), measurer)
+            val part = ShapeTessellator.labelParts(s).single()
+            val frame = s.labelRect()!!
+            val origins = listOf(Pt(frame.w / 4, -5.0), Pt(frame.w / 3, 8.0))
+            val expected = ShapeTessellator.textPart(origins.flatMap { origin ->
+                com.xnotes.core.shapes.FreePath.map(contours) {
+                    s.toPage(Pt(frame.left + origin.x + it.x, frame.top + origin.y + it.y))
+                }
+            }, color) { it }!!
+            assertEquals(color, part.color)
+            assertEquals(expected.mesh.triangleCount, part.mesh.triangleCount)
+            for (y in -10..70) for (x in -10..180) {
+                assertEquals("coverage at $x,$y width $width", covers(expected.mesh, x + .2, y + .2),
+                    covers(part.mesh, x + .2, y + .2))
+            }
+        }
+    }
+
 }

@@ -33,6 +33,9 @@ enum class InkPass {
      */
     EVEN_ODD,
 
+    /** Signed triangle fans accumulate nonzero winding on the GPU, preserving glyph holes and overlaps. */
+    NONZERO,
+
     /** Like [TRANSLUCENT] but multiplied, and always drawn last, exactly as the paged canvas does. */
     MULTIPLY,
 
@@ -276,7 +279,7 @@ object ItemMesher {
     }
 
     private fun meshShape(shape: ShapeItem, tolerance: Double): MeshedItem? {
-        val parts = ShapeTessellator.tessellate(shape, tolerance) + listOfNotNull(ShapeTessellator.labelPart(shape))
+        val parts = ShapeTessellator.tessellate(shape, tolerance) + ShapeTessellator.labelParts(shape)
         if (parts.isEmpty()) return null
         // Drawn text has no line to fade when it thins out on screen.
         val half = if (shape.shape == com.xnotes.core.shapes.ShapeKind.GLYPHS) 0.0 else shape.strokeWidth / 2.0
@@ -284,7 +287,7 @@ object ItemMesher {
     }
 
     private fun meshConnector(connector: ConnectorItem, tolerance: Double): MeshedItem? {
-        val parts = ShapeTessellator.tessellate(connector, tolerance) + listOfNotNull(ShapeTessellator.labelPart(connector))
+        val parts = ShapeTessellator.tessellate(connector, tolerance) + ShapeTessellator.labelParts(connector)
         if (parts.isEmpty()) return null
         return MeshedItem(parts, connector.paintBounds(), connector.strokeWidth / 2.0)
     }

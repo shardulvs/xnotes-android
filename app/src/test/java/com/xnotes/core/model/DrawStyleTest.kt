@@ -1,5 +1,7 @@
 package com.xnotes.core.model
 
+import com.xnotes.core.FakeTextMeasurer
+import com.xnotes.core.pal.FontFace
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.history.RestyleItems
 import com.xnotes.core.stroke.Sample
@@ -50,6 +52,26 @@ class DrawStyleTest {
         val image = ImageItem(ImageData(java.io.File("none"), 4, 4), com.xnotes.core.geometry.Rect(0.0, 0.0, 4.0, 4.0))
         assertNull(DrawStyle.of(image))
         assertNotNull(DrawStyle.of(stroke()))
+    }
+
+    @Test fun `restyling an editable text box preserves its invisible optimized host`() {
+        val host = ShapeItem(ShapeKind.RECTANGLE, Pt(10.0, 20.0), Pt(250.0, 100.0),
+            red.copy(a = 0), 0.0).apply {
+            label = ShapeLabel("Test text", TextStyle(red, 18.0, FontFace.SANS), FakeTextMeasurer())
+        }
+        val before = DrawStyle.of(host)!!
+        assertEquals(DrawStyle(red, 18.0), before)
+        val after = DrawStyle(blue, 24.0)
+        val command = RestyleItems(listOf(RestyleItems.Entry(host, before, after)))
+        command.redo()
+        assertEquals(after, DrawStyle.of(host))
+        assertEquals(true, host.isTextOnlyBox())
+        assertEquals(0.0, host.strokeWidth, 0.0)
+        assertEquals(0, host.strokeRgba.a)
+        assertNull(host.fillRgba)
+        command.undo()
+        assertEquals(before, DrawStyle.of(host))
+        assertEquals(true, host.isTextOnlyBox())
     }
 
     @Test fun `undo restores each item's own former style`() {

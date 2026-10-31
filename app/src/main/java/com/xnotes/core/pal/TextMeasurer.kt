@@ -1,7 +1,11 @@
 package com.xnotes.core.pal
 
+import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.vector.VectorContour
+
+/** Reusable line geometry at the origin, placed by the platform layout. */
+class TextOutlineLine(val contours: List<VectorContour>, val origin: Pt)
 
 /** Font vertical metrics in content px; both values are positive distances from the baseline. */
 data class LineMetrics(val ascent: Double, val descent: Double) {
@@ -37,5 +41,10 @@ interface TextMeasurer {
      * how the infinite canvas, which draws only triangles, sets a shape's label. Empty when the
      * host cannot outline text.
      */
+    /** Lines in local coordinates, with stable contour identities when the host caches geometry.
+     * The default preserves compatibility with hosts that only provide a complete outline. */
+    fun outlineLines(text: String, font: FontSpec, wrapWidth: Double, flags: TextFlags = TextFlags()): List<TextOutlineLine> =
+        listOf(TextOutlineLine(outline(text, font, wrapWidth, flags), Pt.ZERO))
+
     fun outline(text: String, font: FontSpec, wrapWidth: Double, flags: TextFlags = TextFlags()): List<VectorContour> = emptyList()
 }

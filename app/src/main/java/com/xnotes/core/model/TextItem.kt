@@ -36,8 +36,26 @@ class TextItem(
 
     val font get() = FontSpec(pointSize, face)
 
+    /** A frame can query bounds many times (selection, hit testing, drawing and dirty regions).
+     * Reflow only when the wrap width or text styling actually changes. The immutable entry is
+     * safe to share with thumbnail rendering on a worker thread. */
+    private data class MeasuredHeight(val text: String, val width: Double, val size: Double, val face: FontFace, val height: Double)
+    @Volatile private var measuredHeight: MeasuredHeight? = null
+
     /** Height the current text needs at the current width (empty ⇒ one line). */
-    fun contentHeight(): Double = measurer.measure(text.ifEmpty { " " }, font, width, FLAGS).h
+    fun contentHeight(): Double {
+        val currentText = text
+        val currentWidth = width
+        val currentSize = pointSize
+        val currentFace = face
+        measuredHeight?.let {
+            if (it.text == currentText && it.width == currentWidth && it.size == currentSize && it.face == currentFace)
+                return it.height
+        }
+        val height = measurer.measure(currentText.ifEmpty { " " }, FontSpec(currentSize, currentFace), currentWidth, FLAGS).h
+        measuredHeight = MeasuredHeight(currentText, currentWidth, currentSize, currentFace, height)
+        return height
+    }
 
     override fun bounds(): Rect = Rect(pos.x, pos.y, width, maxOf(height, contentHeight()))
 

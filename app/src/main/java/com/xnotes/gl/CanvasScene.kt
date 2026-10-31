@@ -1,6 +1,8 @@
 package com.xnotes.gl
 
+import android.graphics.Bitmap
 import android.opengl.GLES30
+import android.opengl.GLUtils
 import android.util.Log
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.infinite.InkPass
@@ -60,6 +62,10 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         var z: Int,
         /** Set for a placed image, which is drawn as a texture rather than as coloured triangles. */
         val image: ImageItem? = null,
+        /** Text-only editable shape: rasterized once off the GL thread at the latest wrap width. */
+        val textBitmap: Bitmap? = null,
+        var textCorners: DoubleArray? = null,
+        var textTexture: Int = 0,
     )
 
     /** An edit handed over from the main thread. */
@@ -76,6 +82,8 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
              * can fall between them and show one blank frame where the stroke should be.
              */
             val clearsWet: Boolean = false,
+            val textBitmap: Bitmap? = null,
+            val textCorners: DoubleArray? = null,
         ) : Edit()
 
         /**
@@ -87,6 +95,8 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         /** Items being dragged, and how far from where their triangles sit. Empty ends the drag. */
         class Lift(val items: List<CanvasItem>, val at: LiftTransform) : Edit()
 
+        /** Move a text quad while preserving its already uploaded texture. */
+        class RelocateText(val item: CanvasItem, val corners: DoubleArray, val bounds: Rect) : Edit()
         class Remove(val item: CanvasItem) : Edit()
         class Order(val items: List<CanvasItem>) : Edit()
 
@@ -221,6 +231,16 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         post(Edit.Upsert(item, emptyList(), bounds, item, false))
     }
 
+    /** A label rasterized on a worker: the GL thread only uploads and draws four corners. */
+    fun upsertText(item: CanvasItem, bitmap: Bitmap, corners: DoubleArray, bounds: Rect) {
+        post(Edit.Upsert(item, emptyList(), bounds, textBitmap = bitmap, textCorners = corners))
+    }
+
+    /** Rigid translation keeps the existing glyph layout, bitmap, and GPU texture intact. */
+    fun relocateText(item: CanvasItem, corners: DoubleArray, bounds: Rect) {
+        post(Edit.RelocateText(item, corners, bounds))
+    }
+
     fun remove(item: CanvasItem) {
         post(Edit.Remove(item))
     }
@@ -296,8 +316,14 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
 
     // --- GL thread ---
 
+    @Volatile var maxTextTextureSide: Double = 2048.0
+        private set
+
     override fun onContextCreated(contextGen: Int) {
         this.contextGen = contextGen
+        val textureLimit = IntArray(1)
+        GLES30.glGetIntegerv(GLES30.GL_MAX_TEXTURE_SIZE, textureLimit, 0)
+        maxTextTextureSide = textureLimit[0].coerceAtLeast(2048).toDouble()
         ink = null
         cover = null
         imageShader = null
@@ -314,6 +340,8 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
             Log.e(TAG, "ink shaders unavailable", e)
         }
         textures.onContextCreated(contextGen)
+        // GL names do not survive context loss; retained text bitmaps are uploaded on demand.
+        for (record in records.values) record.textTexture = 0
         // The mirrors survived, so the whole document re-uploads without re-tessellating anything.
         store.onContextCreated(contextGen)
         wetStore.onContextCreated(contextGen)
@@ -369,6 +397,16 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         val fade = fade
         for (record in visible) {
             val faded = fade != null && fade.fades(record.item)
+            if (record.textBitmap != null) {
+                flushRun(runStart, runCount)
+                runStart = -1
+                runCount = 0
+                drawText(record, frame, alpha = if (faded) com.xnotes.core.audio.InkFade.ALPHA else 1.0)
+                rebind(program, frame, camChunkX, camChunkY)
+                store.bindForDraw(contextGen)
+                store.bindAttributes(program)
+                continue
+            }
             if (record.image != null) {
                 flushRun(runStart, runCount)
                 runStart = -1
@@ -385,7 +423,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
                 runCount = 0
                 for (part in record.parts) {
                     val pass = when (part.pass) {
-                        InkPass.MULTIPLY, InkPass.SCREEN, InkPass.EVEN_ODD -> part.pass
+                        InkPass.MULTIPLY, InkPass.SCREEN, InkPass.EVEN_ODD, InkPass.NONZERO -> part.pass
                         else -> InkPass.TRANSLUCENT
                     }
                     drawMasked(store, part.slice, record.bounds, part.coverColor, part.coverAlpha * com.xnotes.core.audio.InkFade.ALPHA, frame, pass)
@@ -418,7 +456,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
                             runCount = part.slice.indexCount
                         }
                     }
-                    InkPass.TRANSLUCENT, InkPass.EVEN_ODD -> {
+                    InkPass.TRANSLUCENT, InkPass.EVEN_ODD, InkPass.NONZERO -> {
                         flushRun(runStart, runCount)
                         runStart = -1
                         runCount = 0
@@ -500,6 +538,13 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
             val record = records[item] ?: continue
             val bounds = liftAt.bounds(record.bounds)
             if (!bounds.intersects(view)) continue
+            if (record.textBitmap != null) {
+                drawText(record, frame, liftAt)
+                applyView(program, frame, camChunkX, camChunkY, liftAt)
+                store.bindForDraw(contextGen)
+                store.bindAttributes(program)
+                continue
+            }
             if (record.image != null) {
                 drawImage(record, record.image, frame, liftAt)
                 applyView(program, frame, camChunkX, camChunkY, liftAt)
@@ -513,7 +558,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
                         store.drawRange(part.slice.indexOffset, part.slice.indexCount)
                         lastDrawCalls++
                     }
-                    InkPass.TRANSLUCENT, InkPass.EVEN_ODD, InkPass.MULTIPLY, InkPass.SCREEN -> {
+                    InkPass.TRANSLUCENT, InkPass.EVEN_ODD, InkPass.NONZERO, InkPass.MULTIPLY, InkPass.SCREEN -> {
                         drawMasked(
                             store, part.slice, bounds, part.coverColor, part.coverAlpha,
                             frame, part.pass,
@@ -675,6 +720,46 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
             buffer.bindAttributes(program)
         }
         flush()
+    }
+
+    /** Upload one ready-to-draw text bitmap and reuse its GL texture until the text changes. */
+    private fun textTexture(record: Record): Int {
+        if (record.textTexture != 0) return record.textTexture
+        val bitmap = record.textBitmap ?: return 0
+        val ids = IntArray(1)
+        GLES30.glGenTextures(1, ids, 0)
+        if (ids[0] == 0) return 0
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, ids[0])
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
+        GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, bitmap, 0)
+        record.textTexture = ids[0]
+        return ids[0]
+    }
+
+    /** A native-laid-out editable label is just four vertices on the GL thread, even while resizing. */
+    private fun drawText(
+        record: Record,
+        frame: FrameState,
+        lift: LiftTransform = LiftTransform.NONE,
+        alpha: Double = 1.0,
+    ) {
+        val shader = imageShader ?: return
+        val points = record.textCorners ?: return
+        val texture = textTexture(record)
+        if (texture == 0) return
+        val corners = FloatArray(8)
+        for (i in 0 until 4) {
+            val p = lift.apply(com.xnotes.core.geometry.Pt(points[2 * i], points[2 * i + 1]))
+            val dx = (p.x - frame.scrollX) * frame.zoom
+            val dy = (p.y - frame.scrollY) * frame.zoom
+            corners[2 * i] = (dx / frame.widthPx * 2.0 - 1.0).toFloat()
+            corners[2 * i + 1] = (1.0 - dy / frame.heightPx * 2.0).toFloat()
+        }
+        shader.draw(corners, texture, 0, alpha)
+        lastDrawCalls++
     }
 
     /**
@@ -980,12 +1065,16 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         // was covered is the fill rule itself: a hole cancels, a self-crossing cancels, and the
         // cover then paints exactly what the outline encloses without a single triangle of setup.
         val invert = pass == InkPass.EVEN_ODD
+        val winding = pass == InkPass.NONZERO
         GLES30.glEnable(GLES30.GL_STENCIL_TEST)
-        GLES30.glStencilFunc(GLES30.GL_ALWAYS, if (invert) 0 else 1, 0xFF)
-        GLES30.glStencilOp(
-            GLES30.GL_KEEP, GLES30.GL_KEEP,
-            if (invert) GLES30.GL_INVERT else GLES30.GL_REPLACE,
-        )
+        GLES30.glStencilFunc(GLES30.GL_ALWAYS, if (invert || winding) 0 else 1, 0xFF)
+        if (winding) {
+            GLES30.glStencilOpSeparate(GLES30.GL_FRONT, GLES30.GL_KEEP, GLES30.GL_KEEP, GLES30.GL_INCR_WRAP)
+            GLES30.glStencilOpSeparate(GLES30.GL_BACK, GLES30.GL_KEEP, GLES30.GL_KEEP, GLES30.GL_DECR_WRAP)
+        } else {
+            GLES30.glStencilOp(GLES30.GL_KEEP, GLES30.GL_KEEP,
+                if (invert) GLES30.GL_INVERT else GLES30.GL_REPLACE)
+        }
         GLES30.glStencilMask(0xFF)
         GLES30.glColorMask(false, false, false, false)
         from.drawRange(slice.indexOffset, slice.indexCount)
@@ -1001,7 +1090,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         }
 
         GLES30.glColorMask(true, true, true, true)
-        GLES30.glStencilFunc(if (invert) GLES30.GL_NOTEQUAL else GLES30.GL_EQUAL, if (invert) 0 else 1, 0xFF)
+        GLES30.glStencilFunc(if (invert || winding) GLES30.GL_NOTEQUAL else GLES30.GL_EQUAL, if (invert || winding) 0 else 1, 0xFF)
         GLES30.glStencilOp(GLES30.GL_KEEP, GLES30.GL_KEEP, GLES30.GL_ZERO)
         when (pass) {
             // Exact multiply: the destination is scaled by the source and nothing is added.
@@ -1049,6 +1138,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         while (true) {
             when (val edit = pending.poll() ?: break) {
                 is Edit.Upsert -> applyUpsert(edit)
+                is Edit.RelocateText -> applyRelocateText(edit)
                 is Edit.Wet -> applyWet(edit)
                 is Edit.Lift -> applyLift(edit)
                 is Edit.Remove -> applyRemove(edit.item)
@@ -1085,10 +1175,22 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
             val slice = store.put(part.mesh, baked) ?: continue
             parts.add(Part(slice, part.pass, part.color.withAlpha(255), part.color.a / 255.0, part.glow, part.covers))
         }
-        if (parts.isEmpty() && edit.image == null) return
-        val record = Record(edit.item, parts, edit.bounds, previousZ ?: nextZ++, edit.image)
+        if (parts.isEmpty() && edit.image == null && edit.textBitmap == null) return
+        val record = Record(edit.item, parts, edit.bounds, previousZ ?: nextZ++, edit.image,
+            edit.textBitmap, edit.textCorners)
         records[edit.item] = record
         fileRecord(record)
+    }
+
+    /** Move the already rasterized text in the spatial index without touching its GL texture. */
+    private fun applyRelocateText(edit: Edit.RelocateText) {
+        val record = records[edit.item] ?: return
+        if (record.textBitmap == null) return
+        unfileRecord(record)
+        record.textCorners = edit.corners
+        record.bounds = edit.bounds
+        fileRecord(record)
+        revision++
     }
 
     private fun applyWet(edit: Edit.Wet) {
@@ -1156,11 +1258,20 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         tailParts = emptyList()
     }
 
+    private fun freeText(record: Record) {
+        if (record.textTexture != 0) {
+            GLES30.glDeleteTextures(1, intArrayOf(record.textTexture), 0)
+            record.textTexture = 0
+        }
+        record.textBitmap?.recycle()
+    }
+
     private fun applyRemove(item: CanvasItem) {
         revision++
         val record = records.remove(item) ?: return
         unfileRecord(record)
         for (part in record.parts) store.free(part.slice)
+        freeText(record)
     }
 
     private fun applyOrder(items: List<CanvasItem>) {
@@ -1172,6 +1283,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         revision++
         nextZ = 0
         lifted.clear()
+        for (record in records.values) freeText(record)
         records.clear()
         buckets.clear()
         oversized.clear()
