@@ -1156,6 +1156,10 @@
     <string name="toolbar_floating">Floating</string>
     <string name="pref_toolbar_position">Position</string>
     <string name="pref_toolbar_size">Size</string>
+    <string name="pref_document_tabs_mode">Document tabs on opening</string>
+    <string name="document_tabs_auto">Automatic</string>
+    <string name="document_tabs_compact">Compact</string>
+    <string name="document_tabs_expanded">Expanded</string>
     <string name="toolbar_size_compact">Compact</string>
     <string name="toolbar_size_regular">Regular</string>
     <string name="toolbar_size_comfortable">Comfortable</string>

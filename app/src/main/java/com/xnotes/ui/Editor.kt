@@ -461,6 +461,51 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private val session = com.xnotes.platform.SessionStore(sessionDir, codec, pdfDir, imageDir)
     private val canvasSession = com.xnotes.platform.CanvasSessionStore(sessionDir, canvasCodec, imageDir)
     private val viewStates = com.xnotes.platform.ViewStateStore(com.xnotes.platform.JsonStore.viewStates(appContext))
+    /**
+     * Parsed documents for recently switched-away tabs. This stores only model objects, never
+     * render surfaces, page bitmaps or GL contexts. Limit both count and document complexity;
+     * PDF-backed notes are excluded because their extracted PDF is released on document swap.
+     */
+    private val inactiveDocuments = object : LinkedHashMap<String, Document>(3, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Document>?) = size > 2
+    }
+    private val inactiveCanvases = object : LinkedHashMap<String, com.xnotes.core.infinite.InfiniteDocument>(3, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, com.xnotes.core.infinite.InfiniteDocument>?) = size > 2
+    }
+
+    fun forgetInactiveDocument(uri: String) {
+        inactiveDocuments.remove(uri)
+        inactiveCanvases.remove(uri)
+    }
+    fun clearInactiveDocuments() {
+        inactiveDocuments.clear()
+        inactiveCanvases.clear()
+    }
+
+    private fun rememberInactiveCanvas() {
+        if (!canvasOpen) return
+        val doc = infinite.document
+        val uri = doc.path ?: return
+        if (canvasAutosaveUri == uri && doc.items.size <= 1_500) inactiveCanvases[uri] = doc
+    }
+
+    /** Finish the canvas's edits before switching the pane to a paged note. */
+    private fun leaveCanvasForPagedNote() {
+        if (!canvasOpen) return
+        infinite.commitText()
+        flushCanvasAutosave()
+        rememberInactiveCanvas()
+        canvasAutosaveUri = null
+        canvasOpen = false
+    }
+
+    private fun rememberInactiveDocument() {
+        val doc = state.document
+        val uri = doc.path ?: return
+        if (autosaveUri != uri || doc.pdfFile != null || doc.pages.size > 12) return
+        if (doc.pages.sumOf { it.items.size } > 1_500) return
+        inactiveDocuments[uri] = doc
+    }
     private var lastSessionContentVersion = -1
     private var sessionLoaded = false
 
@@ -781,6 +826,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * main thread; the model swap itself hops back to the main thread.
      */
     suspend fun openCanvasAsync(uri: String, name: String?): Boolean {
+        val cached = inactiveCanvases.remove(uri)
+        if (cached != null) {
+            openCanvasDocument(cached, uri, name)
+            rememberOpened(uri, name)
+            return true
+        }
         val doc = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
                 appContext.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use {
@@ -799,7 +850,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         displayName: String?,
         fromSession: Boolean = false,
     ) {
-        flushAutosave() // a paged note may be open underneath; do not leave its edits unwritten
+        if (canvasOpen) {
+            infinite.commitText()
+            flushCanvasAutosave()
+            if (infinite.document.path != uri) rememberInactiveCanvas()
+        } else {
+            flushAutosave() // a paged note may be open underneath; do not leave its edits unwritten
+            rememberInactiveDocument()
+        }
         doc.path = uri
         doc.displayName = displayName
         val canvas = infinite
@@ -834,6 +892,73 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 }
             }.getOrDefault(false)
         }
+
+    /** Save an explicitly requested canvas before leaving it, and continue only on success. */
+    fun saveCanvasToThen(uri: String, name: String?, onDone: (Boolean) -> Unit) {
+        val canvas = infinite
+        canvas.commitText()
+        val doc = canvas.document
+        val snapshot = doc.snapshotForWrite()
+        val wasDirty = doc.dirty
+        doc.dirty = false
+        canvasDebounceJob?.cancel()
+        val pending = canvasWriteJob
+        savingNote = true
+        canvasWriteJob = autosaveScope.launch {
+            pending?.join()
+            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                writeCanvasSafely(uri, snapshot)
+            }
+            savingNote = false
+            if (ok && canvas.document === doc) {
+                doc.path = uri
+                if (name != null) doc.displayName = name
+                canvasAutosaveUri = if (browseRoot?.let { isUnderTree(uri, it) } == true) uri else null
+                invalidateThumb(uri)
+            } else if (!ok) {
+                if (wasDirty && canvas.document === doc) doc.dirty = true
+                message = appContext.getString(R.string.err_save_note)
+            }
+            onDone(ok && canvas.document === doc && !doc.dirty)
+        }
+    }
+
+    /** Create a durable file for a new canvas before switching away from it. */
+    fun saveNewCanvasToThen(onDone: (Boolean) -> Unit) {
+        val canvas = infinite
+        canvas.commitText()
+        val doc = canvas.document
+        val snapshot = doc.snapshotForWrite()
+        val wasDirty = doc.dirty
+        doc.dirty = false
+        val root = browseRoot ?: com.xnotes.platform.AppStorageDocumentsProvider.treeUri(appContext).toString()
+        canvasDebounceJob?.cancel()
+        val pending = canvasWriteJob
+        savingNote = true
+        canvasWriteJob = autosaveScope.launch {
+            pending?.join()
+            val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    val parent = android.provider.DocumentsContract.getTreeDocumentId(android.net.Uri.parse(root))
+                    val name = uniqueDocumentName(root, parent, "", com.xnotes.core.util.DocumentKind.CANVAS)
+                    val uri = createNoteFile(root, parent, name) { canvasCodec.write(snapshot, it) }
+                    uri?.let { it to name }
+                }.getOrNull()
+            }
+            savingNote = false
+            if (result != null && canvas.document === doc) {
+                doc.path = result.first
+                doc.displayName = result.second
+                canvasAutosaveUri = if (browseRoot == root) result.first else null
+                rememberStamp(result.first)
+                invalidateThumb(result.first)
+            } else if (result == null) {
+                if (wasDirty && canvas.document === doc) doc.dirty = true
+                message = appContext.getString(R.string.err_save_note)
+            }
+            onDone(result != null && canvas.document === doc && !doc.dirty)
+        }
+    }
 
     private fun scheduleCanvasAutosave() {
         val uri = canvasAutosaveUri ?: return
@@ -3620,6 +3745,20 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      */
     suspend fun openAsync(uri: String, name: String? = null) {
         if (opening) return
+        // A tab switch commonly returns to a document decoded moments ago. Reuse its model
+        // instead of re-reading and parsing the ZIP; replaceDocument still resets render caches,
+        // history, gestures and applies the remembered viewport as for any normal open.
+        val cached = inactiveDocuments.remove(uri)
+        if (cached != null) {
+            leaveCanvasForPagedNote()
+            replaceDocument(cached)
+            maybeBindAutosave(uri)
+            noteOpen = true
+            rememberOpened(uri, name)
+            state.lastOpenReadMs = 0L
+            state.lastOpenTotalMs = 0L
+            return
+        }
         openCancelled.set(false)
         opening = true
         val t0 = System.nanoTime()
@@ -3649,6 +3788,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             doc.path = uri
             doc.displayName = name
             doc.dirty = false
+            leaveCanvasForPagedNote()
             replaceDocument(doc)
             state.openFileBytes = fileBytes
             state.lastSaveBytes = fileBytes // the on-disk size, until the first autosave rewrites it
@@ -4358,7 +4498,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             android.provider.DocumentsContract.createDocument(appContext.contentResolver, parent, "application/octet-stream", name)
         }.getOrNull() ?: return null
         return runCatching {
-            appContext.contentResolver.openOutputStream(uri, "wt")?.use { write(it) }
+            val output = appContext.contentResolver.openOutputStream(uri, "wt")
+                ?: throw java.io.IOException("Could not open created document")
+            output.use { write(it) }
             uri.toString()
         }.getOrElse {
             runCatching { android.provider.DocumentsContract.deleteDocument(appContext.contentResolver, uri) }
@@ -6244,6 +6386,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         saveViewState() // remember the outgoing folder note's view before switching away
         flowText.endSession() // flushes the typing burst so the autosave below carries it
         flushAutosave() // save the outgoing note if it was autosaving to the folder
+        if (state.document.path != doc.path) rememberInactiveDocument()
         autosaveUri = null
         // File readouts belong to the outgoing note; a file-backed open re-sets them after the swap.
         state.lastOpenCompacted = doc.compactedOnLoad
