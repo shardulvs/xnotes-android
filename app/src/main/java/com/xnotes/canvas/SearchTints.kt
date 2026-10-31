@@ -19,6 +19,7 @@ import com.xnotes.core.text.FlowPos
 import com.xnotes.core.text.FlowRange
 import com.xnotes.platform.AndroidText
 import java.util.WeakHashMap
+import com.xnotes.core.model.displayRects
 
 /**
  * The search's matches tinted on the pages shown, over ink so a match under handwriting still
@@ -188,13 +189,13 @@ class SearchTints(
     private fun pdfBoxes(hit: SearchHit, text: PageText): Boxes {
         val quads = TextQuads.of(text, hit.sourceStart, hit.sourceEnd)
         val s = state.document.dpi / 72.0
-        return Boxes(
-            IntArray(quads.size) { hit.page },
-            Array(quads.size) { i ->
-                val q = quads[i]
-                Rect(q.left * s, q.top * s, (q.right - q.left) * s, (q.bottom - q.top) * s)
-            },
-        )
+        val page = state.document.pages.getOrNull(hit.page)
+        // Text lies on the page as it was, so a match room cuts across shows in pieces.
+        val rects = quads.flatMap { q ->
+            val r = Rect(q.left * s, q.top * s, (q.right - q.left) * s, (q.bottom - q.top) * s)
+            page?.displayRects(r) ?: listOf(r)
+        }
+        return Boxes(IntArray(rects.size) { hit.page }, rects.toTypedArray())
     }
 
     private fun flowBoxes(hit: SearchHit, para: Int): Boxes {

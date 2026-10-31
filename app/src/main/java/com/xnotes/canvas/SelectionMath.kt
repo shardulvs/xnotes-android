@@ -100,7 +100,11 @@ object SelectionMath {
     private class Drawn(val lines: List<Line>, val reach: Double)
 
     private fun drawnOf(item: CanvasItem): Drawn = when (item) {
-        is Stroke -> Drawn(listOf(Line(List(item.sampleCount) { Pt(item.xAt(it), item.yAt(it)) }, false)), item.config.baseWidth / 2.0)
+        is Stroke -> Drawn(
+            if (item.cuts.isEmpty()) listOf(Line(List(item.sampleCount) { Pt(item.xAt(it), item.yAt(it)) }, false))
+            else item.visibleRuns().map { Line(it, false) },
+            item.config.baseWidth / 2.0,
+        )
         is ShapeItem -> if (item.isFill) fillEdge(item) else outlines(item.paths(), item.strokeWidth)
         is ConnectorItem -> outlines(item.paths(), item.strokeWidth)
         is ImageItem -> Drawn(listOf(Line(item.corners(), true)), 0.0)

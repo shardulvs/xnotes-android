@@ -10,6 +10,7 @@ xnotes is a handwriting notebook for Android, built for the stylus. Take notes, 
 * Book layouts: single, double or cover pages, scrolling or page flips.
 * PDF import: bring in any PDF and write all over it.
 * Room for side notes: widen a PDF's margins on any edge and take notes on the side.
+* Insert space: drag anywhere on a page to open up room there, even in the middle of a PDF.
 * PDF text markups: highlight, underline and strike out text, add comments, search it.
 * PDF colour filters: invert, sepia, contrast, brightness, multiply and screen.
 * Images stay untouched: filter a PDF and its photos and images keep their true colours.
