@@ -135,7 +135,8 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
     }
 
     private fun insertMissing(item: ToolbarItem): ToolbarLayout {
-        val anchor = INSERT_AFTER[item]
+        val anchor = if (item == ToolbarItem.TEXT_BOX && sections.none { s -> s.entries.any { it.item == ToolbarItem.TEXT } })
+            ToolbarItem.SHAPE else INSERT_AFTER[item]
         if (anchor != null) {
             sections.forEachIndexed { si, sec ->
                 val i = sec.entries.indexOfFirst { it.item == anchor }
@@ -172,7 +173,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
             ToolbarItem.PEN, ToolbarItem.DASHED, ToolbarItem.CALLIGRAPHY, ToolbarItem.SPEED,
             ToolbarItem.TAPER, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER,
             ToolbarItem.PAN, ToolbarItem.SELECT, ToolbarItem.LASSO, ToolbarItem.WAND,
-            ToolbarItem.TAPE, ToolbarItem.SHAPE,
+            ToolbarItem.TAPE, ToolbarItem.SHAPE, ToolbarItem.TEXT_BOX,
             ToolbarItem.IMAGE, ToolbarItem.COLORS, ToolbarItem.UNDO, ToolbarItem.REDO,
             ToolbarItem.STYLES, ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP,
             ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK,
@@ -208,7 +209,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
                 ToolbarItem.TAPER, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER,
             ),
             listOf(ToolbarItem.PAN, ToolbarItem.SELECT, ToolbarItem.LASSO),
-            listOf(ToolbarItem.WAND, ToolbarItem.TAPE, ToolbarItem.SHAPE),
+            listOf(ToolbarItem.WAND, ToolbarItem.TAPE, ToolbarItem.SHAPE, ToolbarItem.TEXT_BOX),
             listOf(ToolbarItem.IMAGE),
             listOf(ToolbarItem.COLORS),
             listOf(ToolbarItem.UNDO, ToolbarItem.REDO),

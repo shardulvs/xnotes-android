@@ -1159,4 +1159,5 @@
     <string name="toolbar_size_compact">Compact</string>
     <string name="toolbar_size_regular">Regular</string>
     <string name="toolbar_size_comfortable">Comfortable</string>
+    <string name="err_drop_content">Could not insert the dropped content. Try dragging text or an image from the other app.</string>
 </resources>

@@ -46,7 +46,7 @@ import com.xnotes.core.tools.ToolConfig
 import kotlin.math.exp
 
 /** What the current gesture is doing. */
-enum class CanvasPointerMode { IDLE, PAN, PINCH, DRAW, ERASE, SHAPE, BAND, LASSO, MOVE, RESIZE, ROTATE, VERTEX, POLYGON, CONNECT, JOINT, SLIDE, TAPE }
+enum class CanvasPointerMode { IDLE, PAN, PINCH, DRAW, ERASE, SHAPE, TEXT_BOX, BAND, LASSO, MOVE, RESIZE, ROTATE, VERTEX, POLYGON, CONNECT, JOINT, SLIDE, TAPE }
 
 /**
  * Gestures on the infinite canvas.
@@ -87,6 +87,9 @@ class InfiniteInteraction(
     private val onPendingShape: (CanvasItem?) -> Unit = {},
     /** A finished shape or connector: add it to the document and push the undo command. */
     private val onCommitShape: (CanvasItem) -> Unit = {},
+    /** Create a text box from a tap or drag, or edit the box tapped beneath the pointer. */
+    private val onCreateTextBox: (Pt, Pt) -> Unit = { _, _ -> },
+    private val onEditTextBoxAt: (Pt) -> Boolean = { false },
     /** The shape tool's style, and the active ink colour it draws in. */
     private val shapeConfig: () -> ShapeConfig = { ShapeConfig() },
     private val inkColor: () -> Rgba = { InkPalette.DEFAULT },
@@ -174,6 +177,10 @@ class InfiniteInteraction(
     private val stylusButtons = StylusButtonLatch()
 
     private var eraseSession: EraseSession? = null
+
+    // A text box uses the same tap-or-drag gesture as the paged editor.
+    private var textBoxStart = Pt.ZERO
+    private var textBoxEnd = Pt.ZERO
 
     // The shape being dragged out with the shape tool.
     private var pendingShape: ShapeItem? = null
@@ -539,6 +546,7 @@ class InfiniteInteraction(
             placing -> beginPolygonTap(vx, vy)
             effective == Tool.SHAPE && shapeConfig().connector != null -> beginConnector(vx, vy)
             effective == Tool.SHAPE -> beginShape(vx, vy)
+            effective == Tool.TEXT_BOX -> beginTextBox(vx, vy)
             effective == Tool.SELECT -> beginSelect(vx, vy)
             effective == Tool.LASSO -> beginLasso(vx, vy)
             effective == Tool.TAPE -> beginTape(vx, vy)
@@ -636,6 +644,7 @@ class InfiniteInteraction(
         if (mode == CanvasPointerMode.TAPE && drawingIsStylus) return
         if (e.pointerCount >= 2) {
             if (mode == CanvasPointerMode.DRAW) abandonStroke()
+            if (mode == CanvasPointerMode.TEXT_BOX) onPendingShape(null)
             if (mode == CanvasPointerMode.TAPE) abandonTape()
             // A finger erase yields to a pinch: commit what it already removed rather than lose it.
             if (mode == CanvasPointerMode.ERASE) endErase()
@@ -655,6 +664,7 @@ class InfiniteInteraction(
             CanvasPointerMode.DRAW -> extendDraw(e)
             CanvasPointerMode.ERASE -> extendErase(e)
             CanvasPointerMode.SHAPE -> extendShape(e.getX(0).toDouble(), e.getY(0).toDouble())
+            CanvasPointerMode.TEXT_BOX -> extendTextBox(e.getX(0).toDouble(), e.getY(0).toDouble())
             CanvasPointerMode.TAPE -> extendTape(e.getX(0).toDouble(), e.getY(0).toDouble())
             CanvasPointerMode.CONNECT -> extendConnector(e.getX(0).toDouble(), e.getY(0).toDouble())
             CanvasPointerMode.JOINT -> extendJoint(e.getX(0).toDouble(), e.getY(0).toDouble())
@@ -707,6 +717,7 @@ class InfiniteInteraction(
             onEraseLifted()
         }
         if (mode == CanvasPointerMode.SHAPE) endShape()
+        if (mode == CanvasPointerMode.TEXT_BOX) endTextBox(e.getX(0).toDouble(), e.getY(0).toDouble())
         if (mode == CanvasPointerMode.TAPE) endTape()
         if (mode == CanvasPointerMode.CONNECT) endConnector()
         when (mode) {
@@ -1528,6 +1539,37 @@ class InfiniteInteraction(
     /** End a draft something else interrupts: two corners or more stay, as an open line. */
     fun finishPolygonDraft() {
         if (polygonDraft != null) commitPolygon(closed = false)
+    }
+
+    // --- text boxes ---
+
+    private fun beginTextBox(vx: Double, vy: Double) {
+        val at = viewport.viewportToContent(Pt(vx, vy))
+        if (onEditTextBoxAt(at)) {
+            mode = CanvasPointerMode.IDLE
+            return
+        }
+        textBoxStart = at
+        textBoxEnd = at
+        mode = CanvasPointerMode.TEXT_BOX
+        setInteractive(false, false)
+    }
+
+    private fun extendTextBox(vx: Double, vy: Double) {
+        textBoxEnd = viewport.viewportToContent(Pt(vx, vy))
+        if (textBoxStart.distanceTo(textBoxEnd) * viewport.zoom < TAP_SLOP_PX) return
+        // A lightweight outline marks the box width while it is drawn; only the finished box
+        // becomes an editable label, so line layout never runs on pointer movement.
+        onPendingShape(ShapeItem(ShapeKind.RECTANGLE, textBoxStart, textBoxEnd,
+            inkColor().withAlpha(160), 1.0 / viewport.zoom))
+        requestRender()
+    }
+
+    private fun endTextBox(vx: Double, vy: Double) {
+        textBoxEnd = viewport.viewportToContent(Pt(vx, vy))
+        onPendingShape(null)
+        onCreateTextBox(textBoxStart, textBoxEnd)
+        requestRender()
     }
 
     // --- shapes ---

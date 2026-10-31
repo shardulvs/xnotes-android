@@ -723,6 +723,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             it.applyPalette(palette)
             // Both editors write inserted images into the same purged-on-launch temp dir.
             it.imageDir = imageDir
+            it.externalDrop = com.xnotes.platform.ExternalDrop.create(
+                it.surfaces, autosaveScope, viewContext,
+                prepare = { point -> if (noteOpen && canvasOpen) it.prepareExternalDrop(point, imageDir) else null },
+                onFailure = { message = appContext.getString(R.string.err_drop_content) },
+                indicatorColor = { palette.accent.toArgb() },
+            )
             it.onMessage = { m, action -> say(m, action) }
             for (t in ToolDefaults.persistedTools) it.setToolConfig(t, settings.configFor(t))
             it.armShapeConfig(settings.shapeConfig)
@@ -1605,7 +1611,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** Set when a side-panel thumbnail stood in for a formula, so they render again once it lands. */
     @Volatile private var thumbsAwaitMath = false
 
+    val externalDrop: com.xnotes.platform.ExternalDrop.Receiver
+
     init {
+        externalDrop = com.xnotes.platform.ExternalDrop.create(
+            surfaces, autosaveScope, viewContext, ::prepareExternalDrop,
+            onFailure = { message = appContext.getString(R.string.err_drop_content) },
+            indicatorColor = { palette.accent.toArgb() },
+        )
         com.xnotes.platform.MathRendering.addListener(mathLanded)
         if (pane == Pane.PRIMARY) reloadTemplateLibrary()
         view.input = { ev ->
@@ -2434,6 +2447,37 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(u))
                     .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
             )
+        }
+    }
+
+    /** Capture the document and paper under a drop before asynchronously copying its data. */
+    private fun prepareExternalDrop(viewportPoint: Pt): com.xnotes.platform.ExternalDrop.Target? {
+        if (!noteOpen || canvasOpen) return null
+        val doc = state.document
+        val contentPoint = state.viewportToContent(viewportPoint)
+        val index = state.pageIndexAtContent(contentPoint) ?: return null
+        val page = doc.pages.getOrNull(index) ?: return null
+        val local = state.toPageSpace(index, contentPoint)
+        val area = state.footprint(page)
+        return com.xnotes.platform.ExternalDrop.Target(imageDir) { content ->
+            val currentIndex = doc.pages.indexOf(page)
+            if (state.document !== doc || !noteOpen || canvasOpen || currentIndex < 0) false else {
+                controller.commitTextEdit()
+                val items = com.xnotes.core.importing.DropPlacement.items(
+                    content, local, area, true, controller.inkColor, controller.textPointSize,
+                    controller.textFace, textMeasurer,
+                )
+                if (items.isEmpty()) false else {
+                    page.items.addAll(items)
+                    items.forEach { state.appendToCache(page, it) }
+                    history.push(CompositeCommand(items.map { AddItem(page, it) }))
+                    doc.dirty = true
+                    controller.selectPlaced(currentIndex, items)
+                    refreshContent()
+                    view.requestRender()
+                    true
+                }
+            }
         }
     }
 

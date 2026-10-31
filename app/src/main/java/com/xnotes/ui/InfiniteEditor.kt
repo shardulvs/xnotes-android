@@ -52,6 +52,7 @@ import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.Labelled
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.ShapeLabel
+import com.xnotes.core.shapes.ShapeKind
 import com.xnotes.core.model.Stroke
 import com.xnotes.core.model.TapeItem
 import com.xnotes.core.model.TextItem
@@ -90,6 +91,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     var document: InfiniteDocument = InfiniteDocument()
         private set
 
+    lateinit var externalDrop: com.xnotes.platform.ExternalDrop.Receiver
+        internal set
+
     val history = History()
 
     val view = InfiniteCanvasView(appContext)
@@ -123,6 +127,8 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         onEraserCursor = { at, radius -> view.setEraserCursor(at, radius) },
         onPendingShape = { publishPendingShape(it) },
         onCommitShape = { commitItem(it) },
+        onCreateTextBox = { from, to -> createTextBox(from, to) },
+        onEditTextBoxAt = { at -> editTextBoxAt(at) },
         shapeConfig = { shapeConfig },
         inkColor = { inkColor },
         detectShapes = { detectShapes },
@@ -847,6 +853,8 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     /** The shape or connector whose label is open in the overlay, and that label as it was before. */
     private var editingLabel: Labelled? = null
     private var labelBefore: ShapeLabel? = null
+    /** New text hosts are drafts until the user commits nonblank text. */
+    private var newTextBoxDraft: ShapeItem? = null
 
     /** Where the overlay sits while a label is open, or null. */
     var editingField by mutableStateOf<com.xnotes.canvas.EditingField?>(null)
@@ -858,6 +866,39 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     /** The type a new label starts in, following the last one styled. */
     private var textFace: FontFace = TextItem.DEFAULT_FACE
     private var textPointSize: Double = TextItem.DEFAULT_POINT_SIZE
+
+    /** The canvas Text Box tool makes the same editable, invisible host as imported text. */
+    private fun createTextBox(from: Pt, to: Pt) {
+        val rect = Rect.fromPoints(from, to)
+        val horizontalDrag = rect.w * viewport.zoom >= com.xnotes.ui.InfiniteInteraction.TAP_SLOP_PX
+        val verticalDrag = rect.h * viewport.zoom >= com.xnotes.ui.InfiniteInteraction.TAP_SLOP_PX
+        val width = if (horizontalDrag) rect.w.coerceAtLeast(40.0)
+            else (viewport.visibleContentRect().w * 0.35).coerceIn(140.0, 360.0)
+        val left = if (horizontalDrag) rect.left else from.x
+        val top = if (verticalDrag) rect.top else from.y
+        val label = ShapeLabel("", TextStyle(inkColor, textPointSize, textFace), textMeasurer)
+        val height = if (verticalDrag) rect.h.coerceAtLeast(label.lineHeight)
+            else label.height(width)
+        val host = ShapeItem(ShapeKind.RECTANGLE, Pt(left, top), Pt(left + width, top + height),
+            inkColor.withAlpha(0), strokeWidth = 0.0).also { it.label = label }
+        document.add(host)
+        startLabelEdit(host)
+        newTextBoxDraft = host
+    }
+
+    /** Tapping a previously typed box reopens it, like the notebook's Text Box tool. */
+    private fun editTextBoxAt(at: Pt): Boolean {
+        val reach = 8.0 / viewport.zoom
+        val near = Rect(at.x - reach, at.y - reach, 2 * reach, 2 * reach)
+        val shape = document.itemsIn(near).lastOrNull {
+            it is ShapeItem && !it.locked &&
+                (it.shape == ShapeKind.RECTANGLE || it.shape == ShapeKind.POLYGON) &&
+                it.label != null && it.strokeWidth == 0.0 && it.strokeRgba.a == 0 &&
+                it.fillRgba == null && it.labelContains(at)
+        } as? ShapeItem ?: return false
+        startLabelEdit(shape)
+        return true
+    }
 
     /** A double tap on an unselected shape that takes a label types it, with the tools a note allows. */
     private fun onDoubleTap(vp: com.xnotes.core.geometry.Pt, toolType: Int, selectedBefore: Set<CanvasItem>) {
@@ -929,6 +970,23 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         labelBefore = null
         editingField = null
         textBar = null
+        if (newTextBoxDraft === shape) {
+            newTextBoxDraft = null
+            if (after == null) {
+                // Cancelled or empty drafts must never leave invisible shapes in the document.
+                document.remove(shape)
+            } else {
+                val box = shape.box
+                val requiredHeight = after.height(box.w)
+                if (requiredHeight > box.h) shape.end = Pt(shape.end.x, shape.start.y + requiredHeight)
+                document.itemChanged(shape)
+                history.push(AddCanvasItem(document, shape))
+                markDirty()
+                refresh()
+            }
+            view.publish()
+            return
+        }
         document.itemChanged(shape)
         val changed = if (after == null) before != null else !after.sameAs(before)
         if (changed) {
@@ -1679,6 +1737,39 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         history.push(AddCanvasItem(document, item))
         markDirty()
         refresh()
+    }
+
+    /** Keep a pending drop tied to the canvas that was open when the user released it. */
+    fun prepareExternalDrop(viewportPoint: Pt, dir: java.io.File): com.xnotes.platform.ExternalDrop.Target {
+        val doc = document
+        val at = viewport.viewportToContent(viewportPoint)
+        val area = viewport.visibleContentRect()
+        return com.xnotes.platform.ExternalDrop.Target(dir) { content ->
+            if (document !== doc || !surfaces.isAttachedToWindow) false else {
+                commitText()
+                val color = inkColor
+                val size = textPointSize
+                val face = textFace
+                // Placement measures the full imported paragraph. Keep its initial StaticLayout
+                // off the input thread, just like subsequent text rasterization.
+                val items = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    com.xnotes.core.importing.DropPlacement.items(
+                        content, at, area, false, color, size, face,
+                        com.xnotes.platform.AndroidTextMeasurer(), textAsLabel = true,
+                    )
+                }
+                if (document !== doc || !surfaces.isAttachedToWindow || items.isEmpty()) false else {
+                    document.addAll(items)
+                    history.push(AddCanvasItems(document, items))
+                    selection.select(items)
+                    armTool(Tool.SELECT)
+                    markDirty()
+                    refresh()
+                    publishOverlay()
+                    true
+                }
+            }
+        }
     }
 
     /**

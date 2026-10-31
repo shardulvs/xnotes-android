@@ -195,6 +195,26 @@ class ToolbarLayoutTest {
         assertEquals(ToolbarLayout.CANVAS_ITEMS.size, items.size)
     }
 
+    @Test fun canvasTextBoxCanBeHiddenAndRestoredFromPreferences() {
+        val base = ToolbarLayout.CANVAS_DEFAULT
+        val section = base.sections.indexOfFirst { s -> s.entries.any { it.item == ToolbarItem.TEXT_BOX } }
+        val entry = base.sections[section].entries.indexOfFirst { it.item == ToolbarItem.TEXT_BOX }
+        val hidden = base.toggleVisible(section, entry)
+        assertFalse(hidden.sections[section].entries[entry].visible)
+        val restored = ToolbarLayout.fromRaw(hidden.toRaw(), ToolbarLayout.CANVAS_ITEMS, ToolbarLayout.CANVAS_DEFAULT)
+        assertFalse(restored.sections[section].entries[entry].visible)
+        assertTrue(restored.toggleVisible(section, entry).sections[section].entries[entry].visible)
+    }
+
+    @Test fun legacyCanvasBarReceivesTextBoxBesideShape() {
+        val raw = ToolbarLayout.CANVAS_DEFAULT.toRaw()
+            .map { section -> section.filterNot { it.first == ToolbarItem.TEXT_BOX.id } }
+        val restored = ToolbarLayout.fromRaw(raw, ToolbarLayout.CANVAS_ITEMS, ToolbarLayout.CANVAS_DEFAULT)
+        val tools = restored.sections.first { s -> s.entries.any { it.item == ToolbarItem.SHAPE } }
+            .entries.map { it.item }
+        assertEquals(tools.indexOf(ToolbarItem.SHAPE) + 1, tools.indexOf(ToolbarItem.TEXT_BOX))
+    }
+
     @Test fun theTwoBarsDoNotShareTheirOwnItems() {
         assertTrue(ToolbarItem.WAYPOINTS !in ToolbarLayout.NOTE_ITEMS)
         assertTrue(ToolbarItem.MINIMAP !in ToolbarLayout.NOTE_ITEMS)
