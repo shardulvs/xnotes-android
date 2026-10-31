@@ -289,6 +289,7 @@ object XnotesIcons {
     val gallery = icon(roundRect(3.0, 3.0, 8.0, 14.0, 1.0), roundRect(13.0, 3.0, 8.0, 14.0, 1.0), "M2 21h20")
     val list = icon("M8 6h13", "M8 12h13", "M8 18h13", "M3 6h.01", "M3 12h.01", "M3 18h.01")
     val columns = icon(roundRect(3.0, 3.0, 18.0, 18.0, 2.0), "M9 3v18", "M15 3v18")
+    val folderTree = icon("M3 4h5v5H3Z", "M8 6.5h4v11", "M12 11h4", "M16 9h5v4h-5Z", "M12 17h4", "M16 15h5v4h-5Z")
     val timeline = icon(
         roundRect(3.0, 4.0, 18.0, 18.0, 2.0), "M16 2v4", "M8 2v4", "M3 10h18",
         "M8 14h.01", "M12 14h.01", "M16 14h.01", "M8 18h.01", "M12 18h.01",

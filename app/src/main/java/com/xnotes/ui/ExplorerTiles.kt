@@ -249,7 +249,7 @@ internal fun ThumbBadges(b: ExplorerBody, e: BrowseEntry, inset: Dp = 8.dp) {
 }
 
 @Composable
-private fun EntryMenuButton(b: ExplorerBody, e: BrowseEntry, tint: Color, size: Dp = 32.dp) {
+internal fun EntryMenuButton(b: ExplorerBody, e: BrowseEntry, tint: Color, size: Dp = 32.dp) {
     var open by remember { mutableStateOf(false) }
     Box {
         Tooltip(stringResource(R.string.more)) {

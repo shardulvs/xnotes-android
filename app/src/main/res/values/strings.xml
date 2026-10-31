@@ -939,6 +939,8 @@
     <string name="layout_gallery">Gallery</string>
     <string name="layout_list">List</string>
     <string name="layout_columns">Columns</string>
+    <string name="layout_tree">Tree</string>
+    <string name="tree_show_files">Show notes and canvases in tree</string>
     <string name="layout_timeline">Timeline</string>
     <string name="group_date">Date</string>
     <string name="group_kind">Kind</string>
