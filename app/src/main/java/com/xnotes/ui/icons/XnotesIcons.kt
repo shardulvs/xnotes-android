@@ -142,6 +142,8 @@ object XnotesIcons {
     val skipBack = icon("M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5")
     val skipForward = icon("M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8", "M21 3v5h-5")
     // The screenshot tool: plain scissors (Feather "scissors"), the same glyph as Cut.
+    // Insert space: the page opening across a bar, one arrow up from it and one down.
+    val insertSpace = icon("M4 12h16", "M12 9V3", "M8.5 6.5 12 3l3.5 3.5", "M12 15v6", "M8.5 17.5 12 21l3.5-3.5")
     val scissors = icon(circle(6.0, 6.0, 3.0), circle(6.0, 18.0, 3.0), "M20 4 8.12 15.88", "M14.47 14.48 20 20", "M8.12 8.12 12 12")
 
     // Shape-kind glyphs for the shape tool's kind picker (line / arrow / rect / ellipse / circle / triangle).

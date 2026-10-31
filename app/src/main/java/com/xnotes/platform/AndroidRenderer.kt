@@ -125,6 +125,10 @@ class AndroidRenderer(private val canvas: Canvas) : Renderer {
         canvas.clipRect(rect.left.toFloat(), rect.top.toFloat(), rect.right.toFloat(), rect.bottom.toFloat())
     }
 
+    override fun clipPolygon(points: List<Pt>) {
+        if (points.size >= 3) canvas.clipPath(buildPath(points, close = true, FillRule.NONZERO))
+    }
+
     override fun clear() {
         canvas.drawColor(0, PorterDuff.Mode.CLEAR)
     }
@@ -326,24 +330,38 @@ class AndroidRenderer(private val canvas: Canvas) : Renderer {
     // source) so a huge photo never fully decodes; the free angle, the mirror and the quarter turn
     // all apply about the destination centre, the rect already carrying the quarter-turned
     // (w/h-swapped) box.
-    override fun drawImage(image: ImageData, dest: Rect, orientation: Int, angle: Double, flip: Flip) {
+    override fun drawImage(image: ImageData, dest: Rect, orientation: Int, angle: Double, flip: Flip, part: Rect?) {
         if (dest.w <= 0.0 || dest.h <= 0.0) return
+        val p = part?.takeIf { it.w > 0.0 && it.h > 0.0 && !com.xnotes.core.model.ImageCrop.isWhole(it) }
         val devW = (dest.w * scaleX).toInt()
         val devH = (dest.h * scaleY).toInt()
         val o = ((orientation % 360) + 360) % 360
-        if (o == 0 && angle == 0.0 && drawVectorSlice(image, dest, devW, devH, flip)) return
+        if (o == 0 && angle == 0.0 && drawVectorSlice(image, dest, devW, devH, flip, p)) return
         val turned = o == 90 || o == 270
-        val reqW = (if (turned) devH else devW).coerceIn(1, DECODE_CAP_PX)
-        val reqH = (if (turned) devW else devH).coerceIn(1, DECODE_CAP_PX)
+        // A part is a slice of a larger picture, so the whole is decoded that much larger to keep the slice sharp.
+        val pw = p?.w ?: 1.0
+        val ph = p?.h ?: 1.0
+        val reqW = ((if (turned) devH else devW) / pw).toInt().coerceIn(1, DECODE_CAP_PX)
+        val reqH = ((if (turned) devW else devH) / ph).toInt().coerceIn(1, DECODE_CAP_PX)
         val bmp = ImageDecoder.decodeSampledFile(image.file.path, reqW, reqH) ?: return
         val uw = (if (turned) dest.h else dest.w).toFloat()
         val uh = (if (turned) dest.w else dest.h).toFloat()
         canvas.save()
         canvas.translate(((dest.left + dest.right) / 2.0).toFloat(), ((dest.top + dest.bottom) / 2.0).toFloat())
         if (angle != 0.0) canvas.rotate(Math.toDegrees(angle).toFloat())
+        if (p != null) canvas.clipRect((-dest.w / 2.0).toFloat(), (-dest.h / 2.0).toFloat(), (dest.w / 2.0).toFloat(), (dest.h / 2.0).toFloat())
         if (flip != Flip.NONE) canvas.scale(if (flip.x) -1f else 1f, if (flip.y) -1f else 1f)
         if (o != 0) canvas.rotate(o.toFloat())
-        canvas.drawBitmap(bmp, null, RectF(-uw / 2f, -uh / 2f, uw / 2f, uh / 2f), bitmapPaint)
+        if (p == null) {
+            canvas.drawBitmap(bmp, null, RectF(-uw / 2f, -uh / 2f, uw / 2f, uh / 2f), bitmapPaint)
+        } else {
+            // The whole picture laid where its part fills the box, the clip showing only the part.
+            val w = uw / p.w
+            val h = uh / p.h
+            val cx = (0.5 - p.centerX) * w
+            val cy = (0.5 - p.centerY) * h
+            canvas.drawBitmap(bmp, null, RectF((cx - w / 2).toFloat(), (cy - h / 2).toFloat(), (cx + w / 2).toFloat(), (cy + h / 2).toFloat()), bitmapPaint)
+        }
         canvas.restore()
     }
 
@@ -353,7 +371,7 @@ class AndroidRenderer(private val canvas: Canvas) : Renderer {
      * visible sliver instead of the whole document at a 4096 px bucket. Returns false when the
      * image isn't a vector (or the slice failed) so the caller falls back to the raster path.
      */
-    private fun drawVectorSlice(image: ImageData, dest: Rect, devW: Int, devH: Int, flip: Flip): Boolean {
+    private fun drawVectorSlice(image: ImageData, dest: Rect, devW: Int, devH: Int, flip: Flip, part: Rect?): Boolean {
         val path = image.file.path
         if (!ImageDecoder.isVector(path)) return false
         if (!canvas.getClipBounds(clipBounds)) return true // clipped away entirely
@@ -367,16 +385,25 @@ class AndroidRenderer(private val canvas: Canvas) : Renderer {
         val ur = (r - dest.left) / dest.w
         val vt = (t - dest.top) / dest.h
         val vb = (b - dest.top) / dest.h
+        // A part's fractions are of the part; the slice is asked for in the whole picture's.
+        val pl = part?.left ?: 0.0
+        val pt = part?.top ?: 0.0
+        val pw = part?.w ?: 1.0
+        val ph = part?.h ?: 1.0
         val slice = ImageDecoder.renderVectorSlice(
             path,
-            if (flip.x) 1.0 - ur else ul, if (flip.y) 1.0 - vb else vt,
-            if (flip.x) 1.0 - ul else ur, if (flip.y) 1.0 - vt else vb,
-            devW, devH,
+            pl + (if (flip.x) 1.0 - ur else ul) * pw, pt + (if (flip.y) 1.0 - vb else vt) * ph,
+            pl + (if (flip.x) 1.0 - ul else ur) * pw, pt + (if (flip.y) 1.0 - vt else vb) * ph,
+            (devW / pw).toInt().coerceAtLeast(1), (devH / ph).toInt().coerceAtLeast(1),
         ) ?: return false
-        val x0 = if (flip.x) 1.0 - slice.u1 else slice.u0
-        val y0 = if (flip.y) 1.0 - slice.v1 else slice.v0
-        val x1 = if (flip.x) 1.0 - slice.u0 else slice.u1
-        val y1 = if (flip.y) 1.0 - slice.v0 else slice.v1
+        val u0 = (slice.u0 - pl) / pw
+        val v0 = (slice.v0 - pt) / ph
+        val u1 = (slice.u1 - pl) / pw
+        val v1 = (slice.v1 - pt) / ph
+        val x0 = if (flip.x) 1.0 - u1 else u0
+        val y0 = if (flip.y) 1.0 - v1 else v0
+        val x1 = if (flip.x) 1.0 - u0 else u1
+        val y1 = if (flip.y) 1.0 - v0 else v1
         val target = RectF(
             (dest.left + x0 * dest.w).toFloat(),
             (dest.top + y0 * dest.h).toFloat(),
@@ -384,6 +411,8 @@ class AndroidRenderer(private val canvas: Canvas) : Renderer {
             (dest.top + y1 * dest.h).toFloat(),
         )
         canvas.save()
+        // A slice may reach past the part it was cut for; the box is where the part ends.
+        if (part != null) canvas.clipRect(dest.left.toFloat(), dest.top.toFloat(), dest.right.toFloat(), dest.bottom.toFloat())
         if (flip != Flip.NONE) canvas.scale(if (flip.x) -1f else 1f, if (flip.y) -1f else 1f, target.centerX(), target.centerY())
         canvas.drawBitmap(slice.bitmap, null, target, bitmapPaint)
         canvas.restore()

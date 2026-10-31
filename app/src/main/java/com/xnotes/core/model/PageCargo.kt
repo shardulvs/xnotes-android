@@ -87,6 +87,7 @@ class PageCargo private constructor(
         private fun rescale(page: Page, k: Double) {
             page.width *= k
             page.height *= k
+            page.rooms = Rooms.scaled(page.rooms, k)
             val t = Affine.scaleAbout(Pt.ZERO, k, k)
             for (item in page.items) item.applyTransform(t)
             page.style.spacing?.let { page.style = page.style.copy(spacing = it * k) }
