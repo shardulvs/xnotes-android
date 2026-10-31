@@ -93,6 +93,7 @@ import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
+import com.xnotes.core.model.sourcePoint
 
 /** The pointer state machine modes (spec 06 §1). */
 enum class PointerMode {
@@ -1501,7 +1502,7 @@ class InteractionController(
         val taken = Scribble.taken(passes, radius, candidates) { c, x, y, r ->
             when (c) {
                 is CanvasItem -> EraseRule.touchesLine(c, x, y, r)
-                is TextMarkup -> MarkupPainter.touches(c, x * ptPerPx, y * ptPerPx, r * ptPerPx)
+                is TextMarkup -> page.sourcePoint(Pt(x, y))?.let { at -> MarkupPainter.touches(c, at.x * ptPerPx, at.y * ptPerPx, r * ptPerPx) } == true
                 else -> false
             }
         }
@@ -1584,7 +1585,9 @@ class InteractionController(
     private fun eraseMarkupsFromPage(page: Page, cx: Double, cy: Double, radius: Double): Boolean {
         if (page.markups.isEmpty() || !configFor(Tool.ERASER).eraseMarkups) return false
         val ptPerPx = 72.0 / state.document.dpi
-        val hit = page.markups.filter { MarkupPainter.touches(it, cx * ptPerPx, cy * ptPerPx, radius * ptPerPx) }
+        // Markups lie on the page as it was before room was inserted; the eraser in room touches none.
+        val at = page.sourcePoint(Pt(cx, cy)) ?: return false
+        val hit = page.markups.filter { MarkupPainter.touches(it, at.x * ptPerPx, at.y * ptPerPx, radius * ptPerPx) }
         if (hit.isEmpty()) return false
         for (m in hit) eraseMarkups += RemoveMarkup(page, m).also { it.redo() }
         state.rebakeBackground(page, emptyList())

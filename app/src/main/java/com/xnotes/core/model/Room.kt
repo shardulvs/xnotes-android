@@ -1,5 +1,6 @@
 package com.xnotes.core.model
 
+import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.pal.RasterSurface
 import com.xnotes.core.pal.Renderer
@@ -107,6 +108,25 @@ object Rooms {
         return out.filter { it.to - it.from > EPS }
     }
 
+    /** The stretch [from] to [to] of the source along an axis cut where its rooms open, each piece with the shift it shows at; the ends run on past the source. */
+    fun pieces(rooms: List<Room>, from: Double, to: Double, sideways: Boolean): List<Band> {
+        val out = ArrayList<Band>()
+        var a = from
+        var shift = 0.0
+        for (r in rooms) {
+            if (r.sideways != sideways) continue
+            val cut = r.at - shift
+            if (cut >= to) break
+            if (cut > a) {
+                out += Band(a, cut, shift)
+                a = cut
+            }
+            shift += r.size
+        }
+        if (to > a) out += Band(a, to, shift)
+        return out
+    }
+
     /** One rectangle of source, shown moved by [dx], [dy]. */
     class Tile(val source: Rect, val dx: Double, val dy: Double) {
         val display: Rect get() = source.translate(dx, dy)
@@ -206,6 +226,42 @@ object Rooms {
     fun scaled(rooms: List<Room>, k: Double): List<Room> = if (k == 1.0) rooms else rooms.map { Room(it.at * k, it.size * k, it.sideways) }
 
     private fun sorted(rooms: List<Room>): List<Room> = rooms.sortedWith(compareBy<Room>({ it.sideways }, { it.at }))
+}
+
+/**
+ * [p], a point of this page as it stands, on the page as it was before any room: where its PDF and
+ * the marks on its text are measured. A point in room is on neither side of it, so it is null,
+ * unless [clamp] takes it to where that room opened, as a drag across room wants.
+ */
+fun Page.sourcePoint(p: Pt, clamp: Boolean = false): Pt? {
+    if (rooms.isEmpty()) return p
+    if (!clamp && rooms.any { r -> val v = if (r.sideways) p.x else p.y; v > r.at && v < r.end }) return null
+    return Pt(Rooms.toSource(rooms, p.x, true), Rooms.toSource(rooms, p.y, false))
+}
+
+/** A point of the page as it was before any room, where this page shows it. */
+fun Page.displayPoint(p: Pt): Pt = if (rooms.isEmpty()) p else Pt(Rooms.toDisplay(rooms, p.x, true), Rooms.toDisplay(rooms, p.y, false))
+
+/** A rect of the page as it was before any room, where this page shows it: in pieces when room cuts across it. */
+fun Page.displayRects(r: Rect): List<Rect> {
+    if (rooms.isEmpty()) return listOf(r)
+    val xs = Rooms.pieces(rooms, r.left, r.right, true)
+    val ys = Rooms.pieces(rooms, r.top, r.bottom, false)
+    val out = ArrayList<Rect>(xs.size * ys.size)
+    for (y in ys) for (x in xs) out += Rect(x.from + x.shift, y.from + y.shift, x.to - x.from, y.to - y.from)
+    return out
+}
+
+/** Run [paint], which draws in this page's source space, once for each tile its room cuts that into, each clipped to where it shows. */
+inline fun Page.paintInBands(r: Renderer, paint: () -> Unit) {
+    if (rooms.isEmpty()) return paint()
+    for (t in Rooms.tiles(rooms, sourceWidth, sourceHeight)) {
+        r.save()
+        r.clipRect(t.display)
+        r.translate(t.dx, t.dy)
+        paint()
+        r.restore()
+    }
 }
 
 /** The page's width without the room inserted into it: what its PDF page and margins measure against. */

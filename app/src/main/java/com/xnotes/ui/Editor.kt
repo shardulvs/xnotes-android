@@ -145,6 +145,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import com.xnotes.core.model.sourcePoint
+import com.xnotes.core.model.displayRects
 
 /**
  * The app-side glue between the imperative canvas (CanvasView + CanvasState +
@@ -1134,9 +1136,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val page = state.document.pages.getOrNull(pageIndex) ?: return null
         if (page.markups.isEmpty()) return null
         val local = state.toPageSpace(pageIndex, content)
+        // Markups lie on the page as it was before room was inserted, and room holds none.
+        val at = page.sourcePoint(local) ?: return null
         val ptPerPx = 72.0 / state.document.dpi
-        val m = MarkupPainter.markupAt(page.markups, local.x * ptPerPx, local.y * ptPerPx, markupSlopPt()) ?: return null
-        return MarkupHit(pageIndex, m, local)
+        val m = MarkupPainter.markupAt(page.markups, at.x * ptPerPx, at.y * ptPerPx, markupSlopPt()) ?: return null
+        return MarkupHit(pageIndex, m, at)
     }
 
     /** How far off a markup or a written address a tap may land, in points at the current zoom. */
@@ -1183,7 +1187,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val b = MarkupPainter.bounds(m) ?: return null
         if (pageIndex !in state.pageRects.indices) return null
         val s = state.document.dpi / 72.0
-        val c = state.fromPageSpaceRect(pageIndex, Rect(b.x * s, b.y * s, b.w * s, b.h * s))
+        val shown = state.document.pages[pageIndex].displayRects(Rect(b.x * s, b.y * s, b.w * s, b.h * s))
+        if (shown.isEmpty()) return null
+        val c = state.fromPageSpaceRect(pageIndex, shown.reduce { acc, r -> acc.union(r) })
         val tl = state.contentToViewport(Pt(c.left, c.top))
         val br = state.contentToViewport(Pt(c.right, c.bottom))
         val marks = Rect(tl.x, tl.y, br.x - tl.x, br.y - tl.y)
@@ -1649,10 +1655,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             val page = state.document.pages.getOrNull(pageIndex) ?: return@onLinkTap false
             val pdfIdx = page.pdfKey ?: return@onLinkTap false
             if (page.width <= 0.0 || page.height <= 0.0) return@onLinkTap false
+            // Links lie on the page as it was before room was inserted, and room holds none.
+            val at = page.sourcePoint(pageLocal) ?: return@onLinkTap false
             // Into PDF points, at the same dpi/72 the page renders with.
             val ptPerPx = 72.0 / state.document.dpi
-            val x = (pageLocal.x * ptPerPx).toFloat()
-            val y = (pageLocal.y * ptPerPx).toFloat()
+            val x = (at.x * ptPerPx).toFloat()
+            val y = (at.y * ptPerPx).toFloat()
             val slop = (AUTO_LINK_SLOP_DP * state.devicePxPerDp / state.zoom * ptPerPx).toFloat()
             if (src.hasLinks(pdfIdx)) {
                 val link = src.linkAt(pdfIdx, x, y) ?: return@onLinkTap openAutoLink(src, pdfIdx, x, y, slop)
