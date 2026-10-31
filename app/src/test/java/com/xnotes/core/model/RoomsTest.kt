@@ -173,4 +173,41 @@ class RoomsTest {
         assertTrue(page.rooms.isEmpty())
         assertEquals(300.0, page.height, eps)
     }
+
+    @Test fun aPointInRoomIsOffThePageItShowsUnlessClamped() {
+        val page = Page(200.0, 350.0, rooms = listOf(Room(100.0, 50.0)))
+        assertEquals(com.xnotes.core.geometry.Pt(10.0, 90.0), page.sourcePoint(com.xnotes.core.geometry.Pt(10.0, 90.0)))
+        assertEquals(null, page.sourcePoint(com.xnotes.core.geometry.Pt(10.0, 120.0)))
+        assertEquals(com.xnotes.core.geometry.Pt(10.0, 100.0), page.sourcePoint(com.xnotes.core.geometry.Pt(10.0, 120.0), clamp = true))
+        assertEquals(com.xnotes.core.geometry.Pt(10.0, 110.0), page.sourcePoint(com.xnotes.core.geometry.Pt(10.0, 160.0)))
+        assertEquals(com.xnotes.core.geometry.Pt(10.0, 160.0), page.displayPoint(com.xnotes.core.geometry.Pt(10.0, 110.0)))
+    }
+
+    @Test fun aRectTheRoomCutsShowsInTwoPieces() {
+        val page = Page(200.0, 350.0, rooms = listOf(Room(100.0, 50.0)))
+        assertEquals(listOf(Rect(10.0, 90.0, 20.0, 10.0), Rect(10.0, 150.0, 20.0, 10.0)), page.displayRects(Rect(10.0, 90.0, 20.0, 20.0)))
+        assertEquals(listOf(Rect(10.0, 160.0, 20.0, 10.0)), page.displayRects(Rect(10.0, 110.0, 20.0, 10.0)))
+        assertEquals(listOf(Rect(10.0, 10.0, 20.0, 10.0)), page.displayRects(Rect(10.0, 10.0, 20.0, 10.0)))
+    }
+
+    @Test fun aMarkTheRoomCutsKeepsItsLinesWhereTheyShow() {
+        val page = Page(200.0, 350.0, rooms = listOf(Room(100.0, 50.0)))
+        val quad = com.xnotes.core.pdf.TextQuad(5f, 45f, 15f, 55f, 0)
+        val m = TextMarkup("m", MarkupType.UNDERLINE, Rgba(0, 0, 0, 255), 1.0, listOf(quad), "", null, 0L, 0L)
+        val shown = page.displayMarkup(m, 2.0)
+        assertEquals(2, shown.quads.size)
+        assertEquals(50f, shown.quads[0].bottom, 1e-4f)
+        assertEquals(75f, shown.quads[1].top, 1e-4f)
+        assertEquals(80f, shown.quads[1].bottom, 1e-4f)
+    }
+
+    @Test fun aPageFrameTakesUserPointsBack() {
+        for (rotation in listOf(0, 90, 180, 270)) {
+            val f = com.xnotes.core.pdf.PageFrame.of(10.0, 20.0, 622.0, 812.0, rotation, 72.0 / 300.0)
+            val p = f.toUser(123.0, 456.0)
+            val back = f.fromUser(p)
+            assertEquals("rotation $rotation x", 123.0, back.x, 1e-9)
+            assertEquals("rotation $rotation y", 456.0, back.y, 1e-9)
+        }
+    }
 }

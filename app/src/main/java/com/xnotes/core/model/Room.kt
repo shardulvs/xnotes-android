@@ -252,6 +252,20 @@ fun Page.displayRects(r: Rect): List<Rect> {
     return out
 }
 
+/**
+ * [m], a mark on the page as it was before any room, as this page shows it: each line box where it
+ * lands, in pieces when room cuts across it. [pxPerPt] is the page's px a point.
+ */
+fun Page.displayMarkup(m: TextMarkup, pxPerPt: Double): TextMarkup {
+    if (rooms.isEmpty()) return m
+    val quads = m.quads.flatMap { q ->
+        displayRects(Rect.ltrb(q.left * pxPerPt, q.top * pxPerPt, q.right * pxPerPt, q.bottom * pxPerPt)).map { r ->
+            com.xnotes.core.pdf.TextQuad((r.left / pxPerPt).toFloat(), (r.top / pxPerPt).toFloat(), (r.right / pxPerPt).toFloat(), (r.bottom / pxPerPt).toFloat(), q.quarter)
+        }
+    }
+    return TextMarkup(m.id, m.type, m.color, m.intensity, quads, m.text, m.note, m.created, m.modified)
+}
+
 /** Run [paint], which draws in this page's source space, once for each tile its room cuts that into, each clipped to where it shows. */
 inline fun Page.paintInBands(r: Renderer, paint: () -> Unit) {
     if (rooms.isEmpty()) return paint()
