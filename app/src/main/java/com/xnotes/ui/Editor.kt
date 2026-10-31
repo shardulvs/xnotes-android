@@ -80,6 +80,8 @@ import com.xnotes.core.search.TypedTexts
 import com.xnotes.core.model.deepCopy
 import com.xnotes.core.model.snapshot
 import com.xnotes.core.model.insets
+import com.xnotes.core.model.sourceHeight
+import com.xnotes.core.model.sourceWidth
 import com.xnotes.core.model.resolvedPageColor
 import com.xnotes.core.text.CellIndex
 import com.xnotes.core.text.CharStyle
@@ -2309,7 +2311,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val oldPages = publishedPageList
         val (addedW, addedH) = doc.blankPageSize(doc.pages.lastOrNull())
         val frame = flowLayout.layout(
-            doc.flow, doc.pages.map { PageBox(it.width, it.height) }, doc.dpi,
+            doc.flow, doc.pages.map { PageBox(it.sourceWidth, it.sourceHeight) }, doc.dpi,
             firstPage = flowStart(doc), addedPage = PageBox(addedW, addedH),
         )
         // What this frame actually shows, not what the caller meant it to: an edit
@@ -2604,7 +2606,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private fun flowExportHooks(doc: Document): com.xnotes.platform.PdfExporter.FlowExport {
         if (doc.flow.isEmpty) return com.xnotes.platform.PdfExporter.FlowExport.NONE
         val frame = themedFlowLayout(doc.flow)
-            .layout(doc.flow, doc.pages.map { PageBox(it.width, it.height) }, doc.dpi, firstPage = flowStart(doc))
+            .layout(doc.flow, doc.pages.map { PageBox(it.sourceWidth, it.sourceHeight) }, doc.dpi, firstPage = flowStart(doc))
         val index = HashMap<Page, Int>(doc.pages.size * 2)
         doc.pages.forEachIndexed { i, p -> index[p] = i }
         return com.xnotes.platform.PdfExporter.FlowExport(doc.flow, frame) { index[it] }
@@ -3779,7 +3781,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         PageLayers.paint(itemsSnapshot(page), {
             if (!doc.flow.isEmpty) {
                 val frame = themedFlowLayout(doc.flow)
-                    .layout(doc.flow, doc.pages.map { PageBox(it.width, it.height) }, doc.dpi, throughPage = index, firstPage = flowStart(doc))
+                    .layout(doc.flow, doc.pages.map { PageBox(it.sourceWidth, it.sourceHeight) }, doc.dpi, throughPage = index, firstPage = flowStart(doc))
                 FlowPainter.paintPage(r, frame, index, Rect(0.0, 0.0, page.width, page.height))
             }
         }) { it.paint(r) }
@@ -4383,7 +4385,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             com.xnotes.core.text.MarkdownParser.parse(markdown, newTableDefaults.style, toolbarInk()),
         )
         val layout = themedFlowLayout(doc.flow)
-        fun frame() = layout.layout(doc.flow, doc.pages.map { PageBox(it.width, it.height) }, doc.dpi, firstPage = flowStart(doc))
+        fun frame() = layout.layout(doc.flow, doc.pages.map { PageBox(it.sourceWidth, it.sourceHeight) }, doc.dpi, firstPage = flowStart(doc))
         frame().pages.firstOrNull()?.contentRect?.w?.let { width ->
             for (b in CellIndex(doc.flow.paragraphs).tables) b.table.widths = layout.fitColumns(doc.flow, b.table, width)
         }
@@ -7127,19 +7129,20 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /**
      * Give the plain pages at [indices] the size [choice] makes, as one undo step. Nothing on them is
      * scaled or moved: what a smaller page leaves off stays there out of sight, and comes back if the
-     * page grows again. PDF pages keep theirs.
+     * page grows again. The room inserted into them becomes plain page. PDF pages keep theirs.
      */
     fun resizePages(indices: List<Int>, choice: PageSizeChoice) {
         val all = indices.distinct().sorted().mapNotNull { pageAt(it) }
         val plain = all.filter { it.pdfPage == null }
         if (plain.size < all.size) message = appContext.getString(R.string.pdf_pages_keep_size)
         val (w, h) = choice.pixels(state.document.dpi)
-        val pages = plain.filter { it.width != w || it.height != h }
+        val pages = plain.filter { it.width != w || it.height != h || it.rooms.isNotEmpty() }
         if (pages.isEmpty()) return
         val before = pages.map { PageShape.of(it) }
         for (page in pages) {
             page.width = w
             page.height = h
+            page.rooms = emptyList()
         }
         history.push(ReshapePages(pages, before, pages.map { PageShape.of(it) }))
         afterReshape(pages)
