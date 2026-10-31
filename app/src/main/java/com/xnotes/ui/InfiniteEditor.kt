@@ -258,11 +258,13 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     private val modelListener = object : InfiniteDocument.Listener {
         override fun onItemAdded(item: CanvasItem) {
             itemsRevision++
+            sceneBuildRemoved.remove(item)
             pushItem(item)
         }
 
         override fun onItemRemoved(item: CanvasItem) {
             itemsRevision++
+            sceneBuildRemoved.add(item) // a pending load batch must not resurrect this item
             // Drop any mesh job still running for it, so its result cannot file the record again.
             if (item is ImageItem) vectorMeshGen.remove(item)
             scene.remove(item)
@@ -396,12 +398,36 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     private val vectorMeshGen = java.util.concurrent.ConcurrentHashMap<ImageItem, Long>()
     private val vectorMeshSeq = java.util.concurrent.atomic.AtomicLong()
 
-    /** Re-tessellate the whole document, after a load or a wholesale list replacement. */
+    /**
+     * Building every stroke synchronously here blocked the UI while a dense .xcanvas opened.
+     * Publish the first few items immediately, then yield a frame between later batches.
+     * A document switch invalidates the old callbacks, and removals cannot resurrect items.
+     */
+    private val sceneBuild = com.xnotes.core.infinite.IncrementalBuild<CanvasItem>()
+    private val sceneBuildRemoved = java.util.Collections.newSetFromMap(
+        java.util.IdentityHashMap<CanvasItem, Boolean>(),
+    )
+
     private fun rebuildScene() {
+        sceneBuild.cancel()
+        sceneBuildRemoved.clear()
         scene.reset()
         vectorMeshGen.clear()
-        scene.batch { for (item in document.items) pushItem(item) }
-        scene.setOrder(document.items)
+        val items = document.items.toList()
+        scene.setOrder(items)
+        sceneBuild.start(
+            items = items,
+            // Keep each UI-thread meshing burst short, including on mid-range tablets.
+            batchSize = 4,
+            onBatch = { batch ->
+                scene.batch {
+                    for (item in batch) if (item !in sceneBuildRemoved) pushItem(item)
+                }
+                view.publish()
+            },
+            // Yield to queued input without imposing 16 ms of artificial latency per four items.
+            schedule = { next -> view.post(next) },
+        )
     }
 
     /** Repaint the canvas with whatever the model currently says. */
