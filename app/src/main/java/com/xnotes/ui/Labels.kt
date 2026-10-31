@@ -46,6 +46,7 @@ val Tool.labelRes: Int
         Tool.IMAGE -> R.string.tool_image
         Tool.MARKUP -> R.string.tool_markup
         Tool.TAPE -> R.string.tool_tape
+        Tool.INSERT_SPACE -> R.string.tool_insert_space
     }
 
 @get:StringRes
@@ -95,6 +96,7 @@ val ToolbarItem.labelRes: Int
         ToolbarItem.SCREENSHOT -> R.string.tool_screenshot
         ToolbarItem.WAND -> R.string.tool_wand
         ToolbarItem.TAPE -> R.string.tool_tape
+        ToolbarItem.INSERT_SPACE -> R.string.tool_insert_space
         ToolbarItem.SHAPE -> R.string.tool_shape
         ToolbarItem.RULER -> R.string.tool_ruler
         ToolbarItem.TEXT -> R.string.tool_text
