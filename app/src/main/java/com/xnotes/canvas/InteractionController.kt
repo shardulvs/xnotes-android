@@ -97,7 +97,7 @@ import kotlin.math.sin
 /** The pointer state machine modes (spec 06 §1). */
 enum class PointerMode {
     IDLE, DRAW, ERASE, BAND, LASSO_DRAW, SHOT, SHAPE, MOVE, RESIZE, TRANSFORM, PAN, PINCH, FLOW_TEXT,
-    TEXT_DRAG, RULER_MOVE, RULER_TRANSFORM, RULER_ROTATE, PDF_TEXT, VERTEX, POLYGON, CONNECT, JOINT, SLIDE, TAPE,
+    TEXT_DRAG, RULER_MOVE, RULER_TRANSFORM, RULER_ROTATE, PDF_TEXT, VERTEX, POLYGON, CONNECT, JOINT, SLIDE, TAPE, ROOM,
 }
 
 /**
@@ -384,6 +384,11 @@ class InteractionController(
     private var toolBeforeScreenshot: Tool? = null
     /** Tool armed just before the text tool, to return to once an edit is committed. */
     private var toolBeforeText: Tool? = null
+    /** Tool armed just before Insert space, which comes back after one drag makes or closes room. */
+    private var toolBeforeInsertSpace: Tool? = null
+
+    /** Insert space's gesture, its live room and what it lifts out of the page's cache. */
+    private val insertSpace = InsertSpaceGesture(state, history, { requestRender() }) { page, rect -> repairRegion(page, rect) }
     /** Whether the live erase is finger-driven (vs the stylus eraser tip / side button): a finger
      *  erase yields to a two-finger pinch, a stylus erase ignores incidental finger/palm contact. */
     private var erasingWithFinger = false
@@ -542,7 +547,7 @@ class InteractionController(
     init {
         state.isLiftedItem = { item ->
             item === editingText || item === editingLabel || item in followed || frontInk?.holding(item) == true ||
-                selection.any { it.item === item }
+                selection.any { it.item === item } || item in insertSpace.lifted
         }
         // A selected fill under the typed text stays under the ink, moving with the drag.
         state.paintLiftedUnderText = { page, r ->
@@ -578,6 +583,8 @@ class InteractionController(
         if (t == Tool.SELECT) toolBeforeSelect = tool
         if (t == Tool.SCREENSHOT) toolBeforeScreenshot = tool
         if (t == Tool.TEXT_BOX) toolBeforeText = tool
+        if (t == Tool.INSERT_SPACE) toolBeforeInsertSpace = tool
+        if (tool == Tool.INSERT_SPACE) insertSpace.hoverAt(null)
         commitTextEdit()
         if (t != Tool.TEXT) flowText?.endSession()
         abortGesture()
@@ -675,6 +682,11 @@ class InteractionController(
     fun onHover(e: MotionEvent): Boolean {
         if (handleHoverAction(e)) return true
         if (hoverConnect(e)) return true
+        if (tool == Tool.INSERT_SPACE && mode == PointerMode.IDLE) {
+            val gone = e.actionMasked == MotionEvent.ACTION_HOVER_EXIT
+            insertSpace.hoverAt(if (gone) null else state.viewportToContent(Pt(e.x.toDouble(), e.y.toDouble())))
+            return true
+        }
         val isEraserPointer = e.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER
         if (tool != Tool.ERASER && !isEraserPointer) return false
         eraserCursor = if (e.actionMasked == MotionEvent.ACTION_HOVER_EXIT) {
@@ -903,15 +915,32 @@ class InteractionController(
             effectiveTool == Tool.TEXT_BOX -> beginTextBoxGesture(content)
             effectiveTool == Tool.MARKUP -> beginMarkup(content)
             effectiveTool == Tool.TAPE -> beginTape(content)
+            effectiveTool == Tool.INSERT_SPACE -> beginInsertSpace(content)
             else -> Unit
         }
         // The flow caret owns its own long press (word selection), mid text-drag it is suppressed so
-        // a hold-then-drag still sizes a box, and a markup drag held still is just a slow drag.
+        // a hold-then-drag still sizes a box, and a markup drag held still is just a slow drag; room
+        // held still under the pen is just room opened slowly.
         if (mode != PointerMode.FLOW_TEXT && mode != PointerMode.TEXT_DRAG && mode != PointerMode.PDF_TEXT &&
-            mode != PointerMode.POLYGON
+            mode != PointerMode.POLYGON && mode != PointerMode.ROOM
         ) {
             armLongPress(Pt(vx, vy), content, isFinger, free)
         }
+    }
+
+    /** Insert space's press: room opens or closes from here as the pen drags. */
+    private fun beginInsertSpace(content: Pt) {
+        clearSelection()
+        if (insertSpace.press(content)) mode = PointerMode.ROOM
+        requestRender()
+    }
+
+    /** The pen lifted off Insert space's drag: room it opened or closed is made, and the tool before it comes back. */
+    private fun endInsertSpace() {
+        mode = PointerMode.IDLE
+        if (!insertSpace.release()) return
+        onContentChanged()
+        toolBeforeInsertSpace?.let { setTool(it) }
     }
 
     /** The markup tool's press: selects, or marks, the PDF text it then drags over; anywhere else nothing. */
@@ -940,6 +969,12 @@ class InteractionController(
         if (mode == PointerMode.DRAW && drawingIsStylus) return
         // Tape laid with the pen ignores a resting hand as its ink does; laid with a finger, it yields to the pinch.
         if (mode == PointerMode.TAPE && drawingIsStylus) return
+        // So does room opened with the pen; with a finger it gives way to the pinch, nothing changed.
+        if (mode == PointerMode.ROOM) {
+            if (drawingIsStylus) return
+            insertSpace.abort()
+            mode = PointerMode.IDLE
+        }
         // A finger erase (finger-draw on) yields to a two-finger pinch: commit what was erased so
         // far as one undo step, then start the zoom. A stylus-eraser erase keeps ignoring incidental
         // finger/palm contact, so a resting hand never starts a zoom mid-erase.
@@ -974,6 +1009,7 @@ class InteractionController(
             PointerMode.POLYGON -> showPolygonDraft(content)
             PointerMode.SHAPE -> extendShape(content)
             PointerMode.TAPE -> extendTape(content)
+            PointerMode.ROOM -> insertSpace.drag(content, Pt(vx, vy))
             PointerMode.CONNECT -> extendConnector(content)
             PointerMode.JOINT -> extendJoint(content)
             PointerMode.SLIDE -> extendSlide(content)
@@ -1054,6 +1090,7 @@ class InteractionController(
             PointerMode.POLYGON -> endPolygonTap(content, e.eventTime)
             PointerMode.SHAPE -> endShape()
             PointerMode.TAPE -> endTape()
+            PointerMode.ROOM -> endInsertSpace()
             PointerMode.CONNECT -> endConnector()
             PointerMode.JOINT -> endJoint(e.eventTime)
             PointerMode.SLIDE -> endSlide()
@@ -4396,6 +4433,7 @@ class InteractionController(
         slideSel = null
         slideBefore = null
         if (mode == PointerMode.POLYGON) showPolygonDraft(null)
+        if (mode == PointerMode.ROOM) insertSpace.abort()
         if (mode == PointerMode.MOVE) moveOffset = Pt.ZERO
         if (mode == PointerMode.MOVE || mode == PointerMode.TRANSFORM || mode == PointerMode.VERTEX || mode == PointerMode.JOINT) {
             for ((_, f) in follows) f.restore()
@@ -4537,10 +4575,16 @@ class InteractionController(
 
             // Where a connector can glue, while one is armed or an end is being dragged.
             if (marking) drawConnectionMarks(r)
+
+            // Room on the pages, the cut a hovering pen would make, while Insert space is armed.
+            if (tool == Tool.INSERT_SPACE || insertSpace.active) insertSpace.drawOverlay(r, state.visibleContentRect())
         }
 
         // Note icons: chrome of one size at any zoom, so in viewport space.
         noteIcons?.draw(r)
+
+        // The room's height beside the pen while Insert space drags.
+        insertSpace.drawLabel(r)
 
         // Eraser cursor (viewport space, after the transform is restored).
         eraserCursor?.let {

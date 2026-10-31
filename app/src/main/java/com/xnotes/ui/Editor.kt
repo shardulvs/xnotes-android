@@ -2114,6 +2114,33 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      */
     private fun installPageBackground() {
         state.paintPageBackground = { page, renderer, res, region -> paintBackground(page, renderer, res, region) }
+        state.paintRoomPaper = { view, renderer -> paintRoomPaper(view, renderer) }
+    }
+
+    /**
+     * The paper [view]'s old layers leave bare on its page, ruled as the page will be: the room
+     * opening on a PDF page, ruled as its margins are, or the page a plain page grew by. Closing
+     * room leaves nothing bare.
+     */
+    private fun paintRoomPaper(view: com.xnotes.canvas.RoomView, r: Renderer) {
+        if (view.shift <= 0.0 || view.sideways) return
+        val page = view.page
+        // While the pen drags the page has not grown yet, so it is ruled as it will be.
+        val shown = if (!view.live) page else Page(
+            page.width, page.height + view.shift, pdfPage = page.pdfPage, style = page.style, margins = page.margins,
+            pdfTurn = page.pdfTurn, rooms = com.xnotes.core.model.Rooms.opened(page.rooms, view.split, view.shift),
+        )
+        val cover = state.footprint(shown)
+        val region = if (page.pdfPage != null) {
+            Rect(cover.left, view.split, cover.w, view.shift)
+        } else {
+            Rect(cover.left, view.cover.bottom, cover.w, cover.bottom - view.cover.bottom)
+        }
+        if (region.h <= 0.0) return
+        r.withSave {
+            r.clipRect(region)
+            TemplateLibrary.paint(r, state.document, shown, cover, region)
+        }
     }
 
     /** The open note's page background over [region] at [res]; [minLine] is the template's thinnest line in content px. */
@@ -2122,8 +2149,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val pi = page.pdfKey
         val markups = page.markups
         if (src != null && pi != null) {
-            // The raster covers the page's content box only; a margin is paper beside it.
-            val slice = clampToContent(region, page)
+            // The raster covers the page's content box only; a margin is paper beside it. With room
+            // in it, the content box is the page as it was, rendered once and drawn in bands.
+            val banded = page.rooms.isNotEmpty()
+            val sw = page.sourceWidth
+            val sh = page.sourceHeight
+            val need = if (banded) com.xnotes.core.model.Rooms.sourceOf(region, page.rooms, sw, sh) else region
+            val slice = need?.let { clampToContent(it, sw, sh) }
             if (slice != null) {
                 val rx = (slice.left * res).toInt()
                 val ry = (slice.top * res).toInt()
@@ -2133,7 +2165,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 // points, so their PDF runs past the paper by under a point, cropped as before.
                 val pxPerPt = res * state.document.dpi / 72.0
                 src.renderRegion(pi, pxPerPt, rx, ry, rw, rh, pdfPageFilter(), markups)?.let { bg ->
-                    renderer.drawRaster(bg, slice)
+                    if (banded) {
+                        com.xnotes.core.model.Rooms.drawBanded(renderer, bg, Rect(rx / res, ry / res, rw / res, rh / res), page.rooms, sw, sh)
+                    } else {
+                        renderer.drawRaster(bg, slice)
+                    }
                     bg.recycle()
                 }
             }
@@ -2144,12 +2180,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (pi == null) MarkupPainter.paint(renderer, markups, state.document.dpi / 72.0)
     }
 
-    /** [region] cropped to [page]'s content box (its stored size), or null when it misses it. */
-    private fun clampToContent(region: com.xnotes.core.geometry.Rect, page: Page): com.xnotes.core.geometry.Rect? {
+    /** [region] cropped to a [w] by [h] content box, a page's own size before any room, or null when it misses it. */
+    private fun clampToContent(region: com.xnotes.core.geometry.Rect, w: Double, h: Double): com.xnotes.core.geometry.Rect? {
         val l = region.left.coerceAtLeast(0.0)
         val t = region.top.coerceAtLeast(0.0)
-        val r = region.right.coerceAtMost(page.width)
-        val b = region.bottom.coerceAtMost(page.height)
+        val r = region.right.coerceAtMost(w)
+        val b = region.bottom.coerceAtMost(h)
         return if (r > l && b > t) com.xnotes.core.geometry.Rect(l, t, r - l, b - t) else null
     }
 
@@ -3763,12 +3799,15 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             runCatching {
                 com.xnotes.platform.PdfSource.create(file)?.let { src ->
                     page.pdfKey?.let { pi ->
-                        val pw = (page.width * scale).toInt().coerceAtLeast(1)
-                        val ph = (page.height * scale).toInt().coerceAtLeast(1)
+                        // The page as it was, before any room: drawn in bands through the room inserted since.
+                        val sw = page.sourceWidth
+                        val sh = page.sourceHeight
+                        val pw = (sw * scale).toInt().coerceAtLeast(1)
+                        val ph = (sh * scale).toInt().coerceAtLeast(1)
                         com.xnotes.platform.PdfSource.withPriority(com.xnotes.platform.PdfPriority.THUMBNAIL) {
                             src.renderPage(pi, pw, ph, filter, page.markups)
                         }?.let { bg ->
-                            r.drawRaster(bg, Rect(0.0, 0.0, page.width, page.height))
+                            com.xnotes.core.model.Rooms.drawBanded(r, bg, Rect(0.0, 0.0, sw, sh), page.rooms, sw, sh)
                             bg.recycle()
                         }
                     }

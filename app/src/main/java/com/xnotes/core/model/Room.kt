@@ -1,6 +1,8 @@
 package com.xnotes.core.model
 
 import com.xnotes.core.geometry.Rect
+import com.xnotes.core.pal.RasterSurface
+import com.xnotes.core.pal.Renderer
 
 /**
  * Room the Insert space tool opened on a page: a band [size] content px tall from [at] px below the
@@ -151,6 +153,38 @@ object Rooms {
         }
         if (to - at > EPS) out += at to to
         return out.filter { it.second - it.first > EPS }
+    }
+
+    /** The source the tiles of a [sourceW] by [sourceH] source show within [region] come from, or null when none shows there. */
+    fun sourceOf(region: Rect, rooms: List<Room>, sourceW: Double, sourceH: Double): Rect? {
+        var out: Rect? = null
+        for (t in tiles(rooms, sourceW, sourceH)) {
+            val d = t.display
+            val l = maxOf(d.left, region.left)
+            val top = maxOf(d.top, region.top)
+            val r = minOf(d.right, region.right)
+            val b = minOf(d.bottom, region.bottom)
+            if (r <= l || b <= top) continue
+            val s = Rect(l - t.dx, top - t.dy, r - l, b - top)
+            out = out?.union(s) ?: s
+        }
+        return out
+    }
+
+    /**
+     * Draw [raster], a render of the source over [at] (source space), through [rooms]: each tile
+     * where it shows, the room between them left bare. One render serves every tile, so the bands
+     * match the page unbanded to the pixel.
+     */
+    fun drawBanded(r: Renderer, raster: RasterSurface, at: Rect, rooms: List<Room>, sourceW: Double, sourceH: Double) {
+        for (t in tiles(rooms, sourceW, sourceH)) {
+            if (!t.source.intersects(at)) continue
+            r.save()
+            r.clipRect(t.display)
+            r.translate(t.dx, t.dy)
+            r.drawRaster(raster, at)
+            r.restore()
+        }
     }
 
     /** [rooms] of a [w] by [h] page turned [turns] quarter turns clockwise with it. */
