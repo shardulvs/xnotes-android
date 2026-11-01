@@ -16,6 +16,7 @@
     <string name="tool_screenshot">Screenshot</string>
     <string name="tool_wand">Disappearing ink</string>
     <string name="tool_tape">Tape</string>
+    <string name="tool_insert_space">Insert space</string>
     <string name="tool_shape">Shape</string>
     <string name="tool_ruler">Ruler</string>
     <string name="tool_text">Text</string>

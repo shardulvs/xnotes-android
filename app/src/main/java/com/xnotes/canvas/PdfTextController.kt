@@ -9,6 +9,9 @@ import com.xnotes.core.pdf.TextPos
 import com.xnotes.core.pdf.TextQuad
 import com.xnotes.core.pdf.TextSelection
 import com.xnotes.core.pdf.TextWords
+import com.xnotes.core.model.sourcePoint
+import com.xnotes.core.model.displayPoint
+import com.xnotes.core.model.displayRects
 
 /** Where a [PdfTextController] reads the PDF text of note pages, by note page index. */
 interface PdfTextSource {
@@ -119,20 +122,23 @@ class PdfTextController(
     }
 
     private fun anchorAt(page: Int, text: PageText, pageLocal: Pt) {
-        val x = (pageLocal.x * ptPerPx).toFloat()
-        val y = (pageLocal.y * ptPerPx).toFloat()
+        val at = state.document.pages.getOrNull(page)?.sourcePoint(pageLocal) ?: return
+        val x = (at.x * ptPerPx).toFloat()
+        val y = (at.y * ptPerPx).toFloat()
         val slop = (TOUCH_SLOP_DP * state.devicePxPerDp / state.zoom * ptPerPx).toFloat()
         val offset = TextHit.offsetAt(text, x, y, slop)
         if (offset < 0) return
-        val at = TextPos(page, offset)
+        val pos = TextPos(page, offset)
         readForSelection.clear()
-        anchor = at
-        selection = TextSelection(at, at)
+        anchor = pos
+        selection = TextSelection(pos, pos)
     }
 
     private fun selectWord(page: Int, text: PageText, pageLocal: Pt, noText: () -> Unit) {
-        val x = (pageLocal.x * ptPerPx).toFloat()
-        val y = (pageLocal.y * ptPerPx).toFloat()
+        // A press in room inserted into the page is off its text.
+        val at = state.document.pages.getOrNull(page)?.sourcePoint(pageLocal) ?: return noText()
+        val x = (at.x * ptPerPx).toFloat()
+        val y = (at.y * ptPerPx).toFloat()
         val slop = (TOUCH_SLOP_DP * state.devicePxPerDp / state.zoom * ptPerPx).toFloat()
         var i = TextHit.charAt(text, x, y, slop)
         if (i < 0) return noText()
@@ -255,8 +261,10 @@ class PdfTextController(
             }
             return null
         }
-        val x = (local.x * ptPerPx).toFloat()
-        val y = (local.y * ptPerPx).toFloat()
+        // Dragged across room, the selection runs on from where the room opened.
+        val at = state.document.pages[page].sourcePoint(local, clamp = true) ?: local
+        val x = (at.x * ptPerPx).toFloat()
+        val y = (at.y * ptPerPx).toFloat()
         val offset = TextHit.offsetAt(text, x, y, reach = Float.POSITIVE_INFINITY)
         return if (offset < 0) null else TextPos(page, offset)
     }
@@ -274,7 +282,10 @@ class PdfTextController(
             }
             return
         }
-        forEachQuad(sel) { page, q -> r.fillRect(contentRect(page, q), state.selectionAccent(page).withAlpha(70)) }
+        forEachQuad(sel) { page, q ->
+            val tint = state.selectionAccent(page).withAlpha(70)
+            for (c in contentRects(page, q)) r.fillRect(c, tint)
+        }
         caret(sel, atEnd = false)?.let { handles.draw(r, handles.center(it.tip, isStart = true), isStart = true, state.selectionAccent(sel.start.page)) }
         caret(sel, atEnd = true)?.let { handles.draw(r, handles.center(it.tip, isStart = false), isStart = false, state.selectionAccent(sel.end.page)) }
     }
@@ -287,11 +298,12 @@ class PdfTextController(
         var r = -Double.MAX_VALUE
         var b = -Double.MAX_VALUE
         forEachQuad(sel) { page, q ->
-            val c = contentRect(page, q)
-            l = minOf(l, c.left)
-            t = minOf(t, c.top)
-            r = maxOf(r, c.right)
-            b = maxOf(b, c.bottom)
+            for (c in contentRects(page, q)) {
+                l = minOf(l, c.left)
+                t = minOf(t, c.top)
+                r = maxOf(r, c.right)
+                b = maxOf(b, c.bottom)
+            }
         }
         if (l > r) return null
         val tl = state.contentToViewport(Pt(l, t))
@@ -312,9 +324,12 @@ class PdfTextController(
         }
     }
 
-    private fun contentRect(page: Int, q: TextQuad): Rect {
+    /** Where a line box shows in content space: in pieces when room cuts across it. */
+    private fun contentRects(page: Int, q: TextQuad): List<Rect> {
         val s = 1 / ptPerPx
-        return state.fromPageSpaceRect(page, Rect(q.left * s, q.top * s, (q.right - q.left) * s, (q.bottom - q.top) * s))
+        val src = Rect(q.left * s, q.top * s, (q.right - q.left) * s, (q.bottom - q.top) * s)
+        val p = state.document.pages.getOrNull(page) ?: return emptyList()
+        return p.displayRects(src).map { state.fromPageSpaceRect(page, it) }
     }
 
     /** A selection end's caret in content space: its screen-lower end, which a handle hangs from, and its middle. */
@@ -326,8 +341,9 @@ class PdfTextController(
         val text = texts.peek(pos.page) ?: return null
         val c = (if (atEnd) sel.endCaret(text) else sel.startCaret(text)) ?: return null
         val s = 1 / ptPerPx
-        val top = state.fromPageSpace(pos.page, Pt(c.topX * s, c.topY * s))
-        val bottom = state.fromPageSpace(pos.page, Pt(c.bottomX * s, c.bottomY * s))
+        val p = state.document.pages[pos.page]
+        val top = state.fromPageSpace(pos.page, p.displayPoint(Pt(c.topX * s, c.topY * s)))
+        val bottom = state.fromPageSpace(pos.page, p.displayPoint(Pt(c.bottomX * s, c.bottomY * s)))
         return Caret(if (top.y > bottom.y) top else bottom, Pt((top.x + bottom.x) / 2, (top.y + bottom.y) / 2))
     }
 

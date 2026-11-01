@@ -2,6 +2,7 @@ package com.xnotes.canvas
 
 import com.xnotes.core.model.Page
 import com.xnotes.core.model.TextMarkup
+import com.xnotes.core.model.paintInBands
 import com.xnotes.core.pal.BlendMode
 import com.xnotes.core.pal.Renderer
 import com.xnotes.core.pdf.MarkupPainter
@@ -34,9 +35,12 @@ class MarkupOverlay(private val state: CanvasState, private val filter: () -> Pd
             r.clipRect(pr)
             r.translate(pr.left, pr.top)
             state.applyPageTransform(r, page)
-            r.scale(scale, scale)
-            for (mark in marks) {
-                MarkupPainter.paint(r, mark, if (m != null) PdfColorFilter.apply(m, mark.color) else mark.color, blend)
+            // Marks lie on the page as it was, so room inserted since cuts them as it cuts the PDF.
+            page.paintInBands(r) {
+                r.scale(scale, scale)
+                for (mark in marks) {
+                    MarkupPainter.paint(r, mark, if (m != null) PdfColorFilter.apply(m, mark.color) else mark.color, blend)
+                }
             }
         }
     }

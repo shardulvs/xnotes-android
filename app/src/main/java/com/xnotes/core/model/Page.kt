@@ -18,6 +18,8 @@ class Page(
     @Volatile var markups: List<TextMarkup> = emptyList(),
     /** Quarter turns clockwise its PDF page is shown at past the PDF's own /Rotate, 0 to 3. */
     var pdfTurn: Int = 0,
+    /** The room Insert space opened on it, sorted (see [Rooms]). Replaced whole, never mutated, so any thread can read it. */
+    @Volatile var rooms: List<Room> = emptyList(),
 ) {
     /**
      * A process-unique, stable id (not persisted). Pages compare by identity, but Compose list keys

@@ -11,8 +11,9 @@ enum class PageEdge(val id: String) {
 /**
  * Extra blank space added **outside** a page's content box, one fraction per edge, held on both
  * [Page] (current page) and [Document] ("all pages"). Left/right are fractions of the page's own
- * [Page.width], top/bottom of its [Page.height], so they never compound: the page grows from its
- * stored size, never from an already-grown one.
+ * width, top/bottom of its own height, the room inserted into it left out ([Page.sourceWidth],
+ * [Page.sourceHeight]), so they never compound: the page grows from its stored size, never from an
+ * already-grown one, and inserting room never widens a margin.
  *
  * The page's content keeps its coordinates — a margin moves the *paper* out from under it, it
  * never moves the ink — so page space simply starts at negative coordinates on a margined edge
@@ -85,10 +86,12 @@ fun Page.resolvedMargins(doc: Document): PageMargins {
     )
 }
 
-/** [resolvedMargins] converted to content pixels against this page's stored size. */
+/** [resolvedMargins] converted to content pixels against this page's own size, its room left out. */
 fun Page.insets(doc: Document): PageInsets {
     if (margins.isEmpty && doc.margins.isEmpty) return PageInsets.NONE
     val m = resolvedMargins(doc)
     fun f(v: Double?, of: Double) = (v ?: 0.0).coerceIn(0.0, PageMargins.MAX) * of
-    return PageInsets(f(m.left, width), f(m.top, height), f(m.right, width), f(m.bottom, height))
+    val w = sourceWidth
+    val h = sourceHeight
+    return PageInsets(f(m.left, w), f(m.top, h), f(m.right, w), f(m.bottom, h))
 }

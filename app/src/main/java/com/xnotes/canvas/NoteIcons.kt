@@ -6,6 +6,7 @@ import com.xnotes.core.model.TextMarkup
 import com.xnotes.core.pal.Pen
 import com.xnotes.core.pal.Renderer
 import com.xnotes.core.pdf.NoteIcon
+import com.xnotes.core.model.displayRects
 
 /**
  * The icons over text markups that have a note: chrome drawn over the pages in view, one size on
@@ -40,7 +41,8 @@ class NoteIcons(private val state: CanvasState) {
         val q = m.quads.firstOrNull() ?: return null
         if (page !in state.pageRects.indices) return null
         val s = state.document.dpi / 72.0
-        val c = state.fromPageSpaceRect(page, Rect.ltrb(q.left * s, q.top * s, q.right * s, q.bottom * s))
+        val shown = state.document.pages.getOrNull(page)?.displayRects(Rect.ltrb(q.left * s, q.top * s, q.right * s, q.bottom * s))?.firstOrNull() ?: return null
+        val c = state.fromPageSpaceRect(page, shown)
         return Icon(page, m, NoteIcon.tipFor(state.contentToViewport(Pt(c.left, c.top)), state.devicePxPerDp))
     }
 

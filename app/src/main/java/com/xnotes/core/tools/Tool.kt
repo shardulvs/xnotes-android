@@ -23,7 +23,10 @@ enum class Tool(val id: String) {
     MARKUP("markup"),
 
     /** Lays tape over the page to hide what is under it until a tap peels it back. */
-    TAPE("tape");
+    TAPE("tape"),
+
+    /** Notes only: a drag down opens room across the page under the pen, a drag up inside room closes it. */
+    INSERT_SPACE("insert_space");
 
     /** Tools that produce ink via the stroke engine. */
     val isStroke: Boolean get() = this == PEN || this == DASHED || this == CALLIGRAPHY ||
@@ -37,7 +40,7 @@ enum class Tool(val id: String) {
      */
     val fingerPansWhenOff: Boolean get() = isStroke ||
         this == SELECT || this == LASSO || this == SCREENSHOT || this == SHAPE || this == ERASER || this == MARKUP || this == TAPE ||
-        this == TABLE
+        this == TABLE || this == INSERT_SPACE
 
     /** Render-time ink alpha scale: the highlighter is translucent (spec 03 §3). */
     val alphaScale: Double get() = if (this == HIGHLIGHTER) 0.35 else 1.0
@@ -49,6 +52,6 @@ enum class Tool(val id: String) {
         val DEFAULT = PAN
 
         /** Quick-tool-wheel order (spec 06 §11 / 10 §7). */
-        val wheelOrder = listOf(PEN, DASHED, CALLIGRAPHY, SPEED, TAPER, HIGHLIGHTER, ERASER, SELECT, LASSO, SCREENSHOT, TAPE, SHAPE, TEXT, MARKUP, PAN)
+        val wheelOrder = listOf(PEN, DASHED, CALLIGRAPHY, SPEED, TAPER, HIGHLIGHTER, ERASER, SELECT, LASSO, INSERT_SPACE, SCREENSHOT, TAPE, SHAPE, TEXT, MARKUP, PAN)
     }
 }

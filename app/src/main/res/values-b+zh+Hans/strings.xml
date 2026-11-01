@@ -15,6 +15,7 @@
     <string name="tool_screenshot">截图</string>
     <string name="tool_wand">消失墨迹</string>
     <string name="tool_tape">胶带</string>
+    <string name="tool_insert_space">插入空白</string>
     <string name="tool_shape">形状</string>
     <string name="tool_ruler">直尺</string>
     <string name="tool_text">文本</string>

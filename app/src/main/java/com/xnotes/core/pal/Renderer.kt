@@ -115,6 +115,11 @@ interface Renderer {
     /** Intersect the clip region with an axis-aligned rectangle (content space). */
     fun clipRect(rect: Rect)
 
+    /** Intersect the clip region with a convex polygon (content space): what room left of an item it cut. */
+    fun clipPolygon(points: List<Pt>) {
+        if (points.size >= 3) clipRect(Rect.bounding(points))
+    }
+
     /**
      * Clear the current clip region to fully transparent (replace, not composite).
      * Lets a cached surface be repaired in place: clip to a dirty rect, [clear] it,
@@ -225,10 +230,11 @@ interface Renderer {
      * (0/90/180/270), mirrored by [flip] inside [dest], and then turned [angle] radians clockwise
      * about [dest]'s centre. The backend decodes only as large as [dest] needs, so a big photo is
      * never fully decoded into memory. A placed bitmap is the one thing that cannot rotate by moving
-     * its own points, which is why this is the single primitive that takes a free angle. Default is
-     * a no-op for backends that don't place images.
+     * its own points, which is why this is the single primitive that takes a free angle. [part] is
+     * the share of the image that fills [dest] (fractions of the image as stored, left top right
+     * bottom), null for all of it. Default is a no-op for backends that don't place images.
      */
-    fun drawImage(image: ImageData, dest: Rect, orientation: Int = 0, angle: Double = 0.0, flip: Flip = Flip.NONE) {}
+    fun drawImage(image: ImageData, dest: Rect, orientation: Int = 0, angle: Double = 0.0, flip: Flip = Flip.NONE, part: Rect? = null) {}
 
     fun drawText(text: String, rect: Rect, font: FontSpec, color: Rgba, flags: TextFlags = TextFlags())
 

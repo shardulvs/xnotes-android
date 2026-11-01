@@ -2,6 +2,7 @@ package com.xnotes.core.fill
 
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.history.RefillShapes
+import com.xnotes.core.infinite.MeshClip
 import com.xnotes.core.infinite.ShapeTessellator
 import com.xnotes.core.infinite.StrokeTessellator
 import com.xnotes.core.model.AudioItem
@@ -75,7 +76,7 @@ object ColorDrop {
                     val g = item.geometry()
                     var half = 0.0
                     for (k in 0 until g.pointCount) half = maxOf(half, g.hw(k))
-                    m.addLine(StrokeTessellator.tessellate(g, tol), half)
+                    m.addLine(MeshClip.clip(StrokeTessellator.tessellate(g, tol), item.cuts), half)
                 }
                 is ShapeItem -> m.addLine(ShapeTessellator.outlineMesh(item, tol), item.strokeWidth / 2.0)
                 is ConnectorItem -> for (part in ShapeTessellator.tessellate(item, tol)) m.addLine(part.mesh, item.strokeWidth / 2.0)
