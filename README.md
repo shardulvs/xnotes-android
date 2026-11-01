@@ -23,13 +23,13 @@ Xnotes is a great app, and I'm grateful that the developer puts so much work int
 - **Handwriting to math**: an optional on-device add-on turns handwritten formulas into editable LaTeX.
 - **Plain text to equation**: turn typed maths like `int_0^1 x^2 dx` into a formula.
 - **Maths keyboard**: a dedicated keyboard for equations and the formula editor.
-- **File import**: create notes from PDFs, images, txt, md, rtf, html, epub, docx, xlsx and csv.
+- **File import**: create notes from images, txt, rtf, html, epub, docx, xlsx and csv, on top of the PDF and Markdown import xnotes has.
 - **Import into a note**: import a file into an existing note, and add images or photos as pages.
-- **Read-only reader**: open md, docx, pptx, xlsx, csv and pdf files as they are, or convert them to notes.
+- **Read-only reader**: open md, docx, pptx, xlsx, csv and pdf files as they are, with LaTeX and HTML tags rendered in Markdown, or convert them to notes.
 - **Reader mode**: a toolbar button that locks a note for reading, with only navigation, search and zoom left in the bar.
 - **Find**: search text in the reader and Preferences.
-- **Shape snapping**: held strokes also snap to true circles, squares, upright triangles, waves, parabolas, cubics, exponentials and logarithms; toggle it in the pen popup.
-- **Tables**: a table shape with row and column bars for selecting, resizing, adding and removing, and a line colour in the table tool popup.
+- **Shape snapping**: held strokes also snap to squares, upright triangles, waves, parabolas, cubics, exponentials and logarithms; toggle it in the pen popup.
+- **Tables**: a table shape on the page (not the typed-text table) with row and column bars for selecting, resizing, adding and removing, and a line colour in the table tool popup.
 - **Function curves**: a Functions page in the shape picker with x^n, roots, logs, exponentials, trig and inverse trig graphs and an editable formula and range.
 - **Circles from the centre**: circles grow out from where the drag starts.
 - **Item links**: add tappable links to canvas items, and add or edit the link on selected text.
@@ -39,9 +39,10 @@ Xnotes is a great app, and I'm grateful that the developer puts so much work int
 - **Move grip**: drag small selections without hitting the resize handles.
 - **Readable selection**: the selection colour darkens on light pages and lightens on dark ones so it always stands out.
 - **Rotation snapping**: optionally snap rotation to 90 degrees.
-- **Sidebar layout**: pinned notes, Sync now and optional sections in a reorganised sidebar.
+- **Sidebar layout**: a folder tree, Sync now and optional sections in a reorganised sidebar.
 - **Home swipes**: pick what a swipe left or right on Home does: open or close the sidebar, go up a folder, or back into the folder just left.
 - **Hide dot files**: hide .obsidian, .git and other dot files from the explorer.
+- **Side-by-side install**: n-notes has its own app id, so it installs next to the original xnotes.
 - **Update check**: check GitHub for a newer release from Preferences.
 - **Port old notes**: rewrite notes that still hold the fork's old axes, number line, curve and function shapes in today's shapes, with a backup of each file.
 - **Smooth curve**: a curve shape next to the arrow that runs smoothly through its points; drag a point to move it, drag a dot on the curve to add one, double-tap a point to remove it.
@@ -55,6 +56,7 @@ Xnotes is a great app, and I'm grateful that the developer puts so much work int
 - ~~**Settings backup**: export settings and fonts to one file and import them on another device.~~
 - ~~**Image cropping**: crop selected images.~~
 - ~~**Mixed page orientation**: mix portrait and landscape pages in one note.~~
+- ~~**New note options**: pick the template, page colour, pattern, spacing, pattern colour and opacity when creating a note.~~
 - ~~**Default page style**: pick a template and its settings for new notes.~~
 - ~~**Merge notes**: join several notes into one.~~
 - ~~**Links in text**: tappable links in typed text.~~
