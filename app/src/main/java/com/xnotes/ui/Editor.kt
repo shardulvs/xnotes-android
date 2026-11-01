@@ -933,6 +933,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         canvas.applyInputPrefs(settings.prefs.fingerDraws, controller.penButtonTool, settings.prefs.zoomLockPan, settings.prefs.detectShapes, settings.prefs.snapRotation90)
         canvas.applyZoomRange(settings.prefs.canvasMinZoomPercent, settings.prefs.canvasMaxZoomPercent)
         canvas.hiddenShapes = { settings.prefs.hiddenShapes }
+        canvas.shapeOrder = { settings.prefs.shapeOrder }
         canvas.onContentChanged = { scheduleCanvasAutosave() }
         // Only a canvas living under the granted folder autosaves; anything else is left alone,
         // matching how a note opened from outside the root behaves.
@@ -2638,6 +2639,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     var tableToolRows by mutableStateOf(3)
     var tableToolWidth by mutableStateOf(2.0)
 
+    /** The next table's line colour; null follows the toolbar's ink colour. */
+    var tableToolColor by mutableStateOf<Rgba?>(null)
+
     /**
      * Attach the audio file at [uri] as a pill where the view is, on the canvas when one is open.
      * The file is copied and checked off the main thread, and its waveform is read after it lands.
@@ -2872,7 +2876,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         sidebarVisible = settings.sidebarVisible
         shapeConfig = settings.shapeConfig
         controller.shapeConfig = settings.shapeConfig
-        controller.tableToolDefaults = { com.xnotes.canvas.TableToolDefaults(tableToolCols, tableToolRows, tableToolWidth) }
+        controller.tableToolDefaults = { com.xnotes.canvas.TableToolDefaults(tableToolCols, tableToolRows, tableToolWidth, tableToolColor) }
         for (t in ToolDefaults.persistedTools) controller.setToolConfig(t, settings.configFor(t))
         controller.inkColor = toolbarColors[activeColorIndex]
         selectTool(settings.lastTool)
@@ -7053,6 +7057,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     override val hostHasPdf: Boolean get() = hasPdf
 
     override val hostHiddenShapes: Set<String> get() = settings.prefs.hiddenShapes
+    override val hostShapeOrder: List<String> get() = settings.prefs.shapeOrder
 
     override fun updateToolConfig(tool: Tool, config: com.xnotes.core.tools.ToolConfig) {
         controller.setToolConfig(tool, config.copy(rgba = controller.inkColor))

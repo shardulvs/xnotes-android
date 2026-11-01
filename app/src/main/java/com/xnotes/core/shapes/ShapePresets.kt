@@ -176,11 +176,30 @@ object ShapePresets {
     /** The chip a setting written before chips existed names by its bare kind. */
     fun forKind(kind: ShapeKind): ShapePreset = all.firstOrNull { it.kind == kind } ?: byKey.getValue("rectangle")
 
-    /** The pages left once the [hidden] chips and pages (by key) are taken out, each without its hidden chips. */
-    fun shown(hidden: Set<String>): List<ShapePage> =
-        if (hidden.isEmpty()) pages
-        else pages.filter { it.key !in hidden }.map { page -> ShapePage(page.key, page.presets.filter { it.key !in hidden }) }.filter { it.presets.isNotEmpty() }
+    /** Every page and its chips in the [order] Preferences keeps, each by key. */
+    fun ordered(order: List<String>): List<ShapePage> =
+        if (order.isEmpty()) pages
+        else pages.inOrder(order) { it.key }.map { page -> ShapePage(page.key, page.presets.inOrder(order) { it.key }) }
+
+    /** The pages left once the [hidden] chips and pages (by key) are taken out, each without its hidden chips, in [order]. */
+    fun shown(hidden: Set<String>, order: List<String> = emptyList()): List<ShapePage> =
+        ordered(order).filter { it.key !in hidden }.map { page -> ShapePage(page.key, page.presets.filter { it.key !in hidden }) }.filter { it.presets.isNotEmpty() }
 
     /** The page [preset] sits on. */
     fun pageOf(preset: ShapePreset): Int = pages.indexOfFirst { preset in it.presets }.coerceAtLeast(0)
+}
+
+/** This list sorted by where each key stands in [order]; keys it does not name keep their place after those it does. */
+internal fun <T> List<T>.inOrder(order: List<String>, key: (T) -> String): List<T> {
+    val rank = order.withIndex().associate { it.value to it.index }
+    return sortedBy { rank[key(it)] ?: Int.MAX_VALUE }
+}
+
+/** [order] with [from] moved to where [to] stands among [keys], the one list both belong to as it shows now. */
+fun reorderedKeys(order: List<String>, keys: List<String>, from: String, to: String): List<String> {
+    val moved = keys.toMutableList()
+    val at = moved.indexOf(to)
+    if (!moved.remove(from) || at < 0) return order
+    moved.add(at, from)
+    return moved + order.filter { it !in moved }
 }

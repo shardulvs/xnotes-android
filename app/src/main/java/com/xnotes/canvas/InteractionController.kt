@@ -106,7 +106,7 @@ enum class PointerMode {
 }
 
 /** Column/row counts and line width for the next table drawn with the table tool. */
-data class TableToolDefaults(val cols: Int, val rows: Int, val width: Double)
+data class TableToolDefaults(val cols: Int, val rows: Int, val width: Double, val color: Rgba? = null)
 
 /**
  * Geometry of the live text editor field: [x]/[y] place its top-left in viewport pixels, while
@@ -3121,7 +3121,7 @@ class InteractionController(
         clearSelection()
         val d = tableToolDefaults()
         tableDrawStart = state.toPageSpace(pageIndex, content)
-        pendingTable = TableItem.create(Rect(tableDrawStart.x, tableDrawStart.y, 0.0, 0.0), d.cols, d.rows, inkColor, d.width)
+        pendingTable = TableItem.create(Rect(tableDrawStart.x, tableDrawStart.y, 0.0, 0.0), d.cols, d.rows, d.color ?: inkColor, d.width)
         tableDrawPageIndex = pageIndex
         mode = PointerMode.TABLE_DRAW
         requestRender()

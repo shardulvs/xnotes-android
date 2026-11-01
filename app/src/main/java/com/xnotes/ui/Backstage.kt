@@ -171,6 +171,8 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import com.xnotes.settings.Preferences
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /** Which pane the backstage shows on the right. */
@@ -247,8 +249,34 @@ fun Backstage(
     BackstageContent(editor, compact, view, onSelectView, calls, onExitApp, onImportCodeTheme, onImportFont, onBackup)
 }
 
-/** How far a swipe right on Home travels before it opens the sidebar. */
+/** How far a swipe on Home travels before it counts. */
 private val SIDEBAR_SWIPE = 64.dp
+
+/** The explorer's folder steps, which Home's swipes call into. */
+private class FolderSwipe {
+    var up: () -> Unit = {}
+    var deeper: () -> Unit = {}
+}
+
+/** Calls [onSwipe] once per horizontal drag past [SIDEBAR_SWIPE], with whether it went right. */
+private fun Modifier.horizontalSwipe(vararg keys: Any?, onSwipe: (right: Boolean) -> Unit) = pointerInput(*keys) {
+    val trigger = SIDEBAR_SWIPE.toPx()
+    var dragged = 0f
+    var fired = false
+    detectHorizontalDragGestures(onDragStart = { dragged = 0f; fired = false }) { change, dx ->
+        change.consume()
+        dragged += dx
+        if (!fired && abs(dragged) > trigger) {
+            fired = true
+            onSwipe(dragged > 0)
+        }
+    }
+}
+
+/** The open drawer closes on whichever swipe Preferences sets to close the sidebar. */
+private fun Modifier.swipeToClose(prefs: Preferences, close: () -> Unit) = horizontalSwipe(prefs) { right ->
+    if ((if (right) prefs.homeSwipeRight else prefs.homeSwipeLeft) == "sidebar_close") close()
+}
 
 /** Width at or above which the sidebar is a persistent pane rather than a drawer. */
 internal const val COMPACT_WIDTH_DP = 600
@@ -374,7 +402,7 @@ private fun BackstageContent(
     if (compact) {
         Box(Modifier.fillMaxSize().background(palette.bg.toComposeColor())) {
             BackstageMain(
-                Modifier.fillMaxSize(), editor, view, compact, drawerOpen, { animateClose = true; drawerOpen = true }, { selectView(BackstageView.HOME) },
+                Modifier.fillMaxSize(), editor, view, compact, drawerOpen, { animateClose = true; drawerOpen = true }, dismissDrawer, { selectView(BackstageView.HOME) },
                 calls, createMode, { createMode = it }, onImportCodeTheme, onImportFont, onBackup, link, { selectView(BackstageView.PREFERENCES) },
                 focusSync, { focusSync = false },
             )
@@ -384,14 +412,14 @@ private fun BackstageContent(
                 exit = if (animateClose) fadeOut(animationSpec = tween(SIDEBAR_ANIM_MS)) else ExitTransition.None,
                 modifier = Modifier.fillMaxSize(),
             ) {
-                Box(Modifier.fillMaxSize().background(palette.materialColors.scrim.withAlpha(82).toComposeColor()).clickable { dismissDrawer() })
+                Box(Modifier.fillMaxSize().background(palette.materialColors.scrim.withAlpha(82).toComposeColor()).clickable { dismissDrawer() }.swipeToClose(prefs, dismissDrawer))
             }
             AnimatedVisibility(
                 visible = drawerOpen,
                 enter = slideInHorizontally(animationSpec = tween(SIDEBAR_ANIM_MS), initialOffsetX = { -it }),
                 exit = if (animateClose) slideOutHorizontally(animationSpec = tween(SIDEBAR_ANIM_MS), targetOffsetX = { -it }) else ExitTransition.None,
             ) {
-                BackstageSidebar(Modifier.width(DRAWER_WIDTH), editor, nav, dismissDrawer)
+                BackstageSidebar(Modifier.width(DRAWER_WIDTH).swipeToClose(prefs, dismissDrawer), editor, nav, dismissDrawer)
             }
         }
     } else {
@@ -408,7 +436,7 @@ private fun BackstageContent(
                     val placeable = measurable.measure(constraints.copy(minWidth = w, maxWidth = w))
                     layout(constraints.maxWidth, placeable.height) { placeable.place(inset, 0) }
                 },
-                editor, view, compact, true, { setRailed(false) }, { selectView(BackstageView.HOME) },
+                editor, view, compact, true, { setRailed(false) }, { setRailed(true) }, { selectView(BackstageView.HOME) },
                 calls, createMode, { createMode = it }, onImportCodeTheme, onImportFont, onBackup, link, { selectView(BackstageView.PREFERENCES) },
                 focusSync, { focusSync = false },
             )
@@ -582,6 +610,7 @@ private fun BackstageMain(
     compact: Boolean,
     sidebarOpen: Boolean,
     onShowSidebar: () -> Unit,
+    onHideSidebar: () -> Unit,
     onBackToHome: () -> Unit,
     calls: ExplorerCalls,
     createMode: CreateMode,
@@ -620,7 +649,7 @@ private fun BackstageMain(
         }
         Box(Modifier.weight(1f).fillMaxWidth().padding(start = PANE_GUTTER, end = PANE_GUTTER, top = 4.dp, bottom = 12.dp)) {
             when (view) {
-                BackstageView.HOME -> HomePane(editor, calls, createMode, onCreateMode, sidebarOpen, onShowSidebar, link)
+                BackstageView.HOME -> HomePane(editor, calls, createMode, onCreateMode, sidebarOpen, onShowSidebar, onHideSidebar, link)
                 BackstageView.PREFERENCES -> PreferencesPane(editor, compact, sidebarOpen, onShowSidebar, onBackToHome, onImportCodeTheme, onImportFont, focusSync, onSyncFocused, onBackup)
                 BackstageView.TRASH -> TrashPane(editor, sidebarOpen, onShowSidebar, onOpenPreferences)
                 BackstageView.ABOUT -> AboutPane()
@@ -895,28 +924,27 @@ private fun HomePane(
     onCreateMode: (CreateMode) -> Unit,
     sidebarOpen: Boolean,
     onShowSidebar: () -> Unit,
+    onHideSidebar: () -> Unit,
     link: ExplorerLink,
 ) {
     val focusManager = LocalFocusManager.current
+    val prefs = remember(editor.prefsVersion) { editor.preferences }
+    val folderSwipe = remember { FolderSwipe() }
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var refreshing by remember { mutableStateOf(false) }
     // A tap on empty space anywhere in the pane drops focus from the search field, dismissing it
     // (children like tiles and buttons consume their own taps, so this only fires "outside").
-    // A swipe right brings in the sidebar; scrolling children claim their own horizontal drags first.
+    // A swipe either way does what Preferences sets for it; scrolling children claim their own horizontal drags first.
     Box(
         Modifier.fillMaxSize()
             .pointerInput(Unit) { detectTapGestures { focusManager.clearFocus() } }
-            .pointerInput(onShowSidebar) {
-                val trigger = SIDEBAR_SWIPE.toPx()
-                var dragged = 0f
-                detectHorizontalDragGestures(onDragStart = { dragged = 0f }) { change, dx ->
-                    change.consume()
-                    dragged += dx
-                    if (dragged > trigger) {
-                        dragged = Float.NEGATIVE_INFINITY
-                        onShowSidebar()
-                    }
+            .horizontalSwipe(prefs) { right ->
+                when (if (right) prefs.homeSwipeRight else prefs.homeSwipeLeft) {
+                    "sidebar_open" -> onShowSidebar()
+                    "sidebar_close" -> onHideSidebar()
+                    "folder_up" -> folderSwipe.up()
+                    "folder_deeper" -> folderSwipe.deeper()
                 }
             },
     ) {
@@ -936,7 +964,7 @@ private fun HomePane(
                 },
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             ) {
-                ExplorerSection(editor, calls, createMode, onCreateMode, sidebarOpen, onShowSidebar, link)
+                ExplorerSection(editor, calls, createMode, onCreateMode, sidebarOpen, onShowSidebar, link, folderSwipe)
             }
         }
     }
@@ -987,6 +1015,7 @@ private fun ExplorerSection(
     sidebarOpen: Boolean,
     onShowSidebar: () -> Unit,
     link: ExplorerLink,
+    folderSwipe: FolderSwipe,
 ) {
     val palette = LocalPalette.current
     val root = editor.browseRoot
@@ -1124,6 +1153,22 @@ private fun ExplorerSection(
     BackHandler(enabled = colorFilter != null) {
         colorFilter = null
         selection.clear()
+    }
+    // The deepest path the swipes stepped up out of, so a swipe can walk back down it while it still leads on from here.
+    var trail by remember(root) { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    fun trailLeadsOn() = trail.size > stack.size && trail.subList(0, stack.size) == stack.toList()
+    folderSwipe.up = {
+        if (stack.isNotEmpty() && colorFilter == null && !showRecent) {
+            if (!trailLeadsOn()) trail = stack.toList()
+            stack.removeAt(stack.lastIndex)
+            clearUp()
+        }
+    }
+    folderSwipe.deeper = {
+        if (colorFilter == null && !showRecent && trailLeadsOn()) {
+            stack.add(trail[stack.size])
+            clearUp()
+        }
     }
     BackHandler(enabled = showRecent) {
         showRecent = false

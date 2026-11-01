@@ -39,6 +39,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -1011,19 +1012,39 @@ fun SelectConfigPopup(editor: ToolPopupHost, tool: Tool = Tool.SELECT, onDismiss
 }
 
 /**
- * Table-tool configuration popup: the column/row counts and line thickness for the next table.
+ * Table-tool configuration popup: the line colour, column/row counts and line thickness for the next table.
  * The table itself is drawn on the page by dragging, like the shape tool; these are just its
  * defaults. An existing table's columns/rows are edited in table edit mode, its width via the
  * selection's Change-style slider.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TableConfigPopup(editor: Editor, onDismiss: () -> Unit) {
     var cols by remember { mutableStateOf(editor.tableToolCols) }
     var rows by remember { mutableStateOf(editor.tableToolRows) }
     var width by remember { mutableStateOf(editor.tableToolWidth.toFloat()) }
+    var color by remember { mutableStateOf(editor.tableToolColor) }
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
         Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
             PopupTitle(stringResource(R.string.title_table))
+            StyleCaption(stringResource(R.string.caption_colour))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                ModeChip(stringResource(R.string.default_choice), color == null) { color = null; editor.tableToolColor = null }
+                ColorPickerDot(
+                    color,
+                    custom = color != null,
+                    onPick = { color = it; editor.tableToolColor = it },
+                    dismissOnPick = false,
+                ) { d, p ->
+                    ColorPickerPopup(
+                        initial = color ?: editor.hostToolbarColors.getOrNull(editor.hostActiveColorIndex),
+                        recents = editor.hostRecentColors,
+                        onDismiss = d,
+                        onPick = p,
+                    )
+                }
+            }
+            Spacer(Modifier.size(12.dp))
             TableStepperRow(stringResource(R.string.caption_columns), cols, 1, 20) { cols = it; editor.tableToolCols = it }
             TableStepperRow(stringResource(R.string.caption_rows), rows, 1, 20) { rows = it; editor.tableToolRows = it }
             SliderRow(stringResource(R.string.caption_width), width, 1f..12f) { width = it; editor.tableToolWidth = it.toDouble() }
@@ -1292,6 +1313,9 @@ internal fun DropdownMenu(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val palette = LocalPalette.current
+    // An eyedropper armed from a picker in here closes the whole stack, so the screen is free to touch.
+    val dropperArmed = Eyedropper.target != null
+    if (expanded && dropperArmed) LaunchedEffect(Unit) { onDismissRequest() }
     androidx.compose.material3.DropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismissRequest,

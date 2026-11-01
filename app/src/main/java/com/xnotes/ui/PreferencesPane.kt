@@ -5,6 +5,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
+import com.xnotes.core.shapes.reorderedKeys
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -94,6 +98,7 @@ import com.xnotes.core.tools.ToolbarItem
 import com.xnotes.core.tools.ToolbarLayout
 import com.xnotes.core.util.NameTemplate
 import com.xnotes.platform.MathOcr
+import com.xnotes.settings.HOME_SWIPES
 import com.xnotes.settings.Preferences
 import com.xnotes.settings.MaterialStyle
 import com.xnotes.settings.CornerStyle
@@ -501,6 +506,21 @@ fun PreferencesPane(
                 Chip(stringResource(R.string.last_folder), prefs.homeOpensTo == "last") { updateHome(prefs.copy(homeOpensTo = "last")) }
                 Chip(stringResource(R.string.recent_and_pinned), prefs.homeOpensTo == "shelves") { updateHome(prefs.copy(homeOpensTo = "shelves")) }
             }
+            val swipeLabels = mapOf(
+                "sidebar_open" to stringResource(R.string.swipe_sidebar_open),
+                "sidebar_close" to stringResource(R.string.swipe_sidebar_close),
+                "folder_up" to stringResource(R.string.swipe_folder_up),
+                "folder_deeper" to stringResource(R.string.swipe_folder_deeper),
+                "none" to stringResource(R.string.none),
+            )
+            FieldLabel(stringResource(R.string.pref_home_swipe_right))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                HOME_SWIPES.forEach { a -> Chip(swipeLabels.getValue(a), prefs.homeSwipeRight == a) { updateHome(prefs.copy(homeSwipeRight = a)) } }
+            }
+            FieldLabel(stringResource(R.string.pref_home_swipe_left))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                HOME_SWIPES.forEach { a -> Chip(swipeLabels.getValue(a), prefs.homeSwipeLeft == a) { updateHome(prefs.copy(homeSwipeLeft = a)) } }
+            }
             val words = rememberExplorerWords()
             FieldLabel(stringResource(R.string.pref_dates))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -760,21 +780,43 @@ fun PreferencesPane(
                 val hidden = prefs.hiddenShapes
                 updateHome(prefs.copy(hiddenShapes = if (key in hidden) hidden - key else hidden + key))
             }
-            for (page in ShapePresets.pages) {
+            val reorder = remember { KeyReorder() }
+            reorder.onMove = { keys, from, to -> updateHome(prefs.copy(shapeOrder = reorderedKeys(prefs.shapeOrder, keys, from, to))) }
+            val shapePages = ShapePresets.ordered(prefs.shapeOrder)
+            for (page in shapePages) key(page.key) {
                 val pageShown = page.key !in prefs.hiddenShapes
-                CheckRow(stringResource(pageLabel(page)), pageShown) { toggleHidden(page.key) }
-                if (pageShown) {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        for (p in page.presets) KindChip(ShapeIcons.of(p), chipLabel(p), selected = p.key !in prefs.hiddenShapes, latex = chipLatex(p)) { toggleHidden(p.key) }
+                Column(Modifier.reorderItem(reorder, page.key)) {
+                    Box(Modifier.reorderHandle(reorder, page.key, shapePages.map { it.key })) {
+                        CheckRow(stringResource(pageLabel(page)), pageShown) { toggleHidden(page.key) }
+                    }
+                    if (pageShown) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            val keys = page.presets.map { it.key }
+                            for (p in page.presets) key(p.key) {
+                                Box(Modifier.reorderItem(reorder, p.key).reorderHandle(reorder, p.key, keys)) {
+                                    KindChip(ShapeIcons.of(p), chipLabel(p), selected = p.key !in prefs.hiddenShapes, latex = chipLatex(p)) { toggleHidden(p.key) }
+                                }
+                            }
+                        }
                     }
                 }
             }
-            for (page in ConnectorPresets.pages) {
+            val connectorPages = ConnectorPresets.ordered(prefs.shapeOrder)
+            for (page in connectorPages) key(page.key) {
                 val pageShown = page.key !in prefs.hiddenShapes
-                CheckRow(stringResource(connectorPageLabel(page)), pageShown) { toggleHidden(page.key) }
-                if (pageShown) {
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        for (p in page.presets) KindChip(ShapeIcons.connector(p), stringResource(connectorLabel(p.key)), selected = p.key !in prefs.hiddenShapes) { toggleHidden(p.key) }
+                Column(Modifier.reorderItem(reorder, page.key)) {
+                    Box(Modifier.reorderHandle(reorder, page.key, connectorPages.map { it.key })) {
+                        CheckRow(stringResource(connectorPageLabel(page)), pageShown) { toggleHidden(page.key) }
+                    }
+                    if (pageShown) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            val keys = page.presets.map { it.key }
+                            for (p in page.presets) key(p.key) {
+                                Box(Modifier.reorderItem(reorder, p.key).reorderHandle(reorder, p.key, keys)) {
+                                    KindChip(ShapeIcons.connector(p), stringResource(connectorLabel(p.key)), selected = p.key !in prefs.hiddenShapes) { toggleHidden(p.key) }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1262,6 +1304,34 @@ internal fun ColorCodeMenuContent(onPick: (Rgba?) -> Unit) {
 @Composable
 internal fun PageColorGridPopup(initial: Rgba?, onDismiss: () -> Unit, onPick: (Rgba) -> Unit) {
     ColorPickerPopup(initial = initial, recents = emptyList(), onDismiss = onDismiss, onPick = onPick)
+}
+
+/** Long-press drag to reorder by key: an item dropped on another of its list takes that one's place. */
+private class KeyReorder {
+    var onMove: (keys: List<String>, from: String, to: String) -> Unit = { _, _, _ -> }
+    val bounds = HashMap<String, Rect>()
+    var dragging by mutableStateOf<String?>(null)
+    var shift by mutableStateOf(Offset.Zero)
+}
+
+/** Reports where [key] sits and lifts it to follow the finger while it is dragged. */
+private fun Modifier.reorderItem(r: KeyReorder, key: String) = this
+    .onGloballyPositioned { if (r.dragging != key) r.bounds[key] = it.boundsInRoot() }
+    .then(if (r.dragging == key) Modifier.zIndex(1f).graphicsLayer { translationX = r.shift.x; translationY = r.shift.y; alpha = 0.8f } else Modifier)
+
+/** Long-press here and drag to move [key] among [keys]. */
+private fun Modifier.reorderHandle(r: KeyReorder, key: String, keys: List<String>) = pointerInput(key, keys) {
+    var grab = Offset.Zero
+    detectDragGesturesAfterLongPress(
+        onDragStart = { grab = it; r.shift = Offset.Zero; r.dragging = key },
+        onDrag = { change, delta -> change.consume(); r.shift += delta },
+        onDragEnd = {
+            val finger = (r.bounds[key]?.topLeft ?: Offset.Zero) + grab + r.shift
+            r.dragging = null
+            keys.firstOrNull { it != key && r.bounds[it]?.contains(finger) == true }?.let { r.onMove(keys, key, it) }
+        },
+        onDragCancel = { r.dragging = null },
+    )
 }
 
 @Composable

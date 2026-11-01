@@ -52,7 +52,7 @@ object Eyedropper {
 
 /**
  * Full-screen touch layer shown while [Eyedropper.target] is set: a finger on the screen shows the
- * colour under it in a loupe above the finger, and lifting it hands that colour to the target.
+ * colour under it in a loupe above the finger (below it near the top edge), and lifting it hands that colour to the target.
  * Back cancels.
  */
 @Composable
@@ -112,7 +112,11 @@ fun EyedropperOverlay() {
             val half = with(density) { loupe.toPx() / 2 }
             Box(
                 Modifier
-                    .offset { IntOffset((at.x - half).roundToInt(), (at.y - lift - half).roundToInt()) }
+                    .offset {
+                        // Near the top edge the loupe drops below the finger instead.
+                        val y = if (at.y - lift - half >= 0f) at.y - lift - half else at.y + lift - half
+                        IntOffset((at.x - half).roundToInt(), y.roundToInt())
+                    }
                     .size(loupe)
                     .border(3.dp, androidx.compose.ui.graphics.Color.White, CircleShape)
                     .padding(3.dp)

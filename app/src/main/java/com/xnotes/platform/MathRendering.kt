@@ -613,7 +613,7 @@ object MathRendering : MathTypesetter {
      * have written by hand and the measurement and the raster cannot disagree.
      */
     private fun source(latex: String, display: Boolean): String =
-        if (display) "\\displaystyle $latex" else latex
+        braceFractionArgs(latex).let { if (display) "\\displaystyle $it" else it }
 
     /**
      * Ask for the formula in page pixels rather than screen ones: dividing the
@@ -627,4 +627,51 @@ object MathRendering : MathTypesetter {
             theme = LatexTheme.light(color = Color(color.toArgb()), backgroundColor = Color.Transparent),
         )
     }
+}
+
+private val FRACTION_COMMAND = Regex("""\\(?:[dtc]?frac|[dt]?binom)(?![A-Za-z])""")
+
+/**
+ * TeX reads `\frac x2` as x over 2, one character per bare argument, but the library takes the
+ * whole run `x2` as the numerator. Bracing each bare argument gives it what TeX means.
+ */
+internal fun braceFractionArgs(latex: String): String {
+    if ('\\' !in latex) return latex
+    val out = StringBuilder(latex.length + 8)
+    var i = 0
+    for (m in FRACTION_COMMAND.findAll(latex)) {
+        if (m.range.first < i) continue
+        out.append(latex, i, m.range.last + 1)
+        i = m.range.last + 1
+        repeat(2) {
+            var j = i
+            while (j < latex.length && latex[j].isWhitespace()) j++
+            if (j >= latex.length) return@repeat
+            val c = latex[j]
+            val end = when {
+                c == '{' -> {
+                    var depth = 0
+                    var k = j
+                    while (k < latex.length) {
+                        if (latex[k] == '\\') k++
+                        else if (latex[k] == '{') depth++
+                        else if (latex[k] == '}' && --depth == 0) break
+                        k++
+                    }
+                    if (k >= latex.length) return@repeat
+                    out.append(latex, i, j + 1).append(braceFractionArgs(latex.substring(j + 1, k))).append('}')
+                    i = k + 1; null
+                }
+                c == '\\' -> {
+                    var k = j + 1
+                    if (k < latex.length && latex[k].isLetter()) while (k < latex.length && latex[k].isLetter()) k++ else k++
+                    out.append(latex, i, minOf(k, latex.length)); i = minOf(k, latex.length); null
+                }
+                c.isLetterOrDigit() -> j
+                else -> return@repeat
+            }
+            if (end != null) { out.append('{').append(c).append('}'); i = end + 1 }
+        }
+    }
+    return out.append(latex, i, latex.length).toString()
 }

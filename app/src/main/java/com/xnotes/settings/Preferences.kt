@@ -7,6 +7,9 @@ import com.xnotes.core.model.Rgba
 import com.xnotes.core.util.NameTemplate
 import org.json.JSONObject
 
+/** What a swipe on Home can do: show or hide the sidebar, step up a folder, or back into the one just left. */
+val HOME_SWIPES = listOf("sidebar_open", "sidebar_close", "folder_up", "folder_deeper", "none")
+
 /**
  * Global, document-independent preferences (spec 09 §4). Forgiving load: every
  * field falls back to its default if missing or malformed.
@@ -119,6 +122,9 @@ data class Preferences(
     val sidebarAbout: Boolean = true,
     /** Where Home opens: "top" (the notes folder), "last" (the folder last shown) or "shelves" (the notes folder under Recent and Pinned). */
     val homeOpensTo: String = "top",
+    /** What a swipe right / left on Home does: one of [HOME_SWIPES]. */
+    val homeSwipeRight: String = "sidebar_open",
+    val homeSwipeLeft: String = "sidebar_close",
     /** How the explorer writes dates: "relative" (2 days ago), "day" (Wed 17:30) or "date" (16 Sep 2026). */
     val dateStyle: String = "day",
     /** Tapping a file previews it instead of opening it. */
@@ -137,6 +143,8 @@ data class Preferences(
     val pdfHeadingBookmarks: Boolean = true,
     /** Shape chips and picker pages, by key, left out of the shape popup. */
     val hiddenShapes: Set<String> = emptySet(),
+    /** Shape and connector pages and chips, by key, in the order the shape popup shows them; empty keeps the built-in order. */
+    val shapeOrder: List<String> = emptyList(),
 ) {
     /**
      * A new note's page size in document pixels. A named size is laid out under
@@ -229,6 +237,8 @@ data class Preferences(
         .put("sidebar_sync", sidebarSync)
         .put("sidebar_about", sidebarAbout)
         .put("home_opens_to", homeOpensTo)
+        .put("home_swipe_right", homeSwipeRight)
+        .put("home_swipe_left", homeSwipeLeft)
         .put("date_style", dateStyle)
         .put("tap_previews", tapPreviews)
         .put("trash_days", trashDays)
@@ -239,6 +249,7 @@ data class Preferences(
         .apply { readerDark?.let { put("reader_dark", it) } }
         .put("pdf_heading_bookmarks", pdfHeadingBookmarks)
         .apply { if (hiddenShapes.isNotEmpty()) put("hidden_shapes", org.json.JSONArray(hiddenShapes.sorted())) }
+        .apply { if (shapeOrder.isNotEmpty()) put("shape_order", org.json.JSONArray(shapeOrder)) }
 
     companion object {
         val DEFAULT_ACCENT = Rgba(0, 230, 118, 255)
@@ -351,6 +362,8 @@ data class Preferences(
                 sidebarSync = o.optBoolean("sidebar_sync", true),
                 sidebarAbout = o.optBoolean("sidebar_about", true),
                 homeOpensTo = o.optString("home_opens_to", "top").let { if (it == "last" || it == "shelves") it else "top" },
+                homeSwipeRight = o.optString("home_swipe_right", "sidebar_open").takeIf { it in HOME_SWIPES } ?: "sidebar_open",
+                homeSwipeLeft = o.optString("home_swipe_left", "sidebar_close").takeIf { it in HOME_SWIPES } ?: "sidebar_close",
                 dateStyle = o.optString("date_style", "day").let { if (it == "relative" || it == "date") it else "day" },
                 tapPreviews = o.optBoolean("tap_previews", false),
                 trashDays = o.optInt("trash_days", 30).let { if (it == TRASH_FOREVER || it in 0..365) it else 30 },
@@ -361,6 +374,7 @@ data class Preferences(
                 readerDark = if (o.has("reader_dark")) o.optBoolean("reader_dark") else null,
                 pdfHeadingBookmarks = o.optBoolean("pdf_heading_bookmarks", true),
                 hiddenShapes = o.optJSONArray("hidden_shapes")?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).ifEmpty { null } }.toSet() }.orEmpty(),
+                shapeOrder = o.optJSONArray("shape_order")?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).ifEmpty { null } } }.orEmpty(),
             )
         }
     }

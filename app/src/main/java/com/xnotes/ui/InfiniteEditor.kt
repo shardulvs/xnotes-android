@@ -1131,6 +1131,8 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     var hiddenShapes: () -> Set<String> = { emptySet() }
 
     override val hostHiddenShapes: Set<String> get() = hiddenShapes()
+    var shapeOrder: () -> List<String> = { emptyList() }
+    override val hostShapeOrder: List<String> get() = shapeOrder()
     /** Peel [tape] back, or cover it again: the mesh changes, the history and the file do not. */
     private fun peelTape(tape: TapeItem) {
         tape.peeled = !tape.peeled

@@ -29,7 +29,7 @@ Xnotes is a great app, and I'm grateful that the developer puts so much work int
 - **Reader mode**: a toolbar button that locks a note for reading, with only navigation, search and zoom left in the bar.
 - **Find**: search text in the reader and Preferences.
 - **Shape snapping**: held strokes also snap to true circles, squares, upright triangles, waves, parabolas, cubics, exponentials and logarithms; toggle it in the pen popup.
-- **Tables**: a table shape with row and column bars for selecting, resizing, adding and removing.
+- **Tables**: a table shape with row and column bars for selecting, resizing, adding and removing, and a line colour in the table tool popup.
 - **Function curves**: a Functions page in the shape picker with x^n, roots, logs, exponentials, trig and inverse trig graphs and an editable formula and range.
 - **Circles from the centre**: circles grow out from where the drag starts.
 - **Item links**: add tappable links to canvas items, and add or edit the link on selected text.
@@ -40,12 +40,12 @@ Xnotes is a great app, and I'm grateful that the developer puts so much work int
 - **Readable selection**: the selection colour darkens on light pages and lightens on dark ones so it always stands out.
 - **Rotation snapping**: optionally snap rotation to 90 degrees.
 - **Sidebar layout**: pinned notes, Sync now and optional sections in a reorganised sidebar.
-- **Home swipes**: swipe right on Home to open the sidebar.
+- **Home swipes**: pick what a swipe left or right on Home does: open or close the sidebar, go up a folder, or back into the folder just left.
 - **Hide dot files**: hide .obsidian, .git and other dot files from the explorer.
 - **Update check**: check GitHub for a newer release from Preferences.
 - **Port old notes**: rewrite notes that still hold the fork's old axes, number line, curve and function shapes in today's shapes, with a backup of each file.
 - **Smooth curve**: a curve shape next to the arrow that runs smoothly through its points; drag a point to move it, drag a dot on the curve to add one, double-tap a point to remove it.
-- **Hide shapes**: hide single shapes or whole pages of the shape picker in Preferences > Toolbar.
+- **Hide and reorder shapes**: hide single shapes or whole pages of the shape picker in Preferences > Toolbar, and long-press and drag them to change the order.
 - ~~**Create menu**: the new-note button is now a list to create a note, canvas, folder, or import a file.~~
 - ~~**Sort button**: moved sorting out into its own dedicated button.~~
 - ~~**Find in notes**: search the text of a note.~~

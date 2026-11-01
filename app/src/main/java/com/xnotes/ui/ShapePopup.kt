@@ -67,8 +67,8 @@ fun ShapeConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
         Column(Modifier.width(284.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
             PopupTitle(stringResource(R.string.title_shape))
-            ShapePager(config, editor.hostHiddenShapes, onPage = { emit(config.copy(shapePage = it)) }, onPick = { emit(config.choose(it)) })
-            ConnectorPager(config, editor.hostHiddenShapes, onPage = { emit(config.copy(connectorPage = it)) }, onPick = { emit(config.choose(it)) })
+            ShapePager(config, editor.hostHiddenShapes, editor.hostShapeOrder, onPage = { emit(config.copy(shapePage = it)) }, onPick = { emit(config.choose(it)) })
+            ConnectorPager(config, editor.hostHiddenShapes, editor.hostShapeOrder, onPage = { emit(config.copy(connectorPage = it)) }, onPick = { emit(config.choose(it)) })
             if (!connecting && chip.counted) CountRow(config) { emit(config.copy(n = it)) }
             if (!connecting && !config.placesCorners) {
                 ToggleRow(stringResource(R.string.caption_perfect), config.perfect) { emit(config.copy(perfect = it)) }
@@ -107,11 +107,11 @@ fun ShapeConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
 
 /**
  * The shape chips, [ShapePresets.COLUMNS] to a row, one family to a page, without the chips and
- * pages Preferences hides. The remembered page is an index into every page, hidden ones too.
+ * pages Preferences hides, in its order. The remembered page is an index into every page, hidden ones too.
  */
 @Composable
-private fun ShapePager(config: ShapeConfig, hidden: Set<String>, onPage: (Int) -> Unit, onPick: (ShapePreset) -> Unit) {
-    val pages = ShapePresets.shown(hidden)
+private fun ShapePager(config: ShapeConfig, hidden: Set<String>, order: List<String>, onPage: (Int) -> Unit, onPick: (ShapePreset) -> Unit) {
+    val pages = ShapePresets.shown(hidden, order)
     if (pages.isEmpty()) return
     val all = ShapePresets.pages.map { it.key }
     val initial = pages.indexOfFirst { it.key == all.getOrNull(config.shapePage) }.coerceAtLeast(0)
@@ -125,10 +125,10 @@ private fun ShapePager(config: ShapeConfig, hidden: Set<String>, onPage: (Int) -
     }
 }
 
-/** The connector chips, [ConnectorPresets.COLUMNS] to a row, two rows to a page, without those Preferences hides. */
+/** The connector chips, [ConnectorPresets.COLUMNS] to a row, two rows to a page, without those Preferences hides, in its order. */
 @Composable
-private fun ConnectorPager(config: ShapeConfig, hidden: Set<String>, onPage: (Int) -> Unit, onPick: (ConnectorPreset) -> Unit) {
-    val pages = ConnectorPresets.shown(hidden)
+private fun ConnectorPager(config: ShapeConfig, hidden: Set<String>, order: List<String>, onPage: (Int) -> Unit, onPick: (ConnectorPreset) -> Unit) {
+    val pages = ConnectorPresets.shown(hidden, order)
     if (pages.isEmpty()) return
     val all = ConnectorPresets.pages.map { it.key }
     val initial = pages.indexOfFirst { it.key == all.getOrNull(config.connectorPage) }.coerceAtLeast(0)

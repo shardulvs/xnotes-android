@@ -443,7 +443,7 @@
     <string name="pref_side_margin_px">"Side margin  %1$d px"</string>
     <string name="pref_max_cache_px">"Max cache resolution  %1$d px"</string>
     <string name="pref_hidden_shapes">Shapes and connectors in the shape tool</string>
-    <string name="pref_hidden_shapes_help">Untick a page to hide all of its chips, or tap a chip to hide just that one.</string>
+    <string name="pref_hidden_shapes_help">Untick a page to hide all of its chips, or tap a chip to hide just that one. Long-press a page or chip and drag it to change the order.</string>
     <string name="pref_toolbar_colours_n">"Colours on the toolbar  %1$d"</string>
 
     <!-- Home screen and explorer -->
@@ -1136,6 +1136,12 @@
     <string name="pref_sidebar_sections">Sidebar sections</string>
     <string name="sidebar_files">Files</string>
     <string name="pref_home_opens_to">Home opens to</string>
+    <string name="pref_home_swipe_right">Swipe right on Home</string>
+    <string name="pref_home_swipe_left">Swipe left on Home</string>
+    <string name="swipe_sidebar_open">Open sidebar</string>
+    <string name="swipe_sidebar_close">Close sidebar</string>
+    <string name="swipe_folder_up">Up a folder</string>
+    <string name="swipe_folder_deeper">Back into folder</string>
     <string name="last_folder">Last folder</string>
     <string name="recent_and_pinned">Recent &amp; pinned</string>
     <string name="pref_tapping_file">Tapping a file</string>

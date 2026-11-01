@@ -58,6 +58,9 @@ interface ToolPopupHost : SwatchHost {
     /** Shape chips and picker pages, by key, that Preferences hides from the shape popup. */
     val hostHiddenShapes: Set<String> get() = emptySet()
 
+    /** The shape popup's pages and chips, by key, in the order Preferences keeps. */
+    val hostShapeOrder: List<String> get() = emptyList()
+
     /** Whether the open note has a PDF, whose text markups the eraser can take. */
     val hostHasPdf: Boolean get() = false
 
