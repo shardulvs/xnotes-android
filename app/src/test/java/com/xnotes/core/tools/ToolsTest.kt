@@ -63,6 +63,19 @@ class ToolsTest {
         assertEquals(1.0..20.0, ToolConversions.widthRange(Tool.PEN))
     }
 
+    @Test fun widthIsWholePixels() {
+        // The popup labels a width with no decimals, so the width has to be what it says: two
+        // strokes both shown as 2 were otherwise laid down at different thicknesses.
+        assertEquals(2.0, ToolConversions.snapWidth(Tool.PEN, 2.4), 0.0)
+        assertEquals(3.0, ToolConversions.snapWidth(Tool.PEN, 2.6), 0.0)
+        assertEquals(2.0, ToolConversions.snapWidth(Tool.PEN, 2.0), 0.0)
+        // and stays inside the tool's own range
+        assertEquals(20.0, ToolConversions.snapWidth(Tool.PEN, 20.7), 0.0)
+        assertEquals(1.0, ToolConversions.snapWidth(Tool.PEN, 0.2), 0.0)
+        assertEquals(4.0, ToolConversions.snapWidth(Tool.HIGHLIGHTER, 1.0), 0.0)
+        assertEquals(120.0, ToolConversions.snapWidth(Tool.HIGHLIGHTER, 500.0), 0.0)
+    }
+
     @Test fun strokeToolsAndAlpha() {
         assertTrue(Tool.CALLIGRAPHY.isStroke)
         assertTrue(Tool.DASHED.isStroke)
