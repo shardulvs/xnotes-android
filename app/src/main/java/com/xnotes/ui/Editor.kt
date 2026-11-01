@@ -175,6 +175,12 @@ data class ContextMenuTarget(
  * ordering (SAF exposes no creation time — see [CreationTimeStore]). [parentDocId] is the listing
  * folder (where colour writes go), and [color] is the item's explorer colour code, if any.
  */
+/** An item link to another stored file: this prefix, then the file's path below the top folder. */
+const val DOCUMENT_LINK = "xnotes-doc:"
+
+/** What a document link shows when its label is hidden: a page with an arrow out of it. */
+private const val DOCUMENT_LINK_ICON = """<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#1E88E5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M9 15l6-6M11 9h4v4"/></svg>"""
+
 data class BrowseEntry(
     val name: String,
     val documentUri: String,
@@ -2574,6 +2580,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** Open an external web/mail URL in the system handler. Restricted to safe schemes; never throws. */
     private fun openUrl(url: String) {
         val u = url.trim()
+        if (u.startsWith(DOCUMENT_LINK)) return openDocumentLink(u.removePrefix(DOCUMENT_LINK))
         val ok = u.startsWith("http://", ignoreCase = true) ||
             u.startsWith("https://", ignoreCase = true) ||
             u.startsWith("mailto:", ignoreCase = true)
@@ -2586,10 +2593,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
     }
 
-    fun insertImage(bytes: ByteArray) = insertImageAt(bytes, null)
+    fun insertImage(bytes: ByteArray) {
+        insertImageAt(bytes, null)
+    }
 
-    /** Insert an image, centred on [atContent] (or on the current page when null). */
-    fun insertImageAt(bytes: ByteArray, atContent: com.xnotes.core.geometry.Pt?) {
+    /** Insert an image, centred on [atContent] (or on the current page when null); null when it would not read. */
+    fun insertImageAt(bytes: ByteArray, atContent: com.xnotes.core.geometry.Pt?): ImageItem? {
         val file = runCatching {
             java.io.File.createTempFile("img", null, imageDir).apply { writeBytes(bytes) }
         }.getOrNull()
@@ -2597,7 +2606,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (file == null || size == null || size.width <= 0 || size.height <= 0) {
             file?.delete()
             message = appContext.getString(R.string.err_read_image)
-            return
+            return null
         }
         val index = (atContent?.let { state.pageIndexAtContent(it) } ?: state.currentPageIndex())
             .coerceIn(0, state.document.pages.lastIndex)
@@ -2629,6 +2638,45 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         state.document.dirty = true
         refreshContent()
         view.requestRender()
+        return item
+    }
+
+    /**
+     * Place a link to the stored file at [path] (below the top folder) on the current page and select
+     * it so it can be dragged into place: its [label] as underlined text, or a small icon when null.
+     */
+    fun insertDocumentLink(path: String, label: String?) {
+        val link = DOCUMENT_LINK + path
+        val index = state.currentPageIndex().coerceIn(0, state.document.pages.lastIndex)
+        val page = state.document.pages[index]
+        val item: CanvasItem = if (label == null) {
+            insertImageAt(DOCUMENT_LINK_ICON.toByteArray(), null) ?: return
+        } else {
+            val font = com.xnotes.core.pal.FontSpec(TextItem.DEFAULT_POINT_SIZE, TextItem.DEFAULT_FACE)
+            val width = textMeasurer.measure(label, font, page.width * 0.8).w + 8.0
+            TextItem(Pt(0.0, 0.0), width = width, text = label, rgba = palette.accent, measurer = textMeasurer, underline = true).also {
+                it.translate((page.width - width) / 2.0, (page.height - it.bounds().h) / 2.0)
+                page.items.add(it)
+                state.appendToCache(page, it)
+                history.push(AddItem(page, it))
+                refreshContent()
+            }
+        }
+        item.link = link
+        state.document.dirty = true
+        selectTool(Tool.SELECT)
+        controller.selectSingle(index, item)
+        view.requestRender()
+    }
+
+    /** Open the stored file a document link names, found by its name anywhere under the top folder. */
+    private fun openDocumentLink(path: String) {
+        val root = browseRoot ?: return
+        autosaveScope.launch {
+            val hit = withContext(Dispatchers.IO) { runCatching { findLinkedFile(root, path) }.getOrNull() }
+            if (hit == null) message = appContext.getString(R.string.reader_link_missing, path)
+            else openInPane?.invoke(hit.documentUri)
+        }
     }
 
     // --- table tool ---
@@ -7920,6 +7968,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     val canPastePages: Boolean get() = PageClipboard.clip != null
     val pageSelectionCount: Int get() = selectedPages.size
     val inPageSelectionMode: Boolean get() = selectedPages.isNotEmpty()
+    val allPagesSelected: Boolean get() = selectedPages.size >= state.document.pages.size
 
     fun isPageSelected(index: Int): Boolean {
         val p = pageAt(index) ?: return false

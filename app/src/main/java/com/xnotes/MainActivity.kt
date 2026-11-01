@@ -359,6 +359,8 @@ private fun EditorScreen(
 
     // Read-only files open over everything; following a [[link]] stacks another, Back pops one.
     val readerStack = remember { androidx.compose.runtime.mutableStateListOf<com.xnotes.ui.ReaderFile>() }
+    // Read-only files in split slots: one beside the primary note, or two side by side over everything.
+    val readerSplit = remember { androidx.compose.runtime.mutableStateListOf<com.xnotes.ui.ReaderFile>() }
 
     // Which pane a "Save as" writes: the focused one at the moment the picker opened.
     var savePane by remember { mutableStateOf(editor) }
@@ -794,6 +796,7 @@ private fun EditorScreen(
 
     /** Open two picked files together, one per pane, and start the split focused on the first. */
     fun openSplit(firstUri: String, secondUri: String) {
+        readerSplit.clear()
         editor.splitRatio = 0.5f
         editor.focusPane(com.xnotes.ui.Pane.PRIMARY)
         val second = editor.secondaryPane()
@@ -805,6 +808,34 @@ private fun EditorScreen(
                 editor.abandonSecondary()
                 editor.message = context.getString(R.string.err_open_second)
             }
+        }
+    }
+
+    fun readerFileOf(uriStr: String): com.xnotes.ui.ReaderFile? =
+        displayNameOf(resolver, Uri.parse(uriStr))?.takeIf { com.xnotes.core.util.ReaderKind.isReadable(it) }?.let { com.xnotes.ui.ReaderFile(uriStr, it) }
+
+    /** Show [reader] beside the note at [noteUri] in the primary pane, closing any second note pane. */
+    fun openWithReader(noteUri: String, reader: com.xnotes.ui.ReaderFile) {
+        editor.secondary?.goHome()
+        editor.focusPane(com.xnotes.ui.Pane.PRIMARY)
+        editor.splitRatio = 0.5f
+        readerSplit.clear()
+        scope.launch {
+            if (editor.currentUri?.let { editor.isSameDocument(it, noteUri) } != true) openInto(editor, noteUri)
+            // A note that would not open leaves the reader on its own, full screen.
+            if (editor.noteOpen) readerSplit.add(reader) else readerStack.add(reader)
+        }
+    }
+
+    /** Open any two files side by side: two notes as panes, a note with a reader, or two readers. */
+    fun openPair(firstUri: String, secondUri: String) {
+        val first = readerFileOf(firstUri)
+        val second = readerFileOf(secondUri)
+        when {
+            first != null && second != null -> { readerSplit.clear(); readerSplit.addAll(listOf(first, second)) }
+            first != null -> guardedAll { openWithReader(secondUri, first) }
+            second != null -> guardedAll { openWithReader(firstUri, second) }
+            else -> guardedAll { openSplit(firstUri, secondUri) }
         }
     }
 
@@ -1067,14 +1098,14 @@ private fun EditorScreen(
                         render = { o, prog, cancel -> editor.exportFileToPdf(uri, o, prog, cancel) },
                         onReady = { temp -> pendingExportTemp = temp; savePdfLauncher.launch("${stemOf(uri)}.pdf") })
                 },
-                onOpenSplit = { first, second -> guardedAll { openSplit(first, second) } },
+                onOpenSplit = { first, second -> openPair(first, second) },
                 onShareFiles = { uris -> shareFiles(uris) },
                 onImportIntoNote = { note ->
                     pendingImportInto = note
                     importIntoLauncher.launch(importMimeTypes + arrayOf("application/octet-stream"))
                 },
                 onOpenBeside = { uri ->
-                    editor.currentUri?.takeIf { !editor.isSameDocument(it, uri) }?.let { first -> { guardedAll { openSplit(first, uri) } } }
+                    editor.currentUri?.takeIf { editor.noteOpen && !editor.isSameDocument(it, uri) }?.let { first -> { openPair(first, uri) } }
                 },
                 onExportPdfs = { picked, name, onStarted ->
                     pendingPdfs = PendingPdfs(picked, onStarted)
@@ -1126,7 +1157,10 @@ private fun EditorScreen(
                     runCatching { launchShare(file, file.nameWithoutExtension, "image/png") }
                         .onFailure { editor.message = context.getString(R.string.err_share_image) }
                 },
-                onOpenFile = { pane, uri -> scope.launch { openInto(pane, uri) } },
+                onOpenFile = { pane, uri ->
+                    val reader = readerFileOf(uri)
+                    if (reader != null) readerStack.add(reader) else guarded(pane) { scope.launch { openInto(pane, uri) } }
+                },
                 onAddStickers = { addStickersLauncher.launch(arrayOf("image/*")) },
                 onInsertAudio = { pane ->
                     pendingAudioPane = pane
@@ -1197,7 +1231,29 @@ private fun EditorScreen(
                     imagePageLauncher.launch(arrayOf("image/*"))
                 },
             )
-            SplitHost(editor, actions)
+            fun followWikiLink(target: String) {
+                scope.launch {
+                    val root = editor.browseRoot
+                    val hit = root?.let { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { editor.findLinkedFile(it, target) } }
+                    when {
+                        hit == null -> editor.say(context.getString(R.string.reader_link_missing, target))
+                        com.xnotes.core.util.ReaderKind.isReadable(hit.name) -> readerStack.add(com.xnotes.ui.ReaderFile(hit.documentUri, hit.name))
+                        else -> { readerStack.clear(); readerSplit.clear(); guarded(editor) { openTreeFile(hit.documentUri) } }
+                    }
+                }
+            }
+            // A split reader left with no note beside it goes on alone, full screen.
+            val besideFits = editor.noteOpen && editor.secondary?.noteOpen != true
+            LaunchedEffect(readerSplit.size, besideFits) {
+                if (readerSplit.size == 1 && !besideFits) readerStack.add(readerSplit.removeAt(0))
+            }
+            SplitHost(editor, actions, readerSplit) { file, modifier ->
+                Box(modifier) {
+                    androidx.compose.runtime.key(file.uri) {
+                        com.xnotes.ui.ReaderScreen(editor = editor, file = file, onClose = { readerSplit.remove(file) }, onWikiLink = ::followWikiLink)
+                    }
+                }
+            }
 
             readerStack.lastOrNull()?.let { file ->
                 androidx.compose.runtime.key(file.uri) {
@@ -1205,17 +1261,7 @@ private fun EditorScreen(
                         editor = editor,
                         file = file,
                         onClose = { readerStack.removeLastOrNull() },
-                        onWikiLink = { target ->
-                            scope.launch {
-                                val root = editor.browseRoot
-                                val hit = root?.let { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { editor.findLinkedFile(it, target) } }
-                                when {
-                                    hit == null -> editor.say(context.getString(R.string.reader_link_missing, target))
-                                    com.xnotes.core.util.ReaderKind.isReadable(hit.name) -> readerStack.add(com.xnotes.ui.ReaderFile(hit.documentUri, hit.name))
-                                    else -> { readerStack.clear(); guarded(editor) { openTreeFile(hit.documentUri) } }
-                                }
-                            }
-                        },
+                        onWikiLink = ::followWikiLink,
                     )
                 }
             }
@@ -1482,15 +1528,24 @@ private val SwallowTouches = Modifier.pointerInput(Unit) {
  * when the split opens, closes or the device turns.
  */
 @Composable
-private fun SplitHost(editor: Editor, actions: PaneActions) {
+private fun SplitHost(
+    editor: Editor,
+    actions: PaneActions,
+    readers: List<com.xnotes.ui.ReaderFile>,
+    reader: @Composable (com.xnotes.ui.ReaderFile, Modifier) -> Unit,
+) {
     val second = editor.secondary
-    val split = editor.noteOpen && second?.noteOpen == true
+    // One reader takes the second slot beside the note; two cover both panes, which stay composed underneath.
+    val besideReader = readers.singleOrNull()?.takeIf { editor.noteOpen && second?.noteOpen != true }
+    val readerPair = readers.takeIf { it.size == 2 }
+    var readerPairRatio by remember { mutableStateOf(0.5f) }
+    val split = editor.noteOpen && (second?.noteOpen == true || besideReader != null)
     // A pane that closed on its own leaves the other one full-screen; once neither is open the
     // second editor is released, freeing its canvas and GL surfaces.
     LaunchedEffect(editor.noteOpen, second?.noteOpen) {
         if (second != null && !second.noteOpen) editor.releaseClosedSecondary()
     }
-    if (!editor.noteOpen && second?.noteOpen != true) return
+    if (!editor.noteOpen && second?.noteOpen != true && readerPair == null) return
 
     val sideBySide = LocalConfiguration.current.orientation ==
         android.content.res.Configuration.ORIENTATION_LANDSCAPE
@@ -1535,6 +1590,7 @@ private fun SplitHost(editor: Editor, actions: PaneActions) {
                 modifier = paneOffset(if (split) firstExtent else 0.dp).then(paneSize(secondExtent)),
             )
         }
+        if (besideReader != null) reader(besideReader, paneOffset(firstExtent).then(paneSize(secondExtent)))
         // Composed last so it sits over both panes and catches the drag before either of them.
         if (split) {
             SplitDivider(
@@ -1545,6 +1601,20 @@ private fun SplitHost(editor: Editor, actions: PaneActions) {
                 modifier = paneOffset((firstExtent - DIVIDER / 2).coerceAtLeast(0.dp))
                     .then(paneSize(DIVIDER)),
             )
+        }
+        if (readerPair != null) {
+            val pairFirst = full * readerPairRatio.coerceIn(MIN_PANE_RATIO, 1f - MIN_PANE_RATIO)
+            Box(Modifier.fillMaxSize().then(SwallowTouches)) {
+                reader(readerPair[0], paneSize(pairFirst))
+                reader(readerPair[1], paneOffset(pairFirst).then(paneSize(full - pairFirst)))
+                SplitDivider(
+                    sideBySide = sideBySide,
+                    extentPx = with(LocalDensity.current) { full.toPx() },
+                    ratio = readerPairRatio,
+                    onRatio = { readerPairRatio = it },
+                    modifier = paneOffset((pairFirst - DIVIDER / 2).coerceAtLeast(0.dp)).then(paneSize(DIVIDER)),
+                )
+            }
         }
     }
 }

@@ -5,15 +5,17 @@ import org.junit.Test
 
 class ShapeOrderTest {
     @Test
-    fun movedKeyTakesTheTargetsPlace() {
+    fun movedKeyLandsInTheSlot() {
         val keys = listOf("a", "b", "c", "d")
-        assertEquals(listOf("b", "c", "a", "d"), reorderedKeys(emptyList(), keys, "a", "c"))
-        assertEquals(listOf("d", "a", "b", "c"), reorderedKeys(emptyList(), keys, "d", "a"))
+        assertEquals(listOf("b", "a", "c", "d"), reorderedKeys(emptyList(), keys, "a", 2))
+        assertEquals(listOf("b", "c", "d", "a"), reorderedKeys(emptyList(), keys, "a", 4))
+        assertEquals(listOf("d", "a", "b", "c"), reorderedKeys(emptyList(), keys, "d", 0))
+        assertEquals(keys, reorderedKeys(emptyList(), keys, "b", 2))
     }
 
     @Test
     fun reorderingOneListKeepsTheOthers() {
-        val order = reorderedKeys(listOf("x", "y"), listOf("a", "b"), "b", "a")
+        val order = reorderedKeys(listOf("x", "y"), listOf("a", "b"), "b", 0)
         assertEquals(listOf("b", "a", "x", "y"), order)
         assertEquals(listOf("y", "x", "z"), listOf("x", "y", "z").inOrder(listOf("y", "x")) { it })
     }

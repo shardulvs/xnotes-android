@@ -658,6 +658,7 @@ private fun PageCounter(current: Int, count: Int, modifier: Modifier) {
 @Composable
 private fun NoteInsertMenu(editor: Editor, onInsertImage: () -> Unit, onTakePhoto: () -> Unit, onImagePage: () -> Unit, onAddStickers: () -> Unit, onInsertAudio: () -> Unit, onRecordAudio: () -> Unit) {
     var stickersOpen by remember { mutableStateOf(false) }
+    var linkOpen by remember { mutableStateOf(false) }
     InsertButton(
         owner = editor,
         imageRows = listOf(
@@ -669,8 +670,15 @@ private fun NoteInsertMenu(editor: Editor, onInsertImage: () -> Unit, onTakePhot
         ),
         onAudioFromFile = onInsertAudio,
         onRecord = onRecordAudio,
+        linkRows = if (editor.browseRoot == null) emptyList() else listOf(
+            InsertRow(XnotesIcons.link, stringResource(R.string.add_link_to_document)) { linkOpen = true },
+        ),
     ) {
         if (stickersOpen) StickersMenu(editor, onAddStickers) { stickersOpen = false }
+        if (linkOpen) DocumentLinkDialog(editor, onDismiss = { linkOpen = false }) { path, label ->
+            linkOpen = false
+            editor.insertDocumentLink(path, label)
+        }
     }
 }
 

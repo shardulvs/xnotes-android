@@ -38,6 +38,7 @@ internal fun InsertButton(
     imageRows: List<InsertRow>,
     onAudioFromFile: () -> Unit,
     onRecord: () -> Unit,
+    linkRows: List<InsertRow> = emptyList(),
     popups: @Composable () -> Unit = {},
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -61,6 +62,11 @@ internal fun InsertButton(
                 },
             ) { expanded = false; onRecord() }
             InsertMenuRow(XnotesIcons.music, stringResource(R.string.audio_from_file)) { expanded = false; onAudioFromFile() }
+            if (linkRows.isNotEmpty()) {
+                HorizontalDivider(Modifier.padding(vertical = 6.dp), color = LocalPalette.current.border.toComposeColor())
+                InsertGroup(stringResource(R.string.insert_group_link))
+                for (row in linkRows) InsertMenuRow(row.icon, row.label, row.more) { expanded = false; row.onPick() }
+            }
         }
         popups()
     }

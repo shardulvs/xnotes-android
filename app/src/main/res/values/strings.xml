@@ -323,6 +323,12 @@
     <string name="insert_image">Insert image</string>
     <string name="insert_group_image">Image</string>
     <string name="insert_group_audio">Audio</string>
+    <string name="insert_group_link">Link</string>
+    <string name="add_link_to_document">Add link to document</string>
+    <string name="link_label">Label</string>
+    <string name="show_link_label">Show label</string>
+    <string name="link_back">Back</string>
+    <string name="no_files_here">No files here.</string>
     <string name="audio_from_file">Audio from file…</string>
     <string name="err_audio_too_big">This audio file is too large to attach.</string>
     <string name="err_audio_unplayable">This audio file cannot be played on this device.</string>
@@ -443,7 +449,8 @@
     <string name="pref_side_margin_px">"Side margin  %1$d px"</string>
     <string name="pref_max_cache_px">"Max cache resolution  %1$d px"</string>
     <string name="pref_hidden_shapes">Shapes and connectors in the shape tool</string>
-    <string name="pref_hidden_shapes_help">Untick a page to hide all of its chips, or tap a chip to hide just that one. Long-press a page or chip and drag it to change the order.</string>
+    <string name="pref_hidden_shapes_help">Untick a page to hide all of its chips, or tap a chip to hide just that one. Drag a page by its handle, or long-press a chip and drag it, to change the order.</string>
+    <string name="reset_order">Reset order</string>
     <string name="pref_toolbar_colours_n">"Colours on the toolbar  %1$d"</string>
 
     <!-- Home screen and explorer -->
@@ -803,6 +810,7 @@
     <string name="share_ellipsis">Share…</string>
     <string name="save_as_ellipsis">Save as…</string>
     <string name="clear_selection">Clear selection</string>
+    <string name="deselect_all">Deselect all</string>
     <string name="save_as">Save as</string>
     <string name="no_contents">— no table of contents —</string>
     <string name="add_bookmark">Add bookmark</string>

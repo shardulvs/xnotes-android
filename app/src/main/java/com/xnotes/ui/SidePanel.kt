@@ -721,7 +721,8 @@ private fun PageSelectionBar(
             }
             Text("${editor.pageSelectionCount}", color = palette.text.toComposeColor(), fontSize = 13.sp)
             Spacer(Modifier.weight(1f))
-            BarAction(XnotesIcons.selectAll, stringResource(R.string.select_all)) { editor.selectAllPages() }
+            if (!editor.allPagesSelected) BarAction(XnotesIcons.selectAll, stringResource(R.string.select_all)) { editor.selectAllPages() }
+            else BarAction(XnotesIcons.deselectAll, stringResource(R.string.deselect_all)) { editor.clearPageSelection() }
             BarAction(XnotesIcons.copy, stringResource(R.string.copy)) { editor.copyPages(editor.selectedPageIndices()) }
             BarAction(XnotesIcons.trash, stringResource(R.string.delete)) { editor.deletePages(editor.selectedPageIndices()) }
             PageSelectionMore(editor, onSharePages, onSavePagesAsPdf, onSavePagesAsImages)
@@ -787,8 +788,8 @@ private fun PageSelectionMore(
                         close()
                         extracting = editor.selectedPageIndices() to true
                     })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.save_as_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.download), onClick = { sub = MENU_SAVE })
                     DropdownMenuItem(text = { Text(stringResource(R.string.share_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.share), onClick = { sub = MENU_SHARE })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.save_as_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.download), onClick = { sub = MENU_SAVE })
                 }
             }
         }

@@ -195,11 +195,10 @@ internal fun <T> List<T>.inOrder(order: List<String>, key: (T) -> String): List<
     return sortedBy { rank[key(it)] ?: Int.MAX_VALUE }
 }
 
-/** [order] with [from] moved to where [to] stands among [keys], the one list both belong to as it shows now. */
-fun reorderedKeys(order: List<String>, keys: List<String>, from: String, to: String): List<String> {
-    val moved = keys.toMutableList()
-    val at = moved.indexOf(to)
-    if (!moved.remove(from) || at < 0) return order
-    moved.add(at, from)
+/** [order] with [from] moved into insertion [slot] (0..size) of [keys], the list it belongs to as it shows now. */
+fun reorderedKeys(order: List<String>, keys: List<String>, from: String, slot: Int): List<String> {
+    val at = keys.indexOf(from)
+    if (at < 0) return order
+    val moved = keys.toMutableList().apply { removeAt(at); add((if (slot > at) slot - 1 else slot).coerceIn(0, size), from) }
     return moved + order.filter { it !in moved }
 }
