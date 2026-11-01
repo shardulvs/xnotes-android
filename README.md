@@ -18,77 +18,17 @@ Xnotes is a great app, and I'm grateful that the developer puts so much work int
 
 ## Additions to the original xnotes
 
-- **Filen cloud sync**: sync notes and settings to Filen from the sidebar or by pulling down on Home, with a synced trash and a banner for conflicting edits.
-- **Handwriting to text**: turn selected handwriting (Czech, English) into an editable text box.
-- **Handwriting to math**: an optional on-device add-on turns handwritten formulas into editable LaTeX.
-- **Plain text to equation**: turn typed maths like `int_0^1 x^2 dx` into a formula.
-- **Maths keyboard**: a dedicated keyboard for equations and the formula editor.
-- **File import**: create notes from images, txt, rtf, html, epub, docx, xlsx and csv, on top of the PDF and Markdown import xnotes has.
-- **Import into a note**: import a file into an existing note, and add images or photos as pages.
-- **Read-only reader**: open md, docx, pptx, xlsx, csv and pdf files as they are, with LaTeX and HTML tags rendered in Markdown, or convert them to notes.
-- **Reader mode**: a toolbar button that locks a note for reading, with only navigation, search and zoom left in the bar.
-- **Find**: search text in the reader and Preferences.
-- **Shape snapping**: held strokes also snap to squares, upright triangles, waves, parabolas, cubics, exponentials and logarithms; toggle it in the pen popup.
-- **Tables**: a table shape on the page (not the typed-text table) with row and column bars for selecting, resizing, adding and removing, and a line colour in the table tool popup.
-- **Function curves**: a Functions page in the shape picker with x^n, roots, logs, exponentials, trig and inverse trig graphs and an editable formula and range.
-- **Circles from the centre**: circles grow out from where the drag starts.
-- **Item links**: add tappable links to canvas items, and add or edit the link on selected text.
-- **Eyedropper**: pick a colour from anywhere on screen.
-- **Whole selection**: a switch to select only items lying fully inside the band or lasso.
-- **Finger tap to select**: a finger tap selects, a finger drag still pans.
-- **Move grip**: drag small selections without hitting the resize handles.
-- **Readable selection**: the selection colour darkens on light pages and lightens on dark ones so it always stands out.
-- **Rotation snapping**: optionally snap rotation to 90 degrees.
-- **Sidebar layout**: a folder tree, Sync now and optional sections in a reorganised sidebar.
-- **Home swipes**: pick what a swipe left or right on Home does: open or close the sidebar, go up a folder, or back into the folder just left.
-- **Hide dot files**: hide .obsidian, .git and other dot files from the explorer.
-- **Side-by-side install**: n-notes has its own app id, so it installs next to the original xnotes.
-- **Update check**: check GitHub for a newer release from Preferences.
-- **Port old notes**: rewrite notes that still hold the fork's old axes, number line, curve and function shapes in today's shapes, with a backup of each file.
-- **Smooth curve**: a curve shape next to the arrow that runs smoothly through its points; drag a point to move it, drag a dot on the curve to add one, double-tap a point to remove it.
-- **Hide and reorder shapes**: hide single shapes or whole pages of the shape picker in Preferences > Toolbar, and long-press and drag them to change the order.
-- ~~**Create menu**: the new-note button is now a list to create a note, canvas, folder, or import a file.~~
-- ~~**Sort button**: moved sorting out into its own dedicated button.~~
-- ~~**Find in notes**: search the text of a note.~~
-- ~~**Curve shape**: a smooth line through points you can add, move and remove.~~
-- ~~**Axes shapes**: rotatable x-y axes and a single number line.~~
-- ~~**New shapes stay selected**: move or resize a shape right after drawing it.~~
-- ~~**Settings backup**: export settings and fonts to one file and import them on another device.~~
-- ~~**Image cropping**: crop selected images.~~
-- ~~**Mixed page orientation**: mix portrait and landscape pages in one note.~~
-- ~~**New note options**: pick the template, page colour, pattern, spacing, pattern colour and opacity when creating a note.~~
-- ~~**Default page style**: pick a template and its settings for new notes.~~
-- ~~**Merge notes**: join several notes into one.~~
-- ~~**Links in text**: tappable links in typed text.~~
-
-Crossed-out items were later added to xnotes by its original developer.
+n-notes adds 44 features on top of xnotes, and 13 of them were later implemented in xnotes as well. See the full list in [ADDITIONS.md](ADDITIONS.md).
 
 ## Versioning
 
-Releases use the scheme `{xnotes version}-{nnotes version}`, for example `0.8.16-0.14`:
-
-- `{xnotes version}` is the upstream [xnotes](https://github.com/shardulvs/xnotes-android) release this build is based on (`0.8.16`).
-- `{nnotes version}` is the n-notes fork revision on top of that upstream base (`0.14`), bumped on every published fork build.
-
-So a bump of the second number is a fork-only change; a bump of the first number means the fork was synced onto a newer upstream xnotes.
+Releases are named `{xnotes version}-{n-notes version}`, for example `0.9.7-0.48`: the upstream xnotes release the build is based on, then the fork revision, bumped on every published build.
 
 ## Install
 
 | Channel | |
 |---|---|
 | [GitHub Releases](https://github.com/NeDDy3z/n-notes/releases/latest) | Signed APK |
-
-## Build from source
-
-Requires **JDK 17** (the project pins Java 17):
-
-```bash
-git clone https://github.com/NeDDy3z/n-notes.git
-cd n-notes
-JAVA_HOME=/path/to/jdk-17 ./gradlew assembleDebug
-```
-
-Output: `app/build/outputs/apk/debug/app-debug.apk`
 
 ## License
 
