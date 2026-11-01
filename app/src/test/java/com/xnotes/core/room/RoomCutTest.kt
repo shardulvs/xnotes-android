@@ -62,6 +62,16 @@ class RoomCutTest {
         assertEquals(640.0, p.height, eps)
     }
 
+    @Test fun piecesCutOffKeepTheItemLink() {
+        val s = line(50.0, 100.0, 200.0).also { it.link = "https://ink" }
+        val pic = ImageItem(ImageData(File("x"), 100, 100), Rect(200.0, 100.0, 100.0, 100.0)).also { it.link = "https://pic" }
+        val p = page(s, pic)
+        RoomCut.open(p, 150.0, 40.0)!!
+        assertEquals(4, p.items.size)
+        assertEquals(listOf("https://ink", "https://ink"), p.items.filterIsInstance<Stroke>().map { it.link })
+        assertEquals(listOf("https://pic", "https://pic"), p.items.filterIsInstance<ImageItem>().map { it.link })
+    }
+
     @Test fun inkTheCutCrossesSplitsIntoTwoPiecesThatKeepEverySample() {
         val s = line(50.0, 100.0, 200.0)
         val p = page(s)
