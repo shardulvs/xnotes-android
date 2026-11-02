@@ -127,7 +127,7 @@ import com.xnotes.platform.AndroidSurfaceFactory
 import com.xnotes.platform.AndroidTextMeasurer
 import com.xnotes.settings.ExplorerSortKey
 import com.xnotes.settings.ExplorerView
-import com.xnotes.sync.filen.FilenLocalStore
+import com.xnotes.sync.LocalNoteStore
 import com.xnotes.settings.LiveSettings
 import com.xnotes.settings.SwatchRole
 import com.xnotes.settings.Preferences
@@ -9965,7 +9965,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 canvasAutosaveUri = null
                 canvasOpen = false
                 noteOpen = false
-                com.xnotes.sync.filen.FilenSyncManager.syncOnNoteExit(appContext)
+                com.xnotes.sync.SyncManager.syncOnNoteExit(appContext)
             }
             return
         }
@@ -9979,7 +9979,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             autosaveUri?.let { uri -> autosaveScope.launch { regenerateClosedNoteThumb(uri) } }
             autosaveUri = null
             noteOpen = false
-            com.xnotes.sync.filen.FilenSyncManager.syncOnNoteExit(appContext)
+            com.xnotes.sync.SyncManager.syncOnNoteExit(appContext)
         }
     }
 }

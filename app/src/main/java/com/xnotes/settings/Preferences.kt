@@ -96,17 +96,18 @@ data class Preferences(
     val defaultCodeLanguage: String = "cpp",
     /** Language the format bar's code toggle last applied; "" until a language is picked. */
     val lastCodeLanguage: String = "",
-    // Filen cloud sync (opt-in). Credentials live in the encrypted FilenSecureStore, not here.
-    val filenSyncEnabled: Boolean = false,
-    val filenFolderUuid: String = "",
-    val filenFolderName: String = "",
-    val filenAutoSync: Boolean = true,
-    val filenWifiOnly: Boolean = false,
-    val filenSyncIntervalMinutes: Int = 60,
-    val filenSyncOnNoteExit: Boolean = false,
-    val filenSyncOnAppOpen: Boolean = false,
-    /** Which way notes flow: "both", "up" (local to Filen), "down" (Filen to local), "off". */
-    val filenSyncDirection: String = "both",
+    // Cloud sync (opt-in). Credentials live in each service's own encrypted store, not here.
+    /** Id of the one [com.xnotes.sync.CloudService] that syncs, or [com.xnotes.sync.CloudServices.NONE]. */
+    val cloudService: String = "none",
+    /** The chosen sync folder per service id, so switching services keeps each one's folder. */
+    val cloudFolders: Map<String, CloudFolder> = emptyMap(),
+    val syncAuto: Boolean = true,
+    val syncWifiOnly: Boolean = false,
+    val syncIntervalMinutes: Int = 60,
+    val syncOnNoteExit: Boolean = false,
+    val syncOnAppOpen: Boolean = false,
+    /** Which way notes flow: "both", "up" (local to cloud), "down" (cloud to local), "off". */
+    val syncDirection: String = "both",
     /** Whether typed markdown markers (# - ** `) convert the text as you write. */
     val markdownInput: Boolean = true,
     /** Whether typing "/" at a word start opens the command menu. */
@@ -216,15 +217,16 @@ data class Preferences(
             codeThemeName?.let { put("code_theme_name", it) }
             put("default_code_language", defaultCodeLanguage)
             lastCodeLanguage.takeIf { it.isNotEmpty() }?.let { put("last_code_language", it) }
-            put("filen_sync_enabled", filenSyncEnabled)
-            put("filen_folder_uuid", filenFolderUuid)
-            put("filen_folder_name", filenFolderName)
-            put("filen_auto_sync", filenAutoSync)
-            put("filen_wifi_only", filenWifiOnly)
-            put("filen_sync_interval_minutes", filenSyncIntervalMinutes)
-            put("filen_sync_on_note_exit", filenSyncOnNoteExit)
-            put("filen_sync_on_app_open", filenSyncOnAppOpen)
-            put("filen_sync_direction", filenSyncDirection)
+            put("cloud_service", cloudService)
+            put("cloud_folders", JSONObject().apply {
+                cloudFolders.forEach { (service, f) -> put(service, JSONObject().put("id", f.id).put("name", f.name)) }
+            })
+            put("sync_auto", syncAuto)
+            put("sync_wifi_only", syncWifiOnly)
+            put("sync_interval_minutes", syncIntervalMinutes)
+            put("sync_on_note_exit", syncOnNoteExit)
+            put("sync_on_app_open", syncOnAppOpen)
+            put("sync_direction", syncDirection)
             put("markdown_input", markdownInput)
             put("slash_commands", slashCommands)
         }
@@ -339,15 +341,18 @@ data class Preferences(
                 defaultCodeLanguage = o.optString("default_code_language", "cpp")
                     .lowercase().trim().ifEmpty { "cpp" },
                 lastCodeLanguage = o.optString("last_code_language").lowercase().trim(),
-                filenSyncEnabled = o.optBoolean("filen_sync_enabled", false),
-                filenFolderUuid = o.optString("filen_folder_uuid"),
-                filenFolderName = o.optString("filen_folder_name"),
-                filenAutoSync = o.optBoolean("filen_auto_sync", true),
-                filenWifiOnly = o.optBoolean("filen_wifi_only", false),
-                filenSyncIntervalMinutes = o.optInt("filen_sync_interval_minutes", 60).coerceIn(15, 1440),
-                filenSyncOnNoteExit = o.optBoolean("filen_sync_on_note_exit", false),
-                filenSyncOnAppOpen = o.optBoolean("filen_sync_on_app_open", false),
-                filenSyncDirection = o.optString("filen_sync_direction", "both")
+                // The filen_* fallbacks read settings saved before sync supported more than one service.
+                cloudService = o.optString("cloud_service", if (o.optBoolean("filen_sync_enabled", false)) "filen" else "none"),
+                cloudFolders = o.optJSONObject("cloud_folders")?.let { f ->
+                    f.keys().asSequence().mapNotNull { k -> f.optJSONObject(k)?.let { k to CloudFolder(it.optString("id"), it.optString("name")) } }.toMap()
+                } ?: o.optString("filen_folder_uuid").takeIf { it.isNotEmpty() }
+                    ?.let { mapOf("filen" to CloudFolder(it, o.optString("filen_folder_name"))) }.orEmpty(),
+                syncAuto = o.optBoolean("sync_auto", o.optBoolean("filen_auto_sync", true)),
+                syncWifiOnly = o.optBoolean("sync_wifi_only", o.optBoolean("filen_wifi_only", false)),
+                syncIntervalMinutes = o.optInt("sync_interval_minutes", o.optInt("filen_sync_interval_minutes", 60)).coerceIn(15, 1440),
+                syncOnNoteExit = o.optBoolean("sync_on_note_exit", o.optBoolean("filen_sync_on_note_exit", false)),
+                syncOnAppOpen = o.optBoolean("sync_on_app_open", o.optBoolean("filen_sync_on_app_open", false)),
+                syncDirection = o.optString("sync_direction", o.optString("filen_sync_direction", "both"))
                     .let { if (it == "up" || it == "down" || it == "off") it else "both" },
                 markdownInput = o.optBoolean("markdown_input", true),
                 slashCommands = o.optBoolean("slash_commands", true),
@@ -379,3 +384,6 @@ data class Preferences(
         }
     }
 }
+
+/** A cloud folder picked for sync: the service's folder id and the path shown in preferences. */
+data class CloudFolder(val id: String, val name: String)

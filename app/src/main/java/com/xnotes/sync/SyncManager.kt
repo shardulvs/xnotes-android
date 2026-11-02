@@ -1,4 +1,4 @@
-package com.xnotes.sync.filen
+package com.xnotes.sync
 
 import android.content.Context
 import androidx.work.BackoffPolicy
@@ -22,12 +22,14 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Entry point the UI and the background worker share. Owns the session (via
- * [FilenSecureStore]), reads sync config from preferences, runs the engine under a
- * lock, and (re)schedules the periodic WorkManager job.
+ * Entry point the UI and the background worker share. Only the service picked in preferences
+ * ([com.xnotes.settings.Preferences.cloudService]) syncs: this resolves it, runs the engine under a
+ * lock, and (re)schedules the one periodic WorkManager job. Other services stay signed in but idle.
  */
-object FilenSyncManager {
-    private const val WORK_NAME = "filen_periodic_sync"
+object SyncManager {
+    private const val WORK_NAME = "cloud_periodic_sync"
+    /** The job name from when Filen was the only service; its worker class no longer exists. */
+    private const val LEGACY_WORK_NAME = "filen_periodic_sync"
     private val syncMutex = Mutex()
     private val exitSyncScope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private val backgroundQueued = AtomicBoolean(false)
@@ -45,32 +47,38 @@ object FilenSyncManager {
     private val _status = MutableStateFlow(Status())
     val status: StateFlow<Status> = _status.asStateFlow()
 
-    /** Seed the status flow from the last persisted sync (for the sidebar on a fresh launch). */
+    /** The service [status] belongs to, so switching services shows that service's own last sync. */
+    @Volatile private var statusFor: String? = null
+
+    fun activeService(context: Context): CloudService? = CloudServices.byId(settings(context).prefs.cloudService)
+
+    /** Seed the status flow from the active service's last persisted sync (for the sidebar on a fresh launch). */
     fun primeStatus(context: Context) {
-        if (_status.value.lastSyncMs != 0L || _status.value.running) return
-        runCatching {
-            val f = statusFile(context)
-            if (f.exists()) {
-                val o = org.json.JSONObject(f.readText())
-                val arr = o.optJSONArray("conflicts")
-                val conflicts = if (arr != null) (0 until arr.length()).map { arr.getString(it) } else emptyList()
-                _status.value = Status(lastSyncMs = o.optLong("lastSyncMs"), fileCount = o.optInt("fileCount"), conflicts = conflicts)
-            }
-        }
+        val id = settings(context).prefs.cloudService
+        if (statusFor == id) return
+        statusFor = id
+        _status.value = runCatching {
+            val f = statusFile(context, id)
+            if (!f.exists()) return@runCatching Status()
+            val o = org.json.JSONObject(f.readText())
+            val arr = o.optJSONArray("conflicts")
+            val conflicts = if (arr != null) (0 until arr.length()).map { arr.getString(it) } else emptyList()
+            Status(lastSyncMs = o.optLong("lastSyncMs"), fileCount = o.optInt("fileCount"), conflicts = conflicts)
+        }.getOrDefault(Status())
     }
 
     /** Dismiss the conflict banner (the notes were reviewed). */
     fun clearConflicts(context: Context) {
         _status.value = _status.value.copy(conflicts = emptyList())
-        persistStatus(context, _status.value)
+        statusFor?.let { persistStatus(context, it, _status.value) }
     }
 
-    private fun statusFile(context: Context) =
-        java.io.File(java.io.File(context.filesDir, "config").apply { mkdirs() }, "filen_status.json")
+    private fun statusFile(context: Context, serviceId: String) =
+        java.io.File(java.io.File(context.filesDir, "config").apply { mkdirs() }, "${serviceId}_status.json")
 
-    private fun persistStatus(context: Context, s: Status) {
+    private fun persistStatus(context: Context, serviceId: String, s: Status) {
         runCatching {
-            statusFile(context).writeText(
+            statusFile(context, serviceId).writeText(
                 org.json.JSONObject()
                     .put("lastSyncMs", s.lastSyncMs)
                     .put("fileCount", s.fileCount)
@@ -80,55 +88,49 @@ object FilenSyncManager {
         }
     }
 
-    fun session(context: Context): FilenSession? = FilenSecureStore(context).load()
-
     fun isConfigured(context: Context): Boolean {
-        val prefs = settings(context).prefs
-        return session(context) != null && prefs.filenFolderUuid.isNotEmpty()
+        val service = activeService(context) ?: return false
+        return service.account(context) != null && folderId(context, service).isNotEmpty()
     }
 
-    suspend fun login(context: Context, email: String, password: String, twoFactorCode: String): Result<FilenSession> =
-        withContext(Dispatchers.IO) {
-            runCatching {
-                val session = FilenClient.login(FilenApi(), email.trim(), password, twoFactorCode)
-                FilenSecureStore(context).save(session)
-                session
-            }
+    fun signOut(context: Context, service: CloudService) {
+        service.signOut(context)
+        if (activeService(context) == service) {
+            WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
+            _status.value = Status()
         }
-
-    fun logout(context: Context) {
-        FilenSecureStore(context).clear()
-        WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
-        _status.value = Status()
     }
 
-    suspend fun listFolders(context: Context, parentUuid: String): Result<List<Pair<String, FilenApi.RemoteFolder>>> =
+    suspend fun listFolders(context: Context, service: CloudService, parentId: String): Result<List<CloudStorage.RemoteFolder>> =
         withContext(Dispatchers.IO) {
-            runCatching { clientOrThrow(context).listFolders(parentUuid) }
+            runCatching { service.storage(context).list(parentId).folders }
         }
 
-    suspend fun createFolder(context: Context, parentUuid: String, name: String): Result<String> =
+    suspend fun createFolder(context: Context, service: CloudService, parentId: String, name: String): Result<String> =
         withContext(Dispatchers.IO) {
-            runCatching { clientOrThrow(context).createFolder(parentUuid, name) }
+            runCatching { service.storage(context).createFolder(parentId, name) }
         }
 
-    suspend fun syncNow(context: Context): Result<FilenSyncEngine.Summary> = withContext(Dispatchers.IO) {
+    suspend fun syncNow(context: Context): Result<SyncEngine.Summary> = withContext(Dispatchers.IO) {
         syncMutex.withLock {
             backgroundQueued.set(false) // this pass covers anything queued before it started
+            primeStatus(context)
+            val service = activeService(context)
             _status.value = _status.value.copy(running = true, message = "Syncing")
             val result = runCatching {
                 val prefs = settings(context).prefs
-                require(prefs.filenSyncDirection != "off") { "Sync direction is off" }
-                val folderUuid = prefs.filenFolderUuid
-                require(folderUuid.isNotEmpty()) { "No Filen folder selected" }
+                require(service != null) { "No cloud service selected" }
+                require(prefs.syncDirection != "off") { "Sync direction is off" }
+                val folderId = folderId(context, service)
+                require(folderId.isNotEmpty()) { "No ${service.displayName} folder selected" }
                 val treeUri = effectiveTreeUri(context)
-                val client = clientOrThrow(context)
-                val state = FilenSyncState.load(context)
-                val up = prefs.filenSyncDirection == "both" || prefs.filenSyncDirection == "up"
-                val down = prefs.filenSyncDirection == "both" || prefs.filenSyncDirection == "down"
-                val summary = FilenSyncEngine(context, treeUri, client, folderUuid, up, down).sync(state)
-                runCatching { FilenSettingsSync.sync(context, client, folderUuid, state) }
-                state.save(context)
+                val storage = service.storage(context)
+                val state = SyncState.load(context, service.id)
+                val up = prefs.syncDirection == "both" || prefs.syncDirection == "up"
+                val down = prefs.syncDirection == "both" || prefs.syncDirection == "down"
+                val summary = SyncEngine(context, treeUri, storage, folderId, service.id, up, down).sync(state)
+                runCatching { SettingsSync.sync(context, storage, folderId, state) }
+                state.save(context, service.id)
                 summary to state.filePaths().count { !it.startsWith(".") }
             }
             val newConflicts = result.getOrNull()?.first?.conflictNotes
@@ -151,14 +153,14 @@ object FilenSyncManager {
                 conflicts = (_status.value.conflicts + newConflicts).distinct().takeLast(50),
             )
             _status.value = status
-            if (result.isSuccess) persistStatus(context, status)
+            if (result.isSuccess && service != null) persistStatus(context, service.id, status)
             result.map { it.first }
         }
     }
 
     /** Fire-and-forget sync when a note is closed, if sync on note close is on. */
     fun syncOnNoteExit(context: Context) {
-        if (settings(context.applicationContext).prefs.filenSyncOnNoteExit) syncInBackground(context)
+        if (settings(context.applicationContext).prefs.syncOnNoteExit) syncInBackground(context)
     }
 
     /** Fire-and-forget sync when the app comes to the foreground, if sync on app open is on. */
@@ -166,7 +168,7 @@ object FilenSyncManager {
         val appCtx = context.applicationContext
         // Off the main thread: on a cold start this is the first settings load and session decrypt.
         exitSyncScope.launch {
-            if (!settings(appCtx).prefs.filenSyncOnAppOpen) return@launch
+            if (!settings(appCtx).prefs.syncOnAppOpen) return@launch
             primeStatus(appCtx)
             // Coming back from a file picker or share sheet also starts the activity; skip if we just synced.
             if (System.currentTimeMillis() - _status.value.lastSyncMs < APP_OPEN_MIN_GAP_MS) return@launch
@@ -177,8 +179,8 @@ object FilenSyncManager {
     private fun syncInBackground(context: Context) {
         val appCtx = context.applicationContext
         val prefs = settings(appCtx).prefs
-        if (!prefs.filenSyncEnabled || prefs.filenSyncDirection == "off" || !isConfigured(appCtx)) return
-        if (prefs.filenWifiOnly && !isUnmetered(appCtx)) return
+        if (prefs.syncDirection == "off" || !isConfigured(appCtx)) return
+        if (prefs.syncWifiOnly && !isUnmetered(appCtx)) return
         // A sync already running may have passed the just-saved note, so queue one pass after it (at most one waits).
         if (!backgroundQueued.compareAndSet(false, true)) return
         exitSyncScope.launch { runCatching { syncNow(appCtx) } }
@@ -190,29 +192,28 @@ object FilenSyncManager {
         return caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
     }
 
-    /** (Re)schedule or cancel the periodic job to match current preferences. */
+    /** (Re)schedule or cancel the periodic job to match current preferences and the selected service. */
     fun reschedule(context: Context) {
         val prefs = settings(context).prefs
         val wm = WorkManager.getInstance(context)
-        if (!prefs.filenSyncEnabled || prefs.filenSyncDirection == "off" || !prefs.filenAutoSync || !isConfigured(context)) {
+        wm.cancelUniqueWork(LEGACY_WORK_NAME)
+        if (prefs.syncDirection == "off" || !prefs.syncAuto || !isConfigured(context)) {
             wm.cancelUniqueWork(WORK_NAME)
             return
         }
         val constraints = Constraints.Builder()
-            .setRequiredNetworkType(if (prefs.filenWifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED)
+            .setRequiredNetworkType(if (prefs.syncWifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED)
             .build()
-        val interval = prefs.filenSyncIntervalMinutes.toLong().coerceAtLeast(15)
-        val request = PeriodicWorkRequestBuilder<FilenSyncWorker>(interval, TimeUnit.MINUTES)
+        val interval = prefs.syncIntervalMinutes.toLong().coerceAtLeast(15)
+        val request = PeriodicWorkRequestBuilder<SyncWorker>(interval, TimeUnit.MINUTES)
             .setConstraints(constraints)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.MINUTES)
             .build()
         wm.enqueueUniquePeriodicWork(WORK_NAME, ExistingPeriodicWorkPolicy.UPDATE, request)
     }
 
-    private fun clientOrThrow(context: Context): FilenClient {
-        val session = session(context) ?: throw IllegalStateException("Not signed in to Filen")
-        return FilenClient(FilenApi(session.apiKey), session)
-    }
+    fun folderId(context: Context, service: CloudService): String =
+        settings(context).prefs.cloudFolders[service.id]?.id.orEmpty()
 
     private fun settings(context: Context) = LiveSettings.get(SettingsRepository(context))
 

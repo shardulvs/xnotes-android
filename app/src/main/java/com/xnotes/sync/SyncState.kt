@@ -1,4 +1,4 @@
-package com.xnotes.sync.filen
+package com.xnotes.sync
 
 import android.content.Context
 import org.json.JSONObject
@@ -9,7 +9,7 @@ import java.io.File
  * relative to the browse root. Change detection compares each side to its own baseline,
  * so clock skew between device and cloud does not matter.
  */
-class FilenSyncState(private val map: MutableMap<String, Entry> = HashMap()) {
+class SyncState(private val map: MutableMap<String, Entry> = HashMap()) {
     data class Entry(val remoteUuid: String, val remoteLastModified: Long, val localModified: Long, val size: Long)
 
     fun get(path: String): Entry? = map[path]
@@ -24,7 +24,7 @@ class FilenSyncState(private val map: MutableMap<String, Entry> = HashMap()) {
     fun putFolder(path: String, uuid: String) { map["$path/"] = Entry(uuid, 0, 0, 0) }
     fun removeFolder(path: String) { map.remove("$path/") }
 
-    fun save(context: Context) {
+    fun save(context: Context, serviceId: String) {
         val root = JSONObject()
         for ((path, e) in map) {
             root.put(path, JSONObject()
@@ -32,16 +32,17 @@ class FilenSyncState(private val map: MutableMap<String, Entry> = HashMap()) {
                 .put("localModified", e.localModified).put("size", e.size))
         }
         runCatching {
-            val tmp = File(file(context).parentFile, "filen_sync_state.json.tmp")
+            val target = file(context, serviceId)
+            val tmp = File(target.parentFile, "${target.name}.tmp")
             tmp.writeText(root.toString())
-            tmp.renameTo(file(context))
+            tmp.renameTo(target)
         }
     }
 
     companion object {
-        fun load(context: Context): FilenSyncState {
-            val f = file(context)
-            if (!f.exists()) return FilenSyncState()
+        fun load(context: Context, serviceId: String): SyncState {
+            val f = file(context, serviceId)
+            if (!f.exists()) return SyncState()
             return runCatching {
                 val root = JSONObject(f.readText())
                 val map = HashMap<String, Entry>()
@@ -49,13 +50,13 @@ class FilenSyncState(private val map: MutableMap<String, Entry> = HashMap()) {
                     val o = root.getJSONObject(key)
                     map[key] = Entry(o.getString("remoteUuid"), o.optLong("remoteLastModified"), o.optLong("localModified"), o.optLong("size"))
                 }
-                FilenSyncState(map)
-            }.getOrDefault(FilenSyncState())
+                SyncState(map)
+            }.getOrDefault(SyncState())
         }
 
-        private fun file(context: Context): File {
+        private fun file(context: Context, serviceId: String): File {
             val dir = File(context.filesDir, "config").apply { mkdirs() }
-            return File(dir, "filen_sync_state.json")
+            return File(dir, "${serviceId}_sync_state.json")
         }
     }
 }

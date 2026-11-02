@@ -557,10 +557,10 @@ private fun BackstageSidebar(modifier: Modifier, editor: Editor, nav: SidebarNav
             }
         }
         RailDivider()
-        if (nav.showSync) FilenSyncNowCommand(nav.onSyncSettings)
+        if (nav.showSync) SyncNowCommand(nav.onSyncSettings)
         Command(XnotesIcons.sliders, stringResource(R.string.preferences), selected = nav.view == BackstageView.PREFERENCES) { nav.onSelectView(BackstageView.PREFERENCES) }
         if (nav.showAbout) Command(XnotesIcons.info, stringResource(R.string.about), selected = nav.view == BackstageView.ABOUT) { nav.onSelectView(BackstageView.ABOUT) }
-        FilenSidebarStatus()
+        SyncSidebarStatus()
     }
 }
 
@@ -595,7 +595,7 @@ private fun BackstageRail(modifier: Modifier, nav: SidebarNav, onExpand: () -> U
                 }
             }
         }
-        if (nav.showSync) FilenSyncRailItem(nav.onSyncSettings)
+        if (nav.showSync) SyncRailItem(nav.onSyncSettings)
         RailItem(XnotesIcons.sliders, stringResource(R.string.preferences), selected = nav.view == BackstageView.PREFERENCES) { nav.onSelectView(BackstageView.PREFERENCES) }
         if (nav.showAbout) RailItem(XnotesIcons.info, stringResource(R.string.about), selected = nav.view == BackstageView.ABOUT) { nav.onSelectView(BackstageView.ABOUT) }
     }
@@ -949,15 +949,15 @@ private fun HomePane(
             },
     ) {
         Column(Modifier.fillMaxSize()) {
-            // Filen sync heads-up when a note was changed on two devices; renders nothing otherwise.
+            // Cloud sync heads-up when a note was changed on two devices; renders nothing otherwise.
             SyncConflictBanner()
-            // Pulling down from the top syncs with Filen when it is set up, then lists the folder again.
+            // Pulling down from the top syncs with the cloud service when it is set up, then lists the folder again.
             PullToRefreshBox(
                 isRefreshing = refreshing,
                 onRefresh = {
                     refreshing = true
                     scope.launch {
-                        if (com.xnotes.sync.filen.FilenSyncManager.isConfigured(ctx)) com.xnotes.sync.filen.FilenSyncManager.syncNow(ctx)
+                        if (com.xnotes.sync.SyncManager.isConfigured(ctx)) com.xnotes.sync.SyncManager.syncNow(ctx)
                         editor.relistTree()
                         refreshing = false
                     }
@@ -2584,44 +2584,44 @@ internal fun EmptyPane(text: String, art: EmptyArt? = null, actions: (@Composabl
     }
 }
 
-/** A "Sync now" sidebar action, shown only when a Filen account is signed in; tap syncs, long-press opens sync settings. */
+/** A "Sync now" sidebar action, shown only when the selected cloud service is set up; tap syncs, long-press opens sync settings. */
 @Composable
-private fun FilenSyncNowCommand(onOpenSettings: () -> Unit) {
+private fun SyncNowCommand(onOpenSettings: () -> Unit) {
     val ctx = LocalContext.current
-    if (!com.xnotes.sync.filen.FilenSyncManager.isConfigured(ctx)) return
-    val status by com.xnotes.sync.filen.FilenSyncManager.status.collectAsState()
+    if (!com.xnotes.sync.SyncManager.isConfigured(ctx)) return
+    val status by com.xnotes.sync.SyncManager.status.collectAsState()
     val scope = rememberCoroutineScope()
     Command(Icons.Filled.Sync, if (status.running) "Syncing..." else "Sync now", onLongClick = onOpenSettings) {
-        if (!status.running) scope.launch { com.xnotes.sync.filen.FilenSyncManager.syncNow(ctx) }
+        if (!status.running) scope.launch { com.xnotes.sync.SyncManager.syncNow(ctx) }
     }
 }
 
-/** [FilenSyncNowCommand] for the collapsed rail: tap syncs, hold opens the sync settings. */
+/** [SyncNowCommand] for the collapsed rail: tap syncs, hold opens the sync settings. */
 @Composable
-private fun FilenSyncRailItem(onOpenSettings: () -> Unit) {
+private fun SyncRailItem(onOpenSettings: () -> Unit) {
     val ctx = LocalContext.current
-    if (!com.xnotes.sync.filen.FilenSyncManager.isConfigured(ctx)) return
-    val status by com.xnotes.sync.filen.FilenSyncManager.status.collectAsState()
+    if (!com.xnotes.sync.SyncManager.isConfigured(ctx)) return
+    val status by com.xnotes.sync.SyncManager.status.collectAsState()
     val scope = rememberCoroutineScope()
     RailItem(Icons.Filled.Sync, if (status.running) "Syncing..." else "Sync now", selected = status.running, onLongClick = onOpenSettings) {
-        if (!status.running) scope.launch { com.xnotes.sync.filen.FilenSyncManager.syncNow(ctx) }
+        if (!status.running) scope.launch { com.xnotes.sync.SyncManager.syncNow(ctx) }
     }
 }
 
 /**
- * A quiet line at the foot of the sidebar: when Filen sync is set up, how long ago the last sync
+ * A quiet line at the foot of the sidebar: when cloud sync is set up, how long ago the last sync
  * ran and how many files are tracked. Nothing shows until the account is configured.
  */
 @Composable
-private fun FilenSidebarStatus() {
+private fun SyncSidebarStatus() {
     val palette = LocalPalette.current
     val ctx = LocalContext.current
-    if (!com.xnotes.sync.filen.FilenSyncManager.isConfigured(ctx)) return
-    LaunchedEffect(Unit) { com.xnotes.sync.filen.FilenSyncManager.primeStatus(ctx) }
-    val status by com.xnotes.sync.filen.FilenSyncManager.status.collectAsState()
+    if (!com.xnotes.sync.SyncManager.isConfigured(ctx)) return
+    LaunchedEffect(Unit) { com.xnotes.sync.SyncManager.primeStatus(ctx) }
+    val status by com.xnotes.sync.SyncManager.status.collectAsState()
     val line = when {
         status.running -> "Syncing…"
-        status.lastSyncMs == 0L -> "Filen: not synced yet"
+        status.lastSyncMs == 0L -> "${com.xnotes.sync.SyncManager.activeService(ctx)?.displayName}: not synced yet"
         else -> {
             val ago = android.text.format.DateUtils.getRelativeTimeSpanString(
                 status.lastSyncMs, System.currentTimeMillis(), android.text.format.DateUtils.MINUTE_IN_MILLIS,
@@ -2647,8 +2647,8 @@ private fun FilenSidebarStatus() {
 private fun SyncConflictBanner() {
     val palette = LocalPalette.current
     val ctx = LocalContext.current
-    LaunchedEffect(Unit) { com.xnotes.sync.filen.FilenSyncManager.primeStatus(ctx) }
-    val status by com.xnotes.sync.filen.FilenSyncManager.status.collectAsState()
+    LaunchedEffect(Unit) { com.xnotes.sync.SyncManager.primeStatus(ctx) }
+    val status by com.xnotes.sync.SyncManager.status.collectAsState()
     val conflicts = status.conflicts
     if (conflicts.isEmpty()) return
     Column(
@@ -2667,7 +2667,7 @@ private fun SyncConflictBanner() {
                 if (conflicts.size == 1) "A note was changed on another device too" else "${conflicts.size} notes were changed on another device too",
                 color = palette.text.toComposeColor(), fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = { com.xnotes.sync.filen.FilenSyncManager.clearConflicts(ctx) }) { Text("Dismiss") }
+            TextButton(onClick = { com.xnotes.sync.SyncManager.clearConflicts(ctx) }) { Text("Dismiss") }
         }
         Spacer(Modifier.height(4.dp))
         conflicts.take(6).forEach { line ->

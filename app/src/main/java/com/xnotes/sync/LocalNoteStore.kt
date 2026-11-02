@@ -1,4 +1,4 @@
-package com.xnotes.sync.filen
+package com.xnotes.sync
 
 import android.content.Context
 import android.net.Uri
@@ -10,7 +10,7 @@ import com.xnotes.core.util.ReaderKind
  * also covers the app's internal DocumentsProvider). Mirrors the DocumentsContract calls
  * the Editor already uses, but without depending on it, so background sync can run.
  */
-object FilenLocalStore {
+object LocalNoteStore {
     private val NOTE_EXTENSIONS = listOf(".xnote", ".xcanvas")
     private const val SIDECAR_DIR = ".xnote"
 

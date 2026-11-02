@@ -11,7 +11,7 @@ import com.xnotes.core.pal.ImageCodec
 import com.xnotes.core.pal.TextMeasurer
 import com.xnotes.format.CanvasCodec
 import com.xnotes.format.DocumentCodec
-import com.xnotes.sync.filen.FilenLocalStore
+import com.xnotes.sync.LocalNoteStore
 import java.io.File
 import java.security.MessageDigest
 import kotlin.math.abs
@@ -31,7 +31,7 @@ class NotePorter(
     private val backupRoot: File,
 ) {
     /** A note holding [shapes] shapes from the fork's own kinds. */
-    class Found(val entry: FilenLocalStore.LocalEntry, val shapes: Int)
+    class Found(val entry: LocalNoteStore.LocalEntry, val shapes: Int)
 
     class Result(val ported: List<String>, val failed: List<String>, val skipped: List<String>, val backupDir: File?)
 
@@ -40,9 +40,9 @@ class NotePorter(
         val docCodec = DocumentCodec(imageCodec, measurer)
         val canvasCodec = CanvasCodec(imageCodec, measurer)
         val out = ArrayList<Found>()
-        for (entry in FilenLocalStore.listNotes(context, treeUri)) {
+        for (entry in LocalNoteStore.listNotes(context, treeUri)) {
             if (isCancelled()) break
-            if (!FilenLocalStore.isNote(entry.relativePath)) continue
+            if (!LocalNoteStore.isNote(entry.relativePath)) continue
             val count = runCatching {
                 open(entry.documentUri)?.use { input ->
                     if (isCanvas(entry)) canvasCodec.read(input).let { canvasCodec.forkShapesRead }
@@ -76,7 +76,7 @@ class NotePorter(
     /** Set once the file itself has been written to, after which its backup is never dropped. */
     private var touched = false
 
-    private fun portOne(entry: FilenLocalStore.LocalEntry, backup: File): Boolean {
+    private fun portOne(entry: LocalNoteStore.LocalEntry, backup: File): Boolean {
         val dir = File(workDir, "port-" + System.nanoTime()).apply { mkdirs() }
         touched = false
         var ok = false
@@ -146,7 +146,7 @@ class NotePorter(
 
     private fun open(uri: String) = context.contentResolver.openInputStream(Uri.parse(uri))
 
-    private fun isCanvas(entry: FilenLocalStore.LocalEntry) = entry.relativePath.endsWith(".xcanvas", ignoreCase = true)
+    private fun isCanvas(entry: LocalNoteStore.LocalEntry) = entry.relativePath.endsWith(".xcanvas", ignoreCase = true)
 
     /** One PDF reader per extracted source, for the markups' page geometry; closed together. */
     private class PdfSources {

@@ -42,10 +42,13 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.xnotes.settings.CloudFolder
 import com.xnotes.settings.Preferences
-import com.xnotes.sync.filen.FilenApi
-import com.xnotes.sync.filen.FilenSession
-import com.xnotes.sync.filen.FilenSyncManager
+import com.xnotes.sync.CloudService
+import com.xnotes.sync.CloudServices
+import com.xnotes.sync.CloudStorage
+import com.xnotes.sync.SyncManager
+import com.xnotes.sync.filen.FilenService
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
 import kotlinx.coroutines.launch
@@ -63,54 +66,70 @@ private val SYNC_INTERVALS = listOf(
     1440 to "Once a day",
 )
 
-private val SYNC_DIRECTIONS = listOf(
+private fun syncDirections(service: String) = listOf(
     "both" to "Both ways",
-    "up" to "N-Notes to Filen",
-    "down" to "Filen to N-Notes",
+    "up" to "N-Notes to $service",
+    "down" to "$service to N-Notes",
     "off" to "None - off",
 )
 
 @Composable
-fun FilenSyncSection(editor: Editor) {
+fun CloudSyncSection(editor: Editor) {
     val palette = LocalPalette.current
     val context = LocalContext.current
     var prefs by remember { mutableStateOf(editor.preferences) }
     fun update(p: Preferences) {
         prefs = p
         editor.applyPreferences(p)
-        FilenSyncManager.reschedule(context)
+        SyncManager.reschedule(context)
     }
     LaunchedEffect(editor.prefsVersion) { prefs = editor.preferences }
+    LaunchedEffect(prefs.cloudService) { SyncManager.primeStatus(context) }
 
-    var session by remember { mutableStateOf(FilenSyncManager.session(context)) }
-    val status by FilenSyncManager.status.collectAsState()
+    val status by SyncManager.status.collectAsState()
+    val service = CloudServices.byId(prefs.cloudService)
+    var account by remember(service) { mutableStateOf(service?.account(context)) }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Filen sync", color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        Text("Cloud sync", color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 15.sp)
         Text(
-            "Back up and sync your notes to Filen end-to-end encrypted cloud storage.",
+            "Back up and sync your notes to a cloud service. Only the selected service syncs.",
             color = palette.textDim.toComposeColor(), fontSize = 12.sp,
         )
-        if (session == null) {
-            FilenSignIn(palette, onSignedIn = { session = it })
-        } else {
-            FilenSignedIn(
-                editor = editor,
+        SyncLabel("Cloud service")
+        OptionDropdown(
+            listOf(CloudServices.NONE to "None - off") + CloudServices.all.map { it.id to it.displayName },
+            prefs.cloudService,
+        ) { update(prefs.copy(cloudService = it)) }
+        when {
+            service == null -> Unit
+            account == null -> ServiceSignIn(service, onSignedIn = { account = service.account(context) })
+            else -> SignedIn(
+                service = service,
+                account = account!!,
                 prefs = prefs,
-                session = session!!,
                 status = status,
                 onUpdate = ::update,
                 onSignOut = {
-                    FilenSyncManager.logout(context)
-                    session = null
+                    SyncManager.signOut(context, service)
+                    account = null
                 },
             )
         }
     }
 }
 
+/** Each service signs in its own way, so this is the one place that knows the concrete services. */
 @Composable
-private fun FilenSignIn(palette: com.xnotes.ui.theme.Palette, onSignedIn: (FilenSession) -> Unit) {
+private fun ServiceSignIn(service: CloudService, onSignedIn: () -> Unit) {
+    when (service) {
+        FilenService -> FilenSignIn(onSignedIn)
+    }
+}
+
+@Composable
+private fun FilenSignIn(onSignedIn: () -> Unit) {
+    val palette = LocalPalette.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var email by remember { mutableStateOf("") }
@@ -119,9 +138,9 @@ private fun FilenSignIn(palette: com.xnotes.ui.theme.Palette, onSignedIn: (Filen
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    FilenField("Email", email, KeyboardType.Email) { email = it }
-    FilenField("Password", password, KeyboardType.Password, mask = true) { password = it }
-    FilenField("Two-factor code (optional)", twoFactor, KeyboardType.Number) { twoFactor = it }
+    SyncField("Email", email, KeyboardType.Email) { email = it }
+    SyncField("Password", password, KeyboardType.Password, mask = true) { password = it }
+    SyncField("Two-factor code (optional)", twoFactor, KeyboardType.Number) { twoFactor = it }
     error?.let { Text(it, color = palette.accent.toComposeColor(), fontSize = 12.sp) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Button(
@@ -129,9 +148,9 @@ private fun FilenSignIn(palette: com.xnotes.ui.theme.Palette, onSignedIn: (Filen
                 error = null
                 busy = true
                 scope.launch {
-                    val result = FilenSyncManager.login(context, email, password, twoFactor)
+                    val result = FilenService.signIn(context, email, password, twoFactor)
                     busy = false
-                    result.fold({ onSignedIn(it) }, { error = it.message ?: "Sign-in failed" })
+                    result.fold({ onSignedIn() }, { error = it.message ?: "Sign-in failed" })
                 }
             },
             enabled = !busy && email.isNotBlank() && password.isNotBlank(),
@@ -143,11 +162,11 @@ private fun FilenSignIn(palette: com.xnotes.ui.theme.Palette, onSignedIn: (Filen
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun FilenSignedIn(
-    editor: Editor,
+private fun SignedIn(
+    service: CloudService,
+    account: String,
     prefs: Preferences,
-    session: FilenSession,
-    status: FilenSyncManager.Status,
+    status: SyncManager.Status,
     onUpdate: (Preferences) -> Unit,
     onSignOut: () -> Unit,
 ) {
@@ -155,44 +174,44 @@ private fun FilenSignedIn(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showPicker by remember { mutableStateOf(false) }
+    val folder = prefs.cloudFolders[service.id]
 
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text("Signed in as ${session.email}", color = palette.text.toComposeColor(), fontSize = 13.sp, modifier = Modifier.weight(1f))
+        Text("Signed in as $account", color = palette.text.toComposeColor(), fontSize = 13.sp, modifier = Modifier.weight(1f))
         TextButton(onClick = onSignOut) { Text("Sign out", fontSize = 13.sp) }
     }
 
-    FilenLabel("Backup folder")
+    SyncLabel("Backup folder")
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(
-            prefs.filenFolderName.ifEmpty { "None selected" },
-            color = if (prefs.filenFolderName.isEmpty()) palette.textDim.toComposeColor() else palette.text.toComposeColor(),
+            folder?.name?.ifEmpty { null } ?: "None selected",
+            color = if (folder?.name.isNullOrEmpty()) palette.textDim.toComposeColor() else palette.text.toComposeColor(),
             fontSize = 13.sp, modifier = Modifier.weight(1f),
         )
         TextButton(onClick = { showPicker = true }) { Text("Choose", fontSize = 13.sp) }
     }
 
-    FilenCheckRow("Enable sync", prefs.filenSyncEnabled) { onUpdate(prefs.copy(filenSyncEnabled = it)) }
-    FilenCheckRow("Only on Wi-Fi", prefs.filenWifiOnly) { onUpdate(prefs.copy(filenWifiOnly = it)) }
+    SyncCheckRow("Only on Wi-Fi", prefs.syncWifiOnly) { onUpdate(prefs.copy(syncWifiOnly = it)) }
 
-    FilenLabel("When to sync")
+    SyncLabel("When to sync")
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        CheckChip("Automatically", prefs.filenAutoSync) { onUpdate(prefs.copy(filenAutoSync = !prefs.filenAutoSync)) }
-        CheckChip("On note close", prefs.filenSyncOnNoteExit) { onUpdate(prefs.copy(filenSyncOnNoteExit = !prefs.filenSyncOnNoteExit)) }
-        CheckChip("On app open", prefs.filenSyncOnAppOpen) { onUpdate(prefs.copy(filenSyncOnAppOpen = !prefs.filenSyncOnAppOpen)) }
+        CheckChip("Automatically", prefs.syncAuto) { onUpdate(prefs.copy(syncAuto = !prefs.syncAuto)) }
+        CheckChip("On note close", prefs.syncOnNoteExit) { onUpdate(prefs.copy(syncOnNoteExit = !prefs.syncOnNoteExit)) }
+        CheckChip("On app open", prefs.syncOnAppOpen) { onUpdate(prefs.copy(syncOnAppOpen = !prefs.syncOnAppOpen)) }
     }
 
-    FilenLabel("Sync direction")
-    OptionDropdown(SYNC_DIRECTIONS, prefs.filenSyncDirection) { onUpdate(prefs.copy(filenSyncDirection = it)) }
+    SyncLabel("Sync direction")
+    OptionDropdown(syncDirections(service.displayName), prefs.syncDirection) { onUpdate(prefs.copy(syncDirection = it)) }
 
-    FilenLabel("Sync frequency")
-    OptionDropdown(SYNC_INTERVALS.map { it.first.toString() to it.second }, prefs.filenSyncIntervalMinutes.toString()) {
-        onUpdate(prefs.copy(filenSyncIntervalMinutes = it.toInt()))
+    SyncLabel("Sync frequency")
+    OptionDropdown(SYNC_INTERVALS.map { it.first.toString() to it.second }, prefs.syncIntervalMinutes.toString()) {
+        onUpdate(prefs.copy(syncIntervalMinutes = it.toInt()))
     }
 
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Button(
-            onClick = { scope.launch { FilenSyncManager.syncNow(context) } },
-            enabled = !status.running && prefs.filenFolderUuid.isNotEmpty() && prefs.filenSyncDirection != "off",
+            onClick = { scope.launch { SyncManager.syncNow(context) } },
+            enabled = !status.running && !folder?.id.isNullOrEmpty() && prefs.syncDirection != "off",
             colors = ButtonDefaults.buttonColors(containerColor = palette.accent.toComposeColor(), contentColor = palette.bg.toComposeColor()),
         ) { Text("Sync now") }
         if (status.running) CircularProgressIndicator(modifier = Modifier.size(20.dp), color = palette.accent.toComposeColor(), strokeWidth = 2.dp)
@@ -207,24 +226,24 @@ private fun FilenSignedIn(
     if (statusLine.isNotEmpty()) Text(statusLine, color = palette.textDim.toComposeColor(), fontSize = 12.sp)
 
     if (showPicker) {
-        FilenFolderPicker(
-            baseUuid = session.baseFolderUuid,
+        FolderPicker(
+            service = service,
             onDismiss = { showPicker = false },
-            onSelected = { uuid, path ->
+            onSelected = { id, path ->
                 showPicker = false
-                onUpdate(prefs.copy(filenFolderUuid = uuid, filenFolderName = path))
+                onUpdate(prefs.copy(cloudFolders = prefs.cloudFolders + (service.id to CloudFolder(id, path))))
             },
         )
     }
 }
 
 @Composable
-private fun FilenFolderPicker(baseUuid: String, onDismiss: () -> Unit, onSelected: (String, String) -> Unit) {
+private fun FolderPicker(service: CloudService, onDismiss: () -> Unit, onSelected: (String, String) -> Unit) {
     val palette = LocalPalette.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var stack by remember { mutableStateOf(listOf(baseUuid to "Drive root")) }
-    var folders by remember { mutableStateOf<List<Pair<String, FilenApi.RemoteFolder>>>(emptyList()) }
+    var stack by remember { mutableStateOf(listOf(service.rootFolderId(context) to "Drive root")) }
+    var folders by remember { mutableStateOf<List<CloudStorage.RemoteFolder>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var newFolder by remember { mutableStateOf("") }
@@ -235,8 +254,8 @@ private fun FilenFolderPicker(baseUuid: String, onDismiss: () -> Unit, onSelecte
     LaunchedEffect(current.first, reloadKey) {
         loading = true
         error = null
-        FilenSyncManager.listFolders(context, current.first).fold(
-            { folders = it.sortedBy { f -> f.first.lowercase() }; loading = false },
+        SyncManager.listFolders(context, service, current.first).fold(
+            { folders = it.sortedBy { f -> f.name.lowercase() }; loading = false },
             { error = it.message; loading = false },
         )
     }
@@ -246,7 +265,7 @@ private fun FilenFolderPicker(baseUuid: String, onDismiss: () -> Unit, onSelecte
         confirmButton = { TextButton(onClick = { onSelected(current.first, pathLabel) }) { Text("Use this folder") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
         containerColor = palette.menuBg.toComposeColor(),
-        title = { Text("Choose Filen folder", color = palette.text.toComposeColor(), fontSize = 16.sp) },
+        title = { Text("Choose ${service.displayName} folder", color = palette.text.toComposeColor(), fontSize = 16.sp) },
         text = {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -261,11 +280,11 @@ private fun FilenFolderPicker(baseUuid: String, onDismiss: () -> Unit, onSelecte
                         error != null -> Text(error!!, color = palette.accent.toComposeColor(), fontSize = 12.sp, modifier = Modifier.align(Alignment.Center))
                         folders.isEmpty() -> Text("No subfolders", color = palette.textDim.toComposeColor(), fontSize = 12.sp, modifier = Modifier.align(Alignment.Center))
                         else -> Column(Modifier.verticalScroll(rememberScrollState())) {
-                            folders.forEach { (name, folder) ->
+                            folders.forEach { folder ->
                                 Text(
-                                    name, color = palette.text.toComposeColor(), fontSize = 14.sp,
+                                    folder.name, color = palette.text.toComposeColor(), fontSize = 14.sp,
                                     modifier = Modifier.fillMaxWidth()
-                                        .clickable { stack = stack + (folder.uuid to name) }
+                                        .clickable { stack = stack + (folder.id to folder.name) }
                                         .padding(vertical = 10.dp, horizontal = 8.dp),
                                 )
                             }
@@ -283,7 +302,7 @@ private fun FilenFolderPicker(baseUuid: String, onDismiss: () -> Unit, onSelecte
                             val name = newFolder.trim()
                             newFolder = ""
                             scope.launch {
-                                FilenSyncManager.createFolder(context, current.first, name).onSuccess { reloadKey++ }
+                                SyncManager.createFolder(context, service, current.first, name).onSuccess { reloadKey++ }
                             }
                         },
                     ) { Text("Create") }
@@ -294,8 +313,8 @@ private fun FilenFolderPicker(baseUuid: String, onDismiss: () -> Unit, onSelecte
 }
 
 @Composable
-private fun FilenField(label: String, value: String, keyboard: KeyboardType, mask: Boolean = false, onChange: (String) -> Unit) {
-    FilenLabel(label)
+private fun SyncField(label: String, value: String, keyboard: KeyboardType, mask: Boolean = false, onChange: (String) -> Unit) {
+    SyncLabel(label)
     OutlinedTextField(
         value = value, onValueChange = onChange, singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = keyboard),
@@ -305,13 +324,13 @@ private fun FilenField(label: String, value: String, keyboard: KeyboardType, mas
 }
 
 @Composable
-private fun FilenLabel(text: String) {
+private fun SyncLabel(text: String) {
     val palette = LocalPalette.current
     Text(text, color = palette.accent.toComposeColor(), fontSize = 13.sp, fontWeight = FontWeight.Medium)
 }
 
 @Composable
-private fun FilenCheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun SyncCheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     val palette = LocalPalette.current
     Row(
         Modifier.fillMaxWidth().heightIn(min = 40.dp).clickable { onChange(!checked) },

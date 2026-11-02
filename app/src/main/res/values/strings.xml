@@ -549,7 +549,7 @@
     <string name="port_failed_list">Not ported, left as they were: %1$s</string>
     <string name="port_skipped_list">Open in an editor, close and scan again: %1$s</string>
     <string name="port_backups">Old copies are kept in %1$s</string>
-    <string name="search_keywords_sync">Filen sync backup folder when to sync direction frequency wifi</string>
+    <string name="search_keywords_sync">Cloud sync service Filen backup folder when to sync direction frequency wifi</string>
     <string name="search_keywords_update">Updates check for update version release</string>
     <string name="insert_from_file">Insert from file...</string>
     <string name="add_image_page">Add image page...</string>

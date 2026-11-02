@@ -836,7 +836,7 @@ fun PreferencesPane(
                 TextButton(onClick = { onBackup(false) }) { Text(stringResource(R.string.import_settings), fontSize = 13.sp) }
             }
             HorizontalDivider(color = palette.border.toComposeColor())
-            Box(Modifier.onPlaced { syncTop = it.positionInParent().y.roundToInt() }.searchAnchor(stringResource(R.string.search_keywords_sync)).sectionAnchor("Filen sync")) { FilenSyncSection(editor) }
+            Box(Modifier.onPlaced { syncTop = it.positionInParent().y.roundToInt() }.searchAnchor(stringResource(R.string.search_keywords_sync)).sectionAnchor("Cloud sync")) { CloudSyncSection(editor) }
             HorizontalDivider(color = palette.border.toComposeColor())
             Box(Modifier.searchAnchor(stringResource(R.string.search_keywords_port))) { PortSection(editor) }
             HorizontalDivider(color = palette.border.toComposeColor())

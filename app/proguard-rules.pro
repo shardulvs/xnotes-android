@@ -17,10 +17,10 @@
 -dontwarn org.apache.**
 -dontwarn org.bouncycastle.**
 
-# --- Filen sync ---------------------------------------------------------------------------------
+# --- Cloud sync ---------------------------------------------------------------------------------
 # WorkManager instantiates the worker reflectively by class name, and argon2kt binds its native
 # methods through JNI by class/method name. Renaming either breaks it at runtime.
--keep class com.xnotes.sync.filen.FilenSyncWorker { *; }
+-keep class com.xnotes.sync.SyncWorker { *; }
 -keep class com.lambdapioneer.argon2kt.** { *; }
 
 # --- Persisted model enums ----------------------------------------------------------------------

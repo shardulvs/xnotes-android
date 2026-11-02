@@ -1,0 +1,59 @@
+package com.xnotes.sync
+
+import android.content.Context
+import com.xnotes.sync.filen.FilenService
+
+/**
+ * A cloud provider notes can sync with. Each one owns its sign-in and session storage and hands the
+ * shared [SyncEngine] a [CloudStorage]; the engine, baseline, settings sync and scheduling stay generic.
+ */
+interface CloudService {
+    /** Stable id, stored in preferences and used to name the per-service sync files. */
+    val id: String
+    val displayName: String
+
+    /** The signed-in account's name, or null when signed out. */
+    fun account(context: Context): String?
+    fun signOut(context: Context)
+
+    /** The folder the folder picker starts in. Only called while signed in. */
+    fun rootFolderId(context: Context): String
+
+    /** Storage for the signed-in account. Throws when signed out. */
+    fun storage(context: Context): CloudStorage
+}
+
+/** The remote file operations the sync engine needs. Folder and file ids are opaque to the engine. */
+interface CloudStorage {
+    interface RemoteFile {
+        val id: String
+        val name: String
+        val size: Long
+        val lastModified: Long
+        /** Content hash in the format [hash] produces, or null when the service does not know it. */
+        val hash: String?
+    }
+
+    data class RemoteFolder(val id: String, val name: String)
+
+    class Listing(val folders: List<RemoteFolder>, val files: List<RemoteFile>)
+
+    fun list(folderId: String): Listing
+    fun createFolder(parentId: String, name: String): String
+
+    /** Resolves (creating as needed) a chain of subfolders, matched case-insensitively. Returns the deepest id. */
+    fun ensureFolderPath(parentId: String, segments: List<String>): String
+    fun upload(parentId: String, name: String, bytes: ByteArray, lastModified: Long): String
+    fun download(file: RemoteFile): ByteArray
+    fun trashFile(id: String)
+    fun trashFolder(id: String)
+    fun hash(bytes: ByteArray): String
+}
+
+object CloudServices {
+    const val NONE = "none"
+
+    val all: List<CloudService> = listOf(FilenService)
+
+    fun byId(id: String): CloudService? = all.firstOrNull { it.id == id }
+}
