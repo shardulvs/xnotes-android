@@ -75,6 +75,7 @@
     <string name="caption_intensity">Intensity</string>
     <string name="caption_straight_line">Straight line</string>
     <string name="caption_inverse">Inverse</string>
+    <string name="caption_flat_overlaps">Flat overlaps</string>
     <string name="caption_neon">Neon</string>
     <string name="tape_straight">Straight</string>
     <string name="tape_freehand">Freehand</string>
