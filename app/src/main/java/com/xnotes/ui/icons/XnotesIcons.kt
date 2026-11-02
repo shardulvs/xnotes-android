@@ -346,6 +346,7 @@ object XnotesIcons {
 
     // About / feedback links.
     val info = icon(circle(12.0, 12.0, 10.0), "M12 16v-4", "M12 8h.01")
+    val warning = icon("M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z", "M12 9v4", "M12 17h.01")
     val bug = icon(
         "M8 2l1.88 1.88", "M14.12 3.88 16 2",
         "M9 7.13v-1a3.003 3.003 0 1 1 6 0v1",

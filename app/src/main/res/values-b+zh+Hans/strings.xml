@@ -439,6 +439,7 @@
     <string name="port_skipped_list">已在编辑器中打开，请关闭后重新扫描：%1$s</string>
     <string name="port_backups">旧副本保存在 %1$s</string>
     <string name="search_keywords_sync">云同步 服务 Filen 同步 备份文件夹 同步时机 方向 频率 wifi</string>
+    <string name="sync_conflict_copy">同步冲突副本</string>
     <string name="search_keywords_update">更新 检查更新 版本 发布</string>
     <string name="insert_from_file">从文件插入...</string>
     <string name="add_image_page">添加图片页...</string>

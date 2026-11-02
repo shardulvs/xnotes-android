@@ -1,6 +1,7 @@
 package com.xnotes.sync
 
 import android.content.Context
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
@@ -10,7 +11,15 @@ import java.io.File
  * so clock skew between device and cloud does not matter.
  */
 class SyncState(private val map: MutableMap<String, Entry> = HashMap()) {
-    data class Entry(val remoteUuid: String, val remoteLastModified: Long, val localModified: Long, val size: Long)
+    /** [pages] and [doc] are a note's fingerprints at this sync (see XnoteBundle), null for other files and older baselines. */
+    data class Entry(
+        val remoteUuid: String,
+        val remoteLastModified: Long,
+        val localModified: Long,
+        val size: Long,
+        val pages: List<String>? = null,
+        val doc: String? = null,
+    )
 
     fun get(path: String): Entry? = map[path]
     fun put(path: String, entry: Entry) { map[path] = entry }
@@ -27,9 +36,11 @@ class SyncState(private val map: MutableMap<String, Entry> = HashMap()) {
     fun save(context: Context, serviceId: String) {
         val root = JSONObject()
         for ((path, e) in map) {
-            root.put(path, JSONObject()
+            val o = JSONObject()
                 .put("remoteUuid", e.remoteUuid).put("remoteLastModified", e.remoteLastModified)
-                .put("localModified", e.localModified).put("size", e.size))
+                .put("localModified", e.localModified).put("size", e.size)
+            if (e.pages != null && e.doc != null) o.put("pages", JSONArray(e.pages)).put("doc", e.doc)
+            root.put(path, o)
         }
         runCatching {
             val target = file(context, serviceId)
@@ -48,7 +59,11 @@ class SyncState(private val map: MutableMap<String, Entry> = HashMap()) {
                 val map = HashMap<String, Entry>()
                 for (key in root.keys()) {
                     val o = root.getJSONObject(key)
-                    map[key] = Entry(o.getString("remoteUuid"), o.optLong("remoteLastModified"), o.optLong("localModified"), o.optLong("size"))
+                    val pages = o.optJSONArray("pages")?.let { a -> (0 until a.length()).map { a.getString(it) } }
+                    map[key] = Entry(
+                        o.getString("remoteUuid"), o.optLong("remoteLastModified"), o.optLong("localModified"), o.optLong("size"),
+                        pages, o.optString("doc").takeIf { it.isNotEmpty() },
+                    )
                 }
                 SyncState(map)
             }.getOrDefault(SyncState())

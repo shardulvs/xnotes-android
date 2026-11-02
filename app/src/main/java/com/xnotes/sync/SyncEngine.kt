@@ -1,17 +1,16 @@
 package com.xnotes.sync
 
 import android.content.Context
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import com.xnotes.sync.merge.XnoteBundle
 
 /**
  * Two-way reconciliation between the local note tree and a folder on a [CloudService].
  *
  * Change detection compares each side to the recorded baseline (see [SyncState]).
- * Conflicts (both sides changed) are resolved losslessly: the remote copy is saved
- * beside the local one under a "(<service> conflict ...)" name and the local file becomes
- * the canonical remote version.
+ * Conflicts (both sides changed) are resolved losslessly: the remote copy is always saved
+ * beside the local one under a "(Sync Conflict ...)" name. A note (.xnote) is then merged page
+ * by page when it can be (see [XnoteBundle]); otherwise the local file becomes the canonical
+ * remote version.
  *
  * Deletions DO propagate: a note that was synced before and is now gone on one side is
  * removed on the other, unless that other side changed since the baseline (an edit always
@@ -28,8 +27,6 @@ class SyncEngine(
     private val treeUri: String,
     private val storage: CloudStorage,
     private val remoteRootId: String,
-    /** Goes into conflict copy names, e.g. "filen" gives "note (filen conflict 2026-01-01 1200).xnote". */
-    private val conflictTag: String,
     // Direction gates. [up] permits changes to the remote (uploads, remote deletes); [down]
     // permits changes to the local tree (downloads, local deletes). A conflict is resolved
     // toward whichever side is allowed; with both on it keeps the lossless conflict copy.
@@ -150,7 +147,7 @@ class SyncEngine(
                     val identical = if (rem.hash != null) rem.hash == storage.hash(bytes)
                         else storage.download(rem).contentEquals(bytes)
                     if (identical) {
-                        state.put(path, SyncState.Entry(rem.id, rem.lastModified, loc.modified, loc.size))
+                        state.put(path, withFingerprints(path, bytes, SyncState.Entry(rem.id, rem.lastModified, loc.modified, loc.size)))
                         summary.skipped++
                     } else {
                         resolveConflict(path, loc, rem, state, summary)
@@ -223,7 +220,7 @@ class SyncEngine(
         val bytes = LocalNoteStore.readBytes(context, loc.documentUri) ?: throw IllegalStateException("cannot read local file")
         val newUuid = storage.upload(remoteParent(path), path.substringAfterLast('/'), bytes, loc.modified)
         oldRemoteUuid?.let { runCatching { storage.trashFile(it) } }
-        state.put(path, SyncState.Entry(newUuid, loc.modified, loc.modified, loc.size))
+        state.put(path, withFingerprints(path, bytes, SyncState.Entry(newUuid, loc.modified, loc.modified, loc.size)))
         summary.uploaded++
     }
 
@@ -231,31 +228,53 @@ class SyncEngine(
         val bytes = storage.download(rem)
         val uri = LocalNoteStore.writeNote(context, treeUri, path, bytes) ?: throw IllegalStateException("cannot write local file")
         val localMod = LocalNoteStore.modifiedOf(context, uri)
-        state.put(path, SyncState.Entry(rem.id, rem.lastModified, localMod, bytes.size.toLong()))
+        state.put(path, withFingerprints(path, bytes, SyncState.Entry(rem.id, rem.lastModified, localMod, bytes.size.toLong())))
         summary.downloaded++
     }
 
     private fun doConflict(path: String, loc: LocalNoteStore.LocalEntry, rem: CloudStorage.RemoteFile, state: SyncState, summary: Summary) {
         val remoteBytes = storage.download(rem)
-        val copyPath = conflictPath(path)
+        val copyPath = SyncConflict.copyPath(path)
         LocalNoteStore.writeNote(context, treeUri, copyPath, remoteBytes)
+        val copyName = copyPath.substringAfterLast('/')
         val bytes = LocalNoteStore.readBytes(context, loc.documentUri) ?: throw IllegalStateException("cannot read local file")
-        val newUuid = storage.upload(remoteParent(path), path.substringAfterLast('/'), bytes, loc.modified)
+        val base = state.get(path)
+        val merged = if (isNote(path) && base?.pages != null && base.doc != null) {
+            runCatching { XnoteBundle.merge(base.pages, base.doc, bytes, remoteBytes) }.getOrNull()
+        } else null
+        if (merged == null) {
+            val newUuid = storage.upload(remoteParent(path), path.substringAfterLast('/'), bytes, loc.modified)
+            runCatching { storage.trashFile(rem.id) }
+            state.put(path, withFingerprints(path, bytes, SyncState.Entry(newUuid, loc.modified, loc.modified, loc.size)))
+            note(summary, path, "was also changed on another device; that version is saved as \"$copyName\"")
+            return
+        }
+        val uri = LocalNoteStore.writeNote(context, treeUri, path, merged.bytes) ?: throw IllegalStateException("cannot write local file")
+        val localMod = LocalNoteStore.modifiedOf(context, uri)
+        val newUuid = storage.upload(remoteParent(path), path.substringAfterLast('/'), merged.bytes, localMod)
         runCatching { storage.trashFile(rem.id) }
-        state.put(path, SyncState.Entry(newUuid, loc.modified, loc.modified, loc.size))
-        note(summary, path, "was also changed on another device; that version is saved as \"${copyPath.substringAfterLast('/')}\"")
+        state.put(path, withFingerprints(path, merged.bytes, SyncState.Entry(newUuid, localMod, localMod, merged.bytes.size.toLong())))
+        val both = merged.keptBothPages
+        val bothText = when {
+            both.isEmpty() -> ""
+            both.size == 1 -> " Page ${both[0]} was changed on both, so both versions are kept."
+            else -> " Pages ${both.joinToString(", ")} were changed on both, so both versions are kept."
+        }
+        note(summary, path, "was also changed on another device and the changes were merged.$bothText The other version is also saved as \"$copyName\"")
+    }
+
+    private fun isNote(path: String) = path.endsWith(".xnote", ignoreCase = true)
+
+    /** Remembers a note's page fingerprints with its baseline, so the next conflict on it can be merged. */
+    private fun withFingerprints(path: String, bytes: ByteArray, entry: SyncState.Entry): SyncState.Entry {
+        if (!isNote(path)) return entry
+        val f = runCatching { XnoteBundle.parse(bytes)?.fingerprints() }.getOrNull() ?: return entry
+        return entry.copy(pages = f.pages, doc = f.doc)
     }
 
     private fun remoteParent(path: String): String {
         val folders = path.split("/").dropLast(1)
         return if (folders.isEmpty()) remoteRootId else storage.ensureFolderPath(remoteRootId, folders)
-    }
-
-    private fun conflictPath(path: String): String {
-        val ts = SimpleDateFormat("yyyy-MM-dd HHmm", Locale.US).format(Date())
-        val dot = path.lastIndexOf('.')
-        return if (dot <= 0) "$path ($conflictTag conflict $ts)"
-        else path.substring(0, dot) + " ($conflictTag conflict $ts)" + path.substring(dot)
     }
 
     private fun walkRemote(uuid: String, prefix: String, out: RemoteTree, visited: HashSet<String>) {

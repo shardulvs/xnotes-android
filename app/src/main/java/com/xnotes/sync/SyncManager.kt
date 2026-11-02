@@ -128,7 +128,7 @@ object SyncManager {
                 val state = SyncState.load(context, service.id)
                 val up = prefs.syncDirection == "both" || prefs.syncDirection == "up"
                 val down = prefs.syncDirection == "both" || prefs.syncDirection == "down"
-                val summary = SyncEngine(context, treeUri, storage, folderId, service.id, up, down).sync(state)
+                val summary = SyncEngine(context, treeUri, storage, folderId, up, down).sync(state)
                 runCatching { SettingsSync.sync(context, storage, folderId, state) }
                 state.save(context, service.id)
                 summary to state.filePaths().count { !it.startsWith(".") }

@@ -259,6 +259,20 @@ internal fun ThumbBadges(b: ExplorerBody, e: BrowseEntry, inset: Dp = 8.dp) {
     }
 }
 
+/** [name] with a small orange triangle in front when [e] is a copy sync kept after a conflict. */
+@Composable
+internal fun ConflictMarked(e: BrowseEntry, name: @Composable () -> Unit) {
+    if (e.isDir || !com.xnotes.sync.SyncConflict.isCopy(e.name)) return name()
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            XnotesIcons.warning, stringResource(R.string.sync_conflict_copy),
+            tint = com.xnotes.core.tools.InkPalette.ORANGE.toComposeColor(), modifier = Modifier.size(14.dp),
+        )
+        Spacer(Modifier.width(4.dp))
+        Box(Modifier.weight(1f, fill = false)) { name() }
+    }
+}
+
 @Composable
 private fun EntryMenuButton(b: ExplorerBody, e: BrowseEntry, tint: Color, size: Dp = 32.dp) {
     var open by remember { mutableStateOf(false) }
@@ -338,7 +352,7 @@ internal fun GridFileTile(b: ExplorerBody, e: BrowseEntry) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(b.label(e), color = palette.text.toComposeColor(), fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                ConflictMarked(e) { Text(b.label(e), color = palette.text.toComposeColor(), fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 val meta = b.metaText(e)
                 if (meta.isNotEmpty()) {
                     Text(meta, color = palette.textDim.toComposeColor(), fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -500,7 +514,7 @@ internal fun ListRow(b: ExplorerBody, e: BrowseEntry, wide: Boolean) {
         }
         Row(Modifier.weight(1f).padding(start = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Column(Modifier.weight(1f, fill = false)) {
-                Text(b.label(e), color = fg, fontSize = 14.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                ConflictMarked(e) { Text(b.label(e), color = fg, fontSize = 14.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 val where = b.whereOf?.invoke(e)
                 if (!wide && !compact) Text(listOfNotNull(where, b.metaText(e).ifEmpty { null }).joinToString(" · "), color = dim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 else if (where != null && !compact) Text(where, color = dim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -567,7 +581,7 @@ internal fun GalleryItem(b: ExplorerBody, e: BrowseEntry, shelf: Dp) {
         Spacer(Modifier.height(10.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp), modifier = Modifier.padding(horizontal = 4.dp)) {
             if (code != null) Box(Modifier.size(8.dp).clip(CircleShape).background(code))
-            Text(b.label(e), color = palette.text.toComposeColor(), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            ConflictMarked(e) { Text(b.label(e), color = palette.text.toComposeColor(), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
         }
         Spacer(Modifier.height(3.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.padding(horizontal = 4.dp)) {
@@ -613,7 +627,7 @@ internal fun TimelineCard(b: ExplorerBody, e: BrowseEntry, side: Dp) {
             if (selecting) CheckRing(selected, Modifier.align(Alignment.TopStart).padding(6.dp))
         }
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(b.label(e), color = palette.text.toComposeColor(), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            ConflictMarked(e) { Text(b.label(e), color = palette.text.toComposeColor(), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(formatClock(b.words, b.view.timelineTime(e), b.clock24, b.zone), color = palette.textDim.toComposeColor(), fontSize = 11.5.sp, maxLines = 1)
                 val where = b.whereOf?.invoke(e)
@@ -741,7 +755,7 @@ private fun RecentCard(b: ExplorerBody, r: RecentEntry, onOpen: (BrowseEntry) ->
             ThumbBadges(b, e, 6.dp)
         }
         Spacer(Modifier.height(4.dp))
-        Text(b.label(e), color = palette.text.toComposeColor(), fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        ConflictMarked(e) { Text(b.label(e), color = palette.text.toComposeColor(), fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
         Text(openedLabel(b.words, r.opened, b.now, b.zone), color = palette.textDim.toComposeColor(), fontSize = 11.5.sp, maxLines = 1)
         r.where?.let { where ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -794,7 +808,7 @@ internal fun PinnedCard(b: ExplorerBody, e: BrowseEntry, whole: Boolean) {
             }
         }
         Spacer(Modifier.height(4.dp))
-        Text(b.label(e), color = palette.text.toComposeColor(), fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        ConflictMarked(e) { Text(b.label(e), color = palette.text.toComposeColor(), fontSize = 13.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
         val meta = b.metaText(e)
         if (meta.isNotEmpty()) Text(meta, color = palette.textDim.toComposeColor(), fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         b.pinnedWhere(e)?.let { where ->

@@ -97,13 +97,15 @@ private fun TreeRow(e: BrowseEntry, depth: Int, open: Boolean, showExtensions: B
         Spacer(Modifier.width(4.dp))
         Icon(treeIcon(e), null, tint = e.color?.let { codeTint(it, palette) } ?: dim, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(10.dp))
-        Text(
-            if (e.isDir || showExtensions) e.name else DocumentKind.stripSuffix(e.name),
-            color = palette.text.toComposeColor(),
-            fontSize = 14.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        ConflictMarked(e) {
+            Text(
+                if (e.isDir || showExtensions) e.name else DocumentKind.stripSuffix(e.name),
+                color = palette.text.toComposeColor(),
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 

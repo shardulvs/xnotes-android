@@ -2423,7 +2423,7 @@ private fun StackedNoteCard(editor: Editor, entry: BrowseEntry, modifier: Modifi
             }
         }
         Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
-            Text(entryLabel(entry), color = palette.text.toComposeColor(), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            ConflictMarked(entry) { Text(entryLabel(entry), color = palette.text.toComposeColor(), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             val date = entryDate(entry)
             if (date.isNotEmpty()) {
                 Text(date, color = palette.textDim.toComposeColor(), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -2640,8 +2640,8 @@ private fun SyncSidebarStatus() {
 
 /**
  * A dismissible heads-up shown above the explorer when the last sync found a note that was changed
- * on two devices (no merge is done — the other device's version is kept beside yours). Lists the
- * affected notes so they can be reviewed; Dismiss clears it.
+ * on two devices (merged page by page where possible; the other device's version is always kept
+ * beside it as a "Sync Conflict" copy). Lists the affected notes so they can be reviewed; Dismiss clears it.
  */
 @Composable
 private fun SyncConflictBanner() {
@@ -2661,7 +2661,7 @@ private fun SyncConflictBanner() {
             .padding(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(XnotesIcons.info, null, tint = palette.accent.toComposeColor(), modifier = Modifier.size(18.dp))
+            Icon(XnotesIcons.warning, null, tint = com.xnotes.core.tools.InkPalette.ORANGE.toComposeColor(), modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text(
                 if (conflicts.size == 1) "A note was changed on another device too" else "${conflicts.size} notes were changed on another device too",
