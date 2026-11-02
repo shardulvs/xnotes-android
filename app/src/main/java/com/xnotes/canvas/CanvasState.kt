@@ -16,6 +16,7 @@ import com.xnotes.core.model.TextMarkup
 import com.xnotes.core.model.insets
 import com.xnotes.core.model.resolvedPageColor
 import com.xnotes.core.model.resolvedTemplate
+import com.xnotes.core.pal.BlendMode
 import com.xnotes.core.pal.RasterSurface
 import com.xnotes.core.pal.Renderer
 import com.xnotes.core.pal.SurfaceFactory
@@ -59,6 +60,23 @@ class HighlighterCacheEntry(
     val cover: Rect,
     val cuts: List<com.xnotes.core.model.CutEdge> = emptyList(),
 )
+
+/**
+ * One page's highlighter ink for a single ink alpha and blend, merged into one opaque layer: the
+ * ribbons are unioned here, so the frame composites one tint instead of one multiply per pass, and
+ * two highlights over the same spot read as one shade (#386). [cover] is page space; the frame
+ * blits [surface] over it once, at [alpha] with [blend].
+ */
+class HighlighterMergeEntry(
+    val surface: RasterSurface,
+    val res: Double,
+    val cover: Rect,
+    val alpha: Double,
+    val blend: BlendMode,
+) {
+    /** The per-stroke bitmaps baked in, in z-order: a frame compares them to tell staleness. */
+    var parts: List<HighlighterCacheEntry> = emptyList()
+}
 
 /**
  * Room being opened or closed on [page], drawn before the page's caches hold it. While the pen drags
@@ -163,6 +181,13 @@ class CanvasState(
 
     /** Whether the hairline outline around each page is drawn (a user preference). */
     var pageBorders: Boolean = true
+
+    /**
+     * Whether the page's highlighters are merged into one layer before they composite, so passes
+     * that overlap stay one shade instead of multiplying the paper twice (a user preference; see
+     * [mergedHighlightersFor]). Read per frame, so flipping it repaints as is.
+     */
+    var highlighterNoDarken: Boolean = false
 
     /** Gap (content px) between pages — inside a spread, between rows, and between paginated
      *  rows alike — equal to [sideMargin] so spacing always matches the margin preference. */
@@ -519,6 +544,15 @@ class CanvasState(
      * the main thread only and pruned to the visible pages' highlighters each frame.
      */
     private val hlCaches = HashMap<Stroke, HighlighterCacheEntry>()
+
+    /**
+     * Merged highlighter layers (see [mergedHighlightersFor]), one per page, ink alpha and blend.
+     * Reused while the strokes baked into them are unchanged, so a drag only rebakes the layer the
+     * pen is drawing into.
+     */
+    private val hlMerges = HashMap<MergeKey, HighlighterMergeEntry>()
+
+    private data class MergeKey(val page: Page, val alpha: Int, val blend: BlendMode)
 
     /**
      * Pages whose strokes have built ribbon geometry ([Stroke.geometry]), so eviction can walk only
@@ -1384,6 +1418,51 @@ class CanvasState(
     }
 
     /**
+     * [strokes]' highlighters merged into one opaque layer at [alpha] with [blend] (see
+     * [HighlighterMergeEntry]), or null when there is nothing to draw or the union is too large to
+     * hold as a second surface — the frame then falls back to one blit per stroke.
+     *
+     * The layer is built from the per-stroke bitmaps: a copy of each, not a re-tessellation, so a
+     * frame costs a clear plus one draw per highlighter. It is rebaked only when one of those
+     * bitmaps changes, which during a drag is the single stroke being drawn.
+     */
+    fun mergedHighlightersFor(
+        page: Page,
+        strokes: List<Stroke>,
+        alpha: Double,
+        blend: BlendMode,
+    ): HighlighterMergeEntry? {
+        if (strokes.isEmpty()) return null
+        val res = clampedRes(page)
+        val parts = strokes.map { highlighterCacheFor(it, page) }
+        var cover = parts[0].cover
+        for (i in 1 until parts.size) cover = cover.union(parts[i].cover)
+        val w = ceil(cover.w * res).toInt().coerceAtLeast(1)
+        val h = ceil(cover.h * res).toInt().coerceAtLeast(1)
+        if (w.toLong() * h.toLong() > MAX_MERGE_PX) return null
+        val key = MergeKey(page, (alpha * 255.0).toInt(), blend)
+        val existing = hlMerges[key]
+        if (existing != null && existing.res == res && existing.cover == cover) {
+            if (existing.parts != parts) bake(existing, parts)
+            return existing
+        }
+        val entry = HighlighterMergeEntry(surfaceFactory.create(w, h, 1.0), res, cover, alpha, blend)
+        bake(entry, parts)
+        hlMerges[key] = entry
+        return entry
+    }
+
+    /** Clear [entry]'s surface and lay its per-stroke bitmaps back into it, opaquely. */
+    private fun bake(entry: HighlighterMergeEntry, parts: List<HighlighterCacheEntry>) {
+        entry.surface.fill(TRANSPARENT)
+        val r = entry.surface.renderer()
+        r.scale(entry.res, entry.res)
+        r.translate(-entry.cover.left, -entry.cover.top)
+        for (p in parts) r.drawRaster(p.surface, p.cover)
+        entry.parts = parts
+    }
+
+    /**
      * Whether [page] has anything in its background layer — a PDF page, a resolved ruling or markups.
      * Plain colour pages return false so no (large, transparent) background surface is allocated,
      * even though [paintPageBackground] is always installed for the pattern path.
@@ -1645,6 +1724,7 @@ class CanvasState(
         bgCaches.clear()
         unbaked.clear()
         hlCaches.clear()
+        hlMerges.clear()
         wetInk.clear()
         cacheGen++
         sharpGen++
@@ -1770,6 +1850,7 @@ class CanvasState(
             for (p in visible) for (it in p.items) if (it is Stroke && it.tool == Tool.HIGHLIGHTER) keep.add(it)
             hlCaches.keys.retainAll(keep)
         }
+        if (hlMerges.isNotEmpty()) hlMerges.keys.retainAll { it.page in visible }
         releaseGeometryExcept(visible)
     }
 
@@ -2072,6 +2153,7 @@ class CanvasState(
         for (e in caches.values) bytes += e.surface.width.toLong() * e.surface.height * 4L
         for (e in bgCaches.values) bytes += e.surface.width.toLong() * e.surface.height * 4L
         for (e in hlCaches.values) bytes += e.surface.width.toLong() * e.surface.height * 4L
+        for (e in hlMerges.values) bytes += e.surface.width.toLong() * e.surface.height * 4L
         val visible = visiblePageRange()?.let { it.last - it.first + 1 } ?: 0
         return CacheSnapshot(visible, caches.size, bgCaches.size, bytes)
     }
@@ -2147,6 +2229,9 @@ class CanvasState(
 
         /** Padding (content px) around a highlighter's bounds in its cached bitmap, for AA edges. */
         const val HL_PAD = 2.0
+
+        /** Ceiling on a merged highlighter layer (px); past it the frame blits per stroke. */
+        private const val MAX_MERGE_PX = 8_000_000L
 
         /** Padding (content px) around a replayed or repaired dirty rect, for AA edges. */
         const val SHARP_EDIT_PAD = 2.0

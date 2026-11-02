@@ -106,6 +106,10 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
     var scale by remember { mutableStateOf(base.scale) }
     var intensity by remember { mutableStateOf(ToolConversions.highlighterAlphaToIntensity(base.highlighterAlpha).toFloat()) }
     var inverse by remember { mutableStateOf(base.highlighterInverse) }
+    // FLAT OVERLAPS applies to every highlighter in every note, so it lives in the settings rather
+    // than in this tool's style; null when the host has no such setting (the infinite canvas).
+    val flatOverlaps = editor.hostHighlighterNoDarken
+    var noDarken by remember { mutableStateOf(flatOverlaps == true) }
     var colorOverride by remember { mutableStateOf(base.colorOverride) }
 
     fun emit() {
@@ -189,6 +193,14 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
                 // INVERSE swaps the multiply blend for a screen one, so the marker lightens the
                 // page instead of darkening it. A multiply has nothing to darken on a dark page.
                 ToggleRow(stringResource(R.string.caption_inverse), inverse) { inverse = it; emit() }
+                // Two passes over the same spot normally multiply the paper twice, so the crossing
+                // reads darker than either pass; DARKEN (LIGHTEN when inverse) settles on one shade.
+                if (flatOverlaps != null) {
+                    ToggleRow(stringResource(R.string.caption_flat_overlaps), noDarken) {
+                        noDarken = it
+                        editor.hostHighlighterNoDarken = it
+                    }
+                }
             }
             // Glow is offered on every stroke tool except the highlighter (translucent) and the
             // dashed pen (it draws a line, not a fillable ribbon, so a halo has nothing to hug).

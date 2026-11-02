@@ -542,7 +542,17 @@ class CanvasView @JvmOverloads constructor(
                     r.clipRect(pr)
                     r.translate(pr.left, pr.top)
                     st.applyPageTransform(r, page)
-                    for ((k, item) in page.items.withIndex()) {
+                    // Flat overlaps (#386): the page's highlighters merge into one layer per ink
+                    // alpha and blend and composite once, so a second pass over a highlight can't
+                    // multiply the paper twice. Null means a layer would be too large: blit per
+                    // stroke instead, as below.
+                    val merged = if (st.highlighterNoDarken) highlightGroups(st, page, visLocal) else null
+                    if (merged != null) for (g in merged) {
+                        r.withSave {
+                            if (g.cuts != null) r.clipOutPolygons(g.cuts)
+                            r.drawRasterBlended(g.entry.surface, g.entry.cover, g.entry.alpha, g.entry.blend)
+                        }
+                    } else for ((k, item) in page.items.withIndex()) {
                         if (item is Stroke && item.isHighlighterInk() && !st.isLiftedItem(item) &&
                             item.bounds().intersects(visLocal)
                         ) {
@@ -663,7 +673,24 @@ class CanvasView @JvmOverloads constructor(
             r.clipRect(pr)
             r.translate(pr.left, pr.top)
             st.applyPageTransform(r, page)
-            for (item in page.items) {
+            val merged = if (st.highlighterNoDarken) {
+                highlightGroups(st, page, Rect(-far, -far, 2 * far, 2 * far))
+            } else {
+                null
+            }
+            if (merged != null) {
+                for (g in merged) for (side in 0..1) {
+                    r.withSave {
+                        if (side == 0) {
+                            r.clipRect(if (v.sideways) Rect.ltrb(-far, -far, v.split, far) else Rect.ltrb(-far, -far, far, v.split))
+                        } else {
+                            if (v.sideways) r.translate(v.shift, 0.0) else r.translate(0.0, v.shift)
+                            r.clipRect(if (v.sideways) Rect.ltrb(v.resume, -far, far, far) else Rect.ltrb(-far, v.resume, far, far))
+                        }
+                        r.drawRasterBlended(g.entry.surface, g.entry.cover, g.entry.alpha, g.entry.blend)
+                    }
+                }
+            } else for (item in page.items) {
                 if (item !is Stroke || !item.isHighlighterInk() || st.isLiftedItem(item)) continue
                 val hc = st.highlighterCacheFor(item, page)
                 val faint = if (st.fade?.fades(item) == true) com.xnotes.core.audio.InkFade.ALPHA else 1.0
@@ -680,6 +707,43 @@ class CanvasView @JvmOverloads constructor(
             }
         }
     }
+
+    /**
+     * [page]'s highlighters grouped by ink alpha and blend and merged into one layer each, with the
+     * tapes that cover them — or null when a layer would be too large and the caller should blit
+     * per stroke. The tapes are cut out of the whole group rather than per stroke, which can clip a
+     * highlight lying above a tape the others lie under: that ordering is rare enough not to carry
+     * a second draw path for it.
+     */
+    private fun highlightGroups(st: CanvasState, page: Page, visLocal: Rect): List<HighlighterGroup>? {
+        val groups = LinkedHashMap<Int, MutableList<Stroke>>()
+        for (item in page.items) {
+            if (item !is Stroke || !item.isHighlighterInk() || st.isLiftedItem(item)) continue
+            if (!item.bounds().intersects(visLocal)) continue
+            val faint = if (st.fade?.fades(item) == true) com.xnotes.core.audio.InkFade.ALPHA else 1.0
+            val alpha = (item.renderColor.a / 255.0 * faint * 255.0).toInt()
+            groups.getOrPut(alpha * 4 + item.blendMode.ordinal) { ArrayList() }.add(item)
+        }
+        val out = ArrayList<HighlighterGroup>(groups.size)
+        for ((_, strokes) in groups) {
+            val first = strokes[0]
+            val faint = if (st.fade?.fades(first) == true) com.xnotes.core.audio.InkFade.ALPHA else 1.0
+            val entry = st.mergedHighlightersFor(page, strokes, first.renderColor.a / 255.0 * faint, first.blendMode)
+                ?: return null
+            var cuts: MutableList<List<Pt>>? = null
+            for ((k, item) in page.items.withIndex()) {
+                if (item !is Stroke || !strokes.contains(item)) continue
+                val covers = coveringTapes(st, page.items, k, item.bounds()) ?: continue
+                if (cuts == null) cuts = ArrayList()
+                cuts.addAll(covers)
+            }
+            out.add(HighlighterGroup(entry, cuts))
+        }
+        return out
+    }
+
+    /** A merged highlighter layer for this frame, with the tape polygons cut out of it. */
+    private class HighlighterGroup(val entry: HighlighterMergeEntry, val cuts: List<List<Pt>>?)
 
     /**
      * The bodies of the covered tapes laid after item [index] of [items] over [bounds], or null for

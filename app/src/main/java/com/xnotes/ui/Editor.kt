@@ -2791,6 +2791,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         controller.penButtonHover = p.penButtonHover
         state.sideMargin = p.sideMargin
         state.pageBorders = !p.hidePageBorders
+        state.highlighterNoDarken = p.highlighterNoDarken
         state.maxCachePx = p.maxCacheResolution.toDouble()
         state.minZoom = if (p.minZoomEnabled) p.minZoomPercent / 100.0 else CanvasState.MIN_ZOOM
         state.maxZoom = (if (p.maxZoomEnabled) p.maxZoomPercent / 100.0 else CanvasState.MAX_ZOOM)
@@ -2839,6 +2840,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     fun toggleFullscreen() = setFullscreenPref(!fullscreen)
 
     /** Apply edited preferences live and persist (used by the Preferences dialog). */
+    /** The highlighter popup's flat-overlap switch: a setting, not a per-tool style. */
+    override var hostHighlighterNoDarken: Boolean?
+        get() = settings.prefs.highlighterNoDarken
+        set(value) {
+            if (value != null) applyPreferences(settings.prefs.copy(highlighterNoDarken = value))
+        }
+
     fun applyPreferences(p: Preferences) {
         val marginChanged = p.sideMargin != settings.prefs.sideMargin
         settings = settings.copy(prefs = p)

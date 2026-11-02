@@ -57,4 +57,13 @@ interface ToolPopupHost : SwatchHost {
 
     /** Peel back every tape in the open note or canvas, or cover them all again. */
     fun setAllTapePeeled(peeled: Boolean)
+
+    /**
+     * Whether overlapping highlighter passes stay one shade instead of compounding darker (see
+     * [com.xnotes.core.model.Stroke.blendModeFor]), or null when this host has no such setting and
+     * its highlighter popup leaves the row out.
+     */
+    var hostHighlighterNoDarken: Boolean?
+        get() = null
+        set(value) {}
 }
