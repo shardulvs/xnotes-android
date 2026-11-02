@@ -951,6 +951,13 @@ private fun HomePane(
         Column(Modifier.fillMaxSize()) {
             // Cloud sync heads-up when a note was changed on two devices; renders nothing otherwise.
             SyncConflictBanner()
+            // Any finished sync (sidebar, app open, note close, background worker) may have changed files, so list again.
+            LaunchedEffect(Unit) {
+                var last = com.xnotes.sync.SyncManager.status.value.lastSyncMs
+                com.xnotes.sync.SyncManager.status.collect { s ->
+                    if (s.lastSyncMs != last) { last = s.lastSyncMs; editor.relistTree() }
+                }
+            }
             // Pulling down from the top syncs with the cloud service when it is set up, then lists the folder again.
             PullToRefreshBox(
                 isRefreshing = refreshing,
