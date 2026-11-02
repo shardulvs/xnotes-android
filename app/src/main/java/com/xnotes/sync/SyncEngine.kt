@@ -221,7 +221,7 @@ class SyncEngine(
 
     private fun doUpload(path: String, loc: LocalNoteStore.LocalEntry, oldRemoteUuid: String?, state: SyncState, summary: Summary) {
         val bytes = LocalNoteStore.readBytes(context, loc.documentUri) ?: throw IllegalStateException("cannot read local file")
-        val newUuid = storage.uploadFile(remoteParent(path), path.substringAfterLast('/'), bytes, loc.modified)
+        val newUuid = storage.upload(remoteParent(path), path.substringAfterLast('/'), bytes, loc.modified)
         oldRemoteUuid?.let { runCatching { storage.trashFile(it) } }
         state.put(path, SyncState.Entry(newUuid, loc.modified, loc.modified, loc.size))
         summary.uploaded++
@@ -240,7 +240,7 @@ class SyncEngine(
         val copyPath = conflictPath(path)
         LocalNoteStore.writeNote(context, treeUri, copyPath, remoteBytes)
         val bytes = LocalNoteStore.readBytes(context, loc.documentUri) ?: throw IllegalStateException("cannot read local file")
-        val newUuid = storage.uploadFile(remoteParent(path), path.substringAfterLast('/'), bytes, loc.modified)
+        val newUuid = storage.upload(remoteParent(path), path.substringAfterLast('/'), bytes, loc.modified)
         runCatching { storage.trashFile(rem.id) }
         state.put(path, SyncState.Entry(newUuid, loc.modified, loc.modified, loc.size))
         note(summary, path, "was also changed on another device; that version is saved as \"${copyPath.substringAfterLast('/')}\"")
