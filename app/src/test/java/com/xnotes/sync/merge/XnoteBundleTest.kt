@@ -30,8 +30,12 @@ class XnoteBundleTest {
 
     private fun encode(doc: Document): ByteArray = ByteArrayOutputStream().also { codec.write(doc, it) }.toByteArray()
 
-    private fun decode(bytes: ByteArray): Document =
-        codec.read(ByteArrayInputStream(bytes), imageDir = Files.createTempDirectory("merge-img").toFile())
+    private fun decode(bytes: ByteArray, withPdf: Boolean = false): Document =
+        codec.read(
+            ByteArrayInputStream(bytes),
+            pdfDir = if (withPdf) Files.createTempDirectory("merge-pdf").toFile() else null,
+            imageDir = Files.createTempDirectory("merge-img").toFile(),
+        )
 
     private fun stroke(x: Double) = Stroke(
         Tool.PEN, ToolConfig(2.0, false, 0.4, 0.6, Rgba(0, 0, 0, 255)),
@@ -48,7 +52,17 @@ class XnoteBundleTest {
     /** A note of [n] pages, each with one stroke at its own x so the pages differ. */
     private fun note(n: Int) = Document(dpi = 150).apply { repeat(n) { pages.add(page(it * 10.0)) } }
 
-    private fun fingerprints(bytes: ByteArray) = XnoteBundle.parse(bytes)!!.fingerprints()
+    private fun temp(bytes: ByteArray) = File.createTempFile("note", ".xnote").apply { writeBytes(bytes); deleteOnExit() }
+
+    private fun fingerprints(bytes: ByteArray) = XnoteBundle.fingerprintsOf(temp(bytes))!!
+
+    private class Merged(val bytes: ByteArray, val fingerprints: XnoteBundle.Fingerprints, val keptBothPages: List<Int>)
+
+    private fun merge(basePages: List<String>, baseDoc: String, local: ByteArray, remote: ByteArray): Merged? {
+        val out = File.createTempFile("merged", ".xnote").apply { deleteOnExit() }
+        val m = XnoteBundle.merge(basePages, baseDoc, temp(local), temp(remote), out) ?: return null
+        return Merged(out.readBytes(), m.fingerprints, m.keptBothPages)
+    }
 
     @Test fun unchangedPagesKeepTheirFingerprintThroughALoadAndSave() {
         val doc = note(3)
@@ -75,9 +89,11 @@ class XnoteBundleTest {
         val baseF = fingerprints(base)
         val local = decode(base).apply { pages[0].items.add(stroke(50.0)) }
         val remote = decode(base).apply { pages[2].items.add(image(4, 5, 6)) }
-        val merged = XnoteBundle.merge(baseF.pages, baseF.doc, encode(local), encode(remote))
+        val merged = merge(baseF.pages, baseF.doc, encode(local), encode(remote))
         assertNotNull(merged)
         assertEquals(emptyList<Int>(), merged!!.keptBothPages)
+        assertEquals(fingerprints(merged.bytes).pages, merged.fingerprints.pages)
+        assertEquals(fingerprints(merged.bytes).doc, merged.fingerprints.doc)
         val doc = decode(merged.bytes)
         assertEquals(3, doc.pages.size)
         assertEquals(2, doc.pages[0].items.size)
@@ -86,12 +102,24 @@ class XnoteBundleTest {
         assertArrayEquals(byteArrayOf(4, 5, 6), img.image.file.readBytes())
     }
 
+    @Test fun aNoteWithALargePdfMergesAndKeepsThePdf() {
+        val pdf = File.createTempFile("src", ".pdf").apply { writeBytes(ByteArray(3 * 1024 * 1024) { (it % 251).toByte() }); deleteOnExit() }
+        val base = encode(note(2).apply { pdfFile = pdf; pages.forEachIndexed { i, p -> p.pdfPage = i } })
+        val baseF = fingerprints(base)
+        val local = decode(base, withPdf = true).apply { pages[0].items.add(stroke(50.0)) }
+        val remote = decode(base, withPdf = true).apply { pages[1].items.add(stroke(60.0)) }
+        val doc = decode(merge(baseF.pages, baseF.doc, encode(local), encode(remote))!!.bytes, withPdf = true)
+        assertEquals(listOf(2, 2), doc.pages.map { it.items.size })
+        assertEquals(listOf(0, 1), doc.pages.map { it.pdfPage })
+        assertArrayEquals(pdf.readBytes(), doc.pdfFile!!.readBytes())
+    }
+
     @Test fun imagesFromBothSidesSurviveTheMerge() {
         val base = encode(note(2))
         val baseF = fingerprints(base)
         val local = decode(base).apply { pages[0].items.add(image(1)) }
         val remote = decode(base).apply { pages[1].items.add(image(2)) }
-        val doc = decode(XnoteBundle.merge(baseF.pages, baseF.doc, encode(local), encode(remote))!!.bytes)
+        val doc = decode(merge(baseF.pages, baseF.doc, encode(local), encode(remote))!!.bytes)
         assertArrayEquals(byteArrayOf(1), doc.pages[0].items.filterIsInstance<ImageItem>().single().image.file.readBytes())
         assertArrayEquals(byteArrayOf(2), doc.pages[1].items.filterIsInstance<ImageItem>().single().image.file.readBytes())
     }
@@ -101,7 +129,7 @@ class XnoteBundleTest {
         val baseF = fingerprints(base)
         val local = decode(base).apply { pages[0].items.add(stroke(60.0)) }
         val remote = decode(base).apply { pages[0].items.add(stroke(70.0)) }
-        val merged = XnoteBundle.merge(baseF.pages, baseF.doc, encode(local), encode(remote))!!
+        val merged = merge(baseF.pages, baseF.doc, encode(local), encode(remote))!!
         assertEquals(listOf(1, 2), merged.keptBothPages)
         val doc = decode(merged.bytes)
         assertEquals(3, doc.pages.size)
@@ -114,7 +142,7 @@ class XnoteBundleTest {
         val baseF = fingerprints(base)
         val local = decode(base).apply { pages.add(0, page(500.0)) }
         val remote = decode(base).apply { pages.add(page(600.0)) }
-        val doc = decode(XnoteBundle.merge(baseF.pages, baseF.doc, encode(local), encode(remote))!!.bytes)
+        val doc = decode(merge(baseF.pages, baseF.doc, encode(local), encode(remote))!!.bytes)
         assertEquals(listOf(500.0, 0.0, 10.0, 600.0), doc.pages.map { (it.items[0] as Stroke).samples[0].x })
     }
 
@@ -123,7 +151,7 @@ class XnoteBundleTest {
         val baseF = fingerprints(base)
         val local = decode(base).apply { pages.removeAt(1) }
         val remote = decode(base).apply { pages[2].items.add(stroke(80.0)) }
-        val doc = decode(XnoteBundle.merge(baseF.pages, baseF.doc, encode(local), encode(remote))!!.bytes)
+        val doc = decode(merge(baseF.pages, baseF.doc, encode(local), encode(remote))!!.bytes)
         assertEquals(2, doc.pages.size)
         assertEquals(2, doc.pages[1].items.size)
     }
@@ -133,10 +161,10 @@ class XnoteBundleTest {
         val baseF = fingerprints(base)
         val local = decode(base).apply { pages[0].items.add(stroke(50.0)); bookmarks.add(Bookmark(1, "B")) }
         val remote = decode(base).apply { pages[1].items.add(stroke(60.0)) }
-        assertNull(XnoteBundle.merge(baseF.pages, baseF.doc, encode(local), encode(remote)))
+        assertNull(merge(baseF.pages, baseF.doc, encode(local), encode(remote)))
     }
 
     @Test fun somethingThatIsNotANoteDoesNotParse() {
-        assertNull(XnoteBundle.parse(byteArrayOf(1, 2, 3)))
+        assertNull(XnoteBundle.fingerprintsOf(temp(byteArrayOf(1, 2, 3))))
     }
 }

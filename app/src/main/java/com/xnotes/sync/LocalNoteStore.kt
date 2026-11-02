@@ -82,8 +82,10 @@ object LocalNoteStore {
             .getOrDefault(false)
     }
 
-    fun readBytes(context: Context, documentUri: String): ByteArray? =
-        runCatching { context.contentResolver.openInputStream(Uri.parse(documentUri))?.use { it.readBytes() } }.getOrNull()
+    /** Copy the document at [documentUri] into [to]. False when it cannot be read. */
+    fun copyTo(context: Context, documentUri: String, to: java.io.File): Boolean = runCatching {
+        context.contentResolver.openInputStream(Uri.parse(documentUri))?.use { input -> to.outputStream().use { input.copyTo(it) } } != null
+    }.getOrDefault(false)
 
     fun modifiedOf(context: Context, documentUri: String): Long = runCatching {
         context.contentResolver.query(
@@ -92,7 +94,7 @@ object LocalNoteStore {
     }.getOrDefault(0L)
 
     /** Create or overwrite a note at [relativePath] (folders created as needed). Returns the document uri, or null. */
-    fun writeNote(context: Context, treeUri: String, relativePath: String, bytes: ByteArray): String? {
+    fun writeNote(context: Context, treeUri: String, relativePath: String, from: java.io.File): String? {
         val tree = Uri.parse(treeUri)
         val segments = relativePath.split("/")
         var parentId = DocumentsContract.getTreeDocumentId(tree)
@@ -111,7 +113,7 @@ object LocalNoteStore {
             }.getOrNull() ?: return null
         }
         return runCatching {
-            context.contentResolver.openOutputStream(uri, "wt")?.use { it.write(bytes) }
+            context.contentResolver.openOutputStream(uri, "wt")?.use { out -> from.inputStream().use { it.copyTo(out) } }
             uri.toString()
         }.getOrNull()
     }

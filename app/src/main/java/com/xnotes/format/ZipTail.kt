@@ -53,7 +53,9 @@ internal object ZipTail {
         val localOffset: Long,
         val size: Long,
         val record: ByteArray,
-    )
+    ) {
+        val crc: Long get() = ByteBuffer.wrap(record).order(ByteOrder.LITTLE_ENDIAN).getInt(16).toLong() and MAX_U32
+    }
 
     class Directory(val entries: List<Entry>, val offset: Long)
 
@@ -108,6 +110,11 @@ internal object ZipTail {
     /** Hand [reader] entry [name] of [ch], inflated when it was deflated, seeking straight to it; null when there is no such entry. */
     fun <T> readEntry(ch: FileChannel, name: String, reader: (InputStream) -> T): T? {
         val entry = read(ch)?.entries?.firstOrNull { it.name == name } ?: return null
+        return readEntry(ch, entry, reader)
+    }
+
+    /** [readEntry] for an entry of a directory already read. A stored entry's stream runs past its end, so read only [Entry.size] bytes of it. */
+    fun <T> readEntry(ch: FileChannel, entry: Entry, reader: (InputStream) -> T): T? {
         val head = ByteBuffer.allocate(LOCAL_HEADER).order(ByteOrder.LITTLE_ENDIAN)
         while (head.hasRemaining()) if (ch.read(head, entry.localOffset + head.position()) < 0) return null
         if (head.getInt(0) != LOCAL_SIG) return null

@@ -24,5 +24,6 @@ class SyncConflictTest {
         assertFalse(SyncConflict.isCopy("a.xnote"))
         assertFalse(SyncConflict.isCopy("Merge conflict notes.xnote"))
         assertFalse(SyncConflict.isCopy("a (2026-11-02).xnote"))
+        assertFalse(SyncConflict.isCopy("Meeting (team conflict 2026-03-01 0900).xnote"))
     }
 }

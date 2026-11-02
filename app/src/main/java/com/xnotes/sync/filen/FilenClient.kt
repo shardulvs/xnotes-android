@@ -83,27 +83,36 @@ class FilenClient(private val api: FilenApi, private val session: FilenSession) 
         return uuid
     }
 
-    fun uploadFile(parentUuid: String, fileName: String, bytes: ByteArray, lastModified: Long): String {
+    /** Reads [file] one chunk at a time, so only a chunk is ever in memory. */
+    fun uploadFile(parentUuid: String, fileName: String, file: java.io.File, lastModified: Long): String {
         val key = FilenCrypto.generateFileKey()
         val uploadKey = FilenCrypto.randomString(32)
         val rm = FilenCrypto.randomString(32)
         val uuid = FilenCrypto.uuidV4()
-        val chunks = if (bytes.isEmpty()) 0 else (bytes.size + CHUNK_SIZE - 1) / CHUNK_SIZE
-        for (index in 0 until chunks) {
-            val from = index * CHUNK_SIZE
-            val chunk = bytes.copyOfRange(from, minOf(from + CHUNK_SIZE, bytes.size))
-            api.uploadChunk(uuid, index, parentUuid, uploadKey, FilenCrypto.encryptChunk(chunk, key))
+        val hash = FilenCrypto.sha512Hex(file)
+        var size = 0L
+        var chunks = 0
+        file.inputStream().use { input ->
+            val buf = ByteArray(CHUNK_SIZE)
+            while (true) {
+                var n = 0
+                while (n < buf.size) { val r = input.read(buf, n, buf.size - n); if (r < 0) break; n += r }
+                if (n == 0) break
+                api.uploadChunk(uuid, chunks++, parentUuid, uploadKey, FilenCrypto.encryptChunk(buf.copyOf(n), key))
+                size += n
+                if (n < buf.size) break
+            }
         }
         val mime = "application/octet-stream"
         val metadataJson = JSONObject()
-            .put("name", fileName).put("size", bytes.size).put("mime", mime)
-            .put("key", key).put("lastModified", lastModified).put("hash", FilenCrypto.sha512Hex(bytes))
+            .put("name", fileName).put("size", size).put("mime", mime)
+            .put("key", key).put("lastModified", lastModified).put("hash", hash)
             .toString()
         api.uploadDone(
             uuid = uuid,
             encryptedName = FilenCrypto.encryptMetadata(fileName, key),
             nameHashed = FilenCrypto.hashFileNameV2(fileName),
-            encryptedSize = FilenCrypto.encryptMetadata(bytes.size.toString(), key),
+            encryptedSize = FilenCrypto.encryptMetadata(size.toString(), key),
             chunks = chunks,
             encryptedMime = FilenCrypto.encryptMetadata(mime, key),
             rm = rm,
@@ -113,13 +122,13 @@ class FilenClient(private val api: FilenApi, private val session: FilenSession) 
         return uuid
     }
 
-    fun downloadFile(file: FilenApi.RemoteFile, meta: FileMetadata): ByteArray {
-        val out = java.io.ByteArrayOutputStream(file.size.toInt().coerceAtLeast(0))
-        for (index in 0 until file.chunks) {
-            val enc = api.downloadChunk(file.region, file.bucket, file.uuid, index)
-            out.write(FilenCrypto.decryptChunk(enc, meta.key))
+    fun downloadFile(file: FilenApi.RemoteFile, meta: FileMetadata, to: java.io.File) {
+        to.outputStream().use { out ->
+            for (index in 0 until file.chunks) {
+                val enc = api.downloadChunk(file.region, file.bucket, file.uuid, index)
+                out.write(FilenCrypto.decryptChunk(enc, meta.key))
+            }
         }
-        return out.toByteArray()
     }
 
     fun trashFile(uuid: String) = api.trashFile(uuid)

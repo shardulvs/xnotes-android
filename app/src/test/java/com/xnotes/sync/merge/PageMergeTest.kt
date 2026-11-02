@@ -30,5 +30,10 @@ class PageMergeTest {
 
     @Test fun aDeleteNextToAnEditBothApply() = assertEquals("aZ" to emptyList<Int>(), merge("abc", "ac", "abZ"))
 
+    @Test fun aMoveAgainstAnEditOfThatPageIsNotMerged() =
+        org.junit.Assert.assertNull(PageMerge.merge(listOf("a", "b", "c"), listOf("c", "a", "b"), listOf("a", "b", "X")))
+
+    @Test fun theSameMoveOnBothSidesStillMerges() = assertEquals("cab", merge("abc", "cab", "cab").first)
+
     @Test fun nothingChanged() = assertEquals("abc", merge("abc", "abc", "abc").first)
 }

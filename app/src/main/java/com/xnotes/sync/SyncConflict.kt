@@ -7,7 +7,7 @@ import java.util.Locale
 /** Names of the copies sync keeps when a note changed on two devices. */
 object SyncConflict {
     // Also matches the older "(Filen conflict 2026-01-01 1200)" copies.
-    private val COPY = Regex("""\((sync conflict|\S+ conflict) \d{4}-\d{2}-\d{2} \d{4}\)""", RegexOption.IGNORE_CASE)
+    private val COPY = Regex("""\((sync|filen) conflict \d{4}-\d{2}-\d{2} \d{4}\)""", RegexOption.IGNORE_CASE)
 
     /** "notes/a.xnote" -> "notes/a (Sync Conflict 2026-11-02 1430).xnote". */
     fun copyPath(path: String, now: Date = Date()): String {

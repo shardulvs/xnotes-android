@@ -9,7 +9,7 @@ object PageMerge {
     /** One page of the result: which side it comes from and its index there. */
     data class Ref(val local: Boolean, val index: Int)
 
-    /** [keptBoth] holds the result indexes of pages that were changed on both sides. */
+    /** [keptBoth] holds the result indexes of the pages both sides changed the same run of base pages into. */
     class Result(val pages: List<Ref>, val keptBoth: List<Int>)
 
     /** Above this many cells per alignment the merge is skipped (the caller keeps a copy instead). */
@@ -26,6 +26,15 @@ object PageMerge {
 
         val localToBase = IntArray(local.size) { -1 }.also { m -> toLocal.forEachIndexed { b, l -> if (l >= 0) m[l] = b } }
         val remoteToBase = IntArray(remote.size) { -1 }.also { m -> toRemote.forEachIndexed { b, r -> if (r >= 0) m[r] = b } }
+
+        // A moved page reads as dropped and re-added. If the other side changed or dropped it, the merge would keep
+        // the old moved copy beside the edit, so that is left to the conflict copy.
+        val baseSet = base.toHashSet()
+        fun movedAgainstChange(side: List<String>, toBase: IntArray, other: List<String>): Boolean {
+            val otherSet = other.toHashSet()
+            return side.indices.any { toBase[it] < 0 && side[it] in baseSet && side[it] !in otherSet }
+        }
+        if (movedAgainstChange(local, localToBase, remote) || movedAgainstChange(remote, remoteToBase, local)) return null
 
         /** A page one side added or changed, placed between the base pages that side kept around it. */
         class New(val after: Int, val before: Int, val ref: Ref)

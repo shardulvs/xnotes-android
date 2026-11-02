@@ -123,6 +123,13 @@ object FilenCrypto {
     /** SHA-512 hex of the full plaintext, stored in file metadata (matches the SDK's fileHasher). */
     fun sha512Hex(data: ByteArray): String = sha512(data).toHex()
 
+    fun sha512Hex(file: java.io.File): String {
+        val md = MessageDigest.getInstance("SHA-512")
+        val buf = ByteArray(64 * 1024)
+        file.inputStream().use { input -> while (true) { val n = input.read(buf); if (n < 0) break; md.update(buf, 0, n) } }
+        return md.digest().toHex()
+    }
+
     // Metadata key: PBKDF2(masterKey, salt=masterKey, 1 iteration, SHA-512, 256-bit) -> 32 raw bytes.
     private fun deriveMetadataKey(masterKey: String): ByteArray {
         val bytes = masterKey.toByteArray(Charsets.UTF_8)

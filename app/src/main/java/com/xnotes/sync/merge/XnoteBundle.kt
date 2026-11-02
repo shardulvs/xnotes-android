@@ -1,38 +1,41 @@
 package com.xnotes.sync.merge
 
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
+import com.xnotes.format.ZipTail
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.InputStream
+import java.io.OutputStream
+import java.nio.channels.FileChannel
 import java.security.MessageDigest
-import java.util.zip.CRC32
 import java.util.zip.ZipEntry
-import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 /**
- * An .xnote held as its zip entries, with the manifest's `pages` array split into the raw text of
+ * An .xnote read from its zip directory, with the manifest's `pages` array split into the raw text of
  * each page. Pages are never re-serialized, so an unchanged page keeps its exact bytes. Only sync
  * uses this, to fingerprint pages and to merge two versions page by page; the format is unchanged.
+ * Only the manifest is held in memory: assets are streamed from [ch] when a merge writes them out.
  */
 class XnoteBundle private constructor(
-    private val entries: List<Entry>,
+    private val ch: FileChannel,
+    private val entries: List<ZipTail.Entry>,
     private val head: String,
     val pages: List<String>,
     private val tail: String,
 ) {
-    private class Entry(val name: String, val bytes: ByteArray, val stored: Boolean, val crc: Long)
-
     /** What sync remembers of a note to merge it later: one hash per page and one for the rest. */
     class Fingerprints(val pages: List<String>, val doc: String)
 
-    /** A merged note and the 1-based page numbers that were changed on both devices (both kept). */
-    class Merged(val bytes: ByteArray, val keptBothPages: List<Int>)
+    /** The fingerprints of a merged note, and the 1-based page numbers that hold both devices' versions of one part. */
+    class Merged(val fingerprints: Fingerprints, val keptBothPages: List<Int>)
 
     private val byName = entries.associateBy { it.name }
 
     fun fingerprints(): Fingerprints = Fingerprints(pages.map { pageFingerprint(it) }, docFingerprint())
 
     private fun pageFingerprint(page: String): String =
-        hash(ASSET_REF.replace(page) { m -> byName[assetName(m)]?.let { "\"${it.crc}:${it.bytes.size}\"" } ?: m.value })
+        hash(ASSET_REF.replace(page) { m -> byName[assetName(m)]?.let { "\"${it.crc}:${it.size}\"" } ?: m.value })
 
     /** The manifest outside the pages (minus the writer's version, which differs between app builds) and the flow. */
     private fun docFingerprint(): String =
@@ -44,13 +47,12 @@ class XnoteBundle private constructor(
 
     private fun hasPageIndexes(): Boolean = MARKUPS in byName || !NO_BOOKMARKS.containsMatchIn(head)
 
-    private fun write(refs: List<PageMerge.Ref>, remote: XnoteBundle, docFrom: XnoteBundle): ByteArray {
-        val out = ByteArrayOutputStream()
+    private fun write(refs: List<PageMerge.Ref>, remote: XnoteBundle, docFrom: XnoteBundle, out: OutputStream) {
         val newPages = ArrayList<String>(refs.size)
         ZipOutputStream(out).use { zos ->
             zos.setLevel(java.util.zip.Deflater.BEST_SPEED)
-            var images = 0
-            var audio = 0
+            val images = ArrayList<Triple<XnoteBundle, ZipTail.Entry, String>>()
+            val audio = ArrayList<Triple<XnoteBundle, ZipTail.Entry, String>>()
             // Page assets first, renamed in page order the way the codec names them.
             for (ref in refs) {
                 val from = if (ref.local) this else remote
@@ -60,24 +62,26 @@ class XnoteBundle private constructor(
                     val entry = from.byName[old] ?: return@replace m.value
                     val name = renamed.getOrPut(old) {
                         val ext = old.substringAfterLast('.', "")
-                        val name = if (old.startsWith(IMAGE)) IMAGE + "%03d.%s".format(images++, ext) else AUDIO + "%03d.%s".format(audio++, ext)
-                        zos.put(entry, name)
+                        val list = if (old.startsWith(IMAGE)) images else audio
+                        val name = (if (list === images) IMAGE else AUDIO) + "%03d.%s".format(list.size, ext)
+                        list.add(Triple(from, entry, name))
                         name
                     }
                     "\"assets${m.groupValues[1]}${name.removePrefix("assets/")}\""
                 })
             }
+            // All images, then all audio, as the codec's storedEntries orders them, so the editor's in-place save still applies.
+            for ((from, entry, name) in images + audio) zos.put(from, entry, name)
             // Then everything else in the order the chosen side had it, and the manifest last, as the codec writes it.
             for (entry in docFrom.entries) {
                 if (isPageAsset(entry.name) || entry.name == MANIFEST) continue
-                zos.put(entry, entry.name)
+                zos.put(docFrom, entry, entry.name)
             }
             val manifest = (docFrom.head + newPages.joinToString(",") + docFrom.tail).toByteArray(Charsets.UTF_8)
             zos.putNextEntry(ZipEntry(MANIFEST).apply { method = ZipEntry.DEFLATED })
             zos.write(manifest)
             zos.closeEntry()
         }
-        return out.toByteArray()
     }
 
     companion object {
@@ -95,58 +99,76 @@ class XnoteBundle private constructor(
 
         private fun isPageAsset(name: String) = name.startsWith(IMAGE) || name.startsWith(AUDIO)
 
-        fun parse(bytes: ByteArray): XnoteBundle? = runCatching {
-            val entries = ArrayList<Entry>()
-            ZipInputStream(ByteArrayInputStream(bytes)).use { zis ->
-                while (true) {
-                    val e = zis.nextEntry ?: break
-                    if (e.isDirectory) continue
-                    val data = zis.readBytes()
-                    entries.add(Entry(e.name, data, e.method == ZipEntry.STORED, CRC32().apply { update(data) }.value))
-                }
-            }
+        /** Reads only the zip directory and the manifest, so a note's size does not matter. The caller owns [ch]. */
+        fun fingerprintsOf(ch: FileChannel): Fingerprints? = parse(ch)?.fingerprints()
+
+        fun fingerprintsOf(file: File): Fingerprints? = FileInputStream(file).use { fingerprintsOf(it.channel) }
+
+        private fun parse(ch: FileChannel): XnoteBundle? = runCatching {
+            val entries = ZipTail.read(ch)?.entries ?: return null
             val manifest = entries.firstOrNull { it.name == MANIFEST } ?: return null
-            val text = String(manifest.bytes, Charsets.UTF_8)
+            val text = String(readAll(ch, manifest), Charsets.UTF_8)
             val (open, slices, close) = splitPages(text) ?: return null
-            XnoteBundle(entries, text.substring(0, open + 1), slices, text.substring(close))
+            XnoteBundle(ch, entries, text.substring(0, open + 1), slices, text.substring(close))
         }.getOrNull()
 
         /**
-         * Merges [local] and [remote] against what both had at the last sync, or returns null when it
-         * can't be done safely and the caller should keep a conflict copy instead.
+         * Merges [local] and [remote] against what both had at the last sync into [out], or returns null when
+         * it can't be done safely and the caller should keep a conflict copy instead ([out] is then not a note).
          */
-        fun merge(basePages: List<String>, baseDoc: String, local: ByteArray, remote: ByteArray): Merged? {
-            val l = parse(local) ?: return null
-            val r = parse(remote) ?: return null
-            if (l.hasPageIndexes() || r.hasPageIndexes()) return null
-            if (l.sharedEntries() != r.sharedEntries()) return null
-            val lf = l.fingerprints()
-            val rf = r.fingerprints()
-            val docFrom = when {
-                lf.doc == rf.doc || rf.doc == baseDoc -> l
-                lf.doc == baseDoc -> r
-                else -> return null
+        fun merge(basePages: List<String>, baseDoc: String, local: File, remote: File, out: File): Merged? =
+            FileInputStream(local).use { lIn ->
+                FileInputStream(remote).use { rIn ->
+                    val l = parse(lIn.channel) ?: return null
+                    val r = parse(rIn.channel) ?: return null
+                    if (l.hasPageIndexes() || r.hasPageIndexes()) return null
+                    if (l.sharedEntries() != r.sharedEntries()) return null
+                    val lf = l.fingerprints()
+                    val rf = r.fingerprints()
+                    val docFrom = when {
+                        lf.doc == rf.doc || rf.doc == baseDoc -> l
+                        lf.doc == baseDoc -> r
+                        else -> return null
+                    }
+                    val result = PageMerge.merge(basePages, lf.pages, rf.pages) ?: return null
+                    FileOutputStream(out).use { l.write(result.pages, r, docFrom, it.buffered(64 * 1024)) }
+                    val check = FileInputStream(out).use { parse(it.channel)?.fingerprints() } ?: return null
+                    if (check.pages.size != result.pages.size) return null
+                    Merged(check, result.keptBoth.map { it + 1 })
+                }
             }
-            val result = PageMerge.merge(basePages, lf.pages, rf.pages) ?: return null
-            val bytes = l.write(result.pages, r, docFrom)
-            val check = parse(bytes) ?: return null
-            if (check.pages.size != result.pages.size) return null
-            return Merged(bytes, result.keptBoth.map { it + 1 })
-        }
 
-        private fun ZipOutputStream.put(entry: Entry, name: String) {
+        private fun ZipOutputStream.put(from: XnoteBundle, entry: ZipTail.Entry, name: String) {
             putNextEntry(ZipEntry(name).apply {
-                if (entry.stored) {
+                if (entry.method == ZipEntry.STORED) {
                     method = ZipEntry.STORED
-                    size = entry.bytes.size.toLong()
+                    size = entry.size
                     compressedSize = size
                     crc = entry.crc
                 } else {
                     method = ZipEntry.DEFLATED
                 }
             })
-            write(entry.bytes)
+            ZipTail.readEntry(from.ch, entry) { copy(it, entry.size, this) } ?: error("cannot read ${entry.name}")
             closeEntry()
+        }
+
+        private fun readAll(ch: FileChannel, entry: ZipTail.Entry): ByteArray {
+            val out = java.io.ByteArrayOutputStream(entry.size.toInt())
+            ZipTail.readEntry(ch, entry) { copy(it, entry.size, out) } ?: error("cannot read ${entry.name}")
+            return out.toByteArray()
+        }
+
+        /** Exactly [size] bytes: a stored entry's stream runs on past its end. The stream is not closed, as it would close the channel. */
+        private fun copy(input: InputStream, size: Long, out: OutputStream) {
+            val buf = ByteArray(64 * 1024)
+            var left = size
+            while (left > 0) {
+                val n = input.read(buf, 0, minOf(buf.size.toLong(), left).toInt())
+                if (n < 0) throw java.io.EOFException()
+                out.write(buf, 0, n)
+                left -= n
+            }
         }
 
         private fun hash(s: String): String =

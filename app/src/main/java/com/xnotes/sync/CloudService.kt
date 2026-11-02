@@ -43,11 +43,32 @@ interface CloudStorage {
 
     /** Resolves (creating as needed) a chain of subfolders, matched case-insensitively. Returns the deepest id. */
     fun ensureFolderPath(parentId: String, segments: List<String>): String
-    fun upload(parentId: String, name: String, bytes: ByteArray, lastModified: Long): String
-    fun download(file: RemoteFile): ByteArray
+
+    /** Uploads [file] as [name] and returns the new file's id. Streamed, so a note's size is not bound by memory. */
+    fun upload(parentId: String, name: String, file: java.io.File, lastModified: Long): String
+
+    /** Writes [file]'s content into [to], replacing what it held. Streamed, like [upload]. */
+    fun download(file: RemoteFile, to: java.io.File)
     fun trashFile(id: String)
     fun trashFolder(id: String)
-    fun hash(bytes: ByteArray): String
+
+    /** [file]'s content hash in the format of [RemoteFile.hash]. */
+    fun hash(file: java.io.File): String
+
+    /** For small files (the settings), held in memory. */
+    fun upload(parentId: String, name: String, bytes: ByteArray, lastModified: Long): String =
+        withTemp { it.writeBytes(bytes); upload(parentId, name, it, lastModified) }
+
+    fun download(file: RemoteFile): ByteArray = withTemp { download(file, it); it.readBytes() }
+}
+
+private inline fun <T> withTemp(block: (java.io.File) -> T): T {
+    val f = java.io.File.createTempFile("cloud", null)
+    try {
+        return block(f)
+    } finally {
+        f.delete()
+    }
 }
 
 object CloudServices {

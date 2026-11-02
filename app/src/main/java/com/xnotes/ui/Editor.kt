@@ -549,7 +549,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** When non-null, the current note lives in the granted folder and autosaves to this URI. */
     var autosaveUri: String? = null
-        private set
+        private set(value) { field = value; com.xnotes.sync.OpenNotes.set(this, value) }
     private val autosaveScope = kotlinx.coroutines.MainScope()
 
     /** The note autosave's debounce timer. Cancelled freely: nothing has been written yet. */
