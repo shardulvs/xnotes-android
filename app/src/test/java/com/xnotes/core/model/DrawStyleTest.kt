@@ -67,4 +67,12 @@ class DrawStyleTest {
         assertEquals(DrawStyle(red, 3.0), DrawStyle.of(a))
         assertEquals(DrawStyle(blue, 7.0), DrawStyle.of(b))
     }
+
+    @Test fun `a text box takes a colour and ignores the width`() {
+        val t = TextItem(Pt(0.0, 0.0), text = "doc", rgba = red, measurer = com.xnotes.core.FakeTextMeasurer())
+        assertEquals(DrawStyle(red, DrawStyle.NO_WIDTH), DrawStyle.of(t))
+        DrawStyle(blue, 9.0).applyTo(t)
+        assertEquals(blue, t.rgba)
+        assertEquals(DrawStyle(blue, DrawStyle.NO_WIDTH), DrawStyle.of(t))
+    }
 }

@@ -331,8 +331,8 @@ fun SelectionMenu(
                         )
                         androidx.compose.material3.HorizontalDivider(color = palette.border.toComposeColor())
                     }
-                    // Empty when nothing selected carries ink or a fill: an image or a text box has
-                    // no colour-and-width pair to restyle.
+                    // Empty when nothing selected carries ink, a fill or text colour: an image
+                    // has nothing to restyle.
                     val styles = host.selectionStyles()
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.change_style)) },
@@ -723,7 +723,8 @@ private fun SelectionStylePopup(host: SelectionMenuHost, onDismiss: () -> Unit) 
     val first = opened.firstOrNull()
     val shared = opened.firstOrNull()?.color?.takeIf { c -> opened.all { it.color == c } }
     var color by remember { mutableStateOf(shared ?: first?.color ?: Rgba(0, 0, 0)) }
-    var width by remember { mutableStateOf((first?.width ?: 1.0).toFloat()) }
+    val sized = opened.firstOrNull { it.width != DrawStyle.NO_WIDTH }
+    var width by remember { mutableStateOf((sized?.width ?: 1.0).toFloat()) }
     val fills = remember { host.selectionFills() }
     // Only dropped colours selected: they have a fill and nothing else to restyle.
     val fillsOnly = first == null
@@ -826,7 +827,7 @@ private fun SelectionStylePopup(host: SelectionMenuHost, onDismiss: () -> Unit) 
                     StepDot("+", stringResource(R.string.count_more), enabled = count < range.last) { host.setSelectionCount(count + 1) }
                 }
             }
-            if (fillsOnly) return@Column
+            if (fillsOnly || sized == null) return@Column
             Spacer(Modifier.size(8.dp))
             // The drag previews live and commits on release, so it is one undo step, not fifty.
             SliderRow(
