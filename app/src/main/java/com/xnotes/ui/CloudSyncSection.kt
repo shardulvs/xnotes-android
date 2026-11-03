@@ -231,6 +231,7 @@ private fun SignedIn(
     }
 
     SyncCheckRow("Only on Wi-Fi", prefs.syncWifiOnly) { onUpdate(prefs.copy(syncWifiOnly = it)) }
+    SyncCheckRow("Keep screen on while syncing", prefs.syncKeepScreenOn) { onUpdate(prefs.copy(syncKeepScreenOn = it)) }
 
     SyncLabel("When to sync")
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -58,6 +58,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -169,6 +170,7 @@ class MainActivity : ComponentActivity() {
             val context = LocalContext.current
             val ed = remember { Editor(context).also { editor = it } }
             LaunchedEffect(ed.fullscreen) { applyFullscreen(ed.fullscreen) }
+            KeepScreenOn(ed)
             // Re-arm the periodic cloud sync to match the saved preferences.
             LaunchedEffect(Unit) { com.xnotes.sync.SyncManager.reschedule(context) }
             var ready by remember { mutableStateOf(false) }
@@ -2117,6 +2119,16 @@ private fun PdfBatchExportDialog(p: com.xnotes.platform.PdfBatch.Progress, onCan
             }
         }
     }
+}
+
+/** Holds the screen awake while the app is open, or only while a sync runs, as Preferences say. */
+@Composable
+private fun KeepScreenOn(editor: Editor) {
+    val syncing = com.xnotes.sync.SyncManager.status.collectAsState().value.running
+    editor.prefsVersion // re-read the preferences below whenever they change
+    val keepOn = editor.preferences.let { it.keepScreenOn || (it.syncKeepScreenOn && syncing) }
+    val view = androidx.compose.ui.platform.LocalView.current
+    SideEffect { view.keepScreenOn = keepOn }
 }
 
 /** After following a document link: a back arrow and the previous note's title, tapping it goes back. */
