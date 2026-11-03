@@ -18,7 +18,7 @@ Xnotes is a great app, and I'm grateful that the developer puts so much work int
 
 ## Additions to the original xnotes
 
-n-notes adds 44 features on top of xnotes, and 13 of them were later implemented in xnotes as well. See the full list in [ADDITIONS.md](ADDITIONS.md).
+n-notes adds more then 50+ features on top of xnotes, while 10+ (2026.11.01) of them were later implemented in xnotes as well. See the full list in [ADDITIONS.md](ADDITIONS.md).
 
 ## Versioning
 
