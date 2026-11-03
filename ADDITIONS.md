@@ -1,7 +1,7 @@
 # Additions to the original xnotes
 
-- **Cloud sync**: sync notes and settings to a cloud service picked in Preferences (Filen or Nextcloud) from the sidebar or by pulling down on Home, with a synced trash. A note changed on two devices is merged page by page, with both versions kept of a page changed on both, and the other device's version is also saved as a "Sync Conflict" copy marked with an orange triangle.
-- **Handwriting to text**: turn selected handwriting (Czech, English) into an editable text box.
+- **Cloud sync**: sync notes and settings to a cloud service picked in Preferences (Filen or Nextcloud) from the sidebar or by pulling down on Home, with a synced trash. A note changed on two devices is merged page by page, with both versions kept of a page changed on both, and the other device's version is also saved as a "Sync Conflict" copy marked with an orange triangle. The sidebar shows when it last synced and counts the files up while a sync runs, and the screen can be kept on while syncing.
+- **Handwriting to text**: turn selected handwriting into an editable text box, in a language picked in Preferences whose model is downloaded or deleted there.
 - **Handwriting to math**: an optional on-device add-on turns handwritten formulas into editable LaTeX.
 - **Plain text to equation**: turn typed maths like `int_0^1 x^2 dx` into a formula.
 - **Maths keyboard**: a dedicated keyboard for equations and the formula editor.
@@ -15,7 +15,7 @@
 - **Function curves**: a Functions page in the shape picker with x^n, roots, logs, exponentials, trig and inverse trig graphs and an editable formula and range.
 - **Circles from the centre**: circles grow out from where the drag starts.
 - **Item links**: add tappable links to canvas items, and add or edit the link on selected text.
-- **Eyedropper**: pick a colour from anywhere on screen.
+- **Eyedropper**: pick a colour from anywhere on screen; the menu or dialog it was opened from comes back after the pick.
 - **Whole selection**: a switch to select only items lying fully inside the band or lasso.
 - **Finger tap to select**: a finger tap selects, a finger drag still pans.
 - **Move grip**: drag small selections without hitting the resize handles.
@@ -29,7 +29,10 @@
 - **Port old notes**: rewrite notes that still hold the fork's old axes, number line, curve and function shapes in today's shapes, with a backup of each file.
 - **Smooth curve**: a curve shape next to the arrow that runs smoothly through its points; drag a point to move it, drag a dot on the curve to add one, double-tap a point to remove it.
 - **Hide and reorder shapes**: hide single shapes or whole pages of the shape picker in Preferences > Toolbar, drag pages by their handle or long-press and drag chips to change the order, and reset the order in one tap.
-- **Document links**: link to another note or read-only file from the Insert menu, with an editable or hidden label, and open it with a tap.
+- **Document links**: link to another note or read-only file from the Insert menu, with an editable or hidden label shown after a paperclip, and open it with a tap. A back pill then returns to the note the link was opened from.
+- **Recolour text boxes**: Change style on a selection also recolours text boxes and links.
+- **Preferences categories**: Preferences open on a list of categories, each on its own page, with the categories kept beside it on tablets.
+- **Keep screen on**: keep the screen awake while the app is open.
 - **Read-only files side by side**: open a read-only file next to a note, or two read-only files next to each other.
 - ~~**Create menu**: the new-note button is now a list to create a note, canvas, folder, or import a file.~~
 - ~~**Sort button**: moved sorting out into its own dedicated button.~~
