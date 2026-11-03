@@ -30,6 +30,10 @@ Releases are named `{xnotes version}-{n-notes version}`, for example `0.9.7-0.48
 |---|---|
 | [GitHub Releases](https://github.com/NeDDy3z/n-notes/releases/latest) | Signed APK |
 
+## Disclaimer
+
+I use LLMs during development mainly for research, code review and translations. Any and every change an LLM makes, I manually review/test before it goes into a release.
+
 ## License
 
 Released under the MIT License, the same as upstream. See [LICENSE](LICENSE).
