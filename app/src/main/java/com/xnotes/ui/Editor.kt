@@ -176,7 +176,7 @@ data class ContextMenuTarget(
  * folder (where colour writes go), and [color] is the item's explorer colour code, if any.
  */
 /** An item link to another stored file: this prefix, then the file's path below the top folder. */
-const val DOCUMENT_LINK = "xnotes-doc:"
+const val DOCUMENT_LINK = TextItem.DOCUMENT_LINK
 
 /** What a document link shows when its label is hidden: a page with an arrow out of it. */
 private const val DOCUMENT_LINK_ICON = """<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#1E88E5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M9 15l6-6M11 9h4v4"/></svg>"""
@@ -2653,8 +2653,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             insertImageAt(DOCUMENT_LINK_ICON.toByteArray(), null) ?: return
         } else {
             val font = com.xnotes.core.pal.FontSpec(TextItem.DEFAULT_POINT_SIZE, TextItem.DEFAULT_FACE)
-            val width = textMeasurer.measure(label, font, page.width * 0.8).w + 8.0
+            val width = textMeasurer.measure(label, font, page.width * 0.8).w + 8.0 + TextItem.docLinkInset(font.pointSize)
             TextItem(Pt(0.0, 0.0), width = width, text = label, rgba = palette.accent, measurer = textMeasurer, underline = true).also {
+                it.link = link
                 it.translate((page.width - width) / 2.0, (page.height - it.bounds().h) / 2.0)
                 page.items.add(it)
                 state.appendToCache(page, it)

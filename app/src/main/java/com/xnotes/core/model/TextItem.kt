@@ -8,6 +8,7 @@ import com.xnotes.core.pal.FontSpec
 import com.xnotes.core.pal.HAlign
 import com.xnotes.core.pal.MathBox
 import com.xnotes.core.pal.MathTypesetter
+import com.xnotes.core.pal.Pen
 import com.xnotes.core.pal.Renderer
 import com.xnotes.core.pal.TextFlags
 import com.xnotes.core.pal.TextMeasurer
@@ -51,8 +52,11 @@ class TextItem(
     private fun flags(): TextFlags =
         TextFlags(wordWrap = true, alignLeft = true, alignTop = true, underline = underline, strike = strike, hAlign = align)
 
+    /** A link to a stored document draws a paperclip before its text, this wide. */
+    private val inset: Double get() = if (link?.startsWith(DOCUMENT_LINK) == true) docLinkInset(pointSize) else 0.0
+
     /** Height the current text needs at the current width (empty ⇒ one line). */
-    fun contentHeight(): Double = measurer.measure(text.ifEmpty { " " }, font, width, flags()).h
+    fun contentHeight(): Double = measurer.measure(text.ifEmpty { " " }, font, width - inset, flags()).h
 
     /** The formula's size, or null when this is not maths or the LaTeX cannot be set (then it shows as text). */
     fun mathBox(): MathBox? = if (math && text.isNotEmpty()) mathTypesetter?.measure(text, pointSize, display = true) else null
@@ -68,7 +72,16 @@ class TextItem(
             r.drawMath(text, pos.x, pos.y + it.ascent, pointSize, rgba, display = true)
             return
         }
-        r.drawText(text, bounds(), font, rgba, flags())
+        val box = bounds()
+        val inset = inset
+        if (inset > 0.0) paintPaperclip(r)
+        r.drawText(text, Rect(box.x + inset, box.y, box.w - inset, box.h), font, rgba, flags())
+    }
+
+    private fun paintPaperclip(r: Renderer) {
+        val k = pointSize / 24.0
+        val top = pos.y + pointSize * 0.15
+        r.strokePolyline(List(PAPERCLIP.size / 2) { Pt(pos.x + PAPERCLIP[2 * it] * k, top + PAPERCLIP[2 * it + 1] * k) }, Pen(rgba, 2.0 * k, cosmetic = false))
     }
 
     override fun translate(dx: Double, dy: Double) {
@@ -122,6 +135,23 @@ class TextItem(
         const val DEFAULT_POINT_SIZE = 13.0
         val DEFAULT_FACE = FontFace.MONO
         val DEFAULT_COLOR = Rgba(236, 236, 236, 255)
+
+        /** The [link] prefix of a link to a stored document. */
+        const val DOCUMENT_LINK = "xnotes-doc:"
+
+        fun docLinkInset(pointSize: Double) = pointSize * 1.3
+
+        /** The toolbar's Insert paperclip (Feather), flattened on its 24-unit grid. */
+        private val PAPERCLIP = doubleArrayOf(
+            21.44, 11.05, 12.25, 20.24, 11.79, 20.65, 11.31, 21.01, 10.26, 21.56, 9.15, 21.89, 8.01, 22.00, 6.86, 21.89,
+            5.75, 21.56, 4.70, 21.01, 4.22, 20.65, 3.76, 20.24, 3.35, 19.78, 2.99, 19.30, 2.44, 18.25, 2.11, 17.14,
+            2.00, 16.00, 2.11, 14.85, 2.44, 13.74, 2.99, 12.69, 3.35, 12.21, 3.76, 11.75, 12.95, 2.56, 13.58, 2.05,
+            14.27, 1.68, 15.02, 1.46, 15.78, 1.39, 16.54, 1.46, 17.29, 1.68, 17.98, 2.05, 18.61, 2.56, 19.12, 3.19,
+            19.49, 3.88, 19.71, 4.63, 19.78, 5.39, 19.71, 6.15, 19.49, 6.90, 19.12, 7.59, 18.61, 8.22, 9.41, 17.41,
+            9.10, 17.67, 8.75, 17.85, 8.38, 17.96, 7.99, 18.00, 7.61, 17.96, 7.24, 17.85, 6.89, 17.67, 6.58, 17.41,
+            6.32, 17.10, 6.14, 16.75, 6.03, 16.38, 5.99, 16.00, 6.03, 15.61, 6.14, 15.24, 6.32, 14.89, 6.58, 14.58,
+            15.07, 6.10,
+        )
     }
 }
 
