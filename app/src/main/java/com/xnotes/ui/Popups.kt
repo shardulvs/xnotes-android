@@ -39,7 +39,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -1313,11 +1312,9 @@ internal fun DropdownMenu(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val palette = LocalPalette.current
-    // An eyedropper armed from a picker in here closes the whole stack, so the screen is free to touch.
-    val dropperArmed = Eyedropper.target != null
-    if (expanded && dropperArmed) LaunchedEffect(Unit) { onDismissRequest() }
+    // An armed eyedropper hides the whole stack so the screen is free to touch; it comes back after the pick.
     androidx.compose.material3.DropdownMenu(
-        expanded = expanded,
+        expanded = expanded && Eyedropper.target == null,
         onDismissRequest = onDismissRequest,
         modifier = modifier,
         offset = LocalMenuOffset.current,
@@ -1347,6 +1344,8 @@ internal fun AlertDialog(
     shape: Shape = MaterialTheme.shapes.large,
     containerColor: Color = LocalPalette.current.menuBg.toComposeColor(),
 ) {
+    // Hidden, not dismissed, while an eyedropper armed from inside it picks off the screen.
+    if (Eyedropper.target != null) return
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismissRequest,
         confirmButton = confirmButton,
