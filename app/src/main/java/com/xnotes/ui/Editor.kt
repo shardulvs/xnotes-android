@@ -2675,9 +2675,27 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val root = browseRoot ?: return
         autosaveScope.launch {
             val hit = withContext(Dispatchers.IO) { runCatching { findLinkedFile(root, path) }.getOrNull() }
-            if (hit == null) message = appContext.getString(R.string.reader_link_missing, path)
-            else openInPane?.invoke(hit.documentUri)
+            if (hit == null) {
+                message = appContext.getString(R.string.reader_link_missing, path)
+            } else {
+                val from = currentUri
+                if (from != null) linkBack = LinkBack(from, state.document.displayName?.let { com.xnotes.core.util.Paths.stem(it) } ?: title, hit.documentUri)
+                openInPane?.invoke(hit.documentUri)
+            }
         }
+    }
+
+    /** Where a followed document link came from: the note at [uri] titled [title], shown as a back pill while [to] is open. */
+    class LinkBack(val uri: String, val title: String, val to: String)
+
+    var linkBack by mutableStateOf<LinkBack?>(null)
+        private set
+
+    /** Go back to the note the open document link was followed from. */
+    fun followLinkBack() {
+        val back = linkBack ?: return
+        linkBack = null
+        openInPane?.invoke(back.uri)
     }
 
     // --- table tool ---
@@ -3880,6 +3898,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             doc.path = uri
             doc.displayName = name
             doc.dirty = false
+            if (linkBack?.to != uri) linkBack = null
             replaceDocument(doc)
             state.openFileBytes = fileBytes
             state.lastSaveBytes = fileBytes // the on-disk size, until the first autosave rewrites it

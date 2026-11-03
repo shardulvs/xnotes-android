@@ -1771,6 +1771,7 @@ private fun EditorPane(
                             com.xnotes.ui.FlowTableMenu(editor)
                             com.xnotes.ui.TableChrome(editor)
                             ZoomLockHint(editor)
+                            LinkBackPill(editor)
                             CanvasToastPill(editor)
                         }
                     }
@@ -2115,6 +2116,30 @@ private fun PdfBatchExportDialog(p: com.xnotes.platform.PdfBatch.Progress, onCan
                 Text(stringResource(R.string.cancel), color = palette.accent.toComposeColor())
             }
         }
+    }
+}
+
+/** After following a document link: a back arrow and the previous note's title, tapping it goes back. */
+@Composable
+private fun BoxScope.LinkBackPill(editor: Editor) {
+    editor.title // recompose when another note opens
+    val back = editor.linkBack?.takeIf { it.to == editor.currentUri } ?: return
+    val palette = LocalPalette.current
+    Row(
+        modifier = Modifier
+            .align(Alignment.TopStart)
+            .padding(com.xnotes.ui.LocalToolbarCover.current)
+            .padding(start = 8.dp, top = 8.dp)
+            .clip(androidx.compose.foundation.shape.CircleShape)
+            .background(palette.surface.toComposeColor())
+            .border(1.dp, palette.border.toComposeColor(), androidx.compose.foundation.shape.CircleShape)
+            .clickable { editor.followLinkBack() }
+            .padding(start = 6.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(XnotesIcons.prev, contentDescription = null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(4.dp))
+        Text(back.title, color = palette.text.toComposeColor(), fontSize = 12.sp, maxLines = 1)
     }
 }
 
