@@ -97,6 +97,7 @@ import com.xnotes.core.tools.InkPalette
 import com.xnotes.core.tools.ToolbarItem
 import com.xnotes.core.tools.ToolbarLayout
 import com.xnotes.core.util.NameTemplate
+import com.xnotes.platform.HandwritingOcr
 import com.xnotes.platform.MathOcr
 import com.xnotes.settings.HOME_SWIPES
 import com.xnotes.settings.Preferences
@@ -110,7 +111,9 @@ import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 
 /** One-tap filename templates offered beside the free-text field. */
@@ -386,13 +389,7 @@ fun PreferencesPane(
             HorizontalDivider(color = palette.border.toComposeColor())
             SectionTitle("OCR")
             FieldLabel("Handwriting recognition language (Convert to text)")
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Chip("Czech", prefs.ocrLanguage == "cs") { update(prefs.copy(ocrLanguage = "cs")) }
-                Chip("English", prefs.ocrLanguage == "en") { update(prefs.copy(ocrLanguage = "en")) }
-            }
+            HandwritingLanguageControls(prefs.ocrLanguage) { update(prefs.copy(ocrLanguage = it)) }
             FieldLabel("Handwritten math (Convert to math)")
             MathAddonControls()
 
@@ -944,6 +941,42 @@ private fun MathAddonControls() {
     }
 }
 
+/** Pick the handwriting language and download or delete its model; downloaded ones get a check. */
+@Composable
+private fun HandwritingLanguageControls(selected: String, onSelect: (String) -> Unit) {
+    val palette = LocalPalette.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var downloaded by remember { mutableStateOf(emptySet<String>()) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    fun act(action: () -> Unit) {
+        busy = true
+        error = null
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching(action).onFailure { error = it.message ?: it.toString() }
+                runCatching { HandwritingOcr.downloadedLanguages() }.onSuccess { downloaded = it }
+            }
+            busy = false
+        }
+    }
+    LaunchedEffect(Unit) { act {} }
+    val options = HandwritingOcr.LANGUAGES.map {
+        it to java.util.Locale.forLanguageTag(it).getDisplayLanguage(java.util.Locale.ENGLISH).replaceFirstChar(Char::titlecase)
+    }
+    val isDownloaded = selected in downloaded
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OptionDropdown(options, selected, downloaded, onSelect)
+        TextButton(enabled = !busy && !isDownloaded, onClick = { act { HandwritingOcr.ensureModelDownloaded(selected) } }) {
+            Text(if (busy) "Working..." else "Download", fontSize = 13.sp)
+        }
+        TextButton(enabled = !busy && isDownloaded, onClick = { act { HandwritingOcr.deleteModel(selected) } }) {
+            Text("Delete", fontSize = 13.sp)
+        }
+    }
+    error?.let { Text("Failed: $it", color = palette.danger.toComposeColor(), fontSize = 12.sp) }
+}
+
 /** Find and rewrite the notes that still hold shapes from earlier n-notes versions. */
 @Composable
 private fun PortSection(editor: Editor) {
@@ -1425,7 +1458,7 @@ private fun MillimetreField(label: String, value: Double, onChange: (Double) -> 
 
 /** The shared preferences dropdown: a bordered field showing the current choice and a down chevron. */
 @Composable
-internal fun OptionDropdown(options: List<Pair<String, String>>, selectedId: String, onSelect: (String) -> Unit) {
+internal fun OptionDropdown(options: List<Pair<String, String>>, selectedId: String, checked: Set<String> = emptySet(), onSelect: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val palette = LocalPalette.current
     val label = options.firstOrNull { it.first == selectedId }?.second ?: options.first().second
@@ -1444,7 +1477,13 @@ internal fun OptionDropdown(options: List<Pair<String, String>>, selectedId: Str
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             options.forEach { (id, lbl) ->
-                DropdownMenuItem(text = { Text(lbl) }, onClick = { onSelect(id); expanded = false })
+                DropdownMenuItem(
+                    text = { Text(lbl) },
+                    trailingIcon = if (id in checked) {
+                        { Icon(XnotesIcons.check, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(14.dp)) }
+                    } else null,
+                    onClick = { onSelect(id); expanded = false },
+                )
             }
         }
     }
