@@ -49,6 +49,7 @@ import com.xnotes.sync.CloudServices
 import com.xnotes.sync.CloudStorage
 import com.xnotes.sync.SyncManager
 import com.xnotes.sync.filen.FilenService
+import com.xnotes.sync.nextcloud.NextcloudService
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
 import kotlinx.coroutines.launch
@@ -124,6 +125,44 @@ fun CloudSyncSection(editor: Editor) {
 private fun ServiceSignIn(service: CloudService, onSignedIn: () -> Unit) {
     when (service) {
         FilenService -> FilenSignIn(onSignedIn)
+        NextcloudService -> NextcloudSignIn(onSignedIn)
+    }
+}
+
+@Composable
+private fun NextcloudSignIn(onSignedIn: () -> Unit) {
+    val palette = LocalPalette.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var server by remember { mutableStateOf("") }
+    var user by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    SyncField("Server address", server, KeyboardType.Uri) { server = it }
+    SyncField("User name", user, KeyboardType.Text) { user = it }
+    SyncField("App password", password, KeyboardType.Password, mask = true) { password = it }
+    Text(
+        "Create an app password in Nextcloud under Settings - Security - Devices & sessions.",
+        color = palette.textDim.toComposeColor(), fontSize = 12.sp,
+    )
+    error?.let { Text(it, color = palette.accent.toComposeColor(), fontSize = 12.sp) }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Button(
+            onClick = {
+                error = null
+                busy = true
+                scope.launch {
+                    val result = NextcloudService.signIn(context, server, user, password)
+                    busy = false
+                    result.fold({ onSignedIn() }, { error = it.message ?: "Sign-in failed" })
+                }
+            },
+            enabled = !busy && server.isNotBlank() && user.isNotBlank() && password.isNotBlank(),
+            colors = ButtonDefaults.buttonColors(containerColor = palette.accent.toComposeColor(), contentColor = palette.bg.toComposeColor()),
+        ) { Text("Sign in") }
+        if (busy) CircularProgressIndicator(modifier = Modifier.size(20.dp), color = palette.accent.toComposeColor(), strokeWidth = 2.dp)
     }
 }
 

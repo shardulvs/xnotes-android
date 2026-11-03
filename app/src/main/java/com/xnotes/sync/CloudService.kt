@@ -2,6 +2,7 @@ package com.xnotes.sync
 
 import android.content.Context
 import com.xnotes.sync.filen.FilenService
+import com.xnotes.sync.nextcloud.NextcloudService
 
 /**
  * A cloud provider notes can sync with. Each one owns its sign-in and session storage and hands the
@@ -38,14 +39,17 @@ interface CloudStorage {
 
     class Listing(val folders: List<RemoteFolder>, val files: List<RemoteFile>)
 
+    /** The uploaded file's id and the [RemoteFile.lastModified] it now lists with, which a service may round. */
+    data class Uploaded(val id: String, val lastModified: Long)
+
     fun list(folderId: String): Listing
     fun createFolder(parentId: String, name: String): String
 
     /** Resolves (creating as needed) a chain of subfolders, matched case-insensitively. Returns the deepest id. */
     fun ensureFolderPath(parentId: String, segments: List<String>): String
 
-    /** Uploads [file] as [name] and returns the new file's id. Streamed, so a note's size is not bound by memory. */
-    fun upload(parentId: String, name: String, file: java.io.File, lastModified: Long): String
+    /** Uploads [file] as [name]. Streamed, so a note's size is not bound by memory. */
+    fun upload(parentId: String, name: String, file: java.io.File, lastModified: Long): Uploaded
 
     /** Writes [file]'s content into [to], replacing what it held. Streamed, like [upload]. */
     fun download(file: RemoteFile, to: java.io.File)
@@ -56,7 +60,7 @@ interface CloudStorage {
     fun hash(file: java.io.File): String
 
     /** For small files (the settings), held in memory. */
-    fun upload(parentId: String, name: String, bytes: ByteArray, lastModified: Long): String =
+    fun upload(parentId: String, name: String, bytes: ByteArray, lastModified: Long): Uploaded =
         withTemp { it.writeBytes(bytes); upload(parentId, name, it, lastModified) }
 
     fun download(file: RemoteFile): ByteArray = withTemp { download(file, it); it.readBytes() }
@@ -74,7 +78,7 @@ private inline fun <T> withTemp(block: (java.io.File) -> T): T {
 object CloudServices {
     const val NONE = "none"
 
-    val all: List<CloudService> = listOf(FilenService)
+    val all: List<CloudService> = listOf(FilenService, NextcloudService)
 
     fun byId(id: String): CloudService? = all.firstOrNull { it.id == id }
 }

@@ -222,9 +222,9 @@ class SyncEngine(
 
     private fun doUpload(path: String, loc: LocalNoteStore.LocalEntry, oldRemoteUuid: String?, state: SyncState, summary: Summary) = Temps(tmpDir).use { t ->
         val file = localCopy(loc, t)
-        val newUuid = storage.upload(remoteParent(path), path.substringAfterLast('/'), file, loc.modified)
+        val sent = storage.upload(remoteParent(path), path.substringAfterLast('/'), file, loc.modified)
         oldRemoteUuid?.let { runCatching { storage.trashFile(it) } }
-        state.put(path, withFingerprints(path, file, SyncState.Entry(newUuid, loc.modified, loc.modified, loc.size)))
+        state.put(path, withFingerprints(path, file, SyncState.Entry(sent.id, sent.lastModified, loc.modified, loc.size)))
         summary.uploaded++
     }
 
@@ -252,21 +252,20 @@ class SyncEngine(
         // Checked again right before writing: an edit saved since the listing, or a note opened meanwhile, must not be overwritten.
         if (merged == null || OpenNotes.isOpen(loc.documentUri) || LocalNoteStore.modifiedOf(context, loc.documentUri) != loc.modified) {
             LocalNoteStore.writeNote(context, treeUri, copyPath, remoteFile)
-            val newUuid = storage.upload(remoteParent(path), name, localFile, loc.modified)
+            val sent = storage.upload(remoteParent(path), name, localFile, loc.modified)
             runCatching { storage.trashFile(rem.id) }
-            state.put(path, withFingerprints(path, localFile, SyncState.Entry(newUuid, loc.modified, loc.modified, loc.size)))
+            state.put(path, withFingerprints(path, localFile, SyncState.Entry(sent.id, sent.lastModified, loc.modified, loc.size)))
             note(summary, path, "was also changed on another device; that version is saved as \"$copyName\"")
             return@use
         }
         // Uploaded before anything is written here, so a failed upload leaves no trace and the next run starts over.
-        val uploadedAt = System.currentTimeMillis()
-        val newUuid = storage.upload(remoteParent(path), name, mergedFile, uploadedAt)
+        val sent = storage.upload(remoteParent(path), name, mergedFile, System.currentTimeMillis())
         runCatching { storage.trashFile(rem.id) }
         val uri = LocalNoteStore.writeNote(context, treeUri, path, mergedFile) ?: throw IllegalStateException("cannot write local file")
         val localMod = LocalNoteStore.modifiedOf(context, uri)
         LocalNoteStore.writeNote(context, treeUri, copyPath, remoteFile)
         val f = merged.fingerprints
-        state.put(path, SyncState.Entry(newUuid, uploadedAt, localMod, mergedFile.length(), f.pages, f.doc))
+        state.put(path, SyncState.Entry(sent.id, sent.lastModified, localMod, mergedFile.length(), f.pages, f.doc))
         val both = merged.keptBothPages
         val bothText = when {
             both.isEmpty() -> ""

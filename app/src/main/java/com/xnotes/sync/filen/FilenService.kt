@@ -54,7 +54,7 @@ private class FilenStorage(private val client: FilenClient) : CloudStorage {
     override fun createFolder(parentId: String, name: String) = client.createFolder(parentId, name)
     override fun ensureFolderPath(parentId: String, segments: List<String>) = client.ensureFolderPath(parentId, segments)
     override fun upload(parentId: String, name: String, file: java.io.File, lastModified: Long) =
-        client.uploadFile(parentId, name, file, lastModified)
+        CloudStorage.Uploaded(client.uploadFile(parentId, name, file, lastModified), lastModified)
     override fun download(file: CloudStorage.RemoteFile, to: java.io.File) = (file as File).let { client.downloadFile(it.file, it.meta, to) }
     override fun trashFile(id: String) = client.trashFile(id)
     override fun trashFolder(id: String) = client.trashFolder(id)

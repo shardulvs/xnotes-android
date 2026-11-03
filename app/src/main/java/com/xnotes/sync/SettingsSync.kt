@@ -47,8 +47,8 @@ object SettingsSync {
             if (localMod == 0L) return false // nothing local to publish yet
             val folderUuid = configFolder?.id ?: storage.ensureFolderPath(rootId, listOf(REMOTE_DIR))
             val bytes = portableOf(store.read()).toString().toByteArray()
-            val uuid = storage.upload(folderUuid, REMOTE_FILE, bytes, localMod)
-            state.put(STATE_PATH, SyncState.Entry(uuid, localMod, localMod, bytes.size.toLong()))
+            val sent = storage.upload(folderUuid, REMOTE_FILE, bytes, localMod)
+            state.put(STATE_PATH, SyncState.Entry(sent.id, sent.lastModified, localMod, bytes.size.toLong()))
             return false
         }
 
@@ -69,9 +69,9 @@ object SettingsSync {
                 // Local newer (or a two-sided change): local wins.
                 val folderUuid = configFolder!!.id
                 val bytes = portableOf(store.read()).toString().toByteArray()
-                val uuid = storage.upload(folderUuid, REMOTE_FILE, bytes, localMod)
+                val sent = storage.upload(folderUuid, REMOTE_FILE, bytes, localMod)
                 runCatching { storage.trashFile(file.id) }
-                state.put(STATE_PATH, SyncState.Entry(uuid, localMod, localMod, bytes.size.toLong()))
+                state.put(STATE_PATH, SyncState.Entry(sent.id, sent.lastModified, localMod, bytes.size.toLong()))
                 false
             }
             else -> false

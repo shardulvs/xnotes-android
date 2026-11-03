@@ -1,6 +1,6 @@
 # Additions to the original xnotes
 
-- **Cloud sync**: sync notes and settings to a cloud service picked in Preferences (Filen for now) from the sidebar or by pulling down on Home, with a synced trash. A note changed on two devices is merged page by page, with both versions kept of a page changed on both, and the other device's version is also saved as a "Sync Conflict" copy marked with an orange triangle.
+- **Cloud sync**: sync notes and settings to a cloud service picked in Preferences (Filen or Nextcloud) from the sidebar or by pulling down on Home, with a synced trash. A note changed on two devices is merged page by page, with both versions kept of a page changed on both, and the other device's version is also saved as a "Sync Conflict" copy marked with an orange triangle.
 - **Handwriting to text**: turn selected handwriting (Czech, English) into an editable text box.
 - **Handwriting to math**: an optional on-device add-on turns handwritten formulas into editable LaTeX.
 - **Plain text to equation**: turn typed maths like `int_0^1 x^2 dx` into a formula.
