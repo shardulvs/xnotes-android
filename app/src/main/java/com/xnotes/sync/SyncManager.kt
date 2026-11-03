@@ -42,6 +42,9 @@ object SyncManager {
         val message: String = "",
         /** Notes whose two devices diverged on the last sync, for the explorer's heads-up banner. */
         val conflicts: List<String> = emptyList(),
+        /** Files reconciled so far out of [total] while [running]. */
+        val done: Int = 0,
+        val total: Int = 0,
     )
 
     private val _status = MutableStateFlow(Status())
@@ -116,7 +119,7 @@ object SyncManager {
             backgroundQueued.set(false) // this pass covers anything queued before it started
             primeStatus(context)
             val service = activeService(context)
-            _status.value = _status.value.copy(running = true, message = "Syncing")
+            _status.value = _status.value.copy(running = true, message = "Syncing", done = 0, total = 0)
             val result = runCatching {
                 val prefs = settings(context).prefs
                 require(service != null) { "No cloud service selected" }
@@ -128,7 +131,9 @@ object SyncManager {
                 val state = SyncState.load(context, service.id)
                 val up = prefs.syncDirection == "both" || prefs.syncDirection == "up"
                 val down = prefs.syncDirection == "both" || prefs.syncDirection == "down"
-                val summary = SyncEngine(context, treeUri, storage, folderId, up, down).sync(state)
+                val summary = SyncEngine(context, treeUri, storage, folderId, up, down) { done, total ->
+                    _status.value = _status.value.copy(done = done, total = total)
+                }.sync(state)
                 runCatching { SettingsSync.sync(context, storage, folderId, state) }
                 state.save(context, service.id)
                 summary to state.filePaths().count { !it.startsWith(".") }

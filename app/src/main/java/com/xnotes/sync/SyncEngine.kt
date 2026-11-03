@@ -33,6 +33,8 @@ class SyncEngine(
     // toward whichever side is allowed; with both on it keeps the lossless conflict copy.
     private val up: Boolean = true,
     private val down: Boolean = true,
+    /** Called after each file is reconciled with how many are done out of the total. */
+    private val onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
 ) {
     /** A note whose two sides diverged: the edit was kept and the user should know. */
     data class ConflictNote(val path: String, val message: String)
@@ -75,12 +77,16 @@ class SyncEngine(
         val suppressDeletes = hadBaseline && (local.isEmpty() || remote.isEmpty())
 
         val allPaths = LinkedHashSet<String>().apply { addAll(local.keys); addAll(remote.keys); addAll(state.filePaths()) }
+        // Counted like the sidebar's file count: hidden paths (settings) are synced but not shown.
+        val total = allPaths.count { !it.startsWith(".") }
+        var done = 0
         for (path in allPaths) {
             try {
                 reconcile(path, local[path], remote[path], state, summary, suppressDeletes)
             } catch (e: Exception) {
                 summary.errors.add("$path: ${e.message}")
             }
+            if (!path.startsWith(".")) onProgress(++done, total)
         }
         reconcileFolders(localTree.folders, remoteTree, state, summary, suppressDeletes)
         return summary

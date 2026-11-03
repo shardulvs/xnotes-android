@@ -2626,23 +2626,29 @@ private fun SyncSidebarStatus() {
     if (!com.xnotes.sync.SyncManager.isConfigured(ctx)) return
     LaunchedEffect(Unit) { com.xnotes.sync.SyncManager.primeStatus(ctx) }
     val status by com.xnotes.sync.SyncManager.status.collectAsState()
-    val line = when {
-        status.running -> "Syncing…"
-        status.lastSyncMs == 0L -> "${com.xnotes.sync.SyncManager.activeService(ctx)?.displayName}: not synced yet"
-        else -> {
-            val ago = android.text.format.DateUtils.getRelativeTimeSpanString(
-                status.lastSyncMs, System.currentTimeMillis(), android.text.format.DateUtils.MINUTE_IN_MILLIS,
-            )
-            val files = if (status.fileCount == 1) "1 file" else "${status.fileCount} files"
-            "Last synced $ago · $files"
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(30_000)
+            now = System.currentTimeMillis()
         }
     }
-    Text(
-        line,
-        color = palette.textDim.toComposeColor(),
-        fontSize = 11.sp,
-        modifier = Modifier.padding(start = 18.dp, end = 12.dp, top = 8.dp),
-    )
+    val synced = if (status.lastSyncMs == 0L) {
+        "${com.xnotes.sync.SyncManager.activeService(ctx)?.displayName}: not synced yet"
+    } else {
+        "Last synced " + android.text.format.DateUtils.getRelativeTimeSpanString(
+            status.lastSyncMs, maxOf(now, status.lastSyncMs), android.text.format.DateUtils.MINUTE_IN_MILLIS,
+        )
+    }
+    val files = when {
+        status.running && status.total > 0 -> "${status.done}/${status.total} files"
+        status.running -> "Syncing..."
+        else -> "${status.fileCount}/${status.fileCount} files"
+    }
+    Column(Modifier.padding(start = 18.dp, end = 12.dp, top = 8.dp)) {
+        Text(synced, color = palette.textDim.toComposeColor(), fontSize = 11.sp)
+        Text(files, color = palette.textDim.toComposeColor(), fontSize = 11.sp)
+    }
 }
 
 /**
