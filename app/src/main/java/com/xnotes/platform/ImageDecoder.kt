@@ -25,7 +25,8 @@ import kotlin.math.max
  * size buckets (so a drag, a repeated sharpen, or a small zoom step is a plain bitmap blit).
  * On-screen draws go through [renderVectorSlice], which rasterizes only the region the caller can
  * actually show, so a deep zoom paints a viewport-sized bitmap instead of the whole document.
- * Safe to call from any thread; both caches are thread-safe and memory-capped.
+ * On-screen rasters have a bounded LRU of their own behind [cachedSampledFile], for the same reason.
+ * Safe to call from any thread; every cache is thread-safe and memory-capped.
  */
 object ImageDecoder {
 
@@ -72,6 +73,32 @@ object ImageDecoder {
         val scaled = Bitmap.createScaledBitmap(bmp, tw, th, true)
         if (scaled !== bmp) bmp.recycle()
         return scaled
+    }
+
+    /**
+     * The image at [path] for a [maxWidth]×[maxHeight] box, served from a cache so a picture can be
+     * drawn every frame. A lifted (selected) picture on a page repaints on the UI thread each frame
+     * of a drag, and decoding a phone photo from disk that often is what made the drag crawl. A
+     * raster is kept at its sample step rather than scaled to the box, so it may be up to twice the
+     * box on each side (callers scale into place) and nearby box sizes share one bitmap: a resize
+     * or a zoom only decodes again when the step changes. An SVG takes [decodeSampledFile]'s own
+     * cached route. The bitmap is shared, so callers must never recycle or draw into it.
+     */
+    fun cachedSampledFile(path: String, maxWidth: Int, maxHeight: Int): Bitmap? {
+        val mw = maxWidth.coerceAtLeast(1)
+        val mh = maxHeight.coerceAtLeast(1)
+        if (isVector(path)) return renderSvg(path, mw, mh)
+        val size = rasterSize(path) ?: return null
+        val ss = sampleSize(size.width, size.height, mw, mh)
+        val key = "$path@$ss"
+        rasterBitmapCache.get(key)?.let { return it }
+        val opts = BitmapFactory.Options().apply {
+            inSampleSize = ss
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        val bmp = BitmapFactory.decodeFile(path, opts) ?: return null
+        rasterBitmapCache.put(key, bmp)
+        return bmp
     }
 
     /** True when [path] holds a vector (SVG) source with no native pixel resolution.
@@ -285,6 +312,11 @@ object ImageDecoder {
         return if (o.outWidth > 0 && o.outHeight > 0) ImageSize(o.outWidth, o.outHeight) else null
     }
 
+    // Memoized like [isVector]: even a bounds-only decode opens the file, and a cache hit in
+    // [cachedSampledFile] must not touch the disk at all.
+    private fun rasterSize(path: String): ImageSize? =
+        rasterSizes.get(path) ?: probeRaster(path)?.also { rasterSizes.put(path, it) }
+
     // Parsed SVG documents by path: parsing a big flowchart's XML can dwarf painting it, and image
     // files are immutable temp files, so the path alone is a sound key. Count-bounded (a parsed DOM
     // has no cheap byte size); stale entries for deleted temp files just age out.
@@ -296,6 +328,17 @@ object ImageDecoder {
     // Rasterized SVGs by path + bucket. Byte-bounded against the heap; entries are never recycled
     // (callers may still be drawing them), eviction leaves them to the GC.
     private val svgBitmapCache = object : LruCache<String, Bitmap>(
+        ((Runtime.getRuntime().maxMemory() / 6).coerceAtMost(96L shl 20) shr 10).toInt(),
+    ) {
+        override fun sizeOf(key: String, value: Bitmap) = value.byteCount / 1024
+    }
+
+    // Native raster sizes by path, for the same reason as [vectorFlags].
+    private val rasterSizes = LruCache<String, ImageSize>(64)
+
+    // Decoded rasters by path + sample step, bounded and never recycled just like [svgBitmapCache].
+    // Image files are immutable temp files (a crop writes a new one), so a stale entry can't show.
+    private val rasterBitmapCache = object : LruCache<String, Bitmap>(
         ((Runtime.getRuntime().maxMemory() / 6).coerceAtMost(96L shl 20) shr 10).toInt(),
     ) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount / 1024
@@ -357,13 +400,6 @@ object ImageDecoder {
         return p
     }
 
-    /** Largest power-of-two sample step that keeps the decoded size at or above the requested box. */
-    private fun sampleSize(w: Int, h: Int, reqW: Int, reqH: Int): Int {
-        var ss = 1
-        while (w / (ss * 2) >= reqW && h / (ss * 2) >= reqH) ss *= 2
-        return ss
-    }
-
     private const val DEFAULT_SVG_SIZE = 512f
 
     // Matches the raster decode caps used by the screen renderer and PDF export. On screen the
@@ -386,4 +422,14 @@ object ImageDecoder {
     // Below this the CPU already paints faster than the GPU can hand the pixels back (a megapixel
     // of ARGB is 4 MiB across the bus), so the GPU path is never even measured.
     private const val HW_WORTH_MS_PER_MPX = 6.0
+}
+
+/**
+ * Largest power-of-two sample step that keeps the decoded size at or above the requested box.
+ * Kept outside [ImageDecoder] so it runs on the JVM without Android's caches behind it.
+ */
+internal fun sampleSize(w: Int, h: Int, reqW: Int, reqH: Int): Int {
+    var ss = 1
+    while (w / (ss * 2) >= reqW && h / (ss * 2) >= reqH) ss *= 2
+    return ss
 }
