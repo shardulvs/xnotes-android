@@ -31,7 +31,7 @@
 - **Hide and reorder shapes**: hide single shapes or whole pages of the shape picker in Preferences > Toolbar, drag pages by their handle or long-press and drag chips to change the order, and reset the order in one tap.
 - **Document links**: link to another note or read-only file from the Insert menu, with an editable or hidden label shown after a paperclip, and open it with a tap. A back pill then returns to the note the link was opened from.
 - **Recolour text boxes**: Change style on a selection also recolours text boxes and links.
-- **Preferences categories**: Preferences open on a list of categories, each on its own page, with the categories kept beside it on tablets.
+- **Preferences categories**: Preferences open on a list of categories, each on its own page, with the categories kept beside it on tablets; turn it off in Appearance for one long list.
 - **Keep screen on**: keep the screen awake while the app is open.
 - **Read-only files side by side**: open a read-only file next to a note, or two read-only files next to each other.
 - ~~**Create menu**: the new-note button is now a list to create a note, canvas, folder, or import a file.~~
