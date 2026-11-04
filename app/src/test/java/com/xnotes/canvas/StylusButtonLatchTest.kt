@@ -26,6 +26,19 @@ class StylusButtonLatchTest {
     }
 
     @Test
+    fun focusPenProSqueezeKeyIsAHeldStylusButton() {
+        assertTrue(latch.onKey(InteractionController.FOCUS_PEN_PRO_SQUEEZE_KEYCODE, down = true))
+        assertTrue(latch.held)
+        assertTrue(latch.onKey(InteractionController.FOCUS_PEN_PRO_SQUEEZE_KEYCODE, down = false))
+        assertFalse(latch.held)
+    }
+
+    @Test
+    fun focusPenProSqueezeKeyIsRecognizedByTheSharedKeyClassifier() {
+        assertTrue(StylusButtonLatch.isStylusButtonKey(KeyEvent.KEYCODE_BUTTON_7))
+    }
+
+    @Test
     fun aButtonInButtonStateLatchesAndLetsGo() {
         // S-Pen: the button rides in buttonState, on the touch itself and while hovering.
         assertTrue(latch.heldWith(MotionEvent.BUTTON_STYLUS_PRIMARY))

@@ -88,7 +88,8 @@ class StylusButtonLatch {
                 keyCode == KeyEvent.KEYCODE_STYLUS_BUTTON_SECONDARY ||
                 keyCode == KeyEvent.KEYCODE_STYLUS_BUTTON_TERTIARY ||
                 keyCode == KeyEvent.KEYCODE_STYLUS_BUTTON_TAIL ||
-                keyCode == InteractionController.VENDOR_HELD_BUTTON_KEYCODE
+                keyCode == InteractionController.VENDOR_HELD_BUTTON_KEYCODE ||
+                keyCode == InteractionController.FOCUS_PEN_PRO_SQUEEZE_KEYCODE
     }
 }
 

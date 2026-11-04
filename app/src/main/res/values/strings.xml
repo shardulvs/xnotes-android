@@ -390,6 +390,8 @@
     <string name="pref_three_finger_tap">Three-finger tap</string>
     <string name="pref_stylus_double_tap">Stylus double-tap</string>
     <string name="pref_stylus_button_tap">Stylus side button (tap)</string>
+    <string name="pref_stylus_squeeze">Focus Pen Pro squeeze</string>
+    <string name="pref_stylus_haptics">Stylus gesture haptics</string>
     <string name="pref_redmi_buttons">Redmi Smart Pen side buttons (tap)</string>
     <string name="pen_button_1">Button 1</string>
     <string name="pen_button_2">Button 2</string>
@@ -429,6 +431,7 @@
     <string name="toggle_pan">Toggle pan</string>
     <string name="toggle_eraser">Toggle eraser</string>
     <string name="toggle_previous">Toggle previous tool</string>
+    <string name="toggle_lasso">Toggle lasso</string>
     <string name="pref_filename_template_help">YYYY YY MM DD HH mm ss expand to the creation date and time. # becomes the number that keeps the name free in its folder.</string>
     <string name="pref_next_note_named">The next note would be named %1$s</string>
     <string name="pref_side_margin_px">"Side margin  %1$d px"</string>
