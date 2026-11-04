@@ -51,6 +51,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -68,6 +70,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.pluralStringResource
@@ -191,16 +195,28 @@ fun PreferencesPane(
         searchScope.launch { scrollState.animateScrollTo((y - 24f * search.density).roundToInt().coerceAtLeast(0)) }
     }
     // Null shows the list of categories; a search shows every category so its matches can be stepped through.
+    // With categories off, every setting sits in one long list as before.
+    val categorized = prefs.prefsCategories
     var category by rememberSaveable { mutableStateOf<PrefCategory?>(null) }
     val searching = search.query.isNotBlank()
-    fun shown(c: PrefCategory) = searching || category == c
-    // Only phones fold the categories away; tablets always show them beside an open category.
-    var sectionsOpen by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(focusSync) {
-        if (focusSync) { category = PrefCategory.CLOUD_SYNC; onSyncFocused() }
+    val all = searching || !categorized
+    fun shown(c: PrefCategory) = all || category == c
+    // Categorized, only phones fold the categories away; tablets always show them beside an open category.
+    var sectionsOpen by rememberSaveable { mutableStateOf(!compact && !categorized) }
+    var syncTop by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(focusSync, syncTop) {
+        if (!focusSync) return@LaunchedEffect
+        if (categorized) {
+            category = PrefCategory.CLOUD_SYNC
+            onSyncFocused()
+        } else {
+            val top = syncTop ?: return@LaunchedEffect
+            scrollState.animateScrollTo(top)
+            onSyncFocused()
+        }
     }
     LaunchedEffect(category) { scrollState.scrollTo(0) }
-    BackHandler(enabled = category != null) { category = null }
+    BackHandler(enabled = categorized && category != null) { category = null }
     // Which bar the toolbar section is arranging. The two are separate layouts, so the drag state
     // below always belongs to whichever is on screen.
     var canvasTab by remember { mutableStateOf(false) }
@@ -256,7 +272,7 @@ fun PreferencesPane(
         // Leading button inline with the title, at a constant row height so toggling the sidebar never
         // shifts the settings below: a back arrow to Home on compact, else a hamburger when hidden.
         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-            val open = category
+            val open = if (categorized) category else null
             if (open != null) {
                 IconButton(onClick = { category = null }) {
                     Icon(XnotesIcons.prev, stringResource(R.string.preferences), tint = palette.text.toComposeColor(), modifier = Modifier.size(24.dp))
@@ -275,7 +291,7 @@ fun PreferencesPane(
                     }
                 }
             }
-            if (compact && open != null) {
+            if (!categorized || (compact && open != null)) {
                 IconButton(onClick = { sectionsOpen = !sectionsOpen }) {
                     Icon(XnotesIcons.sidebar, stringResource(R.string.side_panel), tint = (if (sectionsOpen) palette.accent else palette.text).toComposeColor(), modifier = Modifier.size(22.dp))
                 }
@@ -301,14 +317,32 @@ fun PreferencesPane(
         Spacer(Modifier.height(12.dp))
         search.toContentY = { rootY -> rootY - viewport.top + scrollState.value }
         search.density = androidx.compose.ui.platform.LocalDensity.current.density
-        val sectionsPanel = @Composable {
-            PrefSectionsPanel(PrefCategory.entries.map { it.title }, category?.title) { title ->
-                category = PrefCategory.entries.first { it.title == title }
-                if (compact) sectionsOpen = false
+        val currentSection by remember {
+            derivedStateOf {
+                val line = sectionLine(scrollState.value, scrollState.maxValue, viewport.height, 24f * search.density)
+                search.sections.entries.filter { it.value <= line }.maxByOrNull { it.value }?.key
             }
         }
+        val sectionsPanel = @Composable {
+            if (categorized) {
+                PrefSectionsPanel(PrefCategory.entries.map { it.title }, category?.title) { title ->
+                    category = PrefCategory.entries.first { it.title == title }
+                    if (compact) sectionsOpen = false
+                }
+            } else {
+                PrefSectionsPanel(search.sections.entries.sortedBy { it.value }.map { it.key }, currentSection) { title ->
+                    search.sections[title]?.let { y ->
+                        val to = scrollForSection(y, scrollState.maxValue, viewport.height, 24f * search.density)
+                        searchScope.launch { scrollState.animateScrollTo(to) }
+                    }
+                    if (compact) sectionsOpen = false
+                }
+            }
+        }
+        val panelBeside = if (categorized) category != null && !compact else sectionsOpen && !compact
+        val panelOver = sectionsOpen && compact && (!categorized || category != null)
         Row(Modifier.fillMaxSize()) {
-        if (category != null && !compact) {
+        if (panelBeside) {
             sectionsPanel()
             Spacer(Modifier.width(16.dp))
         }
@@ -320,7 +354,7 @@ fun PreferencesPane(
                 .onGloballyPositioned { viewport = it.boundsInRoot() },
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            if (category == null && !searching) {
+            if (categorized && category == null && !searching) {
                 for (c in PrefCategory.entries) {
                     Text(
                         c.title,
@@ -366,11 +400,12 @@ fun PreferencesPane(
                 }
                 CheckRow(stringResource(R.string.pref_start_fullscreen), editor.fullscreen) { editor.setFullscreenPref(it) }
                 CheckRow("Keep screen on while the app is open", prefs.keepScreenOn) { updateHome(prefs.copy(keepScreenOn = it)) }
+                CheckRow("Split settings into categories", prefs.prefsCategories) { updateHome(prefs.copy(prefsCategories = it)) }
                 TextButton(onClick = { update(Preferences()) }) { Text(stringResource(R.string.reset_to_defaults), fontSize = 13.sp) }
             }
             if (shown(PrefCategory.INPUT)) {
-                if (searching) HorizontalDivider(color = palette.border.toComposeColor())
-                if (searching) SectionTitle(stringResource(R.string.pref_input))
+                if (all) HorizontalDivider(color = palette.border.toComposeColor())
+                if (all) SectionTitle(stringResource(R.string.pref_input))
                 CheckRow(stringResource(R.string.pref_finger_draws), prefs.fingerDraws) { update(prefs.copy(fingerDraws = it)) }
                 FieldLabel(stringResource(R.string.pref_zoom_lock_pan))
                 FlowRow(
@@ -416,15 +451,15 @@ fun PreferencesPane(
                 CheckRow(stringResource(R.string.pref_volume_keys_turn_pages), prefs.volumeKeysTurnPages) { update(prefs.copy(volumeKeysTurnPages = it)) }
             }
             if (shown(PrefCategory.OCR)) {
-                if (searching) HorizontalDivider(color = palette.border.toComposeColor())
-                if (searching) SectionTitle("OCR")
+                if (all) HorizontalDivider(color = palette.border.toComposeColor())
+                if (all) SectionTitle("OCR")
                 FieldLabel("Handwriting recognition language (Convert to text)")
                 HandwritingLanguageControls(prefs.ocrLanguage) { update(prefs.copy(ocrLanguage = it)) }
                 FieldLabel("Handwritten math (Convert to math)")
                 MathAddonControls()
             }
             if (shown(PrefCategory.NEW_NOTES)) {
-                if (searching) HorizontalDivider(color = palette.border.toComposeColor())
+                if (all) HorizontalDivider(color = palette.border.toComposeColor())
                 SectionTitle(stringResource(R.string.pref_new_notes))
                 FieldLabel(stringResource(R.string.pref_filename_template))
                 Text(
@@ -452,7 +487,7 @@ fun PreferencesPane(
                 )
             }
             if (shown(PrefCategory.NEW_NOTES)) {
-                if (searching) HorizontalDivider(color = palette.border.toComposeColor())
+                if (all) HorizontalDivider(color = palette.border.toComposeColor())
                 SectionTitle(stringResource(R.string.pref_page))
                 FieldLabel(stringResource(R.string.pref_default_page_size))
                 SizeDropdown(prefs.defaultPageSize) { it?.let { size -> update(prefs.copy(defaultPageSize = size)) } }
@@ -497,8 +532,8 @@ fun PreferencesPane(
                 }
             }
             if (shown(PrefCategory.HOME)) {
-                if (searching) HorizontalDivider(color = palette.border.toComposeColor())
-                if (searching) SectionTitle(stringResource(R.string.pref_home_explorer))
+                if (all) HorizontalDivider(color = palette.border.toComposeColor())
+                if (all) SectionTitle(stringResource(R.string.pref_home_explorer))
                 Text(
                     stringResource(R.string.pref_home_explorer_help),
                     color = palette.textDim.toComposeColor(),
@@ -598,15 +633,15 @@ fun PreferencesPane(
                 CheckRow(stringResource(R.string.pref_hide_dot_items), prefs.hideDotItems) { editor.setHideDotItems(it) }
             }
             if (shown(PrefCategory.EXPORT_IMPORT)) {
-                if (searching) HorizontalDivider(color = palette.border.toComposeColor())
+                if (all) HorizontalDivider(color = palette.border.toComposeColor())
                 SectionTitle(stringResource(R.string.pref_pdf_export))
                 CheckRow(stringResource(R.string.pref_pdf_heading_bookmarks), prefs.pdfHeadingBookmarks) {
                     updateHome(prefs.copy(pdfHeadingBookmarks = it))
                 }
             }
             if (shown(PrefCategory.PERFORMANCE)) {
-                if (searching) HorizontalDivider(color = palette.border.toComposeColor())
-                if (searching) SectionTitle(stringResource(R.string.pref_performance))
+                if (all) HorizontalDivider(color = palette.border.toComposeColor())
+                if (all) SectionTitle(stringResource(R.string.pref_performance))
                 FieldLabel(stringResource(R.string.pref_max_cache_px, prefs.maxCacheResolution))
                 Slider(
                     value = prefs.maxCacheResolution.toFloat(),
@@ -631,7 +666,7 @@ fun PreferencesPane(
             }
             if (shown(PrefCategory.APPEARANCE)) {
                 if (editor.treeSitterAvailable) {
-                    if (searching) HorizontalDivider(color = palette.border.toComposeColor())
+                    if (all) HorizontalDivider(color = palette.border.toComposeColor())
                     SectionTitle(stringResource(R.string.pref_code_highlighting))
 
                     val langOptions = editor.scmLanguages().map { it to it }
@@ -665,7 +700,7 @@ fun PreferencesPane(
                 }
             }
             if (shown(PrefCategory.APPEARANCE)) {
-                if (searching) HorizontalDivider(color = palette.border.toComposeColor())
+                if (all) HorizontalDivider(color = palette.border.toComposeColor())
                 SectionTitle(stringResource(R.string.pref_fonts))
                 Text(
                     stringResource(R.string.pref_fonts_help),
@@ -689,8 +724,8 @@ fun PreferencesPane(
                 }
             }
             if (shown(PrefCategory.TOOLBAR)) {
-                if (searching) HorizontalDivider(color = palette.border.toComposeColor())
-                if (searching) SectionTitle(stringResource(R.string.pref_toolbar))
+                if (all) HorizontalDivider(color = palette.border.toComposeColor())
+                if (all) SectionTitle(stringResource(R.string.pref_toolbar))
                 // The look, like the swatch count below, is one setting for both bars.
                 val look = prefs.toolbarLook
                 FieldLabel(stringResource(R.string.pref_toolbar_style))
@@ -865,7 +900,7 @@ fun PreferencesPane(
                 }
             }
             if (shown(PrefCategory.EXPORT_IMPORT)) {
-                if (searching) HorizontalDivider(color = palette.border.toComposeColor())
+                if (all) HorizontalDivider(color = palette.border.toComposeColor())
                 SectionTitle(stringResource(R.string.pref_backup))
                 Text(stringResource(R.string.pref_backup_help), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -874,22 +909,22 @@ fun PreferencesPane(
                 }
             }
             if (shown(PrefCategory.CLOUD_SYNC)) {
-                if (searching) HorizontalDivider(color = palette.border.toComposeColor())
-                Box(Modifier.searchAnchor(stringResource(R.string.search_keywords_sync))) { CloudSyncSection(editor) }
+                if (all) HorizontalDivider(color = palette.border.toComposeColor())
+                Box(Modifier.onPlaced { syncTop = it.positionInParent().y.roundToInt() }.searchAnchor(stringResource(R.string.search_keywords_sync)).sectionAnchor("Cloud sync")) { CloudSyncSection(editor) }
             }
             if (shown(PrefCategory.MAINTENANCE)) {
-                if (searching) HorizontalDivider(color = palette.border.toComposeColor())
+                if (all) HorizontalDivider(color = palette.border.toComposeColor())
                 Box(Modifier.searchAnchor(stringResource(R.string.search_keywords_port))) { PortSection(editor) }
             }
             if (shown(PrefCategory.UPDATES)) {
-                if (searching) HorizontalDivider(color = palette.border.toComposeColor())
-                Box(Modifier.searchAnchor(stringResource(R.string.search_keywords_update))) { UpdateSection() }
+                if (all) HorizontalDivider(color = palette.border.toComposeColor())
+                Box(Modifier.searchAnchor(stringResource(R.string.search_keywords_update)).sectionAnchor("Updates")) { UpdateSection() }
             }
             Spacer(Modifier.size(8.dp))
         }
         }
         // Phones lay the panel over the settings, so opening it never squeezes the column.
-        if (sectionsOpen && compact && category != null) {
+        if (panelOver) {
             Box(Modifier.fillMaxSize().background(palette.materialColors.scrim.withAlpha(82).toComposeColor()).clickable { sectionsOpen = false })
             sectionsPanel()
         }
@@ -1078,9 +1113,22 @@ private fun PortSection(editor: Editor) {
     }
 }
 
+/**
+ * The content y the sections panel marks the section above: [top] below the top of the view, until
+ * the last screenful, where it slides down to the bottom as fast as the page scrolls, so the short
+ * sections at the end, which can never reach the top, still each get marked, the last at the very end.
+ */
+internal fun sectionLine(scroll: Int, maxScroll: Int, height: Float, top: Float): Float =
+    scroll + top + (height - top - (maxScroll - scroll)).coerceAtLeast(0f)
+
+/** The scroll at which [sectionLine] reaches a section starting at [y]: [y] itself, or less near the end. */
+internal fun scrollForSection(y: Int, maxScroll: Int, height: Float, top: Float): Int =
+    if (maxScroll - y >= height - top) y
+    else ((y + maxScroll - height + top) / 2f).roundToInt().coerceIn(0, maxScroll)
+
 @Composable
 private fun SectionTitle(text: String) {
-    Text(text, color = LocalPalette.current.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.searchAnchor(text))
+    Text(text, color = LocalPalette.current.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 15.sp, modifier = Modifier.searchAnchor(text).sectionAnchor(text))
 }
 
 @Composable
@@ -1101,6 +1149,8 @@ private class PrefSearch {
     /** Label text and its top in the column's content, by the label that registered it. Read only
      *  when searching, so it is a plain map: a scroll repositions labels without recomposing. */
     val anchors = HashMap<Any, Pair<String, Float>>()
+    /** Section titles and their tops in the column's content, for the sections panel. */
+    val sections = mutableStateMapOf<String, Int>()
 
     fun matches(text: String): Boolean = query.isNotBlank() && text.contains(query.trim(), ignoreCase = true)
 
@@ -1123,7 +1173,18 @@ private fun Modifier.searchAnchor(text: String): Modifier {
         .then(if (hit) Modifier.background(tint, MaterialTheme.shapes.extraSmall) else Modifier)
 }
 
-/** The settings' categories, styled like the note's side panel; a tap opens that category. */
+/** List this section under [title] in the sections panel, at where it sits in the column. */
+@Composable
+private fun Modifier.sectionAnchor(title: String): Modifier {
+    val search = LocalPrefSearch.current ?: return this
+    androidx.compose.runtime.DisposableEffect(title) { onDispose { search.sections.remove(title) } }
+    return onGloballyPositioned {
+        val y = search.toContentY(it.positionInRoot().y).roundToInt()
+        if (search.sections[title] != y) search.sections[title] = y
+    }
+}
+
+/** The settings' sections or categories, styled like the note's side panel; a tap goes to it. */
 @Composable
 private fun PrefSectionsPanel(titles: List<String>, current: String?, onPick: (String) -> Unit) {
     val palette = LocalPalette.current
@@ -1451,7 +1512,7 @@ private fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Uni
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { onChange(!checked) }) {
         Checkbox(checked = checked, onCheckedChange = onChange)
         Spacer(Modifier.width(2.dp))
-        Text(label, color = LocalPalette.current.text.toComposeColor(), fontSize = 14.sp)
+        Text(label, color = LocalPalette.current.text.toComposeColor(), fontSize = 14.sp, modifier = Modifier.searchAnchor(label))
     }
 }
 
