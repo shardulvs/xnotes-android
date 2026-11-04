@@ -79,12 +79,3 @@ git clone https://github.com/shardulvs/xnotes-android.git
 cd xnotes-android
 JAVA_HOME=/path/to/jdk-17 ./gradlew assembleDebug
 ```
-
-On Arch Linux or Omarchy, install the complete Android build toolchain with the
-included bootstrap script:
-
-```bash
-./tools/setup-arch-android.sh
-source ~/.bashrc   # or: source ~/.zshrc
-./gradlew :app:testDebugUnitTest
-```
