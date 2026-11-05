@@ -16,6 +16,8 @@
 
 Xnotes is a great app, and I'm grateful that the developer puts so much work into it and shares it openly. However, in my day to day use I noticed a few missing features and some details that bothered me. Above all, I really wanted some kind of cloud sync, so I made this fork. I do my best to keep it in sync with the original repository, and I almost always prefer the original developer's changes over mine, since they are much better implemented.
 
+https://github.com/NeDDy3z/n-notes/issues/13
+
 ## Additions to the original xnotes
 
 n-notes adds more then 50+ features on top of xnotes, while 10+ (2026.11.01) of them were later implemented in xnotes as well. See the full list in [ADDITIONS.md](ADDITIONS.md).
