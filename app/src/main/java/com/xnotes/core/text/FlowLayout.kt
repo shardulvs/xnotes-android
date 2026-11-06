@@ -58,8 +58,11 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
     /** The active code theme's block background, read at layout time (null = neutral grey). */
     var codeBackground: () -> Rgba? = { null }
 
-    /** Theme-derived colour for text when the flow sets no explicit default, read at layout time. */
-    var autoColor: () -> Rgba? = { null }
+    /** Theme-derived colour for text on page [pageIndex] (-1: no page) when the flow sets no explicit default. */
+    var autoColor: (pageIndex: Int) -> Rgba? = { null }
+
+    /** Page [pageIndex]'s own text colour, which wins over the flow's default. */
+    var pageTextColor: (pageIndex: Int) -> Rgba? = { null }
 
     /** The theme accent, which tints a table's header and bands unless the table picks a colour. */
     var accentColor: () -> Rgba? = { null }
@@ -487,7 +490,8 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
         firstPage: Int = 0,
         addedPage: PageBox? = null,
     ): FlowFrame {
-        val defColor = flow.defaultColor ?: autoColor() ?: TextFlow.DEFAULT_COLOR
+        fun colorOn(page: Int) = pageTextColor(page) ?: flow.defaultColor ?: autoColor(page) ?: TextFlow.DEFAULT_COLOR
+        val defColor = colorOn(-1)
         val cells = CellIndex(flow.paragraphs)
         if (pageBoxes.isEmpty()) return FlowFrame(emptyList(), flow.rev, 0, defColor, codeBackground(), cells)
         pass++
@@ -614,7 +618,7 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
         }
         val extra = (page - (pageBoxes.size - 1)).coerceAtLeast(0)
         val pages = pageBoxes.indices.map {
-            PageFlow(contentRects[it], pageLines[it], pageTables[it], pageBreaks[it], pageCallouts[it])
+            PageFlow(contentRects[it], pageLines[it], pageTables[it], pageBreaks[it], pageCallouts[it], colorOn(it))
         }
         return FlowFrame(pages, flow.rev, extra, defColor, codeBackground(), cells, firstPage.coerceIn(0, pageBoxes.lastIndex))
     }

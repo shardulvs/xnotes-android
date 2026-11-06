@@ -23,6 +23,22 @@ class FlowLayoutTest {
         Paragraph(if (text.isEmpty()) mutableListOf() else mutableListOf(Run(text, style)))
 
     @Test
+    fun autoColourIsPickedPerPageUnlessTheFlowSetsOne() {
+        val dark = Rgba(240, 240, 240, 255)
+        val light = Rgba(28, 28, 28, 255)
+        val l = FlowLayout(FakeTextMeasurer()).apply { autoColor = { if (it == 1) dark else light } }
+        val flow = flowWith(para("hi"))
+        val boxes = listOf(PageBox(600.0, 800.0), PageBox(600.0, 800.0))
+        assertEquals(listOf(light, dark), l.layout(flow, boxes, 150).pages.map { it.defaultColor })
+        val red = Rgba(200, 0, 0, 255)
+        flow.defaultColor = red
+        assertEquals(listOf(red, red), l.layout(flow, boxes, 150).pages.map { it.defaultColor })
+        val blue = Rgba(0, 0, 200, 255)
+        l.pageTextColor = { if (it == 1) blue else null }
+        assertEquals(listOf(red, blue), l.layout(flow, boxes, 150).pages.map { it.defaultColor })
+    }
+
+    @Test
     fun wrapsAtWordBoundariesAndHangsTrailingSpaces() {
         val p = para("aaa bbb ccc")
         val lines = layout.breakLines(flowWith(p), p, 60.0)

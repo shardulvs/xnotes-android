@@ -106,6 +106,7 @@ fun Page.bakedStyle(doc: Document): PageStyle {
         accentColor = style.accentColor ?: doc.style.accentColor?.takeIf { sharesNoteTemplate(doc, template) },
         params = resolvedParams(doc).ifEmpty { null },
         colors = resolvedColors(doc).ifEmpty { null },
+        textColor = style.textColor,
     )
 }
 

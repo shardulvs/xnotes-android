@@ -735,6 +735,10 @@ class DocumentCodec(
             writeRgba(j, it)
         }
         s.spacing?.let { j.name("spacing").value(it) }
+        s.textColor?.let {
+            j.name("text_color")
+            writeRgba(j, it)
+        }
         s.accentColor?.let {
             j.name("accent_color")
             writeRgba(j, it)
@@ -1687,6 +1691,7 @@ class DocumentCodec(
         var accent: Rgba? = null
         var params: Map<String, Double>? = null
         var colors: Map<String, Rgba>? = null
+        var textColor: Rgba? = null
         p.beginObject()
         while (p.hasNext()) {
             when (p.nextName()) {
@@ -1698,6 +1703,7 @@ class DocumentCodec(
                 "accent_color" -> accent = rgbaOrNull(p)
                 "params" -> params = namedValues(p) { doubleOrNull(it) }
                 "colors" -> colors = namedValues(p) { rgbaOrNull(it) }
+                "text_color" -> textColor = rgbaOrNull(p)
                 else -> p.skipValue()
             }
         }
@@ -1710,6 +1716,7 @@ class DocumentCodec(
             accentColor = accent,
             params = params,
             colors = colors,
+            textColor = textColor,
         )
     }
 

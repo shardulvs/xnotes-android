@@ -59,6 +59,8 @@ data class PageStyle(
     val params: Map<String, Double>? = null,
     /** The template's colour parameters by name. */
     val colors: Map<String, Rgba>? = null,
+    /** The flow's base text colour on this page; only the page level sets it (All Pages uses the flow's own). */
+    val textColor: Rgba? = null,
 ) {
     /** The part of this style its template owns. */
     val settings: TemplateSettings
@@ -77,7 +79,7 @@ data class PageStyle(
     /** True when nothing is overridden — the codec writes no `style` object in this case. */
     val isEmpty: Boolean
         get() = pageColor == null && template == null && patternColor == null && spacing == null &&
-            accentColor == null && params.isNullOrEmpty() && colors.isNullOrEmpty()
+            accentColor == null && params.isNullOrEmpty() && colors.isNullOrEmpty() && textColor == null
 
     companion object {
         const val DEFAULT_SPACING = 64.0 // content px (~10.8 mm at 150 dpi)

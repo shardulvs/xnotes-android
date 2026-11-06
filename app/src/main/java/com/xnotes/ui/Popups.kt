@@ -308,22 +308,27 @@ fun StylesPopup(editor: Editor, onImportTemplate: () -> Unit = {}, onDismiss: ()
                 SwatchCircles(editor, SwatchRole.PAPER, style.pageColor) { apply(style.copy(pageColor = it)) }
             }
 
-            if (tab == 0) {
-                Spacer(Modifier.size(12.dp))
-                StyleCaption(stringResource(R.string.text_colour))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    fun setText(c: Rgba?) {
+            Spacer(Modifier.size(12.dp))
+            StyleCaption(stringResource(R.string.text_colour))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // The page tab's null follows All Pages, like its page colour.
+                val own = if (tab == 0) textColor else pageStyle.textColor
+                val shown = own ?: if (tab == 0) editor.flowDefaultColor() else editor.currentPageTextColor()
+                fun setText(c: Rgba?) {
+                    if (tab == 0) {
                         editor.setFlowConfig(editor.flowConfigValue().copy(color = c))
                         textColor = c
+                    } else {
+                        apply(pageStyle.copy(textColor = c))
                     }
-                    // Auto picks light or dark text against the paper; turning it off keeps the colour it showed.
-                    ModeChip(stringResource(R.string.auto), textColor == null) {
-                        setText(if (textColor == null) editor.flowDefaultColor() else null)
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    ColorPickerDot(textColor, custom = textColor != null, onPick = { setText(it) }, dismissOnPick = false) { d, p ->
-                        ColorPickerPopup(textColor ?: editor.flowDefaultColor(), editor.recentColors, d, p)
-                    }
+                }
+                // Auto picks light or dark text against the paper; turning it off keeps the colour it showed.
+                ModeChip(stringResource(if (tab == 0) R.string.auto else R.string.default_choice), own == null) {
+                    setText(if (own == null) shown else null)
+                }
+                Spacer(Modifier.width(8.dp))
+                ColorPickerDot(own, custom = own != null, onPick = { setText(it) }, dismissOnPick = false) { d, p ->
+                    ColorPickerPopup(shown, editor.recentColors, d, p)
                 }
             }
 

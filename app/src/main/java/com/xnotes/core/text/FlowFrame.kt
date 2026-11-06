@@ -204,6 +204,8 @@ class PageFlow(
     val tables: List<TableFrag> = emptyList(),
     val breaks: List<BreakMark> = emptyList(),
     val callouts: List<CalloutTitle> = emptyList(),
+    /** Base text colour on this page: the flow's own, else the auto one for this page's paper. */
+    val defaultColor: Rgba = TextFlow.DEFAULT_COLOR,
 )
 
 /** What a text-tool tap landed on. */

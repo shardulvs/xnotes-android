@@ -2376,7 +2376,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 if (line.mathStarts.isEmpty()) continue
                 for (seg in line.segs) {
                     if (!seg.math) continue
-                    val color = seg.style.color ?: frame.defaultColor
+                    val color = seg.style.color ?: frame.pages[idx].defaultColor
                     com.xnotes.platform.MathRendering.prefetch(seg.text, seg.font.pointSize, seg.style.mathDisplay, color, scale.toFloat())
                 }
             }
@@ -2423,7 +2423,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             }
         }
         flowLayout.codeBackground = { activeCodeTheme().background }
-        flowLayout.autoColor = { defaultTextColor() }
+        flowLayout.autoColor = { defaultTextColor(state.document, it) }
+        flowLayout.pageTextColor = { state.document.pages.getOrNull(it)?.style?.textColor }
         flowLayout.accentColor = { palette.accent }
         flowLayout.ruleColor = { tableRuleColor() }
         flowLayout.revealedMath = { revealedMathIn(it) }
@@ -2830,11 +2831,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * layout, so [flow]'s code blocks are parsed synchronously here — cheap (blocks are
      * small) and safe off-thread (the highlighter is stateless per call).
      */
-    private fun themedFlowLayout(flow: com.xnotes.core.text.TextFlow): FlowLayout {
+    private fun themedFlowLayout(doc: Document): FlowLayout {
+        val flow = doc.flow
         val layout = FlowLayout(textMeasurer, com.xnotes.platform.MathRendering.Blocking)
         val theme = activeCodeTheme()
         layout.codeBackground = { theme.background }
-        layout.autoColor = { defaultTextColor() }
+        layout.autoColor = { defaultTextColor(doc, it) }
+        layout.pageTextColor = { doc.pages.getOrNull(it)?.style?.textColor }
         val accent = palette.accent
         layout.accentColor = { accent }
         val rule = tableRuleColor()
@@ -2876,7 +2879,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      */
     private fun flowExportHooks(doc: Document): com.xnotes.platform.PdfExporter.FlowExport {
         if (doc.flow.isEmpty) return com.xnotes.platform.PdfExporter.FlowExport.NONE
-        val frame = themedFlowLayout(doc.flow)
+        val frame = themedFlowLayout(doc)
             .layout(doc.flow, doc.pages.map { PageBox(it.sourceWidth, it.sourceHeight) }, doc.dpi, firstPage = flowStart(doc))
         val index = HashMap<Page, Int>(doc.pages.size * 2)
         doc.pages.forEachIndexed { i, p -> index[p] = i }
@@ -3518,7 +3521,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         } else {
             state.invalidatePaper()
         }
-        if (prev.pageColor != next.pageColor) republishFlow(invalidate = true)
+        if (prev.pageColor != next.pageColor || prev.textColor != next.textColor) republishFlow(invalidate = true)
         state.document.dirty = true
         refreshContent()
         view.requestRender()
@@ -4092,7 +4095,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         // and only as far as this page, so a tile never sets the formulas further on.
         PageLayers.paint(itemsSnapshot(page), {
             if (!doc.flow.isEmpty) {
-                val frame = themedFlowLayout(doc.flow)
+                val frame = themedFlowLayout(doc)
                     .layout(doc.flow, doc.pages.map { PageBox(it.sourceWidth, it.sourceHeight) }, doc.dpi, throughPage = index, firstPage = flowStart(doc))
                 FlowPainter.paintPage(r, frame, index, Rect(0.0, 0.0, page.width, page.height))
             }
@@ -4741,7 +4744,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         doc.flow.paragraphs.addAll(
             com.xnotes.core.text.MarkdownParser.parse(markdown, newTableDefaults.style, toolbarInk()),
         )
-        val layout = themedFlowLayout(doc.flow)
+        val layout = themedFlowLayout(doc)
         fun frame() = layout.layout(doc.flow, doc.pages.map { PageBox(it.sourceWidth, it.sourceHeight) }, doc.dpi, firstPage = flowStart(doc))
         frame().pages.firstOrNull()?.contentRect?.w?.let { width ->
             for (b in CellIndex(doc.flow.paragraphs).tables) b.table.widths = layout.fitColumns(doc.flow, b.table, width)
@@ -5065,6 +5068,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         accentColor = accentColor ?: base.accentColor,
         params = params ?: base.params,
         colors = colors ?: base.colors,
+        textColor = textColor,
     )
 
     /** The text of the markdown file at [uri], or null when it cannot be read or is too big to be one. IO. */
@@ -8337,15 +8341,19 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * The flow's base text colour for the note's paper: the near-white default on
      * dark paper, a near-black on light paper (where near-white would vanish).
      */
-    private fun defaultTextColor(): Rgba {
-        // shortcut: follows the All Pages colour only, a single page's own colour is ignored since the flow has one default
-        val paper = state.document.style.pageColor ?: state.pageColorOverride ?: palette.paper
+    private fun defaultTextColor(doc: Document, pageIndex: Int = -1): Rgba {
+        val paper = doc.pages.getOrNull(pageIndex)?.resolvedPageColor(doc, state.pageColorOverride)
+            ?: doc.style.pageColor ?: state.pageColorOverride ?: palette.paper
         return if (paper.luminance() < 0.5) com.xnotes.core.text.TextFlow.DEFAULT_COLOR else Rgba(28, 28, 28, 255)
     }
 
     /** The effective base text colour: the flow's explicit default, else the theme auto colour. */
-    fun flowDefaultColor(): Rgba = state.document.flow.defaultColor ?: defaultTextColor()
+    fun flowDefaultColor(): Rgba = state.document.flow.defaultColor ?: defaultTextColor(state.document)
     fun flowDefaultFace(): FontFace = state.document.flow.defaultFace
+
+    /** The base text colour the current page shows: its own, else the note's. */
+    fun currentPageTextColor(): Rgba = currentPageStyle.textColor ?: state.document.flow.defaultColor
+        ?: defaultTextColor(state.document, state.currentPageIndex())
 
     /** Rewrite character styles over the selection, or arm them for the next typed run. */
     fun flowSetChar(apply: (CharStyle) -> CharStyle) {
