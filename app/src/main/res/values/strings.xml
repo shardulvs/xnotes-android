@@ -385,6 +385,9 @@
     <string name="preferences">Preferences</string>
     <string name="reset_to_defaults">Reset to defaults</string>
     <string name="pref_general">General</string>
+    <string name="pref_language">Language</string>
+    <string name="pref_language_open">Choose app language</string>
+    <string name="pref_language_system">The app follows the system language.</string>
     <string name="pref_appearance">Appearance</string>
     <string name="pref_ui_theme">UI theme</string>
     <string name="theme_system">System</string>

@@ -322,6 +322,9 @@
     <string name="preferences">偏好设置</string>
     <string name="reset_to_defaults">恢复默认设置</string>
     <string name="pref_general">常规</string>
+    <string name="pref_language">语言</string>
+    <string name="pref_language_open">选择应用语言</string>
+    <string name="pref_language_system">应用跟随系统语言。</string>
     <string name="pref_appearance">外观</string>
     <string name="pref_ui_theme">界面主题</string>
     <string name="theme_system">跟随系统</string>

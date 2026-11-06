@@ -135,7 +135,7 @@ private val tapGestureOptions = listOf(
 
 /** The Preferences pages, in the order the category list shows them. */
 private enum class PrefCategory(val title: String, val summary: String) {
-    GENERAL("General", "Screen, Updates"),
+    GENERAL("General", "Screen, Language, Updates"),
     APPEARANCE("Appearance", "Theme, Code highlighting, Fonts"),
     INPUT("Input", "Touch, Stylus, Gestures"),
     OCR("OCR", "Handwriting, Math"),
@@ -365,6 +365,8 @@ fun PreferencesPane(
                 SectionTitle(stringResource(R.string.pref_general))
                 CheckRow(stringResource(R.string.pref_start_fullscreen), editor.fullscreen) { editor.setFullscreenPref(it) }
                 CheckRow("Keep screen on while the app is open", prefs.keepScreenOn) { updateHome(prefs.copy(keepScreenOn = it)) }
+                if (all) HorizontalDivider(color = palette.border.toComposeColor())
+                LanguageSection()
                 if (all) HorizontalDivider(color = palette.border.toComposeColor())
                 Box(Modifier.searchAnchor(stringResource(R.string.search_keywords_port))) { PortSection(editor) }
                 if (all) HorizontalDivider(color = palette.border.toComposeColor())
@@ -1124,6 +1126,22 @@ internal fun sectionLine(scroll: Int, maxScroll: Int, height: Float, top: Float)
 internal fun scrollForSection(y: Int, maxScroll: Int, height: Float, top: Float): Int =
     if (maxScroll - y >= height - top) y
     else ((y + maxScroll - height + top) / 2f).roundToInt().coerceIn(0, maxScroll)
+
+/** The app language lives in Android's per-app language settings (13+), so this only links there. */
+@Composable
+private fun LanguageSection() {
+    val palette = LocalPalette.current
+    val context = LocalContext.current
+    SectionTitle(stringResource(R.string.pref_language))
+    if (Build.VERSION.SDK_INT >= 33) {
+        TextButton(onClick = {
+            val intent = android.content.Intent(android.provider.Settings.ACTION_APP_LOCALE_SETTINGS, android.net.Uri.fromParts("package", context.packageName, null))
+            runCatching { context.startActivity(intent) }
+        }) { Text(stringResource(R.string.pref_language_open), fontSize = 13.sp) }
+    } else {
+        Text(stringResource(R.string.pref_language_system), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
+    }
+}
 
 @Composable
 private fun SectionTitle(text: String) {
