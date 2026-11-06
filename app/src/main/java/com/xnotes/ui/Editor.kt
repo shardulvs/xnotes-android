@@ -3518,6 +3518,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         } else {
             state.invalidatePaper()
         }
+        if (prev.pageColor != next.pageColor) republishFlow(invalidate = true)
         state.document.dirty = true
         refreshContent()
         view.requestRender()
@@ -8332,11 +8333,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     fun flowDefaultSizePt(): Double = state.document.flow.defaultSizePt
     /**
-     * The flow's base text colour for the active paper: the near-white default on
-     * dark/OLED paper, a near-black on light paper (where near-white would vanish).
+     * The flow's base text colour for the note's paper: the near-white default on
+     * dark paper, a near-black on light paper (where near-white would vanish).
      */
-    private fun defaultTextColor(): Rgba =
-        if (palette.isDark) com.xnotes.core.text.TextFlow.DEFAULT_COLOR else Rgba(28, 28, 28, 255)
+    private fun defaultTextColor(): Rgba {
+        // shortcut: follows the All Pages colour only, a single page's own colour is ignored since the flow has one default
+        val paper = state.document.style.pageColor ?: state.pageColorOverride ?: palette.paper
+        return if (paper.luminance() < 0.5) com.xnotes.core.text.TextFlow.DEFAULT_COLOR else Rgba(28, 28, 28, 255)
+    }
 
     /** The effective base text colour: the flow's explicit default, else the theme auto colour. */
     fun flowDefaultColor(): Rgba = state.document.flow.defaultColor ?: defaultTextColor()

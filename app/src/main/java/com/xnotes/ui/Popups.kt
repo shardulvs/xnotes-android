@@ -252,6 +252,7 @@ fun StylesPopup(editor: Editor, onImportTemplate: () -> Unit = {}, onDismiss: ()
     var customizing by remember { mutableStateOf(false) }
     var docStyle by remember { mutableStateOf(editor.documentStyle) }
     var pageStyle by remember { mutableStateOf(editor.currentPageStyle) }
+    var textColor by remember { mutableStateOf(editor.flowConfigValue().color) }
     val style = if (tab == 0) docStyle else pageStyle
     // "Default for new notes" shows once the All Pages style differs from the saved new-note
     // default, and stays for the rest of the popup session (so it doesn't vanish when checked).
@@ -305,6 +306,25 @@ fun StylesPopup(editor: Editor, onImportTemplate: () -> Unit = {}, onDismiss: ()
             ) {
                 ModeChip(stringResource(R.string.default_choice), style.pageColor == null) { apply(style.copy(pageColor = null)) }
                 SwatchCircles(editor, SwatchRole.PAPER, style.pageColor) { apply(style.copy(pageColor = it)) }
+            }
+
+            if (tab == 0) {
+                Spacer(Modifier.size(12.dp))
+                StyleCaption(stringResource(R.string.text_colour))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    fun setText(c: Rgba?) {
+                        editor.setFlowConfig(editor.flowConfigValue().copy(color = c))
+                        textColor = c
+                    }
+                    // Auto picks light or dark text against the paper; turning it off keeps the colour it showed.
+                    ModeChip(stringResource(R.string.auto), textColor == null) {
+                        setText(if (textColor == null) editor.flowDefaultColor() else null)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    ColorPickerDot(textColor, custom = textColor != null, onPick = { setText(it) }, dismissOnPick = false) { d, p ->
+                        ColorPickerPopup(textColor ?: editor.flowDefaultColor(), editor.recentColors, d, p)
+                    }
+                }
             }
 
             Spacer(Modifier.size(12.dp))
