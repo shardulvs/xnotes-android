@@ -388,6 +388,7 @@
     <string name="pref_language">Language</string>
     <string name="pref_language_open">Choose app language</string>
     <string name="pref_language_system">The app follows the system language.</string>
+    <string name="pref_language_disclaimer">Only English is fully supported. Other languages are translated with an LLM. If a translation looks wrong, open a bug on GitHub and it will be fixed.</string>
     <string name="pref_appearance">Appearance</string>
     <string name="pref_ui_theme">UI theme</string>
     <string name="theme_system">System</string>

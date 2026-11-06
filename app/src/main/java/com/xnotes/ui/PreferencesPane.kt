@@ -1133,6 +1133,7 @@ private fun LanguageSection() {
     val palette = LocalPalette.current
     val context = LocalContext.current
     SectionTitle(stringResource(R.string.pref_language))
+    Text(stringResource(R.string.pref_language_disclaimer), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
     if (Build.VERSION.SDK_INT >= 33) {
         TextButton(onClick = {
             val intent = android.content.Intent(android.provider.Settings.ACTION_APP_LOCALE_SETTINGS, android.net.Uri.fromParts("package", context.packageName, null))

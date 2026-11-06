@@ -325,6 +325,7 @@
     <string name="pref_language">语言</string>
     <string name="pref_language_open">选择应用语言</string>
     <string name="pref_language_system">应用跟随系统语言。</string>
+    <string name="pref_language_disclaimer">仅完整支持英语。其他语言由 LLM 翻译。如果发现翻译有误，请在 GitHub 上提交问题，我们会进行修复。</string>
     <string name="pref_appearance">外观</string>
     <string name="pref_ui_theme">界面主题</string>
     <string name="theme_system">跟随系统</string>
