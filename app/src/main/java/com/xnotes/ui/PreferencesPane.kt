@@ -368,7 +368,9 @@ fun PreferencesPane(
                 if (all) HorizontalDivider(color = palette.border.toComposeColor())
                 Box(Modifier.searchAnchor(stringResource(R.string.search_keywords_port))) { PortSection(editor) }
                 if (all) HorizontalDivider(color = palette.border.toComposeColor())
-                Box(Modifier.searchAnchor(stringResource(R.string.search_keywords_update)).sectionAnchor("Updates")) { UpdateSection() }
+                Box(Modifier.searchAnchor(stringResource(R.string.search_keywords_update)).sectionAnchor("Updates")) {
+                    UpdateSection(prefs.checkUpdatesOnStartup) { updateHome(prefs.copy(checkUpdatesOnStartup = it)) }
+                }
             }
             if (shown(PrefCategory.APPEARANCE)) {
                 if (all) HorizontalDivider(color = palette.border.toComposeColor())
@@ -1505,7 +1507,7 @@ private fun ChipDragGhost(chip: @Composable () -> Unit) {
 }
 
 @Composable
-private fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+internal fun CheckRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { onChange(!checked) }) {
         Checkbox(checked = checked, onCheckedChange = onChange)
         Spacer(Modifier.width(2.dp))

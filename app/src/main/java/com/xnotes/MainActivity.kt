@@ -182,6 +182,12 @@ class MainActivity : ComponentActivity() {
                 ready = true
                 ed.prewarmBackstage() // warm recents/explorer caches so the first backstage open is instant
             }
+            var update by remember { mutableStateOf<com.xnotes.update.UpdateChecker.Status.Available?>(null) }
+            LaunchedEffect(ready) {
+                if (!ready || rebuilt || !ed.preferences.checkUpdatesOnStartup) return@LaunchedEffect
+                val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName ?: "" }.getOrDefault("")
+                update = com.xnotes.update.UpdateChecker.check(version).getOrNull() as? com.xnotes.update.UpdateChecker.Status.Available
+            }
             XnotesTheme(ed.palette, ed.cornerStyle) {
                 CompositionLocalProvider(com.xnotes.ui.LocalToolbarLook provides ed.toolbarLook) {
                     Box(modifier = Modifier.fillMaxSize()) {
@@ -200,6 +206,28 @@ class MainActivity : ComponentActivity() {
                             com.xnotes.ui.XnotesLoader()
                         }
                         com.xnotes.ui.EyedropperOverlay()
+                    }
+                    update?.let { u ->
+                        com.xnotes.ui.AlertDialog(
+                            onDismissRequest = { update = null },
+                            title = { androidx.compose.material3.Text("Update available") },
+                            text = { androidx.compose.material3.Text("n-notes ${u.version} is out.") },
+                            confirmButton = {
+                                androidx.compose.material3.TextButton(onClick = {
+                                    update = null
+                                    runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(u.apkUrl ?: u.releaseUrl))) }
+                                }) { androidx.compose.material3.Text("Download") }
+                            },
+                            dismissButton = {
+                                androidx.compose.foundation.layout.Row {
+                                    androidx.compose.material3.TextButton(onClick = { update = null }) { androidx.compose.material3.Text("Later") }
+                                    androidx.compose.material3.TextButton(onClick = {
+                                        update = null
+                                        ed.applyHomePreferences(ed.preferences.copy(checkUpdatesOnStartup = false))
+                                    }) { androidx.compose.material3.Text("Turn off") }
+                                }
+                            },
+                        )
                     }
                 }
             }

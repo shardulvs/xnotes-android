@@ -70,6 +70,8 @@ data class Preferences(
     val volumeKeysTurnPages: Boolean = false,
     /** Keep the screen from sleeping while the app is open. */
     val keepScreenOn: Boolean = false,
+    /** Look for a newer release on GitHub each time the app starts. */
+    val checkUpdatesOnStartup: Boolean = true,
     /** Preferences open on a list of categories; off shows every setting in one long list. */
     val prefsCategories: Boolean = true,
     /** Horizontal margin (px) on each side of the page column; 0 ⇒ fit-width fills the screen. */
@@ -192,6 +194,7 @@ data class Preferences(
         .put("stylus_button_2_tap", stylusButton2Tap)
         .put("volume_keys_turn_pages", volumeKeysTurnPages)
         .put("keep_screen_on", keepScreenOn)
+        .put("check_updates_on_startup", checkUpdatesOnStartup)
         .put("prefs_categories", prefsCategories)
         .put("side_margin", sideMargin)
         .put("hide_page_borders", hidePageBorders)
@@ -338,6 +341,7 @@ data class Preferences(
                 stylusButton2Tap = tapAction("stylus_button_2_tap"),
                 volumeKeysTurnPages = o.optBoolean("volume_keys_turn_pages", false),
                 keepScreenOn = o.optBoolean("keep_screen_on", false),
+                checkUpdatesOnStartup = o.optBoolean("check_updates_on_startup", true),
                 prefsCategories = o.optBoolean("prefs_categories", true),
                 sideMargin = o.optDouble("side_margin", 16.0).coerceIn(0.0, 80.0),
                 hidePageBorders = o.optBoolean("hide_page_borders", false),

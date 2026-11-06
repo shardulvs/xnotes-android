@@ -29,7 +29,7 @@ import com.xnotes.ui.theme.toComposeColor
 import kotlinx.coroutines.launch
 
 @Composable
-fun UpdateSection() {
+fun UpdateSection(checkOnStartup: Boolean, onCheckOnStartup: (Boolean) -> Unit) {
     val palette = LocalPalette.current
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -53,6 +53,7 @@ fun UpdateSection() {
             "Check GitHub for a newer n-notes release.",
             color = palette.textDim.toComposeColor(), fontSize = 12.sp,
         )
+        CheckRow("Check for updates when the app starts", checkOnStartup, onCheckOnStartup)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(
                 onClick = {
