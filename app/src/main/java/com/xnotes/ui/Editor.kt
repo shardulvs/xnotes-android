@@ -8653,6 +8653,30 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         return true
     }
 
+    /** Run a slash entry from the toolbar's insert menu, where no query was typed. Only argless entries. */
+    fun runInsertEntry(entry: SlashCommands.Entry) {
+        if (!flowText.active) return
+        when (entry.kind) {
+            SlashCommands.Kind.TODO -> flowSetList(ListKind.CHECK)
+            SlashCommands.Kind.QUOTE -> flowStartQuote(null)
+            SlashCommands.Kind.CALLOUT -> flowStartQuote(com.xnotes.core.text.CalloutKind.entries[entry.level])
+            SlashCommands.Kind.PAGE_BREAK -> flowInsertPageBreak()
+            SlashCommands.Kind.DATE, SlashCommands.Kind.TIME -> {
+                val stamp = if (entry.kind == SlashCommands.Kind.DATE) {
+                    dateStamp(java.time.format.FormatStyle.MEDIUM, time = false)
+                } else {
+                    dateStamp(java.time.format.FormatStyle.SHORT, time = true)
+                }
+                flowText.flushBurst()
+                flowText.mirrorStale = true
+                val (cmd, caret) = FlowEditor(state.document.flow).replaceRange(flowText.selection.normalized(), stamp, null)
+                flowText.commitEdit(cmd, caret)
+            }
+            else -> return
+        }
+        flowSelTick++
+    }
+
     /** Today's date or the time, in the reader's locale. */
     private fun dateStamp(style: java.time.format.FormatStyle, time: Boolean): String {
         val fmt = if (time) {
