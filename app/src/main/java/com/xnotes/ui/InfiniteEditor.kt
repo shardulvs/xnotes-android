@@ -1699,7 +1699,8 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
                 // off the input thread, just like subsequent text rasterization.
                 val items = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                     com.xnotes.core.importing.DropPlacement.items(
-                        content, at, area, false, color, size, face,
+                        content.filterIsInstance<com.xnotes.core.importing.DroppedContent.Image>(),
+                        at, area, false, color, size, face,
                         com.xnotes.platform.AndroidTextMeasurer(), textAsLabel = true,
                     )
                 }

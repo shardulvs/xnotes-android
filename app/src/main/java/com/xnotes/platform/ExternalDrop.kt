@@ -27,12 +27,13 @@ import kotlinx.coroutines.withContext
 object ExternalDrop {
     class Target(val imageDir: File, val insert: suspend (List<DroppedContent>) -> Boolean)
 
-    class Receiver(val handle: (Int, DragEvent, Pt) -> Boolean)
+    class Receiver(val accepts: (ClipDescription?) -> Boolean, val handle: (Int, DragEvent, Pt) -> Boolean)
 
     fun create(
         view: View, scope: CoroutineScope, permissionContext: Context,
         prepare: (Pt) -> Target?, onFailure: () -> Unit,
         indicatorColor: () -> Int,
+        acceptsDrop: (ClipDescription?) -> Boolean = ::accepts,
     ): Receiver {
         val debug = view.context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0
         val marker = DropMarker(view.resources.displayMetrics.density, indicatorColor)
@@ -45,12 +46,12 @@ object ExternalDrop {
             override fun onViewAttachedToWindow(v: View) = Unit
             override fun onViewDetachedFromWindow(v: View) = hide()
         })
-        return Receiver { action, event, at ->
+        return Receiver(acceptsDrop) { action, event, at ->
             if (debug && action != DragEvent.ACTION_DRAG_LOCATION) {
                 android.util.Log.d("XnotesDrop", "action=$action types=${event.clipDescription?.filterMimeTypes("*/*")?.joinToString()}")
             }
             when (action) {
-                DragEvent.ACTION_DRAG_STARTED -> accepts(event.clipDescription)
+                DragEvent.ACTION_DRAG_STARTED -> acceptsDrop(event.clipDescription)
                 DragEvent.ACTION_DRAG_ENTERED, DragEvent.ACTION_DRAG_LOCATION -> {
                     if (prepare(at) != null) {
                         marker.setBounds(0, 0, view.width, view.height)
@@ -105,6 +106,10 @@ object ExternalDrop {
     fun accepts(description: ClipDescription?): Boolean = description != null &&
         (description.hasMimeType("text/plain") || description.hasMimeType("text/html") ||
             description.hasMimeType("text/uri-list") || description.hasMimeType("image/*"))
+
+    /** A canvas can accept image URIs without advertising support for regular text drops. */
+    fun acceptsImages(description: ClipDescription?): Boolean = description != null &&
+        (description.hasMimeType("image/*") || description.hasMimeType("text/uri-list"))
 
     private fun read(context: Context, clip: ClipData, dir: File, into: MutableList<DroppedContent>) {
         val resolver = context.contentResolver

@@ -728,6 +728,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 prepare = { point -> if (noteOpen && canvasOpen) it.prepareExternalDrop(point, imageDir) else null },
                 onFailure = { message = appContext.getString(R.string.err_drop_content) },
                 indicatorColor = { palette.accent.toArgb() },
+                acceptsDrop = com.xnotes.platform.ExternalDrop::acceptsImages,
             )
             it.onMessage = { m, action -> say(m, action) }
             for (t in ToolDefaults.persistedTools) it.setToolConfig(t, settings.configFor(t))

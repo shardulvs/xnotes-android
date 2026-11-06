@@ -36,7 +36,7 @@ fun Modifier.externalDropTarget(receiver: ExternalDrop.Receiver): Modifier = com
     }
     onGloballyPositioned { origin = it.positionInRoot() }
         .dragAndDropTarget(
-            shouldStartDragAndDrop = { ExternalDrop.accepts(it.toAndroidDragEvent().clipDescription) },
+            shouldStartDragAndDrop = { receiver.accepts(it.toAndroidDragEvent().clipDescription) },
             target = target,
         )
 }
