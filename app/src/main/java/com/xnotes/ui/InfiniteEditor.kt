@@ -90,6 +90,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     var document: InfiniteDocument = InfiniteDocument()
         private set
 
+    lateinit var externalDrop: com.xnotes.platform.ExternalDrop.Receiver
+        internal set
+
     val history = History()
 
     val view = InfiniteCanvasView(appContext)
@@ -1679,6 +1682,40 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         history.push(AddCanvasItem(document, item))
         markDirty()
         refresh()
+    }
+
+    /** Keep a pending drop tied to the canvas that was open when the user released it. */
+    fun prepareExternalDrop(viewportPoint: Pt, dir: java.io.File): com.xnotes.platform.ExternalDrop.Target {
+        val doc = document
+        val at = viewport.viewportToContent(viewportPoint)
+        val area = viewport.visibleContentRect()
+        return com.xnotes.platform.ExternalDrop.Target(dir) { content ->
+            if (document !== doc || !surfaces.isAttachedToWindow) false else {
+                commitText()
+                val color = inkColor
+                val size = textPointSize
+                val face = textFace
+                // Placement measures the full imported paragraph. Keep its initial StaticLayout
+                // off the input thread, just like subsequent text rasterization.
+                val items = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    com.xnotes.core.importing.DropPlacement.items(
+                        content.filterIsInstance<com.xnotes.core.importing.DroppedContent.Image>(),
+                        at, area, false, color, size, face,
+                        com.xnotes.platform.AndroidTextMeasurer(), textAsLabel = true,
+                    )
+                }
+                if (document !== doc || !surfaces.isAttachedToWindow || items.isEmpty()) false else {
+                    document.addAll(items)
+                    history.push(AddCanvasItems(document, items))
+                    selection.select(items)
+                    armTool(Tool.SELECT)
+                    markDirty()
+                    refresh()
+                    publishOverlay()
+                    true
+                }
+            }
+        }
     }
 
     /**
