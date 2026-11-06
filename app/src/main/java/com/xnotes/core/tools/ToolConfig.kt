@@ -68,6 +68,8 @@ data class ToolConfig(
     val switchBackAfterSelect: Boolean = false,
     /** Select/lasso: take only items lying fully inside the band or loop, not ones it merely touches. */
     val selectWholeItems: Boolean = false,
+    /** Select: a moved selection snaps to the page's text margins and centre lines. Only [Tool.SELECT]. */
+    val snapToMargins: Boolean = true,
     /** Highlighter: commit each drag as a single straight segment (start → release). Only [Tool.HIGHLIGHTER]. */
     val straightLine: Boolean = false,
     /** When false, the pen draws at a constant on-screen size: at pen-down the width (and the

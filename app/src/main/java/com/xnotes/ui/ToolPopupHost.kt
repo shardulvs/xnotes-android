@@ -64,6 +64,9 @@ interface ToolPopupHost : SwatchHost {
     /** Whether the open note has a PDF, whose text markups the eraser can take. */
     val hostHasPdf: Boolean get() = false
 
+    /** True on paged notes, which have page margins to snap a selection to. */
+    val hostIsPaged: Boolean get() = false
+
     /** Peel back every tape in the open note or canvas, or cover them all again. */
     fun setAllTapePeeled(peeled: Boolean)
 }

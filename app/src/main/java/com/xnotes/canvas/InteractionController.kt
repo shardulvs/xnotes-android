@@ -11,6 +11,10 @@ import com.xnotes.core.geometry.Geometry
 import com.xnotes.core.geometry.Obb
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
+import com.xnotes.core.model.sourceHeight
+import com.xnotes.core.model.sourceWidth
+import com.xnotes.core.text.FlowLayout
+import com.xnotes.core.text.PageBox
 import com.xnotes.core.history.AddItem
 import com.xnotes.core.history.AddItems
 import com.xnotes.core.history.Command
@@ -387,6 +391,8 @@ class InteractionController(
     private var bandRect: Rect? = null
     private var moveOrigin = Pt.ZERO
     private var moveOffset = Pt.ZERO
+    /** Content-space guide lines (from, to) shown while a move is snapped to the margins or centre. */
+    private var snapGuides: List<Pair<Pt, Pt>> = emptyList()
 
     // SCREENSHOT (drag a rectangle; on release it stays frozen and offers "copy as image")
     /** The capture rectangle in content space: live while dragging (mode == SHOT), then frozen
@@ -2143,7 +2149,7 @@ class InteractionController(
     }
 
     private fun extendMove(content: Pt) {
-        moveOffset = content - moveOrigin
+        moveOffset = snapMove(content - moveOrigin)
         if (follows.isNotEmpty()) {
             val local = state.vectorToPageSpace(moveOffset)
             val shift = Affine.translateBy(local.x, local.y)
@@ -2153,7 +2159,8 @@ class InteractionController(
     }
 
     private fun endMove(content: Pt) {
-        moveOffset = content - moveOrigin
+        moveOffset = snapMove(content - moveOrigin)
+        snapGuides = emptyList()
         val moved = abs(moveOffset.x) > MOVE_EPS || abs(moveOffset.y) > MOVE_EPS
         if (moved) {
             val items = selection.map { it.item }
@@ -2192,6 +2199,32 @@ class InteractionController(
         refreshSelectionMenu()
         requestRender()
         if (moved) maybeSwitchBackAfterSelect()
+    }
+
+    /**
+     * [raw] nudged so the moved box's sides or centre land on the text margins or centre lines
+     * of the page under it, when one is within [MARGIN_SNAP_PX] on screen. Sets [snapGuides].
+     */
+    private fun snapMove(raw: Pt): Pt {
+        snapGuides = emptyList()
+        if (!configFor(Tool.SELECT).snapToMargins) return raw
+        val box = selObb?.let { Rect.bounding(it.corners()) }?.translate(raw.x, raw.y) ?: return raw
+        val pi = state.pageIndexAtContent(box.center) ?: return raw
+        val page = state.document.pages[pi]
+        val text = FlowLayout.contentRectOf(PageBox(page.sourceWidth, page.sourceHeight), state.document.flow.margins, state.document.dpi)
+        val m = state.fromPageSpaceRect(pi, text)
+        val paper = state.pageRects[pi]
+        val reach = MARGIN_SNAP_PX / state.zoom
+        // The closest (target - side) within reach along one axis, or null.
+        fun pull(sides: List<Double>, targets: List<Double>): Pair<Double, Double>? =
+            sides.flatMap { s -> targets.map { t -> (t - s) to t } }.filter { abs(it.first) <= reach }.minByOrNull { abs(it.first) }
+        val dx = pull(listOf(box.left, box.centerX, box.right), listOf(m.left, m.centerX, m.right))
+        val dy = pull(listOf(box.top, box.centerY, box.bottom), listOf(m.top, m.centerY, m.bottom))
+        snapGuides = listOfNotNull(
+            dx?.let { Pt(it.second, paper.top) to Pt(it.second, paper.bottom) },
+            dy?.let { Pt(paper.left, it.second) to Pt(paper.right, it.second) },
+        )
+        return Pt(raw.x + (dx?.first ?: 0.0), raw.y + (dy?.first ?: 0.0))
     }
 
     // --- RESIZE ---
@@ -5099,7 +5132,7 @@ class InteractionController(
         if (mode == PointerMode.POLYGON) showPolygonDraft(null)
         if (mode == PointerMode.ROOM) insertSpace.abort()
         roomButton = null
-        if (mode == PointerMode.MOVE) moveOffset = Pt.ZERO
+        if (mode == PointerMode.MOVE) { moveOffset = Pt.ZERO; snapGuides = emptyList() }
         if (mode == PointerMode.MOVE || mode == PointerMode.TRANSFORM || mode == PointerMode.VERTEX || mode == PointerMode.JOINT) {
             for ((_, f) in follows) f.restore()
         }
@@ -5219,6 +5252,8 @@ class InteractionController(
             }
 
             // Resize + rotate handles for the settled selection (single, multi, or mixed).
+            for ((a, b) in snapGuides) r.strokePolyline(listOf(a, b), chromePen(1.0))
+
             if (selection.isNotEmpty() && mode != PointerMode.BAND && mode != PointerMode.LASSO_DRAW) {
                 val side = HANDLE_SIZE / state.zoom
                 val sel = state.selectionAccent(selectionPageIndex())
@@ -5555,6 +5590,9 @@ class InteractionController(
             if (zoom.isFinite() && zoom > 0.0) (1.0 / zoom).coerceAtMost(1.0) else 1.0
 
         const val MOVE_EPS = 0.01
+
+        /** How close (viewport px) a moved selection must come to a margin or centre line to snap. */
+        const val MARGIN_SNAP_PX = 10.0
 
         /** Vendor key some pens send for a genuinely held side button (OnePlus Pad Go 2 Stylo,
          *  which reports a real down/up pair with auto-repeat rather than a momentary click). */

@@ -1015,8 +1015,9 @@ fun SelectConfigPopup(editor: ToolPopupHost, tool: Tool = Tool.SELECT, onDismiss
     val base = remember { editor.toolConfig(tool) }
     var switchBack by remember { mutableStateOf(base.switchBackAfterSelect) }
     var whole by remember { mutableStateOf(base.selectWholeItems) }
+    var snap by remember { mutableStateOf(base.snapToMargins) }
 
-    fun emit() = editor.updateToolConfig(tool, base.copy(switchBackAfterSelect = switchBack, selectWholeItems = whole))
+    fun emit() = editor.updateToolConfig(tool, base.copy(switchBackAfterSelect = switchBack, selectWholeItems = whole, snapToMargins = snap))
 
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
         Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
@@ -1026,6 +1027,7 @@ fun SelectConfigPopup(editor: ToolPopupHost, tool: Tool = Tool.SELECT, onDismiss
             // cut, copy, duplicate) finishes, so a quick edit doesn't strand you in select.
             if (tool == Tool.SELECT) {
                 ToggleRow(stringResource(R.string.caption_switch_back), switchBack) { switchBack = it; emit() }
+                if (editor.hostIsPaged) ToggleRow(stringResource(R.string.caption_snap_to_margins), snap) { snap = it; emit() }
             }
         }
     }

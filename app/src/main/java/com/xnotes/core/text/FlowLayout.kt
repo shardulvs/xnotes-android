@@ -985,27 +985,28 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
         }
     }
 
-    private fun contentRectOf(box: PageBox, m: FlowMargins, dpi: Int): Rect {
-        val l = PageSize.mmToPx(m.leftMm, dpi)
-        val t = PageSize.mmToPx(m.topMm, dpi)
-        val r = PageSize.mmToPx(m.rightMm, dpi)
-        val b = PageSize.mmToPx(m.bottomMm, dpi)
-        var left = l
-        var w = box.width - l - r
-        if (w < MIN_LINE_WIDTH) {
-            w = minOf(MIN_LINE_WIDTH, box.width)
-            left = ((box.width - w) / 2.0).coerceAtLeast(0.0)
-        }
-        var top = t
-        var h = box.height - t - b
-        if (h < MIN_CONTENT_HEIGHT) {
-            h = minOf(MIN_CONTENT_HEIGHT, box.height)
-            top = ((box.height - h) / 2.0).coerceAtLeast(0.0)
-        }
-        return Rect(left, top, w, h)
-    }
-
     companion object {
+        /** The box flow text is held to on a page of [box]: the page less the flow margins. */
+        fun contentRectOf(box: PageBox, m: FlowMargins, dpi: Int): Rect {
+            val l = PageSize.mmToPx(m.leftMm, dpi)
+            val t = PageSize.mmToPx(m.topMm, dpi)
+            val r = PageSize.mmToPx(m.rightMm, dpi)
+            val b = PageSize.mmToPx(m.bottomMm, dpi)
+            var left = l
+            var w = box.width - l - r
+            if (w < MIN_LINE_WIDTH) {
+                w = minOf(MIN_LINE_WIDTH, box.width)
+                left = ((box.width - w) / 2.0).coerceAtLeast(0.0)
+            }
+            var top = t
+            var h = box.height - t - b
+            if (h < MIN_CONTENT_HEIGHT) {
+                h = minOf(MIN_CONTENT_HEIGHT, box.height)
+                top = ((box.height - h) / 2.0).coerceAtLeast(0.0)
+            }
+            return Rect(left, top, w, h)
+        }
+
         /** Indent step per level, content px at 150 dpi (~8 mm). */
         const val INDENT_STEP_PX = 48.0
 

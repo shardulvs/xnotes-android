@@ -7138,6 +7138,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     override val hostActiveColorIndex: Int get() = activeColorIndex
     override val hostRecentColors: List<Rgba> get() = recentColors
     override val hostHasPdf: Boolean get() = hasPdf
+    override val hostIsPaged: Boolean get() = true
 
     override val hostHiddenShapes: Set<String> get() = settings.prefs.hiddenShapes
     override val hostShapeOrder: List<String> get() = settings.prefs.shapeOrder
