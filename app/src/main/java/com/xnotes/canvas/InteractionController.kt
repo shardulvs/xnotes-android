@@ -3642,6 +3642,42 @@ class InteractionController(
         requestRender()
     }
 
+    /** The selection box's width and height in page units, or null when the selection has no box to size (a lone connector or table). */
+    fun selectionSize(): Pair<Double, Double>? {
+        if (loneConnector() != null || singleSelectedTable() != null) return null
+        val box = selObb ?: return null
+        return box.halfW * 2.0 to box.halfH * 2.0
+    }
+
+    /** Scale the selection about its box's centre, along the box's own axes, to [w] by [h], as one undo step. A flat side keeps its size. */
+    fun resizeSelection(w: Double, h: Double) {
+        val (bw, bh) = selectionSize() ?: return
+        val box = selObb ?: return
+        if (w <= 0.0 || h <= 0.0) return
+        val world = Affine.scaleAlongAxes(box.center, box.angle, if (bw > 0.0) w / bw else 1.0, if (bh > 0.0) h / bh else 1.0)
+        val members = selection.toList()
+        val before = members.map { it.item.snapshotGeometry() }
+        beginFollow(rigid = true, pin = true)
+        for (sel in members) {
+            if (state.pageRects.getOrNull(sel.pageIndex) == null) continue
+            sel.item.applyTransform(state.affineToPageSpace(sel.pageIndex, world))
+        }
+        for ((pi, f) in follows) {
+            if (state.pageRects.getOrNull(pi) == null) continue
+            f.follow(state.affineToPageSpace(pi, world))
+        }
+        for ((_, f) in follows) f.settle()
+        val tx = TransformItems(members.map { it.item }, before, members.map { it.item.snapshotGeometry() })
+        val cmds = listOfNotNull(tx, followCommand(), reassignSelectionPages())
+        history.push(cmds.singleOrNull() ?: CompositeCommand(cmds))
+        endFollow()
+        state.document.dirty = true
+        selObb = selectionBox()
+        onContentChanged()
+        refreshSelectionMenu()
+        requestRender()
+    }
+
     /** A lone connector's own chrome: its ends (solid when glued), middle segments, waypoints and stretch middles. */
     private fun drawConnectorChrome(r: Renderer) {
         if (mode == PointerMode.MOVE) return

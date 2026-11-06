@@ -53,6 +53,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -76,6 +77,7 @@ import com.xnotes.R
 import com.xnotes.core.model.DrawStyle
 import com.xnotes.core.model.FunctionCurve
 import com.xnotes.core.model.FunctionSpec
+import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.Rgba
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
@@ -229,6 +231,15 @@ interface SelectionMenuHost : SwatchHost {
 
     /** Put that picture in crop mode, the frame standing over it. */
     fun startCrop()
+
+    /** Pixels per inch of the document's units, to show sizes in mm. */
+    fun documentDpi(): Int
+
+    /** The selection box's width and height in document px, or null when it cannot be sized. */
+    fun selectionSize(): Pair<Double, Double>?
+
+    /** Scale the selection about its centre to [width] by [height] document px, as one undo step. */
+    fun resizeSelection(width: Double, height: Double)
 }
 
 /**
@@ -254,11 +265,14 @@ fun SelectionMenu(
     var functionDialogOpen by remember { mutableStateOf(false) }
     var mathDialogOpen by remember { mutableStateOf(false) }
     var renamingAudio by remember { mutableStateOf<com.xnotes.core.model.AudioItem?>(null) }
+    var sizeDialogOpen by remember { mutableStateOf(false) }
+    var mirrorOpen by remember { mutableStateOf(false) }
 
     val audio = host.selectedAudio()
     val crops = host.canCropSelection()
+    val size = host.selectionSize()
     val barHeightPx = with(density) { 48.dp.toPx() }
-    val barWidthPx = with(density) { ((6 + (if (audio != null) 1 else 0) + (if (crops) 1 else 0)) * 46).dp.toPx() }
+    val barWidthPx = with(density) { ((6 + (if (audio != null) 1 else 0) + (if (crops) 1 else 0) + (if (size != null) 1 else 0)) * 46).dp.toPx() }
     val gap = with(density) { 10.dp.toPx() }
     val centerX = ((rect.left + rect.right) / 2.0).toFloat()
     val xPx = (centerX - barWidthPx / 2f).coerceAtLeast(with(density) { 8.dp.toPx() })
@@ -279,14 +293,10 @@ fun SelectionMenu(
                 .background(palette.menuBg.toComposeColor())
                 .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium),
         ) {
-            if (audio != null) {
-                val playing = AudioPlayback.session?.let { it.item === audio && it.playing } == true
-                ActionIcon(if (playing) XnotesIcons.pause else XnotesIcons.play, stringResource(if (playing) R.string.audio_pause else R.string.audio_play)) { host.playSelectedAudio() }
-            }
-            if (crops) ActionIcon(XnotesIcons.crop, stringResource(R.string.crop)) { host.startCrop() }
-            ActionIcon(XnotesIcons.trash, stringResource(R.string.delete), shortcut = Keys.DELETE) { host.deleteSelection() }
+            ActionIcon(XnotesIcons.trash, stringResource(R.string.delete), shortcut = Keys.DELETE, tint = palette.danger.toComposeColor()) { host.deleteSelection() }
             ActionIcon(XnotesIcons.cut, stringResource(R.string.cut)) { host.cutSelection() }
             ActionIcon(XnotesIcons.copy, stringResource(R.string.copy)) { host.copySelection(); host.dismissSelectionMenu() }
+            ActionIcon(XnotesIcons.duplicate, stringResource(R.string.duplicate)) { host.duplicateSelection() }
             Box {
                 ActionIcon(XnotesIcons.front, stringResource(R.string.arrange)) { arrangeOpen = true }
                 DropdownMenu(
@@ -299,12 +309,18 @@ fun SelectionMenu(
                     }
                 }
             }
-            ActionIcon(XnotesIcons.duplicate, stringResource(R.string.duplicate)) { host.duplicateSelection() }
+            if (audio != null) {
+                val playing = AudioPlayback.session?.let { it.item === audio && it.playing } == true
+                ActionIcon(if (playing) XnotesIcons.pause else XnotesIcons.play, stringResource(if (playing) R.string.audio_pause else R.string.audio_play)) { host.playSelectedAudio() }
+            }
+            if (crops) ActionIcon(XnotesIcons.crop, stringResource(R.string.crop)) { host.startCrop() }
+            if (size != null) ActionIcon(XnotesIcons.resize, stringResource(R.string.selection_size)) { sizeDialogOpen = true }
             Box {
                 ActionIcon(XnotesIcons.more, stringResource(R.string.more)) { overflowOpen = true }
                 DropdownMenu(
                     expanded = overflowOpen,
-                    onDismissRequest = { overflowOpen = false },
+                    // A tap on the Mirror submenu lands outside this menu; it must not close it under the tap.
+                    onDismissRequest = { if (!mirrorOpen) overflowOpen = false },
                     properties = PopupProperties(focusable = false),
                 ) {
                     // A lone recording's own actions come first.
@@ -382,17 +398,33 @@ fun SelectionMenu(
                             onClick = { overflowOpen = false; host.rerouteSelection() },
                         )
                     }
-                    val mirrors = host.canMirrorSelection()
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.mirror_left_right)) },
-                        enabled = mirrors,
-                        onClick = { overflowOpen = false; host.mirrorSelection(upsideDown = false) },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.mirror_upside_down)) },
-                        enabled = mirrors,
-                        onClick = { overflowOpen = false; host.mirrorSelection(upsideDown = true) },
-                    )
+                    // The two mirrors open beside this row, like the page menu's Add.
+                    var mirrorRow by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+                    Box(Modifier.onSizeChanged { mirrorRow = it }) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.mirror)) },
+                            trailingIcon = { Icon(XnotesIcons.next, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp)) },
+                            enabled = host.canMirrorSelection(),
+                            onClick = { mirrorOpen = true },
+                        )
+                        val side = with(density) { androidx.compose.ui.unit.DpOffset(mirrorRow.width.toDp(), -mirrorRow.height.toDp()) }
+                        CompositionLocalProvider(LocalMenuOffset provides side) {
+                            DropdownMenu(
+                                expanded = mirrorOpen,
+                                onDismissRequest = { mirrorOpen = false },
+                                properties = PopupProperties(focusable = false),
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.mirror_left_right)) },
+                                    onClick = { mirrorOpen = false; overflowOpen = false; host.mirrorSelection(upsideDown = false) },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.mirror_upside_down)) },
+                                    onClick = { mirrorOpen = false; overflowOpen = false; host.mirrorSelection(upsideDown = true) },
+                                )
+                            }
+                        }
+                    }
                     if (host.canGroupSelection()) {
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.group)) },
@@ -448,6 +480,14 @@ fun SelectionMenu(
                         onDismiss = { linkDialogOpen = false },
                     )
                 }
+                if (sizeDialogOpen && size != null) {
+                    SizeDialog(
+                        initial = size,
+                        dpi = host.documentDpi(),
+                        onConfirm = { w, h -> sizeDialogOpen = false; host.resizeSelection(w, h) },
+                        onDismiss = { sizeDialogOpen = false },
+                    )
+                }
                 renamingAudio?.let { item ->
                     AudioNameDialog(item.name, onConfirm = { renamingAudio = null; host.renameSelectedAudio(it) }) { renamingAudio = null }
                 }
@@ -463,6 +503,77 @@ private val ARRANGE_ROWS = listOf(
     com.xnotes.core.model.Arrange.BACKWARD to R.string.send_backward,
     com.xnotes.core.model.Arrange.BACK to R.string.send_to_back,
 )
+
+/**
+ * The selection's exact width and height, typed in px (document units) or mm. While the aspect
+ * ratio is kept, the other side follows; a flat side (a straight line) is left to itself.
+ */
+@Composable
+private fun SizeDialog(initial: Pair<Double, Double>, dpi: Int, onConfirm: (Double, Double) -> Unit, onDismiss: () -> Unit) {
+    val ratio = if (initial.first > 0.0 && initial.second > 0.0) initial.second / initial.first else null
+    var mm by remember { mutableStateOf(false) }
+    fun toUnit(px: Double) = if (mm) PageSize.pxToMm(px, dpi) else px
+    fun toPx(v: Double) = if (mm) PageSize.mmToPx(v, dpi) else v
+    fun fmt(v: Double) = "%.1f".format(java.util.Locale.ROOT, v).removeSuffix(".0")
+    fun parse(raw: String) = raw.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it > 0.0 && it.isFinite() }
+    var w by remember { mutableStateOf(fmt(initial.first)) }
+    var h by remember { mutableStateOf(fmt(initial.second)) }
+    var keep by remember { mutableStateOf(ratio != null) }
+    val wPx = parse(w)?.let(::toPx)
+    val hPx = parse(h)?.let(::toPx)
+    fun switchUnits(toMm: Boolean) {
+        if (toMm == mm) return
+        val pw = wPx ?: initial.first
+        val ph = hPx ?: initial.second
+        mm = toMm
+        w = fmt(toUnit(pw))
+        h = fmt(toUnit(ph))
+    }
+    val number = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal)
+    val unit = stringResource(if (mm) R.string.units_mm else R.string.units_px)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.selection_size)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    androidx.compose.material3.FilterChip(selected = !mm, onClick = { switchUnits(false) }, label = { Text(stringResource(R.string.units_px)) })
+                    androidx.compose.material3.FilterChip(selected = mm, onClick = { switchUnits(true) }, label = { Text(stringResource(R.string.units_mm)) })
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = w,
+                        onValueChange = { w = it; if (keep && ratio != null) parse(it)?.let { v -> h = fmt(v * ratio) } },
+                        singleLine = true,
+                        label = { Text("${stringResource(R.string.width)} ($unit)") },
+                        isError = wPx == null,
+                        keyboardOptions = number,
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = h,
+                        onValueChange = { h = it; if (keep && ratio != null) parse(it)?.let { v -> w = fmt(v / ratio) } },
+                        singleLine = true,
+                        label = { Text("${stringResource(R.string.height)} ($unit)") },
+                        isError = hPx == null,
+                        keyboardOptions = number,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                if (ratio != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { keep = !keep }) {
+                        androidx.compose.material3.Checkbox(keep, { keep = it })
+                        Text(stringResource(R.string.keep_aspect_ratio))
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = wPx != null && hPx != null, onClick = { if (wPx != null && hPx != null) onConfirm(wPx, hPx) }) { Text(stringResource(R.string.apply)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
+}
 
 /** Rename a recording: its name, ready to type over. */
 @Composable
@@ -941,16 +1052,16 @@ fun ScreenshotMenu(editor: Editor, onShare: (java.io.File) -> Unit) {
 }
 
 @Composable
-private fun ActionIcon(icon: ImageVector, desc: String, enabled: Boolean = true, active: Boolean = false, shortcut: String? = null, onClick: () -> Unit) {
+private fun ActionIcon(icon: ImageVector, desc: String, enabled: Boolean = true, active: Boolean = false, shortcut: String? = null, tint: Color? = null, onClick: () -> Unit) {
     val palette = LocalPalette.current
-    val tint = when {
+    val color = when {
         !enabled -> palette.text.toComposeColor().copy(alpha = 0.35f)
         active -> palette.accent.toComposeColor()
-        else -> palette.text.toComposeColor()
+        else -> tint ?: palette.text.toComposeColor()
     }
     Tooltip(desc, shortcut = shortcut) {
         IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(46.dp)) {
-            Icon(icon, contentDescription = desc, tint = tint, modifier = Modifier.size(22.dp))
+            Icon(icon, contentDescription = desc, tint = color, modifier = Modifier.size(22.dp))
         }
     }
 }

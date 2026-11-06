@@ -840,6 +840,13 @@
     <string name="connector_reroute">Re-route</string>
     <string name="mirror_left_right">Mirror left-right</string>
     <string name="mirror_upside_down">Mirror upside down</string>
+    <string name="mirror">Mirror</string>
+    <string name="selection_size">Size</string>
+    <string name="units_px">px</string>
+    <string name="units_mm">mm</string>
+    <string name="width">Width</string>
+    <string name="height">Height</string>
+    <string name="keep_aspect_ratio">Keep aspect ratio</string>
     <string name="title_change_style">Change style</string>
     <string name="caption_thickness">Thickness</string>
     <string name="colour_drop_not_closed">This area is not closed.</string>

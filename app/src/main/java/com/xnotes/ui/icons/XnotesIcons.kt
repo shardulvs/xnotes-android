@@ -257,6 +257,8 @@ object XnotesIcons {
     )
     /** Two corner brackets crossing: cutting a picture down. */
     val crop = icon("M6 2v14a2 2 0 0 0 2 2h14", "M18 22V8a2 2 0 0 0-2-2H2")
+    /** A box with an arrow pulling its corner out: setting a selection's exact size. */
+    val resize = icon("M21 3L9 15", "M12 3H3v18h18v-9", "M16 3h5v5", "M14 15H9v-5")
     /** A sheet standing and the same sheet lying down: a page's size and which way round it is. */
     val pageSize = icon(roundRect(6.0, 2.0, 12.0, 20.0, 2.0), roundRect(2.0, 6.0, 20.0, 12.0, 2.0))
     /** A quarter turn clockwise. */

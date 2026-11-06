@@ -404,6 +404,15 @@ class CanvasSelection(private val doc: InfiniteDocument) {
         return command
     }
 
+    /** Apply [t] to everything selected, with the connectors glued to it, and refit the box; the undoable edit. */
+    fun transform(t: Affine): Command? {
+        beginTransform(rigid = true)
+        applyLive(t)
+        val command = buildCommand(movedOnly = false)
+        box = boxOf(items)
+        return command
+    }
+
     /** True when [item] is still on the canvas, so glue to it counts. */
     fun holds(item: CanvasItem): Boolean = doc.holds(item)
 

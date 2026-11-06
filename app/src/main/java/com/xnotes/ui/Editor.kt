@@ -8108,6 +8108,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     override fun mirrorSelection(upsideDown: Boolean) = controller.mirrorSelection(upsideDown)
 
+    override fun documentDpi(): Int = state.document.dpi
+
+    override fun selectionSize() = controller.selectionSize()
+
+    override fun resizeSelection(width: Double, height: Double) = controller.resizeSelection(width, height)
+
     override fun restyleSelection(color: Rgba?, width: Double?, preview: Boolean) {
         controller.restyleSelection(color, width, preview)
         if (!preview) color?.let { settings = settings.rememberColor(it) }
