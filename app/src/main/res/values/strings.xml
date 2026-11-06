@@ -842,7 +842,8 @@
     <string name="duplicate">Duplicate</string>
     <string name="change_style">Change style</string>
     <string name="lock">Lock</string>
-    <string name="shape_label">Label</string>
+    <string name="shape_label_add">Add label</string>
+    <string name="shape_label_edit">Edit label</string>
     <string name="connector_reroute">Re-route</string>
     <string name="mirror_left_right">Mirror left-right</string>
     <string name="mirror_upside_down">Mirror upside down</string>

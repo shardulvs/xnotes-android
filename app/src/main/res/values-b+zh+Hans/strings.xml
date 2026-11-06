@@ -703,7 +703,8 @@
     <string name="duplicate">创建副本</string>
     <string name="change_style">更改样式</string>
     <string name="lock">锁定</string>
-    <string name="shape_label">标签</string>
+    <string name="shape_label_add">添加标签</string>
+    <string name="shape_label_edit">编辑标签</string>
     <string name="connector_reroute">重新布线</string>
     <string name="mirror_left_right">左右镜像</string>
     <string name="mirror_upside_down">上下镜像</string>

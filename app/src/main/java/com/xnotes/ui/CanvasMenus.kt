@@ -146,6 +146,15 @@ interface SelectionMenuHost : SwatchHost {
     /** Set (or clear, when null) the selected item's hyperlink. */
     fun setSelectionLink(url: String?)
 
+    /** True when the lone selected item is an image or shape that can take a caption below it. */
+    val selectionCanCaption: Boolean
+
+    /** True when the selection is an image or shape grouped with its caption. */
+    val selectionHasCaption: Boolean
+
+    /** Start typing a caption under the selected image or shape. */
+    fun captionSelection()
+
     /** True when the selection contains handwriting (shows the Convert to text action). */
     val selectionHasInk: Boolean
 
@@ -192,6 +201,9 @@ interface SelectionMenuHost : SwatchHost {
 
     /** True when the lone selection is a shape that can take a typed label. */
     fun canLabelSelection(): Boolean
+
+    /** True when that shape's label already has words. */
+    fun selectionHasLabel(): Boolean
 
     /** Open the editor on that shape's label. */
     fun labelSelection()
@@ -386,9 +398,15 @@ fun SelectionMenu(
                             onClick = { overflowOpen = false; linkDialogOpen = true },
                         )
                     }
+                    if (host.selectionCanCaption) {
+                        DropdownMenuItem(
+                            text = { Text(if (host.selectionHasCaption) "Edit caption" else "Add caption") },
+                            onClick = { overflowOpen = false; host.captionSelection() },
+                        )
+                    }
                     if (host.canLabelSelection()) {
                         DropdownMenuItem(
-                            text = { Text(stringResource(R.string.shape_label)) },
+                            text = { Text(stringResource(if (host.selectionHasLabel()) R.string.shape_label_edit else R.string.shape_label_add)) },
                             onClick = { overflowOpen = false; host.labelSelection() },
                         )
                     }

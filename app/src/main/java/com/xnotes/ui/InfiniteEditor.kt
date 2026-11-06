@@ -617,6 +617,11 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     override val selectionLink: String? get() = null
     override fun setSelectionLink(url: String?) {}
 
+    override val selectionCanCaption: Boolean get() = false
+    override val selectionHasCaption: Boolean get() = false
+
+    override fun captionSelection() {}
+
     override val selectionHasInk: Boolean get() = false
     override fun convertSelectionToText() {}
     override val canConvertToMath: Boolean get() = false
@@ -863,6 +868,8 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     override fun selectionCount(): ShapeCount? = ShapeCount.of(selection.items.singleOrNull() as? ShapeItem)
 
     override fun canLabelSelection(): Boolean = (selection.items.singleOrNull() as? Labelled)?.let { it.takesLabel && !it.locked } == true
+
+    override fun selectionHasLabel(): Boolean = (selection.items.singleOrNull() as? Labelled)?.label?.text?.isNotBlank() == true
 
     override fun canRerouteSelection(): Boolean =
         selection.loneConnector?.let { !it.locked && (it.routing.orthogonal || it.waypoints.isNotEmpty()) } == true

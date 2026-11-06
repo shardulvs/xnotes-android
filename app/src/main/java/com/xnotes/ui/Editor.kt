@@ -778,6 +778,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     override val selectionLink: String? get() = controller.singleSelectedItem()?.link
     override fun setSelectionLink(url: String?) = controller.setSelectedLink(url?.trim()?.ifEmpty { null })
 
+    override val selectionCanCaption: Boolean get() = controller.canCaptionSelection()
+    override val selectionHasCaption: Boolean get() = controller.selectionHasCaption()
+
+    override fun captionSelection() = controller.captionSelection()
+
     override val selectionHasInk: Boolean get() = controller.inkSelection() != null
 
     /** Recognize the selected handwriting off-thread, then swap it for a text box (undoable). */
@@ -8117,6 +8122,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     override fun setSelectionCount(n: Int) = controller.setSelectionCount(n)
 
     override fun canLabelSelection() = controller.canLabelSelection()
+
+    override fun selectionHasLabel() = controller.selectionHasLabel()
 
     override fun labelSelection() = controller.labelSelection()
 
