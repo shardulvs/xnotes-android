@@ -24,7 +24,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.FormatIndentDecrease
 import androidx.compose.material.icons.automirrored.filled.FormatIndentIncrease
 import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.FormatAlignCenter
 import androidx.compose.material.icons.filled.FormatAlignJustify
@@ -41,6 +40,7 @@ import androidx.compose.material.icons.outlined.CheckBox
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material.icons.outlined.TableChart
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -70,6 +70,7 @@ import androidx.compose.ui.unit.sp
 import com.xnotes.R
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.pal.FontFace
+import com.xnotes.core.text.CalloutKind
 import com.xnotes.core.text.ListKind
 import com.xnotes.core.text.ParaAlign
 import com.xnotes.core.text.SlashCommands
@@ -85,9 +86,9 @@ import kotlin.math.roundToInt
  * The bottom text-format strip, shown while the inline text tool is armed (and no
  * legacy box edit is open). Sits as the last child of the editor column, so the
  * adjustResize window floats it directly above the soft keyboard. Controls, in
- * order, like Google Docs: heading level, insert menu (the "/" entries without a
- * button of their own), font face, size, bold/italic/underline/strikethrough, font
- * colour, highlight, link, code block (tap toggles, long-press picks the language),
+ * order, like Google Docs: heading level, font face, size, bold/italic/underline/
+ * strikethrough, font colour, highlight, insert menu (the "/" entries without a
+ * button of their own), link, code block (tap toggles, long-press picks the language),
  * equation, table, alignment (cycles), ordered, unordered and checkbox lists,
  * indent, outdent. Inside a table cell the heading, list, code, table and indent controls
  * disable. Centred when it fits, scrollable when it does not.
@@ -115,7 +116,6 @@ fun TextFormatBar(editor: Editor) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             HeadingButton(editor, para?.headingLevel ?: 0, enabled = !inCell)
-            InsertButton(editor, enabled = editor.flowEditingActive && !inCell)
             FontFaceButton(editor, style.face)
             SizeStepper(editor.flowShownSizePt()) { editor.flowAdjustSize(it) }
             BarDivider()
@@ -126,6 +126,7 @@ fun TextFormatBar(editor: Editor) {
             FontColorButton(editor, style.color)
             HighlightButton(editor, style.highlight)
             BarDivider()
+            InsertButton(editor, enabled = editor.flowEditingActive && !inCell)
             LinkButton(editor, style.link)
             CodeBlockButton(editor, para?.codeLang, enabled = !inCell)
             BarIcon(Icons.Filled.Functions, stringResource(R.string.equation), active = style.math, enabled = editor.flowEditingActive) {
@@ -246,15 +247,33 @@ private fun HeadingButton(editor: Editor, level: Int, enabled: Boolean) {
 
 /** The "/" menu's entries the bar has no own button for. */
 private val INSERT_KINDS = setOf(
-    SlashCommands.Kind.TODO, SlashCommands.Kind.QUOTE, SlashCommands.Kind.CALLOUT,
+    SlashCommands.Kind.QUOTE, SlashCommands.Kind.CALLOUT,
     SlashCommands.Kind.PAGE_BREAK, SlashCommands.Kind.DATE, SlashCommands.Kind.TIME,
 )
 
 @Composable
 private fun InsertButton(editor: Editor, enabled: Boolean) {
+    val palette = LocalPalette.current
     var menuOpen by remember { mutableStateOf(false) }
+    val label = stringResource(R.string.insert)
     Box {
-        BarIcon(Icons.Filled.Add, stringResource(R.string.insert), enabled = enabled) { menuOpen = true }
+        Tooltip(label) {
+            Box(
+                Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .clickable(enabled = enabled) { menuOpen = true }
+                    .semantics { contentDescription = label },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "/",
+                    color = (if (enabled) palette.textDim else palette.disabled).toComposeColor(),
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             for (entry in SlashCommands.entries().filter { it.kind in INSERT_KINDS }) {
                 ChoiceMenuItem(
@@ -268,6 +287,9 @@ private fun InsertButton(editor: Editor, enabled: Boolean) {
                         menuOpen = false
                     },
                 )
+                val groupEnds = entry.kind == SlashCommands.Kind.PAGE_BREAK ||
+                    (entry.kind == SlashCommands.Kind.CALLOUT && entry.level == CalloutKind.entries.lastIndex)
+                if (groupEnds) HorizontalDivider(Modifier.padding(vertical = 4.dp), color = palette.border.toComposeColor())
             }
         }
     }

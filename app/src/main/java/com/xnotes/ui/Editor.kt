@@ -8657,7 +8657,6 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     fun runInsertEntry(entry: SlashCommands.Entry) {
         if (!flowText.active) return
         when (entry.kind) {
-            SlashCommands.Kind.TODO -> flowSetList(ListKind.CHECK)
             SlashCommands.Kind.QUOTE -> flowStartQuote(null)
             SlashCommands.Kind.CALLOUT -> flowStartQuote(com.xnotes.core.text.CalloutKind.entries[entry.level])
             SlashCommands.Kind.PAGE_BREAK -> flowInsertPageBreak()
