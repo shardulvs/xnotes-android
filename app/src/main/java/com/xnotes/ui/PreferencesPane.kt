@@ -134,18 +134,17 @@ private val tapGestureOptions = listOf(
 )
 
 /** The Preferences pages, in the order the category list shows them. */
-private enum class PrefCategory(val title: String) {
-    APPEARANCE("Appearance"),
-    INPUT("Input"),
-    OCR("OCR"),
-    NEW_NOTES("New notes"),
-    HOME("Home & explorer"),
-    EXPORT_IMPORT("Export & import"),
-    PERFORMANCE("Performance"),
-    TOOLBAR("Toolbar"),
-    CLOUD_SYNC("Cloud sync"),
-    MAINTENANCE("Maintenance"),
-    UPDATES("Updates"),
+private enum class PrefCategory(val title: String, val summary: String) {
+    GENERAL("General", "Screen, Updates"),
+    APPEARANCE("Appearance", "Theme, Code highlighting, Fonts"),
+    INPUT("Input", "Touch, Stylus, Gestures"),
+    OCR("OCR", "Handwriting, Math"),
+    NEW_NOTES("New notes", "File names, Page size, Page colour"),
+    HOME("Home & explorer", "Layouts, Sidebar, Files"),
+    EXPORT_IMPORT("Export & import", "PDF export, Backup"),
+    PERFORMANCE("Performance", "Cache, Rendering"),
+    TOOLBAR("Toolbar", "Style, Position, Colours, Shapes"),
+    CLOUD_SYNC("Cloud sync", "Service, Automatic sync"),
 }
 
 /**
@@ -356,16 +355,24 @@ fun PreferencesPane(
         ) {
             if (categorized && category == null && !searching) {
                 for (c in PrefCategory.entries) {
-                    Text(
-                        c.title,
-                        color = palette.text.toComposeColor(),
-                        fontSize = 16.sp,
-                        modifier = Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).clickable { category = c }.padding(horizontal = 8.dp, vertical = 10.dp),
-                    )
+                    Column(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).clickable { category = c }.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                        Text(c.title, color = palette.text.toComposeColor(), fontSize = 16.sp)
+                        Text(c.summary, color = palette.textDim.toComposeColor(), fontSize = 12.sp)
+                    }
                 }
             }
-            if (shown(PrefCategory.APPEARANCE)) {
+            if (shown(PrefCategory.GENERAL)) {
                 SectionTitle(stringResource(R.string.pref_general))
+                CheckRow(stringResource(R.string.pref_start_fullscreen), editor.fullscreen) { editor.setFullscreenPref(it) }
+                CheckRow("Keep screen on while the app is open", prefs.keepScreenOn) { updateHome(prefs.copy(keepScreenOn = it)) }
+                if (all) HorizontalDivider(color = palette.border.toComposeColor())
+                Box(Modifier.searchAnchor(stringResource(R.string.search_keywords_port))) { PortSection(editor) }
+                if (all) HorizontalDivider(color = palette.border.toComposeColor())
+                Box(Modifier.searchAnchor(stringResource(R.string.search_keywords_update)).sectionAnchor("Updates")) { UpdateSection() }
+            }
+            if (shown(PrefCategory.APPEARANCE)) {
+                if (all) HorizontalDivider(color = palette.border.toComposeColor())
+                SectionTitle(stringResource(R.string.pref_appearance))
                 FieldLabel(stringResource(R.string.pref_ui_theme))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Chip(stringResource(R.string.theme_system), prefs.uiAppearance == "system") { update(prefs.copy(uiAppearance = "system")) }
@@ -398,8 +405,6 @@ fun PreferencesPane(
                         Chip(stringResource(label), prefs.cornerStyle == style) { updateHome(prefs.copy(cornerStyle = style)) }
                     }
                 }
-                CheckRow(stringResource(R.string.pref_start_fullscreen), editor.fullscreen) { editor.setFullscreenPref(it) }
-                CheckRow("Keep screen on while the app is open", prefs.keepScreenOn) { updateHome(prefs.copy(keepScreenOn = it)) }
                 CheckRow("Split settings into categories", prefs.prefsCategories) { updateHome(prefs.copy(prefsCategories = it)) }
                 TextButton(onClick = { update(Preferences()) }) { Text(stringResource(R.string.reset_to_defaults), fontSize = 13.sp) }
             }
@@ -911,14 +916,6 @@ fun PreferencesPane(
             if (shown(PrefCategory.CLOUD_SYNC)) {
                 if (all) HorizontalDivider(color = palette.border.toComposeColor())
                 Box(Modifier.onPlaced { syncTop = it.positionInParent().y.roundToInt() }.searchAnchor(stringResource(R.string.search_keywords_sync)).sectionAnchor("Cloud sync")) { CloudSyncSection(editor) }
-            }
-            if (shown(PrefCategory.MAINTENANCE)) {
-                if (all) HorizontalDivider(color = palette.border.toComposeColor())
-                Box(Modifier.searchAnchor(stringResource(R.string.search_keywords_port))) { PortSection(editor) }
-            }
-            if (shown(PrefCategory.UPDATES)) {
-                if (all) HorizontalDivider(color = palette.border.toComposeColor())
-                Box(Modifier.searchAnchor(stringResource(R.string.search_keywords_update)).sectionAnchor("Updates")) { UpdateSection() }
             }
             Spacer(Modifier.size(8.dp))
         }

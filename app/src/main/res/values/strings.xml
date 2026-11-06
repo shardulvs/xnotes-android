@@ -385,6 +385,7 @@
     <string name="preferences">Preferences</string>
     <string name="reset_to_defaults">Reset to defaults</string>
     <string name="pref_general">General</string>
+    <string name="pref_appearance">Appearance</string>
     <string name="pref_ui_theme">UI theme</string>
     <string name="theme_system">System</string>
     <string name="theme_dark">Dark</string>
@@ -537,7 +538,7 @@
     <string name="search_settings">Search settings</string>
     <string name="search_keywords_port">Port old notes shapes axes number line curve function graph upgrade check</string>
     <string name="pref_port">Port old notes</string>
-    <string name="pref_port_help">Earlier n-notes versions drew the X-Y axes, the number line, the smooth curve and function graphs as shapes of their own. Notes open with these turned into today\'s shapes, but the files keep the old ones until they are saved again. Scan finds them and Port rewrites them. Each file is checked after it is written, and its old copy is kept first. A file that does not check out, or that changes meanwhile, is left as it was. Notes open in an editor are skipped.</string>
+    <string name="pref_port_help">Rewrites notes that still store axes, number lines, curves or graphs from older n-notes versions. Old copies are backed up, open notes are skipped.</string>
     <string name="port_scan">Scan</string>
     <string name="port_run">Port</string>
     <string name="port_scanning">Scanning...</string>

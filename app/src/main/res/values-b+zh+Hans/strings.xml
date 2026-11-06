@@ -322,6 +322,7 @@
     <string name="preferences">偏好设置</string>
     <string name="reset_to_defaults">恢复默认设置</string>
     <string name="pref_general">常规</string>
+    <string name="pref_appearance">外观</string>
     <string name="pref_ui_theme">界面主题</string>
     <string name="theme_system">跟随系统</string>
     <string name="theme_dark">深色</string>
@@ -426,7 +427,7 @@
     <string name="search_settings">搜索设置</string>
     <string name="search_keywords_port">迁移 旧笔记 形状 坐标轴 数轴 曲线 函数 图像 升级 检查</string>
     <string name="pref_port">迁移旧笔记</string>
-    <string name="pref_port_help">n-notes 早期版本把坐标轴、数轴、平滑曲线和函数图像画成自己的形状。打开笔记时它们会显示为现在的形状，但文件里仍是旧形状，直到再次保存。扫描会找出这些笔记，迁移会重写它们。每个文件写入后都会检查，旧副本会先保存；检查不通过或期间被修改的文件会保持原样。正在编辑器中打开的笔记会被跳过。</string>
+    <string name="pref_port_help">重写仍保存旧版 n-notes 坐标轴、数轴、曲线或函数图像的笔记。旧副本会先备份，打开中的笔记会被跳过。</string>
     <string name="port_scan">扫描</string>
     <string name="port_run">迁移</string>
     <string name="port_scanning">正在扫描...</string>
