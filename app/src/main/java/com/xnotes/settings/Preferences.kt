@@ -118,6 +118,8 @@ data class Preferences(
     val markdownInput: Boolean = true,
     /** Whether typing "/" at a word start opens the command menu. */
     val slashCommands: Boolean = true,
+    /** Whether callout titles follow the app language; off keeps them in English. */
+    val translateCallouts: Boolean = true,
     /** Layouts the explorer header's switcher offers, in switcher order. */
     val switcherLayouts: List<ExplorerLayout> = ExplorerLayout.entries,
     val sidebarRecent: Boolean = true,
@@ -238,6 +240,7 @@ data class Preferences(
             put("sync_keep_screen_on", syncKeepScreenOn)
             put("markdown_input", markdownInput)
             put("slash_commands", slashCommands)
+            put("translate_callouts", translateCallouts)
         }
         .put("switcher_layouts", org.json.JSONArray().apply { switcherLayouts.forEach { put(it.id) } })
         .put("sidebar_recent", sidebarRecent)
@@ -368,6 +371,7 @@ data class Preferences(
                 syncKeepScreenOn = o.optBoolean("sync_keep_screen_on", false),
                 markdownInput = o.optBoolean("markdown_input", true),
                 slashCommands = o.optBoolean("slash_commands", true),
+                translateCallouts = o.optBoolean("translate_callouts", true),
                 switcherLayouts = o.optJSONArray("switcher_layouts")?.let { a ->
                     (0 until a.length()).mapNotNull { ExplorerLayout.fromId(a.optString(it)) }.distinct()
                 } ?: ExplorerLayout.entries,

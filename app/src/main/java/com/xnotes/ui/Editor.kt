@@ -2429,7 +2429,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         flowLayout.revealedMath = { revealedMathIn(it) }
         flowLayout.pageBreakLabel = appContext.getString(R.string.page_break)
         val callouts = com.xnotes.core.text.CalloutKind.entries.associateWith { appContext.getString(calloutLabelRes(it)) }
-        flowLayout.calloutLabel = { callouts.getValue(it) }
+        flowLayout.calloutLabel = { if (settings.prefs.translateCallouts) callouts.getValue(it) else it.title }
     }
 
     /**
@@ -3062,6 +3062,20 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             editor.slashCommands = on
             editor.flowText.slashCommands = on
             if (!on) editor.slashDismissed = null
+        }
+    }
+
+    /** Whether callout titles follow the app language; the text tool's config popup toggles it. */
+    var translateCallouts by mutableStateOf(settings.prefs.translateCallouts)
+        private set
+
+    /** Set the callout title preference, relaying out both panes and persisting it. */
+    fun setTranslateCalloutsPref(on: Boolean) {
+        settings = settings.copy(prefs = settings.prefs.copy(translateCallouts = on))
+        settingsRepo.save(settings)
+        for (editor in listOfNotNull(this, sibling)) {
+            editor.translateCallouts = on
+            editor.republishFlow(invalidate = true)
         }
     }
 
@@ -9117,6 +9131,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             editor.explorerView = next.explorerView
             editor.markdownInput = next.prefs.markdownInput
             editor.slashCommands = next.prefs.slashCommands
+            editor.translateCallouts = next.prefs.translateCallouts
             editor.infiniteOrNull?.let { c ->
                 c.toolbarLayout = next.canvasToolbarLayout
                 c.toolbarColorCount = next.toolbarColorCount

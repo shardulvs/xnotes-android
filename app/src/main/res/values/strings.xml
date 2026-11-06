@@ -895,6 +895,7 @@
     <string name="margins_mm">Margins (mm)</string>
     <string name="markdown_shortcuts">Markdown shortcuts</string>
     <string name="slash_commands">Slash commands</string>
+    <string name="translate_callouts">Translate callout titles</string>
     <string name="equation">Equation</string>
     <string name="insert_date">Date</string>
     <string name="insert_time">Time</string>

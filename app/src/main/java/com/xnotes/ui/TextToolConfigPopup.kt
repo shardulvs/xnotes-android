@@ -110,6 +110,14 @@ internal fun TextToolConfigPopup(editor: Editor, onDismiss: () -> Unit) {
                     fontSize = 13.sp,
                 )
             }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.offset(x = (-14).dp)) {
+                Checkbox(checked = editor.translateCallouts, onCheckedChange = { editor.setTranslateCalloutsPref(it) })
+                Text(
+                    stringResource(R.string.translate_callouts),
+                    color = palette.text.toComposeColor(),
+                    fontSize = 13.sp,
+                )
+            }
             if (showNewNoteRow && config != editor.factoryFlow) {
                 // The checkbox's 48dp touch frame insets the drawn box; pull the row back to align it.
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.offset(x = (-14).dp)) {
