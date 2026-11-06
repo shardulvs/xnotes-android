@@ -896,6 +896,8 @@
     <string name="swatches">Swatches</string>
     <string name="spectrum">Spectrum</string>
     <string name="caption_recent">Recent</string>
+    <string name="eyedropper">Pick a colour from the screen</string>
+    <string name="eyedropper_hint">Touch a colour to pick it</string>
 
     <!-- Canvas and storage -->
     <string name="pull_to_add_page">Pull to add page</string>

@@ -193,6 +193,7 @@ class MainActivity : ComponentActivity() {
                         ) {
                             com.xnotes.ui.XnotesLoader()
                         }
+                        com.xnotes.ui.EyedropperOverlay()
                     }
                 }
             }
