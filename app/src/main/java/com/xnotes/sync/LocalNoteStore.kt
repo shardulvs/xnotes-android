@@ -148,11 +148,29 @@ object LocalNoteStore {
             runCatching { DocumentsContract.deleteDocument(resolver, temp) }
             return null
         }
+        val existing = findChild(context, tree, parentId, fileName, dir = false)
+        if (!supportsRename(context, temp)) {
+            // shortcut: no swap without rename, so this provider is overwritten in place as before.
+            runCatching { DocumentsContract.deleteDocument(resolver, temp) }
+            val uri = existing?.let(doc) ?: runCatching {
+                DocumentsContract.createDocument(resolver, doc(parentId), "application/octet-stream", fileName)
+            }.getOrNull() ?: return null
+            return runCatching {
+                resolver.openOutputStream(uri, "wt")?.use { out -> from.inputStream().use { it.copyTo(out) } }
+                uri.toString()
+            }.getOrNull()
+        }
         return runCatching {
-            findChild(context, tree, parentId, fileName, dir = false)?.let { check(DocumentsContract.deleteDocument(resolver, doc(it))) }
+            existing?.let { check(DocumentsContract.deleteDocument(resolver, doc(it))) }
             (DocumentsContract.renameDocument(resolver, temp, fileName) ?: temp).toString()
         }.getOrNull()
     }
+
+    private fun supportsRename(context: Context, uri: Uri): Boolean = runCatching {
+        context.contentResolver.query(uri, arrayOf(DocumentsContract.Document.COLUMN_FLAGS), null, null, null)?.use { c ->
+            c.moveToFirst() && c.getInt(0) and DocumentsContract.Document.FLAG_SUPPORTS_RENAME != 0
+        }
+    }.getOrNull() == true
 
     private const val TEMP_SUFFIX = ".synctmp"
 
