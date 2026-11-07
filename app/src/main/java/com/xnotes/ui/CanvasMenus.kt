@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -53,7 +52,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -283,8 +281,9 @@ fun SelectionMenu(
     val audio = host.selectedAudio()
     val crops = host.canCropSelection()
     val size = host.selectionSize()
+    val mirrors = host.canMirrorSelection()
     val barHeightPx = with(density) { 48.dp.toPx() }
-    val barWidthPx = with(density) { ((6 + (if (audio != null) 1 else 0) + (if (crops) 1 else 0) + (if (size != null) 1 else 0)) * 46).dp.toPx() }
+    val barWidthPx = with(density) { ((7 + (if (audio != null) 1 else 0) + (if (crops) 1 else 0) + (if (size != null) 1 else 0) + (if (mirrors) 1 else 0)) * 46).dp.toPx() }
     val gap = with(density) { 10.dp.toPx() }
     val centerX = ((rect.left + rect.right) / 2.0).toFloat()
     val xPx = (centerX - barWidthPx / 2f).coerceAtLeast(with(density) { 8.dp.toPx() })
@@ -321,18 +320,35 @@ fun SelectionMenu(
                     }
                 }
             }
+            ActionIcon(XnotesIcons.lock, stringResource(R.string.lock)) { host.lockSelection() }
             if (audio != null) {
                 val playing = AudioPlayback.session?.let { it.item === audio && it.playing } == true
                 ActionIcon(if (playing) XnotesIcons.pause else XnotesIcons.play, stringResource(if (playing) R.string.audio_pause else R.string.audio_play)) { host.playSelectedAudio() }
             }
             if (crops) ActionIcon(XnotesIcons.crop, stringResource(R.string.crop)) { host.startCrop() }
             if (size != null) ActionIcon(XnotesIcons.resize, stringResource(R.string.selection_size)) { sizeDialogOpen = true }
+            if (mirrors) Box {
+                ActionIcon(XnotesIcons.mirror, stringResource(R.string.mirror)) { mirrorOpen = true }
+                DropdownMenu(
+                    expanded = mirrorOpen,
+                    onDismissRequest = { mirrorOpen = false },
+                    properties = PopupProperties(focusable = false),
+                ) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.mirror_left_right)) },
+                        onClick = { mirrorOpen = false; host.mirrorSelection(upsideDown = false) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.mirror_upside_down)) },
+                        onClick = { mirrorOpen = false; host.mirrorSelection(upsideDown = true) },
+                    )
+                }
+            }
             Box {
                 ActionIcon(XnotesIcons.more, stringResource(R.string.more)) { overflowOpen = true }
                 DropdownMenu(
                     expanded = overflowOpen,
-                    // A tap on the Mirror submenu lands outside this menu; it must not close it under the tap.
-                    onDismissRequest = { if (!mirrorOpen) overflowOpen = false },
+                    onDismissRequest = { overflowOpen = false },
                     properties = PopupProperties(focusable = false),
                 ) {
                     // A lone recording's own actions come first.
@@ -367,6 +383,7 @@ fun SelectionMenu(
                         enabled = styles.isNotEmpty() || host.selectionFills().isNotEmpty(),
                         onClick = { overflowOpen = false; styleOpen = true },
                     )
+                    androidx.compose.material3.HorizontalDivider(color = palette.border.toComposeColor())
                     if (host.selectionFunction != null) {
                         DropdownMenuItem(
                             text = { Text("Edit function") },
@@ -416,33 +433,6 @@ fun SelectionMenu(
                             onClick = { overflowOpen = false; host.rerouteSelection() },
                         )
                     }
-                    // The two mirrors open beside this row, like the page menu's Add.
-                    var mirrorRow by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
-                    Box(Modifier.onSizeChanged { mirrorRow = it }) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.mirror)) },
-                            trailingIcon = { Icon(XnotesIcons.next, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp)) },
-                            enabled = host.canMirrorSelection(),
-                            onClick = { mirrorOpen = true },
-                        )
-                        val side = with(density) { androidx.compose.ui.unit.DpOffset(mirrorRow.width.toDp(), -mirrorRow.height.toDp()) }
-                        CompositionLocalProvider(LocalMenuOffset provides side) {
-                            DropdownMenu(
-                                expanded = mirrorOpen,
-                                onDismissRequest = { mirrorOpen = false },
-                                properties = PopupProperties(focusable = false),
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.mirror_left_right)) },
-                                    onClick = { mirrorOpen = false; overflowOpen = false; host.mirrorSelection(upsideDown = false) },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.mirror_upside_down)) },
-                                    onClick = { mirrorOpen = false; overflowOpen = false; host.mirrorSelection(upsideDown = true) },
-                                )
-                            }
-                        }
-                    }
                     if (host.canGroupSelection()) {
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.group)) },
@@ -455,6 +445,7 @@ fun SelectionMenu(
                             onClick = { overflowOpen = false; host.ungroupSelection() },
                         )
                     }
+                    androidx.compose.material3.HorizontalDivider(color = palette.border.toComposeColor())
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.copy_as_image)) },
                         onClick = { overflowOpen = false; host.copySelectionAsImage() },
@@ -465,10 +456,6 @@ fun SelectionMenu(
                             onClick = { overflowOpen = false; host.selectionImageForShare()?.let(share) },
                         )
                     }
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.lock)) },
-                        onClick = { overflowOpen = false; host.lockSelection() },
-                    )
                 }
                 if (styleOpen) {
                     // Closing settles any preview the slider left open.
@@ -555,8 +542,8 @@ private fun SizeDialog(initial: Pair<Double, Double>, dpi: Int, onConfirm: (Doub
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    androidx.compose.material3.FilterChip(selected = !mm, onClick = { switchUnits(false) }, label = { Text(stringResource(R.string.units_px)) })
-                    androidx.compose.material3.FilterChip(selected = mm, onClick = { switchUnits(true) }, label = { Text(stringResource(R.string.units_mm)) })
+                    ModeChip(stringResource(R.string.units_px), !mm) { switchUnits(false) }
+                    ModeChip(stringResource(R.string.units_mm), mm) { switchUnits(true) }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
