@@ -60,6 +60,7 @@ import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -2649,6 +2650,20 @@ private fun SyncSidebarStatus() {
     Column(Modifier.padding(start = 18.dp, end = 12.dp, top = 8.dp)) {
         Text(synced, color = palette.textDim.toComposeColor(), fontSize = 11.sp)
         Text(files, color = palette.textDim.toComposeColor(), fontSize = 11.sp)
+        if (status.running) {
+            val bar = Modifier.padding(top = 6.dp).fillMaxWidth().height(3.dp)
+            val accent = palette.accent.toComposeColor()
+            val track = palette.border.toComposeColor()
+            // Until both sides are listed the total is unknown, so the bar just runs.
+            if (status.total > 0) {
+                LinearProgressIndicator(
+                    progress = { status.done.toFloat() / status.total }, modifier = bar,
+                    color = accent, trackColor = track, drawStopIndicator = {},
+                )
+            } else {
+                LinearProgressIndicator(modifier = bar, color = accent, trackColor = track)
+            }
+        }
     }
 }
 

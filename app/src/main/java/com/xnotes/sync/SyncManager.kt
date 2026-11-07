@@ -235,7 +235,8 @@ object SyncManager {
             primeStatus(appCtx)
             // Coming back from a file picker or share sheet also starts the activity; skip if we just synced.
             if (System.currentTimeMillis() - _status.value.lastSyncMs < APP_OPEN_MIN_GAP_MS) return@launch
-            requestSync(appCtx, "app open")
+            // A sync already running started moments ago and covers what app open would fetch, so this one is dropped.
+            requestSync(appCtx, "app open", rerunIfBusy = false)
         }
     }
 

@@ -208,7 +208,7 @@ class MainActivity : ComponentActivity() {
                             com.xnotes.ui.XnotesLoader()
                         }
                         com.xnotes.ui.EyedropperOverlay()
-                        SyncStrip()
+                        SyncStrip(ed)
                     }
                     update?.let { u ->
                         com.xnotes.ui.AlertDialog(
@@ -2162,11 +2162,12 @@ private fun KeepScreenOn(editor: Editor) {
     SideEffect { view.keepScreenOn = keepOn }
 }
 
-/** A thin bar along the top while a cloud sync runs, so it shows inside notes and canvases too; fills as files are done. */
+/** A thin bar along the top of an open note or canvas while a cloud sync runs; fills as files are done. */
 @Composable
-private fun BoxScope.SyncStrip() {
+private fun BoxScope.SyncStrip(editor: Editor) {
     val status = SyncManager.status.collectAsState().value
-    if (!status.running) return
+    // Home shows its progress at the foot of the sidebar instead.
+    if (!status.running || !editor.noteOpen) return
     val accent = com.xnotes.ui.theme.LocalPalette.current.accent.toComposeColor()
     val modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().windowInsetsPadding(WindowInsets.statusBars).height(2.dp)
     if (status.total > 0) {
