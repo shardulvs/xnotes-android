@@ -66,7 +66,8 @@ object LocalNoteStore {
 
     fun listNotes(context: Context, treeUri: String): List<LocalEntry> = listTree(context, treeUri).files
 
-    fun listTree(context: Context, treeUri: String): LocalTree {
+    /** With [recover], swaps that [writeNote] left half done in a crash are finished first; only sync passes it. */
+    fun listTree(context: Context, treeUri: String, recover: Boolean = false): LocalTree {
         val tree = Uri.parse(treeUri)
         val rootId = DocumentsContract.getTreeDocumentId(tree)
         val out = ArrayList<LocalEntry>()
@@ -76,7 +77,8 @@ object LocalNoteStore {
         while (stack.isNotEmpty()) {
             val (docId, prefix) = stack.removeLast()
             if (!seen.add(docId)) continue
-            for (child in recoverTemps(context, tree, children(context, tree, docId))) {
+            val kids = children(context, tree, docId)
+            for (child in if (recover && finishSwaps(context, tree, docId, kids)) children(context, tree, docId) else kids) {
                 val rel = if (prefix.isEmpty()) child.name else "$prefix/${child.name}"
                 if (child.isDir) {
                     if (!syncsDir(rel)) continue
@@ -136,35 +138,50 @@ object LocalNoteStore {
         val fileName = segments.last()
         val resolver = context.contentResolver
         val doc = { id: String -> DocumentsContract.buildDocumentUriUsingTree(tree, id) }
-        // Written in full beside the file first, then swapped in, so a crash never leaves a half-written note.
-        findChild(context, tree, parentId, fileName + TEMP_SUFFIX, dir = false)?.let { runCatching { DocumentsContract.deleteDocument(resolver, doc(it)) } }
-        val temp = runCatching {
-            DocumentsContract.createDocument(resolver, doc(parentId), "application/octet-stream", fileName + TEMP_SUFFIX)
-        }.getOrNull() ?: return null
-        val written = runCatching {
-            resolver.openOutputStream(temp, "wt")?.use { out -> from.inputStream().use { it.copyTo(out) } } != null
-        }.getOrDefault(false)
-        if (!written) {
-            runCatching { DocumentsContract.deleteDocument(resolver, temp) }
-            return null
+        val existing = findChild(context, tree, parentId, fileName, dir = false)?.let(doc)
+        val tempName = fileName + TEMP_SUFFIX
+        val folderKey = "$treeUri|$parentId"
+        val temp = if (folderKey in noSwap) null else {
+            findChild(context, tree, parentId, tempName, dir = false)?.let { runCatching { DocumentsContract.deleteDocument(resolver, doc(it)) } }
+            runCatching { DocumentsContract.createDocument(resolver, doc(parentId), "application/octet-stream", tempName) }.getOrNull()
         }
-        val existing = findChild(context, tree, parentId, fileName, dir = false)
-        if (!supportsRename(context, temp)) {
-            // shortcut: no swap without rename, so this provider is overwritten in place as before.
-            runCatching { DocumentsContract.deleteDocument(resolver, temp) }
-            val uri = existing?.let(doc) ?: runCatching {
+        // The swap needs rename, and ids that are paths so the note keeps its uri (open notes and recents hold it).
+        if (temp == null || !supportsRename(context, temp) || DocumentsContract.getDocumentId(temp) != "$parentId/$tempName") {
+            if (temp != null) noSwap.add(folderKey)
+            temp?.let { runCatching { DocumentsContract.deleteDocument(resolver, it) } }
+            // shortcut: such providers are overwritten in place, so a crash mid-write can still truncate the note there.
+            val uri = existing ?: runCatching {
                 DocumentsContract.createDocument(resolver, doc(parentId), "application/octet-stream", fileName)
             }.getOrNull() ?: return null
-            return runCatching {
-                resolver.openOutputStream(uri, "wt")?.use { out -> from.inputStream().use { it.copyTo(out) } }
-                uri.toString()
-            }.getOrNull()
+            return uri.toString().takeIf { copyInto(context, uri, from) }
         }
-        return runCatching {
-            existing?.let { check(DocumentsContract.deleteDocument(resolver, doc(it))) }
-            (DocumentsContract.renameDocument(resolver, temp, fileName) ?: temp).toString()
-        }.getOrNull()
+        val placed = if (!copyInto(context, temp, from)) null else if (existing == null) {
+            rename(context, temp, fileName)
+        } else {
+            // The original is only moved aside, never deleted, until the new copy is in place.
+            val backup = rename(context, existing, fileName + BACKUP_SUFFIX)
+            val swapped = backup?.let { rename(context, temp, fileName) }
+            if (backup != null) {
+                if (swapped != null) runCatching { DocumentsContract.deleteDocument(resolver, backup) } else rename(context, backup, fileName)
+            }
+            swapped
+        }
+        if (placed == null) runCatching { DocumentsContract.deleteDocument(resolver, temp) }
+        return placed?.toString()
     }
+
+    private const val TEMP_SUFFIX = ".synctmp"
+    private const val BACKUP_SUFFIX = ".syncold"
+
+    /** Folders found unable to swap, so they are not probed with a throwaway temp on every write. */
+    private val noSwap: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    private fun copyInto(context: Context, uri: Uri, from: java.io.File): Boolean = runCatching {
+        context.contentResolver.openOutputStream(uri, "wt")?.use { out -> from.inputStream().use { it.copyTo(out) } } != null
+    }.getOrDefault(false)
+
+    private fun rename(context: Context, uri: Uri, name: String): Uri? =
+        runCatching { DocumentsContract.renameDocument(context.contentResolver, uri, name) }.getOrNull()
 
     private fun supportsRename(context: Context, uri: Uri): Boolean = runCatching {
         context.contentResolver.query(uri, arrayOf(DocumentsContract.Document.COLUMN_FLAGS), null, null, null)?.use { c ->
@@ -172,22 +189,55 @@ object LocalNoteStore {
         }
     }.getOrNull() == true
 
-    private const val TEMP_SUFFIX = ".synctmp"
+    /** What finishing a crashed swap does with one leftover: rename it to [to], or delete it when [to] is null. */
+    data class SwapFix(val name: String, val to: String?)
 
-    /** A temp left by a crash mid-swap becomes the file again when the file is gone, else it is dropped. */
-    private fun recoverTemps(context: Context, tree: Uri, children: List<Child>): List<Child> {
-        val names = children.mapTo(HashSet()) { it.name.lowercase() }
-        return children.mapNotNull { child ->
-            if (child.isDir || !child.name.endsWith(TEMP_SUFFIX)) return@mapNotNull child
-            val uri = Uri.parse(child.uri)
-            val name = child.name.removeSuffix(TEMP_SUFFIX)
-            if (name.lowercase() in names) {
-                runCatching { DocumentsContract.deleteDocument(context.contentResolver, uri) }
-                return@mapNotNull null
+    /**
+     * A leftover backup means the crash came mid-swap: the original comes back and the new copy goes, so the
+     * next sync simply downloads again. A lone temp becomes the file when that is missing, as a build that
+     * deleted before renaming could leave the only copy there; next to the file it is dropped.
+     */
+    fun swapFixes(names: List<String>): List<SwapFix> {
+        val present = names.mapTo(HashSet()) { it.lowercase() }
+        val fixes = ArrayList<SwapFix>()
+        for (name in names) {
+            val backupOf = name.takeIf { it.endsWith(BACKUP_SUFFIX) }?.removeSuffix(BACKUP_SUFFIX)
+            val tempOf = name.takeIf { it.endsWith(TEMP_SUFFIX) }?.removeSuffix(TEMP_SUFFIX)
+            when {
+                backupOf != null -> fixes += SwapFix(name, backupOf.takeIf { it.lowercase() !in present })
+                tempOf != null -> {
+                    val replaced = tempOf.lowercase() in present || (tempOf + BACKUP_SUFFIX).lowercase() in present
+                    fixes += SwapFix(name, tempOf.takeIf { !replaced })
+                }
             }
-            val renamed = runCatching { DocumentsContract.renameDocument(context.contentResolver, uri, name) ?: uri }.getOrNull() ?: return@mapNotNull null
-            child.copy(name = name, docId = DocumentsContract.getDocumentId(renamed), uri = renamed.toString())
         }
+        return fixes
+    }
+
+    /** Applies [swapFixes] in one folder; true when anything changed. Throws when a leftover cannot be made the file again. */
+    private fun finishSwaps(context: Context, tree: Uri, folderId: String, kids: List<Child>): Boolean {
+        val resolver = context.contentResolver
+        val fixes = swapFixes(kids.filter { !it.isDir }.map { it.name })
+        for (fix in fixes) {
+            val uri = Uri.parse(kids.first { it.name == fix.name }.uri)
+            if (fix.to == null || rename(context, uri, fix.to) != null) {
+                if (fix.to == null) runCatching { DocumentsContract.deleteDocument(resolver, uri) }
+                continue
+            }
+            // No rename here: the content is copied to the right name instead, never dropped.
+            val target = runCatching {
+                DocumentsContract.createDocument(resolver, DocumentsContract.buildDocumentUriUsingTree(tree, folderId), "application/octet-stream", fix.to)
+            }.getOrNull()
+            val copied = target != null && runCatching {
+                resolver.openInputStream(uri)?.use { input -> resolver.openOutputStream(target, "wt")?.use { input.copyTo(it) } } != null
+            }.getOrDefault(false)
+            if (!copied) {
+                target?.let { runCatching { DocumentsContract.deleteDocument(resolver, it) } }
+                error("Could not restore ${fix.to} from ${fix.name}")
+            }
+            runCatching { DocumentsContract.deleteDocument(resolver, uri) }
+        }
+        return fixes.isNotEmpty()
     }
 
     /**

@@ -78,7 +78,7 @@ class SyncEngine(
         tmpDir.listFiles()?.forEach { it.delete() } // left behind if a run was killed mid-transfer
         syncPriority(state, summary)
         var phase = System.currentTimeMillis()
-        val localTree = LocalNoteStore.listTree(context, treeUri)
+        val localTree = LocalNoteStore.listTree(context, treeUri, recover = true)
         val local = localTree.files.associateBy { it.relativePath }
         localTree.files.associateTo(localUris) { it.relativePath to it.documentUri }
         log("Listed ${local.size} files here in ${secondsSince(phase)}")
