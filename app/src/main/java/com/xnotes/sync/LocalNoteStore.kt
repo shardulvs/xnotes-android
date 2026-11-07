@@ -76,7 +76,7 @@ object LocalNoteStore {
         while (stack.isNotEmpty()) {
             val (docId, prefix) = stack.removeLast()
             if (!seen.add(docId)) continue
-            for (child in children(context, tree, docId)) {
+            for (child in recoverTemps(context, tree, children(context, tree, docId))) {
                 val rel = if (prefix.isEmpty()) child.name else "$prefix/${child.name}"
                 if (child.isDir) {
                     if (!syncsDir(rel)) continue
@@ -134,19 +134,42 @@ object LocalNoteStore {
                 ?: createDir(context, tree, parentId, segments[i]) ?: return null
         }
         val fileName = segments.last()
-        val existing = findChild(context, tree, parentId, fileName, dir = false)
-        val uri = if (existing != null) {
-            DocumentsContract.buildDocumentUriUsingTree(tree, existing)
-        } else {
-            val parent = DocumentsContract.buildDocumentUriUsingTree(tree, parentId)
-            runCatching {
-                DocumentsContract.createDocument(context.contentResolver, parent, "application/octet-stream", fileName)
-            }.getOrNull() ?: return null
+        val resolver = context.contentResolver
+        val doc = { id: String -> DocumentsContract.buildDocumentUriUsingTree(tree, id) }
+        // Written in full beside the file first, then swapped in, so a crash never leaves a half-written note.
+        findChild(context, tree, parentId, fileName + TEMP_SUFFIX, dir = false)?.let { runCatching { DocumentsContract.deleteDocument(resolver, doc(it)) } }
+        val temp = runCatching {
+            DocumentsContract.createDocument(resolver, doc(parentId), "application/octet-stream", fileName + TEMP_SUFFIX)
+        }.getOrNull() ?: return null
+        val written = runCatching {
+            resolver.openOutputStream(temp, "wt")?.use { out -> from.inputStream().use { it.copyTo(out) } } != null
+        }.getOrDefault(false)
+        if (!written) {
+            runCatching { DocumentsContract.deleteDocument(resolver, temp) }
+            return null
         }
         return runCatching {
-            context.contentResolver.openOutputStream(uri, "wt")?.use { out -> from.inputStream().use { it.copyTo(out) } }
-            uri.toString()
+            findChild(context, tree, parentId, fileName, dir = false)?.let { check(DocumentsContract.deleteDocument(resolver, doc(it))) }
+            (DocumentsContract.renameDocument(resolver, temp, fileName) ?: temp).toString()
         }.getOrNull()
+    }
+
+    private const val TEMP_SUFFIX = ".synctmp"
+
+    /** A temp left by a crash mid-swap becomes the file again when the file is gone, else it is dropped. */
+    private fun recoverTemps(context: Context, tree: Uri, children: List<Child>): List<Child> {
+        val names = children.mapTo(HashSet()) { it.name.lowercase() }
+        return children.mapNotNull { child ->
+            if (child.isDir || !child.name.endsWith(TEMP_SUFFIX)) return@mapNotNull child
+            val uri = Uri.parse(child.uri)
+            val name = child.name.removeSuffix(TEMP_SUFFIX)
+            if (name.lowercase() in names) {
+                runCatching { DocumentsContract.deleteDocument(context.contentResolver, uri) }
+                return@mapNotNull null
+            }
+            val renamed = runCatching { DocumentsContract.renameDocument(context.contentResolver, uri, name) ?: uri }.getOrNull() ?: return@mapNotNull null
+            child.copy(name = name, docId = DocumentsContract.getDocumentId(renamed), uri = renamed.toString())
+        }
     }
 
     /**
