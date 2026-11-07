@@ -118,8 +118,6 @@ data class Preferences(
     val syncDirection: String = "both",
     /** Keep the screen from sleeping while a sync runs with the app open. */
     val syncKeepScreenOn: Boolean = false,
-    /** How many files cloud sync lists and transfers at once (1-4). */
-    val syncThreads: Int = 1,
     /** Whether typed markdown markers (# - ** `) convert the text as you write. */
     val markdownInput: Boolean = true,
     /** Whether typing "/" at a word start opens the command menu. */
@@ -245,7 +243,6 @@ data class Preferences(
             put("sync_on_app_open", syncOnAppOpen)
             put("sync_direction", syncDirection)
             put("sync_keep_screen_on", syncKeepScreenOn)
-            put("sync_threads", syncThreads)
             put("markdown_input", markdownInput)
             put("slash_commands", slashCommands)
             put("translate_callouts", translateCallouts)
@@ -378,7 +375,6 @@ data class Preferences(
                 syncDirection = o.optString("sync_direction", o.optString("filen_sync_direction", "both"))
                     .let { if (it == "up" || it == "down" || it == "off") it else "both" },
                 syncKeepScreenOn = o.optBoolean("sync_keep_screen_on", false),
-                syncThreads = o.optInt("sync_threads", 1).coerceIn(1, 4),
                 markdownInput = o.optBoolean("markdown_input", true),
                 slashCommands = o.optBoolean("slash_commands", true),
                 translateCallouts = o.optBoolean("translate_callouts", true),

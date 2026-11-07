@@ -431,8 +431,6 @@
     <string name="pref_performance">Performance</string>
     <string name="pref_cache_help">Higher feels smoother when you pan and zoom but uses more memory. Your ink and PDFs look just as crisp either way.</string>
     <string name="pref_disable_front_buffering">Disable front buffering</string>
-    <string name="pref_sync_threads">"Cloud sync threads  %1$d"</string>
-    <string name="pref_sync_threads_help">How many files cloud sync lists and transfers at once. More can finish a big sync sooner on a fast connection, but uses more memory and battery and asks more of the server. 1 syncs one file after another.</string>
     <string name="pref_front_buffering_help">Front buffering paints the pen\'s ink straight into the frame the screen is showing, which is what makes it feel instant. A few panels do not hand that over cleanly, and there the ink can flicker or fall behind the nib. Turn it off on those and every stroke goes through the ordinary canvas.</string>
     <string name="pref_code_highlighting">Code highlighting</string>
     <string name="pref_default_code_language">Default code language</string>

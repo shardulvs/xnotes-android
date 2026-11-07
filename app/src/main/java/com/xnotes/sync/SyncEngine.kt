@@ -41,8 +41,6 @@ class SyncEngine(
     private val takePriority: () -> String? = { null },
     /** Called after a priority note is synced, to save the baseline at once. */
     private val checkpoint: () -> Unit = {},
-    /** How many files are listed and transferred at once; one keeps everything in order on this thread. */
-    private val threads: Int = 1,
 ) {
     /** A note whose two sides diverged: the edit was kept and the user should know. */
     data class ConflictNote(val path: String, val message: String)
@@ -55,14 +53,7 @@ class SyncEngine(
         var skipped: Int = 0,
         val errors: MutableList<String> = mutableListOf(),
         val conflictNotes: MutableList<ConflictNote> = mutableListOf(),
-    ) {
-        /** Adds one file's own summary; each file fills its own, so threads never share one while they work. */
-        @Synchronized
-        fun add(o: Summary) {
-            uploaded += o.uploaded; downloaded += o.downloaded; conflicts += o.conflicts; deleted += o.deleted; skipped += o.skipped
-            errors.addAll(o.errors); conflictNotes.addAll(o.conflictNotes)
-        }
-    }
+    )
 
     /** Everything one walk of the remote tree found; [foreign] names folders holding things sync leaves alone. */
     private class RemoteTree {
@@ -72,30 +63,17 @@ class SyncEngine(
     }
 
     /** Remote paths this run moved to the cloud trash, so a folder emptied by them counts as empty. */
-    private val trashedRemote: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    private val trashedRemote = HashSet<String>()
 
     private val tmpDir = File(context.cacheDir, "sync").apply { mkdirs() }
 
-    /** Guards [handled] and [inFlight]: a path is worked on by one thread at a time, never twice at once. */
-    private val claims = Object()
     /** Paths a priority sync already settled; the full pass leaves them, since its listing may predate that. */
     private val handled = HashSet<String>()
-    /** Paths a thread is reconciling right now. */
-    private val inFlight = HashSet<String>()
-
-    /** Writes to the notes folder go one at a time, so two files never create the same new folder twice. */
-    private val localLock = Object()
-    /** Cloud folders are looked up or created one at a time, so a new folder is never made twice; ids by lowercase path. */
-    private val remoteFolders = HashMap<String, String>()
-    /** Progress and checkpoints are reported from one thread at a time. */
-    private val progressLock = Object()
 
     /** Every local file's document uri by relative path, kept current through the run (for settings sync's recents). */
-    val localUris: MutableMap<String, String> = java.util.concurrent.ConcurrentHashMap()
+    val localUris = HashMap<String, String>()
 
-    fun sync(state: SyncState): Summary = Workers(threads).use { workers -> sync(state, workers) }
-
-    private fun sync(state: SyncState, workers: Workers): Summary {
+    fun sync(state: SyncState): Summary {
         val summary = Summary()
         tmpDir.listFiles()?.forEach { it.delete() } // left behind if a run was killed mid-transfer
         syncPriority(state, summary)
@@ -105,7 +83,8 @@ class SyncEngine(
         localTree.files.associateTo(localUris) { it.relativePath to it.documentUri }
         log("Listed ${local.size} files here in ${secondsSince(phase)}")
         phase = System.currentTimeMillis()
-        val remoteTree = walkRemote(workers)
+        val remoteTree = RemoteTree()
+        walkRemote(remoteRootId, "", remoteTree, HashSet())
         val remote = remoteTree.files
         log("Listed ${remote.size} files in ${remoteTree.folders.size + 1} cloud folders in ${secondsSince(phase)}")
         phase = System.currentTimeMillis()
@@ -119,26 +98,17 @@ class SyncEngine(
         val allPaths = LinkedHashSet<String>().apply { addAll(local.keys); addAll(remote.keys); addAll(state.filePaths()) }
         // Counted like the sidebar's file count: hidden paths (settings, sidecars, Trash) are synced but not shown.
         val total = allPaths.count { !LocalNoteStore.isHiddenPath(it) }
-        val done = java.util.concurrent.atomic.AtomicInteger()
+        var done = 0
         for (path in allPaths) {
             syncPriority(state, summary) // a note closed while this runs goes next, not after the whole pass
-            workers.submit {
-                if (claim(path)) {
-                    val mine = Summary()
-                    try {
-                        reconcile(path, local[path], remote[path], state, mine, suppressDeletes)
-                    } catch (e: Throwable) {
-                        mine.errors.add("$path: ${e.message}")
-                        log("Error $path: ${e.message}")
-                    } finally {
-                        release(path)
-                    }
-                    summary.add(mine)
-                }
-                if (!LocalNoteStore.isHiddenPath(path)) synchronized(progressLock) { onProgress(done.incrementAndGet(), total) }
+            if (path !in handled) try {
+                reconcile(path, local[path], remote[path], state, summary, suppressDeletes)
+            } catch (e: Exception) {
+                summary.errors.add("$path: ${e.message}")
+                log("Error $path: ${e.message}")
             }
+            if (!LocalNoteStore.isHiddenPath(path)) onProgress(++done, total)
         }
-        workers.awaitAll()
         log("Compared and transferred files in ${secondsSince(phase)}")
         phase = System.currentTimeMillis()
         reconcileFolders(localTree.folders, remoteTree, state, summary, suppressDeletes)
@@ -146,49 +116,24 @@ class SyncEngine(
         return summary
     }
 
-    /** Takes [path] for this thread, unless a priority sync already settled it. */
-    private fun claim(path: String): Boolean = synchronized(claims) {
-        if (path in handled) false else { inFlight.add(path); true }
-    }
-
-    private fun release(path: String) = synchronized(claims) {
-        inFlight.remove(path)
-        claims.notifyAll()
-    }
-
-    /**
-     * Syncs each just-closed note waiting, from a fresh look at it here and at its one cloud folder. It is
-     * marked settled first, so no thread starts it from the older listing, and waits out a thread already on it.
-     */
+    /** Syncs each just-closed note waiting, from a fresh look at it here and at its one cloud folder. */
     private fun syncPriority(state: SyncState, summary: Summary) {
         while (true) {
             val path = takePriority() ?: return
-            synchronized(claims) {
-                handled.add(path)
-                while (path in inFlight) claims.wait()
-            }
             val started = System.currentTimeMillis()
-            val mine = Summary()
             try {
-                val loc = LocalNoteStore.entryAt(context, treeUri, path)
-                if (loc == null) {
-                    synchronized(claims) { handled.remove(path) }
-                    continue
-                }
+                val loc = LocalNoteStore.entryAt(context, treeUri, path) ?: continue
                 val name = path.substringAfterLast('/')
                 val rem = storage.list(remoteParent(path)).files.firstOrNull { it.name == name }
                 // Deletes are never applied from a single folder's view; the full pass judges those.
-                reconcile(path, loc, rem, state, mine, suppressDeletes = true)
+                reconcile(path, loc, rem, state, summary, suppressDeletes = true)
+                handled.add(path)
                 localUris[path] = loc.documentUri
                 log("Synced $path first in ${secondsSince(started)}")
-                synchronized(progressLock) { checkpoint() }
-            } catch (e: Throwable) {
-                // Left to the full pass, if it has not passed this path yet.
-                synchronized(claims) { handled.remove(path) }
-                mine.errors.add("$path: ${e.message}")
+                checkpoint()
+            } catch (e: Exception) {
+                summary.errors.add("$path: ${e.message}")
                 log("Error $path: ${e.message}")
-            } finally {
-                summary.add(mine)
             }
         }
     }
@@ -296,7 +241,7 @@ class SyncEngine(
                 suppressDeletes -> summary.skipped++
                 // Unchanged here and gone from the other device: applying that deletion locally is a
                 // download-side change, so only when down is allowed.
-                down -> if (synchronized(localLock) { LocalNoteStore.deleteLocal(context, treeUri, path) }) { state.remove(path); localUris.remove(path); summary.deleted++; log("Deleted here $path") } else summary.skipped++
+                down -> if (LocalNoteStore.deleteLocal(context, treeUri, path)) { state.remove(path); localUris.remove(path); summary.deleted++; log("Deleted here $path") } else summary.skipped++
                 else -> summary.skipped++
             }
             rem != null && loc == null -> when {
@@ -353,7 +298,7 @@ class SyncEngine(
     private fun doDownload(path: String, rem: CloudStorage.RemoteFile, state: SyncState, summary: Summary) = Temps(tmpDir).use { t ->
         val file = t.file()
         storage.download(rem, file)
-        val uri = writeLocal(path, file) ?: throw IllegalStateException("cannot write local file")
+        val uri = LocalNoteStore.writeNote(context, treeUri, path, file) ?: throw IllegalStateException("cannot write local file")
         localUris[path] = uri
         val localMod = LocalNoteStore.modifiedOf(context, uri)
         state.put(path, withFingerprints(path, file, SyncState.Entry(rem.id, rem.lastModified, localMod, file.length())))
@@ -375,7 +320,7 @@ class SyncEngine(
         } else null
         // Checked again right before writing: an edit saved since the listing, or a note opened meanwhile, must not be overwritten.
         if (merged == null || OpenNotes.isOpen(loc.documentUri) || LocalNoteStore.modifiedOf(context, loc.documentUri) != loc.modified) {
-            writeLocal(copyPath, remoteFile)
+            LocalNoteStore.writeNote(context, treeUri, copyPath, remoteFile)
             val sent = storage.upload(remoteParent(path), name, localFile, loc.modified)
             runCatching { storage.trashFile(rem.id) }
             state.put(path, withFingerprints(path, localFile, SyncState.Entry(sent.id, sent.lastModified, loc.modified, loc.size)))
@@ -385,10 +330,10 @@ class SyncEngine(
         // Uploaded before anything is written here, so a failed upload leaves no trace and the next run starts over.
         val sent = storage.upload(remoteParent(path), name, mergedFile, System.currentTimeMillis())
         runCatching { storage.trashFile(rem.id) }
-        val uri = writeLocal(path, mergedFile) ?: throw IllegalStateException("cannot write local file")
+        val uri = LocalNoteStore.writeNote(context, treeUri, path, mergedFile) ?: throw IllegalStateException("cannot write local file")
         localUris[path] = uri
         val localMod = LocalNoteStore.modifiedOf(context, uri)
-        writeLocal(copyPath, remoteFile)
+        LocalNoteStore.writeNote(context, treeUri, copyPath, remoteFile)
         val f = merged.fingerprints
         state.put(path, SyncState.Entry(sent.id, sent.lastModified, localMod, mergedFile.length(), f.pages, f.doc))
         val both = merged.keptBothPages
@@ -407,14 +352,12 @@ class SyncEngine(
         // Uploaded first, as with a merged note, so a failed upload leaves this device as it was.
         val sent = storage.upload(remoteParent(path), path.substringAfterLast('/'), merged, System.currentTimeMillis())
         runCatching { storage.trashFile(rem.id) }
-        val uri = writeLocal(path, merged) ?: throw IllegalStateException("cannot write local file")
+        val uri = LocalNoteStore.writeNote(context, treeUri, path, merged) ?: throw IllegalStateException("cannot write local file")
         state.put(path, SyncState.Entry(sent.id, sent.lastModified, LocalNoteStore.modifiedOf(context, uri), merged.length()))
         summary.uploaded++
         summary.downloaded++
         log("Merged $path")
     }
-
-    private fun writeLocal(path: String, from: File): String? = synchronized(localLock) { LocalNoteStore.writeNote(context, treeUri, path, from) }
 
     /** Sync works on a private copy of the local file, so a save landing meanwhile cannot change what is sent. */
     private fun localCopy(loc: LocalNoteStore.LocalEntry, t: Temps): File =
@@ -455,43 +398,24 @@ class SyncEngine(
     }
 
     private fun remoteParent(path: String): String {
-        val folders = path.substringBeforeLast('/', "")
-        if (folders.isEmpty()) return remoteRootId
-        return synchronized(remoteFolders) {
-            remoteFolders.getOrPut(folders.lowercase()) { storage.ensureFolderPath(remoteRootId, folders.split("/")) }
-        }
+        val folders = path.split("/").dropLast(1)
+        return if (folders.isEmpty()) remoteRootId else storage.ensureFolderPath(remoteRootId, folders)
     }
 
-    /**
-     * Lists the cloud tree one level at a time, the folders of a level side by side on [workers]. Results are
-     * taken in listing order, as a depth-first walk would, and any failed listing fails the whole run: a
-     * partial view of the cloud must never be read as files deleted there.
-     */
-    private fun walkRemote(workers: Workers): RemoteTree {
-        val out = RemoteTree()
-        val visited = HashSet<String>()
-        var level = listOf(remoteRootId to "")
-        while (level.isNotEmpty()) {
-            val fresh = level.filter { visited.add(it.first) }
-            val listings = workers.map(fresh) { (id, _) -> storage.list(id) }
-            val next = ArrayList<Pair<String, String>>()
-            for ((i, content) in listings.withIndex()) {
-                val prefix = fresh[i].second
-                for (file in content.files) {
-                    val path = join(prefix, file.name)
-                    if (LocalNoteStore.syncsFile(path)) out.files[path] = file else out.foreign.add(prefix)
-                }
-                for (folder in content.folders) {
-                    val path = join(prefix, folder.name)
-                    // Sidecars and their Trash are descended into; other hidden folders (config, templates, .obsidian) are left alone.
-                    if (!LocalNoteStore.syncsDir(path)) { out.foreign.add(prefix); continue }
-                    out.folders[path] = folder.id
-                    next.add(folder.id to path)
-                }
-            }
-            level = next
+    private fun walkRemote(uuid: String, prefix: String, out: RemoteTree, visited: HashSet<String>) {
+        if (!visited.add(uuid)) return
+        val content = storage.list(uuid)
+        for (file in content.files) {
+            val path = join(prefix, file.name)
+            if (LocalNoteStore.syncsFile(path)) out.files[path] = file else out.foreign.add(prefix)
         }
-        return out
+        for (folder in content.folders) {
+            val path = join(prefix, folder.name)
+            // Sidecars and their Trash are descended into; other hidden folders (config, templates, .obsidian) are left alone.
+            if (!LocalNoteStore.syncsDir(path)) { out.foreign.add(prefix); continue }
+            out.folders[path] = folder.id
+            walkRemote(folder.id, path, out, visited)
+        }
     }
 
     private fun join(prefix: String, name: String) = if (prefix.isEmpty()) name else "$prefix/$name"

@@ -24,11 +24,7 @@ interface CloudService {
     fun storage(context: Context): CloudStorage
 }
 
-/**
- * The remote file operations the sync engine needs. Folder and file ids are opaque to the engine.
- * Calls may come from several threads at once (see the sync threads preference), so an implementation must
- * be thread-safe; the engine itself makes sure [ensureFolderPath] and [createFolder] never run concurrently.
- */
+/** The remote file operations the sync engine needs. Folder and file ids are opaque to the engine. */
 interface CloudStorage {
     interface RemoteFile {
         val id: String

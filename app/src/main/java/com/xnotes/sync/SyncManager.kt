@@ -178,7 +178,6 @@ object SyncManager {
                     log = { line -> synchronized(log) { log.add("  $line") } },
                     takePriority = { generateSequence { priority.poll() }.firstNotNullOfOrNull { LocalNoteStore.relativePathOf(treeUri, it) } },
                     checkpoint = ::checkpoint,
-                    threads = prefs.syncThreads.coerceIn(1, 4),
                 )
                 val summary = engine.sync(state)
                 runCatching { SettingsSync.sync(context, storage, folderId, state, engine.localUris) }

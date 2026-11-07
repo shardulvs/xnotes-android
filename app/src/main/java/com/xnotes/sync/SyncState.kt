@@ -8,7 +8,7 @@ import java.io.File
 /**
  * The per-file sync baseline: what we last saw on each side, keyed by the note's path
  * relative to the browse root. Change detection compares each side to its own baseline,
- * so clock skew between device and cloud does not matter. Safe to use from several sync threads.
+ * so clock skew between device and cloud does not matter.
  */
 class SyncState(private val map: MutableMap<String, Entry> = HashMap()) {
     /** [pages] and [doc] are a note's fingerprints at this sync (see XnoteBundle), null for other files and older baselines. */
@@ -21,19 +21,19 @@ class SyncState(private val map: MutableMap<String, Entry> = HashMap()) {
         val doc: String? = null,
     )
 
-    @Synchronized fun get(path: String): Entry? = map[path]
-    @Synchronized fun put(path: String, entry: Entry) { map[path] = entry }
-    @Synchronized fun remove(path: String) { map.remove(path) }
-    @Synchronized fun paths(): Set<String> = map.keys.toSet()
+    fun get(path: String): Entry? = map[path]
+    fun put(path: String, entry: Entry) { map[path] = entry }
+    fun remove(path: String) { map.remove(path) }
+    fun paths(): Set<String> = map.keys.toSet()
 
     /** File baselines; folder baselines are kept under their path plus a trailing slash. */
-    @Synchronized fun filePaths(): Set<String> = map.keys.filterTo(HashSet()) { !it.endsWith("/") }
-    @Synchronized fun folderPaths(): Set<String> = map.keys.filter { it.endsWith("/") }.mapTo(HashSet()) { it.removeSuffix("/") }
-    @Synchronized fun hasFolder(path: String): Boolean = "$path/" in map
-    @Synchronized fun putFolder(path: String, uuid: String) { map["$path/"] = Entry(uuid, 0, 0, 0) }
-    @Synchronized fun removeFolder(path: String) { map.remove("$path/") }
+    fun filePaths(): Set<String> = map.keys.filterTo(HashSet()) { !it.endsWith("/") }
+    fun folderPaths(): Set<String> = map.keys.filter { it.endsWith("/") }.mapTo(HashSet()) { it.removeSuffix("/") }
+    fun hasFolder(path: String): Boolean = "$path/" in map
+    fun putFolder(path: String, uuid: String) { map["$path/"] = Entry(uuid, 0, 0, 0) }
+    fun removeFolder(path: String) { map.remove("$path/") }
 
-    @Synchronized fun save(context: Context, serviceId: String) {
+    fun save(context: Context, serviceId: String) {
         val root = JSONObject()
         for ((path, e) in map) {
             val o = JSONObject()

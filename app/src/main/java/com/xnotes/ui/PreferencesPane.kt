@@ -142,7 +142,7 @@ private enum class PrefCategory(val title: String, val summary: String) {
     NEW_NOTES("New notes", "File names, Page size, Page colour"),
     HOME("Home & explorer", "Layouts, Sidebar, Files"),
     EXPORT_IMPORT("Export & import", "PDF export, Backup"),
-    PERFORMANCE("Performance", "Cache, Rendering, Sync threads"),
+    PERFORMANCE("Performance", "Cache, Rendering"),
     TOOLBAR("Toolbar", "Style, Position, Colours, Shapes"),
     CLOUD_SYNC("Cloud sync", "Service, Automatic sync"),
 }
@@ -669,19 +669,6 @@ fun PreferencesPane(
                 }
                 Text(
                     stringResource(R.string.pref_front_buffering_help),
-                    color = palette.textDim.toComposeColor(),
-                    fontSize = 12.sp,
-                )
-                FieldLabel(stringResource(R.string.pref_sync_threads, prefs.syncThreads))
-                Slider(
-                    value = prefs.syncThreads.toFloat(),
-                    onValueChange = { v -> Math.round(v).let { if (it != prefs.syncThreads) update(prefs.copy(syncThreads = it)) } },
-                    valueRange = 1f..4f,
-                    steps = 2,
-                    modifier = Modifier.width(280.dp),
-                )
-                Text(
-                    stringResource(R.string.pref_sync_threads_help),
                     color = palette.textDim.toComposeColor(),
                     fontSize = 12.sp,
                 )
