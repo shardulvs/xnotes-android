@@ -47,6 +47,7 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -93,6 +94,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.xnotes.R
 import com.xnotes.platform.PdfOpenError
+import com.xnotes.sync.SyncManager
 import com.xnotes.ui.CanvasToastPill
 import com.xnotes.canvas.StylusButtonLatch
 import com.xnotes.ui.Editor
@@ -172,7 +174,7 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(ed.fullscreen) { applyFullscreen(ed.fullscreen) }
             KeepScreenOn(ed)
             // Re-arm the periodic cloud sync to match the saved preferences.
-            LaunchedEffect(Unit) { com.xnotes.sync.SyncManager.reschedule(context) }
+            LaunchedEffect(Unit) { SyncManager.reschedule(context) }
             var ready by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) {
                 val start = android.os.SystemClock.uptimeMillis()
@@ -206,6 +208,7 @@ class MainActivity : ComponentActivity() {
                             com.xnotes.ui.XnotesLoader()
                         }
                         com.xnotes.ui.EyedropperOverlay()
+                        SyncStrip()
                     }
                     update?.let { u ->
                         com.xnotes.ui.AlertDialog(
@@ -296,7 +299,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        com.xnotes.sync.SyncManager.syncOnAppOpen(this)
+        SyncManager.syncOnAppOpen(this)
     }
 
     override fun onPause() {
@@ -2152,11 +2155,28 @@ private fun PdfBatchExportDialog(p: com.xnotes.platform.PdfBatch.Progress, onCan
 /** Holds the screen awake while the app is open, or only while a sync runs, as Preferences say. */
 @Composable
 private fun KeepScreenOn(editor: Editor) {
-    val syncing = com.xnotes.sync.SyncManager.status.collectAsState().value.running
+    val syncing = SyncManager.status.collectAsState().value.running
     editor.prefsVersion // re-read the preferences below whenever they change
     val keepOn = editor.preferences.let { it.keepScreenOn || (it.syncKeepScreenOn && syncing) }
     val view = androidx.compose.ui.platform.LocalView.current
     SideEffect { view.keepScreenOn = keepOn }
+}
+
+/** A thin bar along the top while a cloud sync runs, so it shows inside notes and canvases too; fills as files are done. */
+@Composable
+private fun BoxScope.SyncStrip() {
+    val status = SyncManager.status.collectAsState().value
+    if (!status.running) return
+    val accent = com.xnotes.ui.theme.LocalPalette.current.accent.toComposeColor()
+    val modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().windowInsetsPadding(WindowInsets.statusBars).height(2.dp)
+    if (status.total > 0) {
+        androidx.compose.material3.LinearProgressIndicator(
+            progress = { status.done.toFloat() / status.total }, modifier = modifier, color = accent,
+            trackColor = androidx.compose.ui.graphics.Color.Transparent, drawStopIndicator = {},
+        )
+    } else {
+        androidx.compose.material3.LinearProgressIndicator(modifier = modifier, color = accent, trackColor = androidx.compose.ui.graphics.Color.Transparent)
+    }
 }
 
 /** After following a document link: a back arrow and the previous note's title, tapping it goes back. */

@@ -5,6 +5,8 @@ import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.PageSizeChoice
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.util.NameTemplate
+import com.xnotes.sync.CloudService
+import com.xnotes.sync.CloudServices
 import org.json.JSONObject
 
 /** What a swipe on Home can do: show or hide the sidebar, step up a folder, or back into the one just left. */
@@ -103,7 +105,7 @@ data class Preferences(
     /** Language the format bar's code toggle last applied; "" until a language is picked. */
     val lastCodeLanguage: String = "",
     // Cloud sync (opt-in). Credentials live in each service's own encrypted store, not here.
-    /** Id of the one [com.xnotes.sync.CloudService] that syncs, or [com.xnotes.sync.CloudServices.NONE]. */
+    /** Id of the one [CloudService] that syncs, or [CloudServices.NONE]. */
     val cloudService: String = "none",
     /** The chosen sync folder per service id, so switching services keeps each one's folder. */
     val cloudFolders: Map<String, CloudFolder> = emptyMap(),

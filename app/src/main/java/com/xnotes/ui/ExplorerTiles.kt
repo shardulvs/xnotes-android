@@ -70,6 +70,7 @@ import com.xnotes.platform.DocMetaStore
 import com.xnotes.settings.ExplorerSortKey
 import com.xnotes.settings.ExplorerView
 import com.xnotes.settings.ThumbShape
+import com.xnotes.sync.SyncConflict
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
@@ -262,7 +263,7 @@ internal fun ThumbBadges(b: ExplorerBody, e: BrowseEntry, inset: Dp = 8.dp) {
 /** [name] with a small orange triangle in front when [e] is a copy sync kept after a conflict. */
 @Composable
 internal fun ConflictMarked(e: BrowseEntry, name: @Composable () -> Unit) {
-    if (e.isDir || !com.xnotes.sync.SyncConflict.isCopy(e.name)) return name()
+    if (e.isDir || !SyncConflict.isCopy(e.name)) return name()
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(
             XnotesIcons.warning, stringResource(R.string.sync_conflict_copy),

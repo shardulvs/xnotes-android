@@ -22,6 +22,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -47,6 +48,7 @@ import com.xnotes.settings.Preferences
 import com.xnotes.sync.CloudService
 import com.xnotes.sync.CloudServices
 import com.xnotes.sync.CloudStorage
+import com.xnotes.sync.SyncLog
 import com.xnotes.sync.SyncManager
 import com.xnotes.sync.filen.FilenService
 import com.xnotes.sync.nextcloud.NextcloudService
@@ -248,14 +250,32 @@ private fun SignedIn(
         onUpdate(prefs.copy(syncIntervalMinutes = it.toInt()))
     }
 
+    var showLog by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Button(
             onClick = { scope.launch { SyncManager.syncNow(context) } },
             enabled = !status.running && !folder?.id.isNullOrEmpty() && prefs.syncDirection != "off",
             colors = ButtonDefaults.buttonColors(containerColor = palette.accent.toComposeColor(), contentColor = palette.bg.toComposeColor()),
         ) { Text("Sync now") }
-        if (status.running) CircularProgressIndicator(modifier = Modifier.size(20.dp), color = palette.accent.toComposeColor(), strokeWidth = 2.dp)
+        TextButton(onClick = { showLog = true }) { Text("Sync log", fontSize = 13.sp) }
     }
+    if (status.running) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (status.total > 0) {
+                LinearProgressIndicator(
+                    progress = { status.done.toFloat() / status.total },
+                    modifier = Modifier.weight(1f),
+                    color = palette.accent.toComposeColor(), trackColor = palette.border.toComposeColor(),
+                )
+                Text("${status.done}/${status.total}", color = palette.textDim.toComposeColor(), fontSize = 12.sp)
+            } else {
+                // Both sides are still being listed, so the total is not known yet.
+                LinearProgressIndicator(modifier = Modifier.weight(1f), color = palette.accent.toComposeColor(), trackColor = palette.border.toComposeColor())
+                Text("Listing files", color = palette.textDim.toComposeColor(), fontSize = 12.sp)
+            }
+        }
+    }
+    if (showLog) SyncLogDialog(onDismiss = { showLog = false })
     val statusLine = buildString {
         if (status.message.isNotEmpty()) append(status.message)
         if (status.lastSyncMs > 0) {
@@ -275,6 +295,54 @@ private fun SignedIn(
             },
         )
     }
+}
+
+/** The last sync runs, newest at the bottom; each run ends in an OK or FAILED line. */
+@Composable
+private fun SyncLogDialog(onDismiss: () -> Unit) {
+    val palette = LocalPalette.current
+    val context = LocalContext.current
+    var lines by remember { mutableStateOf<List<String>>(emptyList()) }
+    val scroll = rememberScrollState()
+    // Read off the main thread, and again whenever a running sync adds to it.
+    LaunchedEffect(Unit) {
+        var seen = -1L
+        while (true) {
+            val modified = SyncLog.lastModified(context)
+            if (modified != seen) {
+                seen = modified
+                lines = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { SyncLog.read(context) }
+            }
+            kotlinx.coroutines.delay(1_000)
+        }
+    }
+    LaunchedEffect(lines) { scroll.scrollTo(scroll.maxValue) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Sync log") },
+        text = {
+            Column(Modifier.heightIn(max = 480.dp).verticalScroll(scroll)) {
+                if (lines.isEmpty()) Text("Nothing synced yet.", color = palette.textDim.toComposeColor(), fontSize = 12.sp)
+                lines.forEach { line ->
+                    val t = line.trimStart()
+                    val color = when {
+                        t.startsWith("FAILED") || t.startsWith("Error") -> com.xnotes.core.tools.InkPalette.RED.toComposeColor()
+                        t.startsWith("Conflict") || t.startsWith("Skipped") -> com.xnotes.core.tools.InkPalette.ORANGE.toComposeColor()
+                        t.startsWith("OK") -> palette.accent.toComposeColor()
+                        !line.startsWith(" ") -> palette.text.toComposeColor()
+                        else -> palette.textDim.toComposeColor()
+                    }
+                    Text(
+                        line, color = color, fontSize = 11.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontWeight = if (!line.startsWith(" ")) FontWeight.Medium else null,
+                        modifier = Modifier.padding(top = if (!line.startsWith(" ")) 8.dp else 0.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        dismissButton = { TextButton(onClick = { SyncLog.clear(context); lines = emptyList() }) { Text("Clear") } },
+    )
 }
 
 @Composable

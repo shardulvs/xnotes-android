@@ -140,6 +140,7 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.mutableIntStateOf
+import com.xnotes.sync.SyncManager
 import java.time.YearMonth
 import java.time.ZoneId
 import java.time.temporal.WeekFields
@@ -953,8 +954,8 @@ private fun HomePane(
             SyncConflictBanner()
             // Any finished sync (sidebar, app open, note close, background worker) may have changed files, so list again.
             LaunchedEffect(Unit) {
-                var last = com.xnotes.sync.SyncManager.status.value.lastSyncMs
-                com.xnotes.sync.SyncManager.status.collect { s ->
+                var last = SyncManager.status.value.lastSyncMs
+                SyncManager.status.collect { s ->
                     if (s.lastSyncMs != last) { last = s.lastSyncMs; editor.relistTree() }
                 }
             }
@@ -964,7 +965,7 @@ private fun HomePane(
                 onRefresh = {
                     refreshing = true
                     scope.launch {
-                        if (com.xnotes.sync.SyncManager.isConfigured(ctx)) com.xnotes.sync.SyncManager.syncNow(ctx)
+                        if (SyncManager.isConfigured(ctx)) SyncManager.syncNow(ctx)
                         editor.relistTree()
                         refreshing = false
                     }
@@ -2595,11 +2596,11 @@ internal fun EmptyPane(text: String, art: EmptyArt? = null, actions: (@Composabl
 @Composable
 private fun SyncNowCommand(onOpenSettings: () -> Unit) {
     val ctx = LocalContext.current
-    if (!com.xnotes.sync.SyncManager.isConfigured(ctx)) return
-    val status by com.xnotes.sync.SyncManager.status.collectAsState()
+    if (!SyncManager.isConfigured(ctx)) return
+    val status by SyncManager.status.collectAsState()
     val scope = rememberCoroutineScope()
     Command(Icons.Filled.Sync, if (status.running) "Syncing ${syncProgress(status)}" else "Sync now", onLongClick = onOpenSettings) {
-        if (!status.running) scope.launch { com.xnotes.sync.SyncManager.syncNow(ctx) }
+        if (!status.running) scope.launch { SyncManager.syncNow(ctx) }
     }
 }
 
@@ -2607,16 +2608,16 @@ private fun SyncNowCommand(onOpenSettings: () -> Unit) {
 @Composable
 private fun SyncRailItem(onOpenSettings: () -> Unit) {
     val ctx = LocalContext.current
-    if (!com.xnotes.sync.SyncManager.isConfigured(ctx)) return
-    val status by com.xnotes.sync.SyncManager.status.collectAsState()
+    if (!SyncManager.isConfigured(ctx)) return
+    val status by SyncManager.status.collectAsState()
     val scope = rememberCoroutineScope()
     RailItem(Icons.Filled.Sync, if (status.running) "Syncing ${syncProgress(status)}" else "Sync now", selected = status.running, onLongClick = onOpenSettings) {
-        if (!status.running) scope.launch { com.xnotes.sync.SyncManager.syncNow(ctx) }
+        if (!status.running) scope.launch { SyncManager.syncNow(ctx) }
     }
 }
 
 /** Files synced out of the total; until listing both sides gives the total, the last sync's count stands in. */
-private fun syncProgress(status: com.xnotes.sync.SyncManager.Status): String =
+private fun syncProgress(status: SyncManager.Status): String =
     if (status.total > 0) "${status.done}/${status.total}" else "0/${status.fileCount}"
 
 /**
@@ -2627,9 +2628,9 @@ private fun syncProgress(status: com.xnotes.sync.SyncManager.Status): String =
 private fun SyncSidebarStatus() {
     val palette = LocalPalette.current
     val ctx = LocalContext.current
-    if (!com.xnotes.sync.SyncManager.isConfigured(ctx)) return
-    LaunchedEffect(Unit) { com.xnotes.sync.SyncManager.primeStatus(ctx) }
-    val status by com.xnotes.sync.SyncManager.status.collectAsState()
+    if (!SyncManager.isConfigured(ctx)) return
+    LaunchedEffect(Unit) { SyncManager.primeStatus(ctx) }
+    val status by SyncManager.status.collectAsState()
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -2638,7 +2639,7 @@ private fun SyncSidebarStatus() {
         }
     }
     val synced = if (status.lastSyncMs == 0L) {
-        "${com.xnotes.sync.SyncManager.activeService(ctx)?.displayName}: not synced yet"
+        "${SyncManager.activeService(ctx)?.displayName}: not synced yet"
     } else {
         "Last synced " + android.text.format.DateUtils.getRelativeTimeSpanString(
             status.lastSyncMs, maxOf(now, status.lastSyncMs), android.text.format.DateUtils.MINUTE_IN_MILLIS,
@@ -2660,8 +2661,8 @@ private fun SyncSidebarStatus() {
 private fun SyncConflictBanner() {
     val palette = LocalPalette.current
     val ctx = LocalContext.current
-    LaunchedEffect(Unit) { com.xnotes.sync.SyncManager.primeStatus(ctx) }
-    val status by com.xnotes.sync.SyncManager.status.collectAsState()
+    LaunchedEffect(Unit) { SyncManager.primeStatus(ctx) }
+    val status by SyncManager.status.collectAsState()
     val conflicts = status.conflicts
     if (conflicts.isEmpty()) return
     Column(
@@ -2680,7 +2681,7 @@ private fun SyncConflictBanner() {
                 if (conflicts.size == 1) "A note was changed on another device too" else "${conflicts.size} notes were changed on another device too",
                 color = palette.text.toComposeColor(), fontSize = 14.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = { com.xnotes.sync.SyncManager.clearConflicts(ctx) }) { Text("Dismiss") }
+            TextButton(onClick = { SyncManager.clearConflicts(ctx) }) { Text("Dismiss") }
         }
         Spacer(Modifier.height(4.dp))
         conflicts.take(6).forEach { line ->
