@@ -30,7 +30,7 @@ object SettingsSync {
     /** Preference keys that stay device-local: the cloud sync config itself. */
     private val LOCAL_PREF_KEYS = listOf(
         "cloud_service", "cloud_folders",
-        "sync_auto", "sync_wifi_only", "sync_interval_minutes", "sync_on_app_open",
+        "sync_auto", "sync_wifi_only", "sync_interval_minutes", "sync_on_app_open", "sync_threads",
     )
 
     private const val RECENT_DOCS = "recent_docs"

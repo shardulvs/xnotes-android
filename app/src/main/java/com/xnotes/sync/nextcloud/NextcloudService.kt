@@ -56,7 +56,7 @@ private class NextcloudStorage(private val dav: NextcloudDav) : CloudStorage {
     }
 
     /** Overwriting keeps the path, so the engine's "trash the old version" after an upload must not delete the new one. */
-    private val uploaded = HashSet<String>()
+    private val uploaded: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
     override fun list(folderId: String): CloudStorage.Listing {
         val self = NextcloudDav.decode(folderId).trimEnd('/')

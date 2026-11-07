@@ -367,6 +367,8 @@
     <string name="pref_performance">性能</string>
     <string name="pref_cache_help">设置越高，平移和缩放越流畅，但会使用更多内存。无论如何设置，墨迹和 PDF 都会保持清晰。</string>
     <string name="pref_disable_front_buffering">禁用前缓冲绘制</string>
+    <string name="pref_sync_threads">"云同步线程  %1$d"</string>
+    <string name="pref_sync_threads_help">云同步同时列出和传输的文件数。网络较快时，数值越大，大量同步完成得越快，但会占用更多内存和电量，也会给服务器带来更大压力。设为 1 时逐个同步文件。</string>
     <string name="pref_front_buffering_help">前缓冲绘制可降低笔迹延迟。部分屏幕可能出现笔迹闪烁或跟笔延迟，遇到这些问题时可关闭此功能，使用常规画布绘制。</string>
     <string name="pref_code_highlighting">代码高亮</string>
     <string name="pref_default_code_language">默认代码语言</string>

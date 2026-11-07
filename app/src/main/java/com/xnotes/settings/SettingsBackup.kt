@@ -20,7 +20,7 @@ object SettingsBackup {
 
     /** The same among the preferences: performance switches, and paths to this device's own files. */
     private val DEVICE_PREFS = setOf(
-        "max_cache_resolution", "disable_front_buffering", "start_fullscreen", "code_theme_path", "code_theme_name", "page_template_pdf",
+        "max_cache_resolution", "disable_front_buffering", "start_fullscreen", "code_theme_path", "code_theme_name", "page_template_pdf", "sync_threads",
     )
 
     /** [settings] as [Settings.toJson] wrote them, with what belongs to this device taken out. */
