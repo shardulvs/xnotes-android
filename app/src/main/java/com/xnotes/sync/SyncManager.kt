@@ -4,8 +4,12 @@ import android.content.Context
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.workDataOf
 import androidx.work.WorkManager
 import com.xnotes.platform.AppStorageDocumentsProvider
 import com.xnotes.settings.LiveSettings
@@ -18,6 +22,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -28,11 +35,19 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 object SyncManager {
     private const val WORK_NAME = "cloud_periodic_sync"
+    /** The one-off job note close and app open start; one at a time, kept alive when the app goes to the background. */
+    private const val NOW_WORK_NAME = "cloud_sync_now"
+    private const val CHECKPOINT_MS = 3_000L
     /** The job name from when Filen was the only service; its worker class no longer exists. */
     private const val LEGACY_WORK_NAME = "filen_periodic_sync"
     private val syncMutex = Mutex()
     private val exitSyncScope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
-    private val backgroundQueued = AtomicBoolean(false)
+    /** A trigger came while a sync ran: it may have passed the just-saved note, so one more pass follows it. */
+    private val rerun = AtomicBoolean(false)
+    /** Just-closed notes (document uris) to sync ahead of the full pass. */
+    private val priority = java.util.concurrent.ConcurrentLinkedQueue<String>()
+    /** Syncs started and not yet finished, counting one waiting for another to end. */
+    private val active = java.util.concurrent.atomic.AtomicInteger(0)
     private const val APP_OPEN_MIN_GAP_MS = 60_000L
 
     data class Status(
@@ -114,12 +129,28 @@ object SyncManager {
             runCatching { service.storage(context).createFolder(parentId, name) }
         }
 
-    suspend fun syncNow(context: Context): Result<SyncEngine.Summary> = withContext(Dispatchers.IO) {
+    suspend fun syncNow(context: Context, trigger: String = "manual"): Result<SyncEngine.Summary> = withContext(Dispatchers.IO) {
+        active.incrementAndGet()
+        try {
+            var result = syncPass(context, trigger)
+            // A trigger muted during the pass is answered here, by the same job, which stays alive while it runs.
+            while (rerun.getAndSet(false) || priority.isNotEmpty()) result = syncPass(context, "rerun")
+            result
+        } finally {
+            active.decrementAndGet()
+        }
+    }
+
+    private suspend fun syncPass(context: Context, trigger: String): Result<SyncEngine.Summary> =
         syncMutex.withLock {
-            backgroundQueued.set(false) // this pass covers anything queued before it started
+            rerun.set(false) // this pass covers any trigger that came before it started
+            SyncLog.trim(context)
             primeStatus(context)
             val service = activeService(context)
             _status.value = _status.value.copy(running = true, message = "Syncing", done = 0, total = 0)
+            val started = System.currentTimeMillis()
+            val log = mutableListOf("${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(started))}  Started ($trigger)")
+            fun flushLog() = synchronized(log) { SyncLog.append(context, log.toList()); log.clear() }
             val result = runCatching {
                 val prefs = settings(context).prefs
                 require(service != null) { "No cloud service selected" }
@@ -131,12 +162,28 @@ object SyncManager {
                 val state = SyncState.load(context, service.id)
                 val up = prefs.syncDirection == "both" || prefs.syncDirection == "up"
                 val down = prefs.syncDirection == "both" || prefs.syncDirection == "down"
-                val summary = SyncEngine(context, treeUri, storage, folderId, up, down) { done, total ->
-                    _status.value = _status.value.copy(done = done, total = total)
-                }.sync(state)
-                runCatching { SettingsSync.sync(context, storage, folderId, state) }
+                var lastSave = System.currentTimeMillis()
+                fun checkpoint() {
+                    state.save(context, service.id)
+                    flushLog()
+                    lastSave = System.currentTimeMillis()
+                }
+                val engine = SyncEngine(
+                    context, treeUri, storage, folderId, up, down,
+                    onProgress = { done, total ->
+                        _status.value = _status.value.copy(done = done, total = total)
+                        // Saved as it goes, so a run cut short (app killed, network gone) does not redo or conflict with its own uploads.
+                        if (System.currentTimeMillis() - lastSave > CHECKPOINT_MS) checkpoint()
+                    },
+                    log = { line -> synchronized(log) { log.add("  $line") } },
+                    takePriority = { generateSequence { priority.poll() }.firstNotNullOfOrNull { LocalNoteStore.relativePathOf(treeUri, it) } },
+                    checkpoint = ::checkpoint,
+                )
+                val summary = engine.sync(state)
+                runCatching { SettingsSync.sync(context, storage, folderId, state, engine.localUris) }
+                    .onFailure { synchronized(log) { log.add("  Error settings: ${it.message}") } }
                 state.save(context, service.id)
-                summary to state.filePaths().count { !it.startsWith(".") }
+                summary to state.filePaths().count { !LocalNoteStore.isHiddenPath(it) }
             }
             val newConflicts = result.getOrNull()?.first?.conflictNotes
                 ?.map { "${it.path.substringAfterLast('/')}: ${it.message}" } ?: emptyList()
@@ -159,13 +206,24 @@ object SyncManager {
             )
             _status.value = status
             if (result.isSuccess && service != null) persistStatus(context, service.id, status)
+            val seconds = "%.1f s".format(Locale.US, (System.currentTimeMillis() - started) / 1000.0)
+            synchronized(log) {
+                log.add(result.fold(
+                    { (s, _) -> if (s.errors.isEmpty()) "  OK in $seconds: ${status.message}" else "  FAILED in $seconds: ${status.message}" },
+                    { e -> "  FAILED in $seconds: ${e.message}" },
+                ))
+            }
+            flushLog()
             result.map { it.first }
         }
-    }
 
-    /** Fire-and-forget sync when a note is closed, if sync on note close is on. */
-    fun syncOnNoteExit(context: Context) {
-        if (settings(context.applicationContext).prefs.syncOnNoteExit) syncInBackground(context)
+    /** Fire-and-forget sync when the note at [uri] is closed, if sync on note close is on; that note goes first. */
+    fun syncOnNoteExit(context: Context, uri: String?) {
+        val appCtx = context.applicationContext
+        if (!settings(appCtx).prefs.syncOnNoteExit) return
+        val first = uri != null && LocalNoteStore.relativePathOf(effectiveTreeUri(appCtx), uri) != null
+        if (first) priority.add(uri)
+        requestSync(appCtx, "note close", rerunIfBusy = !first)
     }
 
     /** Fire-and-forget sync when the app comes to the foreground, if sync on app open is on. */
@@ -177,25 +235,48 @@ object SyncManager {
             primeStatus(appCtx)
             // Coming back from a file picker or share sheet also starts the activity; skip if we just synced.
             if (System.currentTimeMillis() - _status.value.lastSyncMs < APP_OPEN_MIN_GAP_MS) return@launch
-            syncInBackground(appCtx)
+            requestSync(appCtx, "app open")
         }
     }
 
-    private fun syncInBackground(context: Context) {
+    /**
+     * Starts a sync as an expedited background job, which carries on after the app is left (an in-app
+     * coroutine is frozen with the app). Muted while a sync runs: that one does a single pass more instead.
+     */
+    private fun requestSync(context: Context, trigger: String, rerunIfBusy: Boolean = true) {
         val appCtx = context.applicationContext
         val prefs = settings(appCtx).prefs
         if (prefs.syncDirection == "off" || !isConfigured(appCtx)) return
-        if (prefs.syncWifiOnly && !isUnmetered(appCtx)) return
-        // A sync already running may have passed the just-saved note, so queue one pass after it (at most one waits).
-        if (!backgroundQueued.compareAndSet(false, true)) return
-        exitSyncScope.launch { runCatching { syncNow(appCtx) } }
+        // A queued priority note is picked up by the running sync itself, so only other triggers need a whole pass more.
+        if (active.get() > 0) { if (rerunIfBusy) rerun.set(true); return }
+        val request = OneTimeWorkRequestBuilder<SyncWorker>()
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(if (prefs.syncWifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED).build())
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            .setInputData(workDataOf(SyncWorker.TRIGGER to trigger))
+            .build()
+        WorkManager.getInstance(appCtx).enqueueUniqueWork(NOW_WORK_NAME, ExistingWorkPolicy.KEEP, request)
     }
 
-    private fun isUnmetered(context: Context): Boolean {
-        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
-        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
-        return caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+    /** Whether a sync is running now, so the periodic job can skip its turn. */
+    val isRunning: Boolean get() = active.get() > 0
+
+    /** The notification an expedited sync shows on Android 11 and older, where it runs as a foreground service. */
+    fun foregroundInfo(context: Context): androidx.work.ForegroundInfo {
+        val nm = context.getSystemService(android.app.NotificationManager::class.java)
+        if (nm.getNotificationChannel(NOTIFY_CHANNEL) == null) {
+            nm.createNotificationChannel(android.app.NotificationChannel(NOTIFY_CHANNEL, "Cloud sync", android.app.NotificationManager.IMPORTANCE_LOW))
+        }
+        val n = androidx.core.app.NotificationCompat.Builder(context, NOTIFY_CHANNEL)
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setContentTitle("Syncing notes")
+            .setOngoing(true)
+            .setSilent(true)
+            .build()
+        return androidx.work.ForegroundInfo(NOTIFY_ID, n)
     }
+
+    private const val NOTIFY_CHANNEL = "cloud_sync"
+    private const val NOTIFY_ID = 4711
 
     /** (Re)schedule or cancel the periodic job to match current preferences and the selected service. */
     fun reschedule(context: Context) {

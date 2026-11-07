@@ -1,5 +1,7 @@
 package com.xnotes.ui
 
+import com.xnotes.sync.OpenNotes
+import com.xnotes.sync.SyncManager
 import com.xnotes.ui.theme.audioLook
 import com.xnotes.core.model.forExport
 import android.content.Context
@@ -328,7 +330,7 @@ private val searchWorker: java.util.concurrent.Executor by lazy {
 }
 
 
-/** Recent, shared by both panes of a split so a note opened in either shows up; null until first read from settings. */
+/** Recent as last set here, read only so both panes of a split recompose on a change; the list itself lives in settings. */
 private val sharedRecents = androidx.compose.runtime.mutableStateOf<List<com.xnotes.settings.RecentDoc>?>(null)
 
 /**
@@ -549,7 +551,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** When non-null, the current note lives in the granted folder and autosaves to this URI. */
     var autosaveUri: String? = null
-        private set(value) { field = value; com.xnotes.sync.OpenNotes.set(this, value) }
+        private set(value) { field = value; OpenNotes.set(this, value) }
     private val autosaveScope = kotlinx.coroutines.MainScope()
 
     /** The note autosave's debounce timer. Cancelled freely: nothing has been written yet. */
@@ -733,6 +735,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** Has the explorer list again after files changed on disk behind it (a sync, say). */
     fun relistTree() {
         treeVersion++
+        sharedRecents.value = settings.recentDocs // a sync may have merged in another device's recents
     }
 
     override var toastText by mutableStateOf<String?>(null)
@@ -4469,9 +4472,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         settingsSaveJob = autosaveScope.launch { delay(SETTINGS_SAVE_DELAY_MS); settingsRepo.save(settings) }
     }
 
-    /** Notes and canvases opened on this device, newest first. */
+    /** Notes and canvases opened, newest first; read from the live settings, which cloud sync may merge into. */
     val recentDocs: List<com.xnotes.settings.RecentDoc>
-        get() = sharedRecents.value ?: settings.recentDocs.also { sharedRecents.value = it }
+        get() { sharedRecents.value; return settings.recentDocs }
 
     private fun setRecents(list: List<com.xnotes.settings.RecentDoc>) {
         if (list == recentDocs) return
@@ -10046,10 +10049,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (canvasOpen) {
             infinite.commitText() // an open label goes down with what was typed
             flushCanvasThen(showOverlay = true) {
+                val closed = canvasAutosaveUri
                 canvasAutosaveUri = null
                 canvasOpen = false
                 noteOpen = false
-                com.xnotes.sync.SyncManager.syncOnNoteExit(appContext)
+                SyncManager.syncOnNoteExit(appContext, closed)
             }
             return
         }
@@ -10061,9 +10065,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             // Regenerate this folder note's grid tile now that editing is done (off-thread, low priority);
             // a non-folder note (no autosave binding) isn't in the explorer, so there's nothing to do.
             autosaveUri?.let { uri -> autosaveScope.launch { regenerateClosedNoteThumb(uri) } }
+            val closed = autosaveUri
             autosaveUri = null
             noteOpen = false
-            com.xnotes.sync.SyncManager.syncOnNoteExit(appContext)
+            SyncManager.syncOnNoteExit(appContext, closed)
         }
     }
 }

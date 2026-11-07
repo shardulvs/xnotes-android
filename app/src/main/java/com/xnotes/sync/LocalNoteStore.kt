@@ -13,12 +13,46 @@ import com.xnotes.core.util.ReaderKind
 object LocalNoteStore {
     private val NOTE_EXTENSIONS = listOf(".xnote", ".xcanvas")
     private const val SIDECAR_DIR = ".xnote"
+    /** In a folder's sidecar: its colours, and in the top one the colour names and pins. */
+    private val SIDECAR_FILES = setOf("colors.json", "color-names.json", "pins.json")
+    /** The top folder's Trash inside its sidecar; each item sits in a folder of its own beside a [TRASH_INFO]. */
+    private const val SIDECAR_TRASH = "trash"
+    private const val TRASH_INFO = "trash.json"
 
     /** The hidden recycle-bin folder under the browse root. Synced like a normal folder (so a
      *  deletion reaches every device), but hidden from the note listing and presented as Trash. */
     const val TRASH_DIR = ".trash"
 
-    fun isTrashPath(relativePath: String): Boolean = relativePath == TRASH_DIR || relativePath.startsWith("$TRASH_DIR/")
+    fun isTrashPath(relativePath: String): Boolean = relativePath == TRASH_DIR || relativePath.startsWith("$TRASH_DIR/") ||
+        relativePath.startsWith("$SIDECAR_DIR/$SIDECAR_TRASH/")
+
+    /** Whether sync mirrors the folder at [relativePath]: no hidden folders but the sidecars, their Trash, and the old .trash. */
+    fun syncsDir(relativePath: String): Boolean {
+        val segs = relativePath.split("/")
+        return segs.indices.all { i ->
+            val seg = segs[i]
+            when {
+                !seg.startsWith(".") -> true
+                seg == TRASH_DIR -> true
+                // A folder's sidecar itself, or the top one's Trash; never the template library.
+                seg == SIDECAR_DIR -> i == segs.lastIndex || i == 0 && segs[1] == SIDECAR_TRASH
+                else -> false
+            }
+        }
+    }
+
+    /** Whether sync carries the file at [relativePath]: notes and readable files, and the sidecars' colours, pins and Trash. */
+    fun syncsFile(relativePath: String): Boolean {
+        val parent = relativePath.substringBeforeLast('/', "")
+        val name = relativePath.substringAfterLast('/')
+        if (parent.isNotEmpty() && !syncsDir(parent)) return false
+        if (parent == SIDECAR_DIR || parent.endsWith("/$SIDECAR_DIR")) return name in SIDECAR_FILES
+        if (name == TRASH_INFO) return relativePath.startsWith("$SIDECAR_DIR/$SIDECAR_TRASH/")
+        return isSynced(name)
+    }
+
+    /** A path with a hidden segment (settings, sidecars, Trash): synced but not counted as a note. */
+    fun isHiddenPath(relativePath: String): Boolean = relativePath.split("/").any { it.startsWith(".") }
 
     data class LocalEntry(val relativePath: String, val documentUri: String, val size: Long, val modified: Long)
 
@@ -43,15 +77,12 @@ object LocalNoteStore {
             val (docId, prefix) = stack.removeLast()
             if (!seen.add(docId)) continue
             for (child in children(context, tree, docId)) {
+                val rel = if (prefix.isEmpty()) child.name else "$prefix/${child.name}"
                 if (child.isDir) {
-                    // Skip hidden folders (colour sidecar, config) but descend into .trash so the
-                    // recycle bin replicates across devices like any other synced folder.
-                    if (child.name.startsWith(".") && child.name != TRASH_DIR) continue
-                    val rel = if (prefix.isEmpty()) child.name else "$prefix/${child.name}"
+                    if (!syncsDir(rel)) continue
                     folders.add(rel)
                     stack.addLast(child.docId to rel)
-                } else if (isSynced(child.name)) {
-                    val rel = if (prefix.isEmpty()) child.name else "$prefix/${child.name}"
+                } else if (syncsFile(rel)) {
                     out.add(LocalEntry(rel, child.uri, child.size, child.modified))
                 }
             }
@@ -117,6 +148,28 @@ object LocalNoteStore {
             uri.toString()
         }.getOrNull()
     }
+
+    /**
+     * Where the document at [documentUri] lies under [treeUri], when the provider's ids are paths (this app's
+     * storage, the device's shared storage); null for other providers, which then wait for the full sync.
+     */
+    fun relativePathOf(treeUri: String, documentUri: String): String? {
+        val root = DocumentsContract.getTreeDocumentId(Uri.parse(treeUri))
+        val id = runCatching { DocumentsContract.getDocumentId(Uri.parse(documentUri)) }.getOrNull() ?: return null
+        return id.removePrefix("$root/").takeIf { id.startsWith("$root/") && it.isNotEmpty() && syncsFile(it) }
+    }
+
+    /** The file at [relativePath] as it is now, or null when it has gone. */
+    fun entryAt(context: Context, treeUri: String, relativePath: String): LocalEntry? = runCatching {
+        val tree = Uri.parse(treeUri)
+        val uri = DocumentsContract.buildDocumentUriUsingTree(tree, "${DocumentsContract.getTreeDocumentId(tree)}/$relativePath")
+        context.contentResolver.query(
+            uri, arrayOf(DocumentsContract.Document.COLUMN_SIZE, DocumentsContract.Document.COLUMN_LAST_MODIFIED), null, null, null,
+        )?.use { c ->
+            if (!c.moveToFirst()) return@use null
+            LocalEntry(relativePath, uri.toString(), if (c.isNull(0)) 0L else c.getLong(0), if (c.isNull(1)) 0L else c.getLong(1))
+        }
+    }.getOrNull()
 
     /** Permanently delete the note at [relativePath] (applying a deletion that came from sync). True
      *  when the file is gone afterwards (already-absent counts as success). */
