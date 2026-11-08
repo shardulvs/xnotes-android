@@ -2215,10 +2215,6 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     // --- documents ---
 
-    fun newCanvas() {
-        replaceDocument(InfiniteDocument())
-    }
-
     fun replaceDocument(next: InfiniteDocument) {
         AudioRecording.stopFor(this) // closing the canvas places its recording
         AudioPlayback.closeFor(this)
