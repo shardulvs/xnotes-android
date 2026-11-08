@@ -772,13 +772,6 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private var canvasDebounceJob: kotlinx.coroutines.Job? = null
     private var canvasWriteJob: kotlinx.coroutines.Job? = null
 
-    /** Open a fresh, unsaved infinite canvas on top of backstage. */
-    fun newCanvas() {
-        val doc = com.xnotes.core.infinite.InfiniteDocument(created = System.currentTimeMillis())
-        settings.newCanvasBackground?.let { doc.background = it }
-        openCanvasDocument(doc, uri = null, displayName = null)
-    }
-
     /**
      * Read the `.xcanvas` at [uri] and push its editor on top of backstage. IO, so call it off the
      * main thread; the model swap itself hops back to the main thread.
