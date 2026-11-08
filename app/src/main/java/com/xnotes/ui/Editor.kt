@@ -4370,7 +4370,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     fun createBlankCanvasFile(treeUri: String, parentDocId: String, rawName: String): String? {
         val name = uniqueDocumentName(treeUri, parentDocId, rawName, com.xnotes.core.util.DocumentKind.CANVAS)
         return createNoteFile(treeUri, parentDocId, name) {
-            canvasCodec.write(com.xnotes.core.infinite.InfiniteDocument(created = System.currentTimeMillis()), it)
+            val doc = com.xnotes.core.infinite.InfiniteDocument(created = System.currentTimeMillis())
+            settings.newCanvasBackground?.let { bg -> doc.background = bg }
+            canvasCodec.write(doc, it)
         }
     }
 
