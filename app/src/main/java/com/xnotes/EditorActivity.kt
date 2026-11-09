@@ -10,6 +10,8 @@ import android.util.DisplayMetrics
 import android.view.Display
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.View
+import android.view.ViewTreeObserver
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -103,10 +105,6 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** Minimum time the launch loader stays up, so its animation is briefly seen even
- *  when the session restores instantly. */
-private const val MIN_LOADER_MS = 600L
-
 /** How long the maths waits for the font bytes it measures with before going without. */
 private const val MATH_FONT_WAIT_MS = 1500L
 
@@ -150,6 +148,8 @@ class EditorActivity : ComponentActivity() {
     private var editor: Editor? = null
     // A PDF or markdown file handed to us by another app ("Open with" / Share); consumed once the editor is ready.
     private var pendingImport by mutableStateOf<Uri?>(null)
+    // Whether the editor has composed; the first frame, and with it the system splash, waits for it.
+    private var launched = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -157,7 +157,7 @@ class EditorActivity : ComponentActivity() {
         com.xnotes.platform.TemplateLibrary.init(this)
         com.xnotes.ui.AudioPlayback.init(this)
         com.xnotes.ui.AudioRecording.init(this)
-        setTheme(com.xnotes.R.style.Theme_Xnotes) // leave the dark launch/splash theme behind
+        setTheme(com.xnotes.R.style.Theme_Xnotes) // leave the launch theme behind
         applyFullscreen(!deviceHasDisplayCutout(this)) // provisional; reconciled once the editor loads prefs
         // The intent that started the task comes back whenever Android rebuilds it, from a saved state
         // or from Recents after the process died or the app was updated; it was handled the first time.
@@ -169,34 +169,34 @@ class EditorActivity : ComponentActivity() {
             LaunchedEffect(ed.fullscreen) { applyFullscreen(ed.fullscreen) }
             var ready by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) {
-                val start = android.os.SystemClock.uptimeMillis()
-                ed.restoreSession() // heavy load off-thread; loader animates meanwhile
-                val elapsed = android.os.SystemClock.uptimeMillis() - start
-                if (elapsed < MIN_LOADER_MS) kotlinx.coroutines.delay(MIN_LOADER_MS - elapsed)
+                ed.restoreSession() // heavy load off-thread; the system splash stays up meanwhile
                 ready = true
                 ed.prewarmBackstage() // warm recents/explorer caches so the first backstage open is instant
             }
             XnotesTheme(ed.palette, ed.cornerStyle) {
                 CompositionLocalProvider(com.xnotes.ui.LocalToolbarLook provides ed.toolbarLook) {
                     Box(modifier = Modifier.fillMaxSize()) {
-                        if (ready) EditorScreen(
-                            ed,
-                            fullscreen = ed.fullscreen,
-                            onToggleFullscreen = ed::toggleFullscreen,
-                            importUri = pendingImport,
-                            onImportConsumed = { pendingImport = null },
-                        )
-                        androidx.compose.animation.AnimatedVisibility(
-                            visible = !ready,
-                            enter = androidx.compose.animation.EnterTransition.None,
-                            exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(280)),
-                        ) {
-                            com.xnotes.ui.XnotesLoader()
+                        if (ready) {
+                            EditorScreen(
+                                ed,
+                                fullscreen = ed.fullscreen,
+                                onToggleFullscreen = ed::toggleFullscreen,
+                                importUri = pendingImport,
+                                onImportConsumed = { pendingImport = null },
+                            )
+                            SideEffect { launched = true }
                         }
                     }
                 }
             }
         }
+        val content = findViewById<View>(android.R.id.content)
+        content.viewTreeObserver.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                if (launched) content.viewTreeObserver.removeOnPreDrawListener(this)
+                return launched
+            }
+        })
     }
 
     // Stylus side-button keys (Bluetooth/USI pens report the button only this way) are caught here,

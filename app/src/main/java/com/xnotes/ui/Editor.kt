@@ -2757,6 +2757,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     private fun applyPagePrefsToState(p: Preferences) {
         palette = buildPalette(p)
+        com.xnotes.platform.AppNightMode.follow(appContext, p.uiAppearance)
         cornerStyle = p.cornerStyle
         toolbarLook = p.toolbarLook
         state.palette = palette
