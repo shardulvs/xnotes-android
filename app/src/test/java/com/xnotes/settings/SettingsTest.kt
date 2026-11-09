@@ -3,6 +3,7 @@ package com.xnotes.settings
 import com.xnotes.core.model.Orientation
 import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.tools.InkPalette
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolbarLayout
 import org.json.JSONObject
@@ -16,7 +17,8 @@ class SettingsTest {
 
     @Test fun emptyJsonYieldsDefaults() {
         val s = Settings.fromJson(JSONObject())
-        assertEquals(15, s.toolbarColors.size)
+        assertEquals(InkPalette.dark, s.toolbarColorsDark)
+        assertEquals(InkPalette.light, s.toolbarColorsLight)
         assertEquals(5, s.toolbarColorCount)
         assertEquals(0, s.activeColor)
         assertEquals(1.0, s.renderScale, 1e-9)
@@ -58,7 +60,8 @@ class SettingsTest {
     @Test fun roundTripPreservesValues() {
         val original = Settings(
             tools = mapOf(Tool.PEN to com.xnotes.core.tools.ToolConfig(5.0, false, 0.2, 0.1, Rgba(1, 2, 3, 255))),
-            toolbarColors = listOf(Rgba(0, 230, 118), Rgba(1, 1, 1), Rgba(2, 2, 2), Rgba(3, 3, 3), Rgba(4, 4, 4)),
+            toolbarColorsDark = InkPalette.dark.reversed(),
+            toolbarColorsLight = InkPalette.light.map { it.copy(a = 128) },
             activeColor = 2,
             renderScale = 1.5,
             sidebarVisible = true,
@@ -74,6 +77,8 @@ class SettingsTest {
         assertEquals(5.0, back.configFor(Tool.PEN).baseWidth, 1e-9)
         assertFalse(back.configFor(Tool.PEN).pressureEnabled)
         assertEquals(2, back.activeColor)
+        assertEquals(original.toolbarColorsDark, back.toolbarColorsDark)
+        assertEquals(original.toolbarColorsLight, back.toolbarColorsLight)
         assertEquals(1.5, back.renderScale, 1e-9)
         assertTrue(back.sidebarVisible)
         assertEquals("light", back.prefs.uiAppearance)
@@ -200,7 +205,44 @@ class SettingsTest {
             "toolbar_colors",
             org.json.JSONArray().put(org.json.JSONArray().put(0).put(0).put(0).put(255)),
         )
-        assertEquals(15, Settings.fromJson(o).toolbarColors.size)
+        val s = Settings.fromJson(o)
+        assertEquals(15, s.toolbarColorsDark.size)
+        assertEquals(15, s.toolbarColorsLight.size)
+    }
+
+    // The single swatch set every version before the light and dark sets wrote.
+    private val oldSwatches = listOf(
+        Rgba(0, 230, 118), Rgba(236, 236, 236), Rgba(255, 92, 92), Rgba(255, 199, 64), Rgba(88, 196, 255),
+        Rgba(199, 134, 255), Rgba(128, 128, 128), Rgba(255, 145, 60), Rgba(255, 105, 180), Rgba(70, 120, 255),
+        Rgba(190, 240, 60), Rgba(0, 190, 180), Rgba(160, 110, 70), Rgba(40, 60, 140), Rgba(20, 20, 20),
+    )
+
+    private fun oldSettings(colors: List<Rgba>) = JSONObject().put("toolbar_colors", org.json.JSONArray().apply {
+        colors.forEach { put(org.json.JSONArray().put(it.r).put(it.g).put(it.b).put(it.a)) }
+    })
+
+    @Test fun untouchedSwatchesTakeTheNewLightAndDarkSets() {
+        for (saved in listOf(oldSwatches, oldSwatches.take(5))) {
+            val s = Settings.fromJson(oldSettings(saved))
+            assertEquals(InkPalette.dark, s.toolbarColorsDark)
+            assertEquals(InkPalette.light, s.toolbarColorsLight)
+        }
+    }
+
+    @Test fun editedSwatchesServeBothAppearancesUntilOneIsEdited() {
+        val edited = oldSwatches.toMutableList().also { it[3] = Rgba(1, 2, 3) }
+        val s = Settings.fromJson(oldSettings(edited))
+        assertEquals(edited, s.toolbarColorsDark)
+        assertEquals(edited, s.toolbarColorsLight)
+        val lightEdited = s.copy(toolbarColorsLight = edited.toMutableList().also { it[0] = Rgba(4, 5, 6) })
+        val back = Settings.fromJson(lightEdited.toJson())
+        assertEquals(edited, back.toolbarColorsDark)
+        assertEquals(Rgba(4, 5, 6), back.toolbarColorsLight[0])
+    }
+
+    @Test fun theLegacyPresetsAreTheOldSwatches() {
+        assertEquals(oldSwatches, InkPalette.legacyPresets)
+        assertEquals(InkPalette.dark.size, InkPalette.light.size)
     }
 
     @Test fun toolbarColorCountDefaultsToFive() {

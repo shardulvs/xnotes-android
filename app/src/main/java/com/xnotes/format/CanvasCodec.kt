@@ -907,7 +907,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         val width = s.tapeWidth?.takeIf { it.isFinite() && it > 0.0 } ?: TapeItem.DEFAULT_WIDTH
         return TapeItem(
             TapeShape(mode, if (mode == TapeMode.FREEHAND) points else points.take(2), width),
-            s.rgba ?: InkPalette.DEFAULT,
+            s.rgba ?: InkPalette.LEGACY,
             TapePattern.fromId(s.pattern),
         )
     }
@@ -921,7 +921,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             pressureEnabled = c?.pressureEnabled ?: def.pressureEnabled,
             pressureMinFactor = c?.pressureMinFactor ?: def.pressureMinFactor,
             directionStrength = c?.directionStrength ?: def.directionStrength,
-            rgba = c?.rgba ?: def.rgba,
+            rgba = c?.rgba ?: InkPalette.LEGACY,
             speedStrength = c?.speedStrength ?: def.speedStrength,
             taperEnabled = c?.taperEnabled ?: def.taperEnabled,
             taperMinFactor = c?.taperMinFactor ?: ToolDefaults.LEGACY_TAPER_TIP,

@@ -34,6 +34,7 @@ import com.xnotes.core.shapes.Elbow
 import com.xnotes.core.shapes.FreePath
 import com.xnotes.core.shapes.Head
 import com.xnotes.core.shapes.ShapeKind
+import com.xnotes.core.tools.InkPalette
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
 import com.xnotes.core.tools.ToolDefaults
@@ -569,6 +570,11 @@ class CanvasCodecTest {
         val s = doc.items[0] as Stroke
         assertTrue(s.config.taperEnabled)
         assertEquals(ToolDefaults.LEGACY_TAPER_TIP, s.config.taperMinFactor, 1e-9)
+    }
+
+    @Test fun inkSavedWithoutAColourReloadsInTheLegacyGreen() {
+        val doc = readManifest("""{"format":"xcanvas","items":[{"kind":"stroke","tool":"pen","samples":[[0,0,1]]}]}""")
+        assertEquals(InkPalette.LEGACY, (doc.items[0] as Stroke).config.rgba)
     }
 
     @Test fun legacyHighlightersReloadAtTheHistoricalAlpha() {

@@ -1035,6 +1035,12 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         onToolStyleChanged?.invoke()
     }
 
+    /** The host turned light or dark: its other swatches, the same slot armed, so the ink becomes that slot's colour. */
+    fun adoptSwatches(colors: List<Rgba>) {
+        toolbarColors = colors
+        colors.getOrNull(activeColorIndex)?.let { inkColor = it }
+    }
+
     fun setToolConfig(forTool: Tool, config: ToolConfig) {
         toolConfigs[forTool] = config
     }
@@ -1231,7 +1237,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     var onColorRemembered: ((Rgba) -> Unit)? = null
 
     /** The toolbar's swatches and recents, handed over by the host so both surfaces share them. */
-    var toolbarColors by mutableStateOf(InkPalette.presets)
+    var toolbarColors by mutableStateOf(InkPalette.dark)
     var activeColorIndex by mutableStateOf(0)
     var recentColors by mutableStateOf<List<Rgba>>(emptyList())
     var toolbarColorCount by mutableStateOf(5)

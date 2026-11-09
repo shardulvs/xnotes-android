@@ -41,6 +41,7 @@ import com.xnotes.core.shapes.Axis
 import com.xnotes.core.shapes.Elbow
 import com.xnotes.core.shapes.FreePath
 import com.xnotes.core.shapes.ShapeKind
+import com.xnotes.core.tools.InkPalette
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
 import com.xnotes.core.tools.ToolDefaults
@@ -477,6 +478,7 @@ class DocumentCodecTest {
         val doc = codec.read(ByteArrayInputStream(out.toByteArray()))
         val stroke = doc.pages[0].items[0] as Stroke
         assertEquals(ToolConfig().baseWidth, stroke.config.baseWidth, 1e-9)
+        assertEquals(InkPalette.LEGACY, stroke.config.rgba) // the ink default when it was written, not today's
         assertNull(doc.pdfFile)
     }
 
