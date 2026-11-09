@@ -142,7 +142,7 @@ private fun standardPenAction(action: Int): Int = when (action) {
     else -> -1
 }
 
-class MainActivity : ComponentActivity() {
+class EditorActivity : ComponentActivity() {
 
     // The editor owns the fullscreen state (persisted preference, default depends on the display
     // cutout); this activity just applies it to the window. Fullscreen draws edge to edge and lets

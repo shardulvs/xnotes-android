@@ -22,7 +22,7 @@ import android.view.ViewConfiguration
  * must not let go of the key.
  *
  * A fourth quirk is handled higher up and needs nothing here: some Samsung builds tag a
- * button-held stroke with proprietary action codes instead of DOWN/MOVE/UP, and `MainActivity`
+ * button-held stroke with proprietary action codes instead of DOWN/MOVE/UP, and `EditorActivity`
  * rewrites those before dispatch, so any view in the tree gets a normal touch stream.
  *
  * The button masks and the vendor keycode are read from [InteractionController] rather than copied,

@@ -815,6 +815,14 @@
     <string name="mit_license">MIT License</string>
     <string name="version_n">Version %1$s</string>
     <string name="version_copied">Version copied</string>
+    <string name="icon_bubblegum">Bubblegum and violet</string>
+    <string name="icon_cream_rose">Cream and rose</string>
+    <string name="icon_lime">Lime and violet</string>
+    <string name="icon_aqua">Aqua</string>
+    <string name="icon_ink_tile">Ink tile</string>
+    <string name="icon_classic">Classic</string>
+    <string name="icon_graphite">Graphite</string>
+    <string name="icon_cream_tile">Cream tile</string>
 
     <!-- Text formatting -->
     <string name="checkbox_item">Checkbox item</string>
