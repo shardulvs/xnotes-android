@@ -1129,6 +1129,10 @@
     <string name="material_custom">Custom</string>
     <string name="material_indigo">Indigo</string>
     <string name="material_amber">Amber</string>
+    <string name="material_bubblegum">Bubblegum</string>
+    <string name="material_rose">Rose</string>
+    <string name="material_lime">Lime</string>
+    <string name="material_aqua">Aqua</string>
     <string name="material_morning">Morning</string>
     <string name="material_evening">Evening</string>
     <string name="material_sea">Sea</string>

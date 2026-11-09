@@ -363,8 +363,8 @@ class SettingsTest {
         val defaults = Preferences.fromJson(JSONObject())
         assertEquals(MaterialColourMode.SYSTEM, defaults.materialMode)
         assertEquals(Rgba(244, 67, 54), defaults.materialSingleSeed)
-        assertEquals(Rgba(154, 124, 66), defaults.materialDualSeed)
-        assertEquals(Rgba(61, 117, 230), defaults.materialSurfaceSeed)
+        assertEquals(Rgba(255, 107, 154), defaults.materialDualSeed)
+        assertEquals(Rgba(122, 92, 255), defaults.materialSurfaceSeed)
         for (key in listOf("material_mode", "material_seed", "material_single_seed", "material_dual_seed", "material_surface_seed")) {
             assertFalse(defaults.toJson().has(key))
         }
@@ -393,11 +393,31 @@ class SettingsTest {
     @Test fun legacyDualToneRetainsOldFallbackColours() {
         val json = JSONObject().put("material_dual_tone", true)
         val loaded = Preferences.fromJson(json)
-        assertEquals(Preferences.DEFAULT_ACCENT, loaded.materialDualSeed)
+        assertEquals(Preferences.LEGACY_ACCENT, loaded.materialDualSeed)
         assertEquals(Rgba(33, 150, 243), loaded.materialSurfaceSeed)
         val classicAccent = Preferences.fromJson(json.put("accent_color", "#123456"))
         assertEquals(Rgba(18, 52, 86), classicAccent.materialDualSeed)
         assertEquals(classicAccent, Preferences.fromJson(classicAccent.toJson()))
+    }
+
+    @Test fun untouchedMorningMovesToBubblegum() {
+        // What a two-tone install that never changed its colours saved while Morning was the default.
+        val loaded = Preferences.fromJson(JSONObject().put("material_mode", "dual")
+            .put("material_seed", "#9a7c42").put("material_dual_tone", true).put("material_surface_seed", "#3d75e6"))
+        assertEquals(MaterialColourMode.DUAL, loaded.materialMode)
+        assertEquals(Preferences.DEFAULT_MATERIAL_DUAL, loaded.materialDualSeed)
+        assertEquals(Preferences.DEFAULT_MATERIAL_SURFACE, loaded.materialSurfaceSeed)
+        assertEquals(loaded, Preferences.fromJson(loaded.toJson()))
+    }
+
+    @Test fun morningChosenSinceBubblegumStays() {
+        val morning = Preferences(materialMode = MaterialColourMode.DUAL,
+            materialDualSeed = Rgba(154, 124, 66), materialSurfaceSeed = Rgba(61, 117, 230))
+        assertEquals(morning, Preferences.fromJson(morning.toJson()))
+        val ownSurface = Preferences.fromJson(JSONObject().put("material_mode", "dual")
+            .put("material_seed", "#9a7c42").put("material_dual_tone", true).put("material_surface_seed", "#000080"))
+        assertEquals(Rgba(154, 124, 66), ownSurface.materialDualSeed)
+        assertEquals(Rgba(0, 0, 128), ownSurface.materialSurfaceSeed)
     }
 
     @Test fun customMaterialOptionsDefaultForgivingly() {

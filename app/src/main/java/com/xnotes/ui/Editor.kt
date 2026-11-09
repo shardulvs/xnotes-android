@@ -2735,7 +2735,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             MaterialColourMode.DUAL -> MaterialColors.seeded(p.materialDualSeed, dark, p.materialStyle, p.materialSurfaceSeed, p.materialContrast)
             MaterialColourMode.SINGLE -> MaterialColors.seeded(p.materialSingleSeed, dark, p.materialStyle, contrast = p.materialContrast)
             MaterialColourMode.SYSTEM -> dynamicMaterialColors(appContext, dark = dark)
-                ?: MaterialColors.seeded(Preferences.DEFAULT_ACCENT, dark = dark)
+                ?: MaterialColors.seeded(Preferences.DEFAULT_MATERIAL_DUAL, dark, surfaceSeed = Preferences.DEFAULT_MATERIAL_SURFACE)
         }
         return Palette.material(appearance, m)
     }
