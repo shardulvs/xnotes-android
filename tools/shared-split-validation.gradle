@@ -1,0 +1,15 @@
+// Isolate device tests from existing debug/community apps. Release builds are unchanged.
+// ./gradlew -I tools/shared-split-validation.gradle :app:assembleDebug :app:assembleDebugAndroidTest
+// Optional: -PsharedSplitAbi=arm64-v8a (or x86_64 for an emulator).
+allprojects {
+    afterEvaluate { project ->
+        if (project.name == 'app') {
+            android.buildTypes.debug.applicationIdSuffix = '.sharedsplit'
+            def abi = project.findProperty('sharedSplitAbi')
+            if (abi != null) {
+                android.defaultConfig.ndk.abiFilters.clear()
+                android.defaultConfig.ndk.abiFilters.add(abi.toString())
+            }
+        }
+    }
+}

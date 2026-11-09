@@ -98,6 +98,7 @@ fun Toolbar(
     onInsertAudio: () -> Unit = {},
     onRecordAudio: () -> Unit = {},
     onTakePhoto: () -> Unit = {},
+    layout: com.xnotes.core.tools.ToolbarLayout = editor.toolbarLayout,
 ) {
     // The five stroke tools use the designed vector drawables (res/drawable/ic_stroke_*),
     // tinted at the call site like every other icon; the rest use the built-in line set.
@@ -127,7 +128,7 @@ fun Toolbar(
     ToolbarFrame(armed = editor.tool, trailing = onClosePane?.let { { ClosePaneButton(it) } }) {
         // The bar is driven by the user-customisable layout; separators sit between non-empty
         // sections, and each item dispatches to its renderer (see ToolbarItemView).
-        editor.toolbarLayout.visibleSections.forEachIndexed { si, section ->
+        layout.visibleSections.forEachIndexed { si, section ->
             if (si > 0) Separator()
             section.visibleEntries.forEach { entry ->
                 ToolbarItemView(
@@ -187,7 +188,7 @@ private fun ToolbarItemView(
 ) {
     when (item) {
         // Canvas-only items; a stored paged layout can never hold one, so nothing is drawn.
-        ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP -> Unit
+        ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP -> UnavailableSharedToolbarItem(item)
 
         ToolbarItem.HOME -> ToolbarIcon(XnotesIcons.prev, stringResource(R.string.toolbar_home)) { onOpenBackstage() }
         // A name has no room down a side rail.

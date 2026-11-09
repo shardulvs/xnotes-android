@@ -27,6 +27,7 @@ android {
         targetSdk = 36
         versionCode = 68
         versionName = "0.9.7"
+        testInstrumentationRunner = "android.test.InstrumentationTestRunner"
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
         }
@@ -140,4 +141,8 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.json)
+    androidTestCompileOnly(files(
+        android.sdkDirectory.resolve("platforms/android-36/optional/android.test.runner.jar"),
+        android.sdkDirectory.resolve("platforms/android-36/optional/android.test.base.jar"),
+    ))
 }

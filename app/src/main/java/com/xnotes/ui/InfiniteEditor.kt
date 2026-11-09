@@ -1026,6 +1026,14 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         restyleLabel { it.copy(rgba = color) }
     }
 
+    /** Share future ink between panes without restyling their selected or edited content. */
+    internal fun adoptSharedInk(source: ToolPopupHost, color: Rgba) {
+        toolbarColors = source.hostToolbarColors
+        toolbarColorCount = source.hostToolbarColorCount
+        activeColorIndex = source.hostActiveColorIndex.coerceIn(0, toolbarColors.lastIndex)
+        inkColor = color
+    }
+
     /** Arm swatch [index], the same way the paged toolbar picks its ink; an open label takes it too. */
     fun pickColor(index: Int) {
         if (index !in toolbarColors.indices) return

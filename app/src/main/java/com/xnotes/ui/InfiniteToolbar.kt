@@ -53,6 +53,7 @@ fun InfiniteToolbar(
     onInsertAudio: () -> Unit = {},
     onRecordAudio: () -> Unit = {},
     onTakePhoto: () -> Unit = {},
+    layout: com.xnotes.core.tools.ToolbarLayout = editor.toolbarLayout,
 ) {
     // The stroke tools use the same designed drawables the paged toolbar does, so a pen looks like
     // a pen on either canvas rather than like a generic glyph.
@@ -83,7 +84,7 @@ fun InfiniteToolbar(
 
     // Pinned outside the scrolling strip so closing a split pane is always one tap away.
     ToolbarFrame(armed = editor.tool, trailing = onClosePane?.let { { ClosePaneButton(it) } }) {
-        val sections = editor.toolbarLayout.visibleSections
+        val sections = layout.visibleSections
         sections.forEachIndexed { index, section ->
             if (index > 0) Separator()
             for (entry in section.visibleEntries) {
@@ -193,7 +194,7 @@ fun InfiniteToolbar(
                     ) { editor.toggleZoomLock() }
 
                     // Everything else belongs to the paged bar; a canvas layout never holds one.
-                    else -> Unit
+                    else -> UnavailableSharedToolbarItem(item)
                 }
             }
         }
