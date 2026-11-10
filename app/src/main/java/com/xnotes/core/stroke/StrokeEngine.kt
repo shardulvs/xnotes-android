@@ -91,10 +91,10 @@ object StrokeEngine {
     /** Speed pen: a step crossed slower than this fraction of the top speed counts as the pen holding still. */
     const val SPEED_FLOOR = 0.1
 
-    /** Speed pen: the default blur of the width along the path, in pen widths (the Gaussian's sigma). */
+    /** Speed pen: the default blur of the width along the path, in pen widths (the bell's sigma). */
     const val DEFAULT_SPEED_SMOOTHING = 0.25
 
-    /** Speed pen: how many sigmas the blur reaches either side of a point. */
+    /** Speed pen: how many sigmas the blur's bell reaches either side of a point before it reaches zero. */
     const val SPEED_BLUR_REACH = 3.0
 
     /** Taper pen: strokes shorter than this arc are left un-tapered, so a quick tick doesn't
@@ -320,7 +320,7 @@ object StrokeEngine {
     internal fun speedFactor(v: Double, strength: Double, top: Double, speedScale: Double): Double =
         1.0 - strength * smoothstep(0.0, top, v * speedScale)
 
-    /** [f] blurred along [path] at point [i] by a Gaussian of [sigma], each sample weighted by the arc around it. */
+    /** [f] blurred along [path] at point [i] by a triweight bell of [sigma], each sample weighted by the arc around it. */
     internal fun blurAt(f: DoubleArray, path: DoubleArray, n: Int, i: Int, sigma: Double, cursor: IntArray): Double {
         if (sigma <= 0.0) return f[i]
         val reach = SPEED_BLUR_REACH * sigma
@@ -328,7 +328,7 @@ object StrokeEngine {
         var lo = cursor[0]
         while (lo < i && path[lo] < at - reach) lo++
         cursor[0] = lo
-        val k = -0.5 / (sigma * sigma)
+        val inv = 1.0 / reach
         var num = 0.0
         var den = 0.0
         var j = lo
@@ -336,7 +336,9 @@ object StrokeEngine {
             val d = path[j] - at
             if (d > reach) break
             val own = (if (j > 0) path[j] - path[j - 1] else 0.0) + (if (j < n - 1) path[j + 1] - path[j] else 0.0)
-            val w = exp(k * d * d) * own
+            val u = d * inv
+            val q = 1.0 - u * u
+            val w = q * q * q * own
             num += w * f[j]
             den += w
             j++
