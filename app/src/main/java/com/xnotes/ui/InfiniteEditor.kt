@@ -265,6 +265,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             itemsRevision++
             // Drop any mesh job still running for it, so its result cannot file the record again.
             if (item is ImageItem) vectorMeshGen.remove(item)
+            if (item is TextItem) textMeshGen.remove(item)
             scene.remove(item)
             if (item === AudioPlayback.session?.item) AudioPlayback.closeIfGone(this@InfiniteEditor)
         }
@@ -324,6 +325,10 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             if (!pushVectorImage(item)) scene.upsertImage(item, item.paintBounds())
             return
         }
+        if (item is TextItem) {
+            pushTextAsync(item)
+            return
+        }
         val started = System.nanoTime()
         val meshed = ItemMesher.mesh(item)
         scene.lastTessellateMs = (System.nanoTime() - started) / 1_000_000.0
@@ -333,6 +338,37 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         }
         scene.upsert(item, meshed.parts, meshed.bounds, committingWetStroke)
     }
+
+    /**
+     * Meshing text can take tens of milliseconds. Capture mutable properties on the UI thread,
+     * then mesh the snapshot off-thread. A generation token discards old resize/edit results.
+     * The previous mesh remains visible until the newest result is ready.
+     */
+    private fun pushTextAsync(item: TextItem) {
+        val snapshot = TextItem(
+            item.pos, item.width, item.height, item.text, item.rgba,
+            item.pointSize, item.face, com.xnotes.platform.AndroidTextMeasurer(),
+        )
+        val token = textMeshSeq.incrementAndGet()
+        textMeshGen[item] = token
+        decodeExecutor.execute {
+            // Skip queued work already superseded by subsequent drag events.
+            if (textMeshGen[item] != token) return@execute
+            val started = System.nanoTime()
+            val meshed = ItemMesher.mesh(snapshot)
+            val elapsed = (System.nanoTime() - started) / 1_000_000.0
+            view.post {
+                if (!textMeshGen.remove(item, token)) return@post
+                scene.lastTessellateMs = elapsed
+                if (meshed == null || meshed.isEmpty) scene.remove(item)
+                else scene.upsert(item, meshed.parts, meshed.bounds)
+                view.publish()
+            }
+        }
+    }
+
+    private val textMeshGen = java.util.concurrent.ConcurrentHashMap<TextItem, Long>()
+    private val textMeshSeq = java.util.concurrent.atomic.AtomicLong()
 
     /**
      * A placed SVG becomes triangles like everything else, so it stays sharp at any zoom instead of
@@ -400,6 +436,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     private fun rebuildScene() {
         scene.reset()
         vectorMeshGen.clear()
+        textMeshGen.clear()
         scene.batch { for (item in document.items) pushItem(item) }
         scene.setOrder(document.items)
     }
