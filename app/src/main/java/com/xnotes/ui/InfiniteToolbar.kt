@@ -32,6 +32,7 @@ private val CANVAS_TOOL_OF: Map<ToolbarItem, Tool> = mapOf(
     ToolbarItem.SELECT to Tool.SELECT,
     ToolbarItem.LASSO to Tool.LASSO,
     ToolbarItem.SHAPE to Tool.SHAPE,
+    ToolbarItem.TEXT_BOX to Tool.TEXT_BOX,
     ToolbarItem.TAPE to Tool.TAPE,
 )
 
@@ -66,6 +67,7 @@ fun InfiniteToolbar(
         Tool.PAN to XnotesIcons.pan,
         Tool.ERASER to XnotesIcons.eraser,
         Tool.SHAPE to XnotesIcons.shape,
+        Tool.TEXT_BOX to XnotesIcons.textBox,
         Tool.SELECT to XnotesIcons.select,
         Tool.LASSO to XnotesIcons.lasso,
         Tool.TAPE to XnotesIcons.tape,

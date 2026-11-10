@@ -295,6 +295,7 @@ object ItemMesher {
     private val textMeshes = java.util.WeakHashMap<TextItem, Pair<TextMeshKey, MeshedItem?>>()
 
     private fun meshText(item: TextItem): MeshedItem? {
+        if (item.canvasEditingHidden) return null
         val key = TextMeshKey(item.text, item.pos, item.width, item.height, item.rgba, item.pointSize, item.face)
         synchronized(textMeshes) {
             textMeshes[item]?.let { (cachedKey, cachedMesh) ->

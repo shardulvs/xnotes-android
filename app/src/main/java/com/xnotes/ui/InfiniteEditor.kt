@@ -17,6 +17,8 @@ import com.xnotes.core.geometry.Rect
 import com.xnotes.core.history.Command
 import com.xnotes.core.history.CompositeCommand
 import com.xnotes.core.history.EditLabel
+import com.xnotes.core.history.EditText
+import com.xnotes.core.history.RestyleText
 import com.xnotes.core.history.History
 import com.xnotes.core.history.LockItems
 import com.xnotes.core.history.RefillShapes
@@ -137,8 +139,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         hasPasteContent = { hasClipboardItems || clipboardHasImage },
         onToolChanged = { adoptTool(it) },
         onDoubleTap = { vp, toolType, selectedBefore -> onDoubleTap(vp, toolType, selectedBefore) },
-        isEditingText = { editingLabel != null },
+        isEditingText = { editingLabel != null || editingTextItem != null },
         onCommitText = { commitText() },
+        onCreateText = { createTextItem(it) },
         onAudioTap = { tapAudio(it) },
         onPeelTape = { peelTape(it) },
         onUserMovedView = { AudioPlayback.userMoved(this) },
@@ -884,6 +887,10 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     /** The shape or connector whose label is open in the overlay, and that label as it was before. */
     private var editingLabel: Labelled? = null
     private var labelBefore: ShapeLabel? = null
+    private var editingTextItem: TextItem? = null
+    private var newEditingTextItem: TextItem? = null
+    private var textItemBefore: String? = null
+    private var textStyleBefore: TextStyle? = null
 
     /** Where the overlay sits while a label is open, or null. */
     var editingField by mutableStateOf<com.xnotes.canvas.EditingField?>(null)
@@ -898,7 +905,15 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     /** A double tap on an unselected shape that takes a label types it, with the tools a note allows. */
     private fun onDoubleTap(vp: com.xnotes.core.geometry.Pt, toolType: Int, selectedBefore: Set<CanvasItem>) {
-        if (editingLabel != null) return
+        if (editingLabel != null || editingTextItem != null) return
+        val at = viewport.viewportToContent(vp)
+        val text = document.itemsIn(Rect(at.x - 1.0, at.y - 1.0, 2.0, 2.0)).lastOrNull {
+            it is TextItem && !it.locked && it.contains(at) && it !in selectedBefore
+        } as? TextItem
+        if (text != null) {
+            startTextItemEdit(text)
+            return
+        }
         interaction.labelTargetAt(vp, toolType, selectedBefore)?.let { startLabelEdit(it) }
     }
 
@@ -906,6 +921,32 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
      * Open the overlay on [shape]'s label, giving it one in the text box defaults if it has none.
      * The shape is meshed without its words while the field shows them.
      */
+    /** Start an editable text box at the point tapped with the canvas text tool. */
+    private fun createTextItem(at: Pt) {
+        commitText()
+        val item = TextItem(
+            at, TextItem.DEFAULT_WIDTH, 0.0, "", inkColor,
+            textPointSize, textFace, textMeasurer,
+        )
+        document.add(item)
+        newEditingTextItem = item
+        startTextItemEdit(item)
+    }
+
+    private fun startTextItemEdit(item: TextItem) {
+        commitText()
+        interaction.clearSelection()
+        editingTextItem = item
+        item.canvasEditingHidden = true
+        document.itemChanged(item)
+        textItemBefore = item.text
+        textStyleBefore = TextStyle.of(item)
+        textFace = item.face
+        textPointSize = item.pointSize
+        refreshField()
+        view.publish()
+    }
+
     private fun startLabelEdit(shape: Labelled) {
         commitText()
         interaction.clearSelection()
@@ -921,6 +962,12 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     }
 
     override fun updateEditingText(text: String) {
+        editingTextItem?.let {
+            it.text = text
+            document.itemChanged(it)
+            refreshField()
+            return
+        }
         val shape = editingLabel ?: return
         shape.label = shape.label?.withText(text)
         document.itemChanged(shape)
@@ -928,7 +975,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     }
 
     override fun panWhileEditing(dxFinger: Float, dyFinger: Float) {
-        if (editingLabel == null) return
+        if (editingLabel == null && editingTextItem == null) return
         viewport.panByViewport(dxFinger.toDouble(), dyFinger.toDouble())
         onViewChanged()
         view.publish()
@@ -947,6 +994,12 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     /** Restyle the open label; the whole edit is one undo step, taken when it ends. */
     private fun restyleLabel(change: (TextStyle) -> TextStyle) {
+        editingTextItem?.let {
+            change(TextStyle.of(it)).applyTo(it)
+            document.itemChanged(it)
+            refreshField()
+            return
+        }
         val shape = editingLabel ?: return
         val l = shape.label ?: return
         shape.label = l.withStyle(change(l.style))
@@ -956,6 +1009,41 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     /** End the label edit with its current (or [text]) words: blank clears the label; any change is one undo step. */
     override fun commitText(text: String?) {
+        editingTextItem?.let { item ->
+            text?.let { item.text = it }
+            val beforeText = textItemBefore ?: item.text
+            val beforeStyle = textStyleBefore ?: TextStyle.of(item)
+            val commands = mutableListOf<Command>()
+            if (beforeText != item.text) commands.add(EditText(item, beforeText, item.text))
+            if (beforeStyle != TextStyle.of(item)) commands.add(RestyleText(item, beforeStyle, TextStyle.of(item)))
+            item.canvasEditingHidden = false
+            editingTextItem = null
+            textItemBefore = null
+            textStyleBefore = null
+            editingField = null
+            textBar = null
+            val isNew = newEditingTextItem === item
+            if (isNew) {
+                newEditingTextItem = null
+                if (item.text.isBlank()) {
+                    document.remove(item)
+                } else {
+                    document.itemChanged(item)
+                    history.push(AddCanvasItem(document, item))
+                    markDirty()
+                    refresh()
+                }
+            } else {
+                document.itemChanged(item)
+                if (commands.isNotEmpty()) {
+                    history.push(OnCanvas(document, CompositeCommand(commands), listOf(item)))
+                    markDirty()
+                    refresh()
+                }
+            }
+            view.publish()
+            return
+        }
         val shape = editingLabel ?: return
         text?.let { t -> shape.label = shape.label?.withText(t) }
         val before = labelBefore
@@ -978,6 +1066,18 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     /** Put the overlay back over the open label after its text, its style or the view moved. */
     private fun refreshField() {
+        editingTextItem?.let { item ->
+            val topLeft = viewport.contentToViewport(item.pos)
+            val f = com.xnotes.canvas.EditingField(
+                x = topLeft.x, y = topLeft.y, width = item.width, height = item.bounds().h,
+                fontPx = item.pointSize * com.xnotes.platform.AndroidText.POINTS_TO_PX,
+                zoom = viewport.zoom, face = item.face, rgba = item.rgba,
+                text = item.text, centred = false,
+            )
+            editingField = f
+            textBar = com.xnotes.canvas.TextBar(f.screenBounds(), item.face, item.pointSize, editing = true)
+            return
+        }
         val shape = editingLabel
         val l = shape?.label
         val r = shape?.labelFrame()

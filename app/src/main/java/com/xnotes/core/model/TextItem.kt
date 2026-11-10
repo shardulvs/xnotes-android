@@ -30,6 +30,8 @@ class TextItem(
     override val kind = KIND
     override val mirrorable = false
     override val resizable = true
+    /** Hidden only while the native Android text editing overlay is active. */
+    var canvasEditingHidden = false
     override var locked = false
     override var group: Int? = null
     override var sync: SyncMark? = null
