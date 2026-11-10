@@ -1,6 +1,10 @@
 package com.xnotes.core.geometry
 
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.asin
 import kotlin.math.hypot
+import kotlin.math.sqrt
 
 /** Pure geometry predicates used by selection and hit-testing (spec 06 §15). */
 object Geometry {
@@ -91,6 +95,29 @@ object Geometry {
         val q = listOf(c0 + nrm * r0, c1 + nrm * r1, c1 - nrm * r1, c0 - nrm * r0)
         val area2 = (q[1].x - q[0].x) * (q[2].y - q[0].y) - (q[1].y - q[0].y) * (q[2].x - q[0].x)
         return if (area2 < 0.0) q.asReversed() else q
+    }
+
+    /** What [capsule] returns when one disc holds the other, so their hull is just the larger disc. */
+    const val SWALLOWED = -1.0
+
+    /**
+     * Hull of discs ([x0], [y0], [r0]) and ([x1], [y1], [r1]): writes its two tangent lines' outward normals into [out]
+     * (left x, y, then right x, y, travelling first to second, y down) and returns the degrees of the second rim on it.
+     */
+    fun capsule(x0: Double, y0: Double, r0: Double, x1: Double, y1: Double, r1: Double, out: DoubleArray): Double {
+        val dx = x1 - x0
+        val dy = y1 - y0
+        val d = hypot(dx, dy)
+        if (d <= abs(r1 - r0) + 1e-9) return SWALLOWED
+        val ux = dx / d
+        val uy = dy / d
+        val s = (r0 - r1) / d
+        val k = sqrt(1.0 - s * s)
+        out[0] = ux * s + uy * k
+        out[1] = uy * s - ux * k
+        out[2] = ux * s - uy * k
+        out[3] = uy * s + ux * k
+        return 180.0 - 2.0 * asin(s) * 180.0 / PI
     }
 
     /**
