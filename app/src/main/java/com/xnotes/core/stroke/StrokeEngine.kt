@@ -67,11 +67,16 @@ object StrokeEngine {
      *  quarter the size. */
     fun headLen(smoothScale: Double): Double = HEAD_LEN * max(smoothScale, 0.0)
 
-    /** [OPEN_LEN] at the stroke's draw zoom; see [headLen]. */
-    fun openLen(smoothScale: Double): Double = OPEN_LEN * max(smoothScale, 0.0)
+    /** Calligraphy pen: the nib width up to which [OPEN_LEN] and [CLOSE_LEN] hold; a wider nib takes proportionally longer. */
+    const val NIB_RATE_WIDTH = 6.0
 
-    /** [CLOSE_LEN] at the stroke's draw zoom; see [headLen]. */
-    fun closeLen(smoothScale: Double): Double = CLOSE_LEN * max(smoothScale, 0.0)
+    /** [OPEN_LEN] at the stroke's draw zoom (see [headLen]), stretched for a nib wider than [NIB_RATE_WIDTH]. */
+    fun openLen(smoothScale: Double, baseWidth: Double): Double =
+        max(OPEN_LEN * max(smoothScale, 0.0), OPEN_LEN / NIB_RATE_WIDTH * baseWidth)
+
+    /** [CLOSE_LEN] at the stroke's draw zoom (see [headLen]), stretched for a nib wider than [NIB_RATE_WIDTH]. */
+    fun closeLen(smoothScale: Double, baseWidth: Double): Double =
+        max(CLOSE_LEN * max(smoothScale, 0.0), CLOSE_LEN / NIB_RATE_WIDTH * baseWidth)
 
     /** Calligraphy pen: the direction-y a dot is built at. Past the broad face's 1.0 on purpose,
      *  so a dot lands slightly bigger than the thickest line and reads as a deliberate mark. */
@@ -686,7 +691,7 @@ object StrokeEngine {
         val dirY = if (ds > 0.0) {
             val window = headLen(smoothScale)
             val (head, holdUntil) = headDirection(sx, sy, cum, window, finished)
-            val d = nibDirection(ty, dirSteps, openLen(smoothScale), closeLen(smoothScale), head, holdUntil)
+            val d = nibDirection(ty, dirSteps, openLen(smoothScale, baseWidth), closeLen(smoothScale, baseWidth), head, holdUntil)
             if (finished) capTail(d, cum, window)
             d
         } else null

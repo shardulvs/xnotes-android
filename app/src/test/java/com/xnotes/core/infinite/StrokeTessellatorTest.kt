@@ -256,13 +256,11 @@ class StrokeTessellatorTest {
 
     // --- the swept disc ---
 
-    /**
-     * Calligraphy on a wave, so the nib widens and thins as fast as it may: a broad nib, and one so
-     * broad its width outruns the travel and a disc swallows its neighbour.
-     */
+    /** Calligraphy on a wave, the nib swelling as fast as it may, and on the broadest a pressure dip that swallows a disc. */
     private fun swells(): List<StrokeGeometry> {
         val pts = (0..80).map { Sample(it * 1.5, 22.0 * kotlin.math.sin(it * 1.5 / 9.0), 1.0) }
-        return listOf(StrokeEngine.build(pts, 12.0, true, 0.4, 0.6), StrokeEngine.build(pts, 24.0, true, 0.4, 0.9))
+        val dip = pts.mapIndexed { i, s -> if (i in 40..43) s.copy(pressure = 0.0) else s }
+        return listOf(StrokeEngine.build(pts, 12.0, true, 0.4, 0.6), StrokeEngine.build(dip, 24.0, true, 0.4, 0.9))
     }
 
     @Test fun theBroadestSwellReallySwallowsADisc() {

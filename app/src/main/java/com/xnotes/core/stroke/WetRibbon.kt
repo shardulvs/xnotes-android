@@ -104,8 +104,8 @@ class WetRibbon(
 
     private val smoothLen = StrokeEngine.SMOOTH_LEN * max(smoothScale, 0.0)
     private val headLen = StrokeEngine.headLen(smoothScale)
-    private val openLen = StrokeEngine.openLen(smoothScale)
-    private val closeLen = StrokeEngine.closeLen(smoothScale)
+    private val openLen = StrokeEngine.openLen(smoothScale, baseWidth)
+    private val closeLen = StrokeEngine.closeLen(smoothScale, baseWidth)
 
     /** Tangents are final below this; the last one is always a backward difference and provisional. */
     private var tanDone = 0

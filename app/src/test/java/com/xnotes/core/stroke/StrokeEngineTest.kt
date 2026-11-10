@@ -455,6 +455,20 @@ class StrokeEngineTest {
         assertArrayEquals(speedV(20.0).halfWidths, stored.halfWidths, 0f)
     }
 
+    @Test fun aWideNibSwellsNoSteeperThanTheDefault() {
+        // A zigzag turns the nib between its faces as fast as the rate allows, so the swell's slope is the rate's.
+        val pts = ArrayList<Sample>()
+        for (leg in 0 until 6) for (i in 0 until 30) {
+            val x = leg * 45.0 + i * 1.5
+            pts.add(Sample(x, if (leg % 2 == 0) i * 1.5 else 45.0 - i * 1.5, 1.0))
+        }
+        val default = steepest(StrokeEngine.build(pts, 6.0, false, 0.4, 0.6))
+        for (w in listOf(12.0, 24.0)) {
+            val edge = steepest(StrokeEngine.build(pts, w, false, 0.4, 0.6))
+            assertTrue("width $w: $edge against $default", edge <= default * 1.1)
+        }
+    }
+
     @Test fun topSpeedSetsWhereTheLineIsThinnest() {
         val pts = (0..40).map { Sample(it * 2.0, 0.0, 1.0, it * 4.0) } // a steady 0.5 dp/ms
         val partial = StrokeEngine.build(pts, 4.0, false, 1.0, 0.0, speedStrength = 0.8, speedTop = 0.6)
