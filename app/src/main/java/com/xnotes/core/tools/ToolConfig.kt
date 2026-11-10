@@ -4,6 +4,7 @@ import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.TapeItem
 import com.xnotes.core.model.TapeMode
 import com.xnotes.core.model.TapePattern
+import com.xnotes.core.stroke.StrokeEngine
 
 /**
  * Eraser behaviour (spec 04 §2): STROKE removes a whole stroke on contact; AREA removes only the
@@ -99,6 +100,10 @@ data class ToolConfig(
     val tapeMode: TapeMode = TapeMode.STRAIGHT,
     /** Tape: what is printed on it. Only used by [Tool.TAPE]. */
     val tapePattern: TapePattern = TapePattern.SOLID,
+    /** Speed pen: how far along the path its width changes are blurred, in pen widths. Only used by [Tool.SPEED]. */
+    val speedSmoothing: Double = StrokeEngine.DEFAULT_SPEED_SMOOTHING,
+    /** Speed pen: the speed in dp/ms at which the line reaches its thinnest. Only used by [Tool.SPEED]. */
+    val speedTop: Double = StrokeEngine.SPEED_HI,
 ) {
     companion object {
         const val DEFAULT_MARKUP_INTENSITY = 0.9

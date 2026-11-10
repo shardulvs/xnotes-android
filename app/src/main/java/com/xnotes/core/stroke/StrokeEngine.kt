@@ -77,25 +77,20 @@ object StrokeEngine {
      *  so a dot lands slightly bigger than the thickest line and reads as a deliberate mark. */
     const val DOT_DIR_Y = 1.5
 
-    /** Speed pen: dp/ms at/below which the line stays full width, and the speed
-     *  at/above which it reaches its thinnest (0 and ≈3.75 in/s of hand travel).
-     *  Measuring in dp — not page pixels — makes the effect independent of both zoom
-     *  and screen density; see [speedFactors] and the per-stroke speed scale. */
-    const val SPEED_LO = 0.0
+    /** Speed pen: the default top speed in dp/ms, where the line is thinnest (about 10 cm/s of hand travel). */
     const val SPEED_HI = 0.6
 
-    /** Speed pen: half the duration (ms) of the centred window the nib's speed is measured over.
-     *  Speed is the arc length covered across `±this` ms divided by that span. A fixed *time*
-     *  base (not a fixed sample count, which collapses to a point where the pen crawls and the
-     *  distance-gated samples bunch up) keeps the estimate steady and lets the faster ink on
-     *  either side of a brief corner pause dilute it, instead of the width ballooning into a
-     *  blob there. The window slides inward at the stroke's ends so its first and last points
-     *  still average a full span rather than the at-rest tip. */
-    const val SPEED_WINDOW_MS = 40.0
+    /** Speed pen: half the moving time (ms) the nib's speed is measured over around each sample. */
+    const val SPEED_WINDOW_MS = 25.0
 
-    /** Speed pen: minimum per-segment dt (ms) so a duplicate-timestamp pair can't
-     *  divide by ~zero and spike the speed. */
-    const val MIN_DT = 1.0
+    /** Speed pen: a step crossed slower than this fraction of the top speed counts as the pen holding still. */
+    const val SPEED_FLOOR = 0.1
+
+    /** Speed pen: the default blur of the width along the path, in pen widths (the Gaussian's sigma). */
+    const val DEFAULT_SPEED_SMOOTHING = 0.25
+
+    /** Speed pen: how many sigmas the blur reaches either side of a point. */
+    const val SPEED_BLUR_REACH = 3.0
 
     /** Taper pen: strokes shorter than this arc are left un-tapered, so a quick tick doesn't
      *  collapse to nothing. Quoted at 100% zoom and scaled by the stroke's draw zoom, since what
@@ -231,91 +226,117 @@ object StrokeEngine {
         return t * t * (3 - 2 * t)
     }
 
-    /**
-     * Per-point width multipliers in `[1 − speedStrength, 1]` for the **speed pen**:
-     * the faster the nib travels across the page, the thinner the line (ink has less
-     * time to lay down). Speed at point `i` is the **arc length of the raw samples over a
-     * centred time window** of `±[SPEED_WINDOW_MS]` ms divided by that span, in dp/ms, where
-     * [speedScale] (zoom ÷ density, captured at pen-down) converts page pixels to dp so the
-     * effect is zoom- and device-independent. It reads the raw sample motion, not the smoothed
-     * centerline, so the position low-pass can't compress the start or cut a corner short and
-     * read a false slow-down there. Summing distance and time over a fixed *time* span (not a
-     * fixed sample count) rejects per-sample jitter and keeps slow corners and ends from
-     * collapsing the window onto themselves and ballooning the width. Returns all-`1.0` when off
-     * or the samples carry no usable timing. [steps] is [build]'s raw per-sample travel.
-     */
-    fun speedFactors(
-        samples: List<Sample>,
-        steps: DoubleArray,
+    /** The speed pen's width factor per sample, exactly as [build] applies it; a stroke keeps these once the pen lifts. */
+    fun speedWidths(
+        rawX: DoubleArray,
+        rawY: DoubleArray,
+        rawT: DoubleArray?,
+        baseWidth: Double,
         speedStrength: Double,
+        speedTop: Double,
+        speedSmoothing: Double,
         speedScale: Double,
-    ): DoubleArray = speedFactors(
-        DoubleArray(samples.size) { samples[it].t }, steps, speedStrength, speedScale,
-    )
+        smooth: Boolean,
+        smoothScale: Double,
+    ): DoubleArray {
+        val n = rawX.size
+        val steps = DoubleArray(n)
+        for (i in 1 until n) steps[i] = hypot(rawX[i] - rawX[i - 1], rawY[i] - rawY[i - 1])
+        val smoothLen = SMOOTH_LEN * max(smoothScale, 0.0)
+        val sx = if (smooth) emaByArc(rawX, steps, smoothLen) else rawX
+        val sy = if (smooth) emaByArc(rawY, steps, smoothLen) else rawY
+        val path = DoubleArray(n)
+        for (i in 1 until n) path[i] = path[i - 1] + hypot(sx[i] - sx[i - 1], sy[i] - sy[i - 1])
+        return speedFactorsOver(rawT, steps, path, n, speedStrength, speedTop, speedSmoothing * baseWidth, speedScale)
+    }
 
-    /** [speedFactors] over the elapsed-ms channel alone; [times] holds one entry per sample. */
-    fun speedFactors(
-        times: DoubleArray,
+    /** [speedWidths] over worked-out channels: raw travel per moving ms in a centred window, blurred along [path] by [sigma]. */
+    internal fun speedFactorsOver(
+        times: DoubleArray?,
         steps: DoubleArray,
-        speedStrength: Double,
+        path: DoubleArray,
+        n: Int,
+        strength: Double,
+        top: Double,
+        sigma: Double,
         speedScale: Double,
     ): DoubleArray {
-        val n = times.size
         val out = DoubleArray(n) { 1.0 }
-        if (speedStrength <= 0.0 || n < 2) return out
-        val t0 = times[0]
-        val tN = times[n - 1]
-        if (tN - t0 <= 0.0) return out
+        if (strength <= 0.0 || n < 2) return out
+        val floor = floorSpeed(top, speedScale)
+        val tau = DoubleArray(n)
         val cum = DoubleArray(n)
-        for (i in 1 until n) cum[i] = cum[i - 1] + steps[i]
-        val cursor = IntArray(2)
-        for (i in 0 until n) {
-            out[i] = speedFactorAt(times, cum, n, i, cursor, speedStrength, speedScale)
+        for (i in 1 until n) {
+            tau[i] = tau[i - 1] + movingStep(if (times == null) 0.0 else times[i] - times[i - 1], steps[i], floor)
+            cum[i] = cum[i - 1] + steps[i]
         }
+        val f = DoubleArray(n)
+        val window = IntArray(2)
+        for (i in 0 until n) f[i] = speedFactor(windowSpeed(tau, cum, n, i, window), strength, top, speedScale)
+        val blur = IntArray(1)
+        for (i in 0 until n) out[i] = blurAt(f, path, n, i, sigma, blur)
         return out
     }
 
-    /**
-     * One point's speed width factor, and the body of [speedFactors]. [cum] is cumulative *raw*
-     * travel and [cursor] holds the window's two sample indices, which only ever move forward, so
-     * walking the points in order costs one pass over the stroke rather than a search per point.
-     *
-     * [WetRibbon] calls this directly for the handful of points still inside the window. Restarting
-     * the scan from an older [cursor] is safe: both ends of the window only slide forward as the
-     * stroke grows, so a stale cursor is behind the true one and the scan simply runs further.
-     */
-    internal fun speedFactorAt(
-        times: DoubleArray,
-        cum: DoubleArray,
-        n: Int,
-        i: Int,
-        cursor: IntArray,
-        speedStrength: Double,
-        speedScale: Double,
-    ): Double {
-        val t0 = times[0]
-        val tN = times[n - 1]
-        val half = SPEED_WINDOW_MS
-        // Centre a fixed-duration window on this sample's time; if it runs past either end of
-        // the stroke, slide it inward so the span stays ~2·half rather than shrinking to a point.
-        var a = times[i] - half
-        var b = times[i] + half
-        if (a < t0) { b += t0 - a; a = t0 }
-        if (b > tN) { a -= b - tN; b = tN; if (a < t0) a = t0 }
+    /** Content px per ms below which a step counts as the pen holding still. */
+    internal fun floorSpeed(top: Double, speedScale: Double): Double =
+        if (speedScale > 0.0) SPEED_FLOOR * top / speedScale else 0.0
+
+    /** Moving time across one step: its elapsed ms, but never more than crossing it at [floor] would take. */
+    internal fun movingStep(dt: Double, step: Double, floor: Double): Double {
+        val t = max(dt, 0.0)
+        return if (floor > 0.0) min(t, step / floor) else t
+    }
+
+    /** Raw travel per moving ms across ±[SPEED_WINDOW_MS] around sample [i], slid inward at the ends; [cursor] only moves on. */
+    internal fun windowSpeed(tau: DoubleArray, cum: DoubleArray, n: Int, i: Int, cursor: IntArray): Double {
+        val total = tau[n - 1]
+        if (total <= 0.0) return 0.0
+        var a = tau[i] - SPEED_WINDOW_MS
+        var b = tau[i] + SPEED_WINDOW_MS
+        if (a < 0.0) { b -= a; a = 0.0 }
+        if (b > total) { a = max(a - (b - total), 0.0); b = total }
+        if (b <= a) return 0.0
+        return (arcAt(tau, cum, n, b, cursor, 1) - arcAt(tau, cum, n, a, cursor, 0)) / (b - a)
+    }
+
+    /** Raw arc at moving time [x], read linearly between the samples either side of it. */
+    private fun arcAt(tau: DoubleArray, cum: DoubleArray, n: Int, x: Double, cursor: IntArray, end: Int): Double {
+        var k = cursor[end]
+        while (k < n - 1 && tau[k] < x) k++
+        cursor[end] = k
+        if (k == 0 || tau[k] < x) return cum[k]
+        val t0 = tau[k - 1]
+        val span = tau[k] - t0
+        return if (span > 0.0) cum[k - 1] + (cum[k] - cum[k - 1]) * (x - t0) / span else cum[k]
+    }
+
+    /** The width factor a speed of [v] content px/ms draws at. */
+    internal fun speedFactor(v: Double, strength: Double, top: Double, speedScale: Double): Double =
+        1.0 - strength * smoothstep(0.0, top, v * speedScale)
+
+    /** [f] blurred along [path] at point [i] by a Gaussian of [sigma], each sample weighted by the arc around it. */
+    internal fun blurAt(f: DoubleArray, path: DoubleArray, n: Int, i: Int, sigma: Double, cursor: IntArray): Double {
+        if (sigma <= 0.0) return f[i]
+        val reach = SPEED_BLUR_REACH * sigma
+        val at = path[i]
         var lo = cursor[0]
-        var hi = cursor[1]
-        while (lo < i && times[lo] < a) lo++
-        while (hi < n - 1 && times[hi + 1] <= b) hi++
+        while (lo < i && path[lo] < at - reach) lo++
         cursor[0] = lo
-        cursor[1] = hi
-        // Always span at least one segment so a window that falls between two far-apart slow
-        // samples reads a real speed instead of a zero-length divide.
-        var l = lo
-        var h = hi
-        if (h <= l) { if (h < n - 1) h++ else l-- }
-        val dist = (cum[h] - cum[l]) * speedScale
-        val dt = max(times[h] - times[l], MIN_DT)
-        return 1.0 - speedStrength * smoothstep(SPEED_LO, SPEED_HI, dist / dt)
+        val k = -0.5 / (sigma * sigma)
+        var num = 0.0
+        var den = 0.0
+        var j = lo
+        while (j < n) {
+            val d = path[j] - at
+            if (d > reach) break
+            val own = (if (j > 0) path[j] - path[j - 1] else 0.0) + (if (j < n - 1) path[j + 1] - path[j] else 0.0)
+            val w = exp(k * d * d) * own
+            num += w * f[j]
+            den += w
+            j++
+        }
+        return if (den > 0.0) num / den else f[i]
     }
 
     /**
@@ -520,6 +541,8 @@ object StrokeEngine {
         holdEnds: Boolean = false,
         finished: Boolean = true,
         smoothScale: Double = 1.0,
+        speedTop: Double = SPEED_HI,
+        speedSmoothing: Double = DEFAULT_SPEED_SMOOTHING,
     ): StrokeGeometry {
         val n = samples.size
         if (n == 0) return StrokeGeometry.EMPTY
@@ -527,17 +550,21 @@ object StrokeEngine {
         val rawY = DoubleArray(n)
         val rawP = DoubleArray(n)
         var timed = false
+        var widths = true
         for (i in 0 until n) {
             val s = samples[i]
             rawX[i] = s.x
             rawY[i] = s.y
             rawP[i] = s.pressure
             if (s.t != 0.0) timed = true
+            if (s.widthFactor <= 0.0) widths = false
         }
         val rawT = if (timed) DoubleArray(n) { samples[it].t } else null
+        val rawF = if (widths) DoubleArray(n) { samples[it].widthFactor } else null
         return build(
             rawX, rawY, rawP, rawT, baseWidth, pressureEnabled, m, ds, speedStrength,
             taperEnabled, taperMinFactor, speedScale, smooth, holdEnds, finished, smoothScale,
+            speedTop, speedSmoothing, rawF,
         )
     }
 
@@ -564,6 +591,9 @@ object StrokeEngine {
         holdEnds: Boolean = false,
         finished: Boolean = true,
         smoothScale: Double = 1.0,
+        speedTop: Double = SPEED_HI,
+        speedSmoothing: Double = DEFAULT_SPEED_SMOOTHING,
+        rawF: DoubleArray? = null,
     ): StrokeGeometry {
         val n = rawX.size
         if (n == 0) return StrokeGeometry.EMPTY
@@ -623,8 +653,9 @@ object StrokeEngine {
         }
 
         // Travel along the smoothed centreline and its running total: the path the ink follows, and
-        // what every arc-length rule below is measured in. Only the nib and the taper read it.
-        val needArc = ds > 0.0 || taperEnabled
+        // what every arc-length rule below is measured in. Only the nib, the taper and the speed blur read it.
+        val speedOn = speedStrength > 0.0 && (rawF != null || rawT != null)
+        val needArc = ds > 0.0 || taperEnabled || (speedOn && rawF == null)
         val dirSteps = DoubleArray(if (needArc) n else 0)
         val cum = DoubleArray(dirSteps.size)
         if (needArc) {
@@ -636,10 +667,10 @@ object StrokeEngine {
 
         // Optional width multipliers: speed thins fast travel, taper points the ends. Neither pen is
         // the common one, so the arrays are built only for the strokes that use them.
-        val sf = if (speedStrength > 0.0 && rawT != null) {
-            speedFactors(rawT, steps, speedStrength, speedScale)
-        } else {
-            null
+        val sf = when {
+            !speedOn -> null
+            rawF != null -> rawF
+            else -> speedFactorsOver(rawT, steps, cum, n, speedStrength, speedTop, speedSmoothing * baseWidth, speedScale)
         }
         val tf = if (taperEnabled) taperFactors(cum, taperMinFactor, smoothScale) else null
 

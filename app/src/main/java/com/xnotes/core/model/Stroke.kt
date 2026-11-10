@@ -260,6 +260,8 @@ class Stroke(
             holdEnds = tool == Tool.PEN || tool == Tool.HIGHLIGHTER,
             finished = finished,
             smoothScale = smoothScale,
+            speedTop = config.speedTop,
+            speedSmoothing = config.speedSmoothing,
         ).also { cachedGeometry = it }
     }
 
@@ -348,6 +350,8 @@ class Stroke(
             smooth = !straight,
             holdEnds = tool == Tool.PEN || tool == Tool.HIGHLIGHTER,
             smoothScale = smoothScale,
+            speedTop = config.speedTop,
+            speedSmoothing = config.speedSmoothing,
         )
         // Everything before the sample being added; the caller appends that one itself.
         val s = pts

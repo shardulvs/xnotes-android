@@ -376,6 +376,93 @@ class StrokeEngineTest {
         assertEquals("even width through the corner", maxHw, minHw, 1e-5)
     }
 
+    private val pxPerMm = 249.0 / 25.4
+    private val handScale = 160.0 / 280.0
+
+    private fun minJerk(u: Double): Double {
+        val t = u.coerceIn(0.0, 1.0)
+        return t * t * t * (10 - 15 * t + 6 * t * t)
+    }
+
+    /** A hand's 'V': two 10 mm min-jerk legs of 150 ms, through a 240 Hz pen, whole-ms times and a 1 px gate. */
+    private fun handV(pauseMs: Double = 0.0, restMs: Double = 0.0): List<Sample> {
+        val leg = 150.0
+        val dx = 5.0 * pxPerMm
+        val dy = 8.66 * pxPerMm
+        val total = restMs + leg + pauseMs + leg
+        fun at(t: Double): Pair<Double, Double> {
+            val u = t - restMs
+            return when {
+                u <= 0.0 -> 0.0 to 0.0
+                u < leg -> minJerk(u / leg).let { dx * it to dy * it }
+                u < leg + pauseMs -> dx to dy
+                else -> minJerk((u - leg - pauseMs) / leg).let { dx + dx * it to dy - dy * it }
+            }
+        }
+        val out = ArrayList<Sample>()
+        var k = 0
+        while (k * 1000.0 / 240.0 <= total) {
+            val t = k * 1000.0 / 240.0
+            val (x, y) = at(t)
+            val last = out.lastOrNull()
+            if (last == null || abs(last.x - x) + abs(last.y - y) >= 1.0) out.add(Sample(x, y, 1.0, kotlin.math.floor(t)))
+            k++
+        }
+        val (ex, ey) = at(total)
+        out.add(Sample(ex, ey, 1.0, kotlin.math.floor(total)))
+        return out
+    }
+
+    /** The steepest half-width change per px of centreline; 1 or more means a disc swallows its neighbour. */
+    private fun steepest(g: StrokeGeometry): Double {
+        var worst = 0.0
+        for (i in 0 until g.pointCount - 1) {
+            val d = hypot(g.cx(i + 1) - g.cx(i), g.cy(i + 1) - g.cy(i))
+            val dr = abs(g.hw(i + 1) - g.hw(i))
+            worst = maxOf(worst, if (d > 1e-9) dr / d else if (dr > 1e-9) Double.MAX_VALUE else 0.0)
+        }
+        return worst
+    }
+
+    private fun speedV(w: Double, pauseMs: Double = 0.0, restMs: Double = 0.0) =
+        StrokeEngine.build(handV(pauseMs, restMs), w, false, 1.0, 0.0, speedStrength = 0.8, speedScale = handScale)
+
+    @Test fun speedEdgesStayGentleAtEveryWidth() {
+        for (w in listOf(4.0, 10.0, 20.0, 40.0)) for (pause in listOf(0.0, 80.0)) {
+            val edge = steepest(speedV(w, pause))
+            assertTrue("width $w, pause $pause: steepest edge $edge", edge < 0.5)
+        }
+    }
+
+    @Test fun holdingStillNeitherWidensNorThins() {
+        val plain = speedV(20.0)
+        val corner = plain.halfWidths.max().toDouble()
+        val paused = speedV(20.0, pauseMs = 300.0).halfWidths.max().toDouble()
+        assertEquals("a paused corner", corner, paused, 0.05 * corner)
+        assertEquals("a rest at pen-down", plain.hw(0), speedV(20.0, restMs = 300.0).hw(0), 0.05 * plain.hw(0))
+    }
+
+    @Test fun storedSpeedWidthsAreWhatTheEngineApplies() {
+        val s = handV()
+        val xs = DoubleArray(s.size) { s[it].x }
+        val ys = DoubleArray(s.size) { s[it].y }
+        val ts = DoubleArray(s.size) { s[it].t }
+        val f = StrokeEngine.speedWidths(
+            xs, ys, ts, 20.0, 0.8, StrokeEngine.SPEED_HI, StrokeEngine.DEFAULT_SPEED_SMOOTHING, handScale, true, 1.0,
+        )
+        val kept = s.mapIndexed { i, it -> it.copy(widthFactor = f[i]) }
+        val stored = StrokeEngine.build(kept, 20.0, false, 1.0, 0.0, speedStrength = 0.8, speedScale = handScale)
+        assertArrayEquals(speedV(20.0).halfWidths, stored.halfWidths, 0f)
+    }
+
+    @Test fun topSpeedSetsWhereTheLineIsThinnest() {
+        val pts = (0..40).map { Sample(it * 2.0, 0.0, 1.0, it * 4.0) } // a steady 0.5 dp/ms
+        val partial = StrokeEngine.build(pts, 4.0, false, 1.0, 0.0, speedStrength = 0.8, speedTop = 0.6)
+        val full = StrokeEngine.build(pts, 4.0, false, 1.0, 0.0, speedStrength = 0.8, speedTop = 0.4)
+        assertEquals(0.4, full.hw(20).toDouble(), 1e-6)
+        assertTrue("short of the top speed it is only part thinned", partial.hw(20) > 0.5)
+    }
+
     // --- Direction smoothing & end-width hold ---
     @Test fun calligraphyRibbonIsThinnedByDirection() {
         // An upward calligraphy ribbon is thinned by the direction term; the swept disc rounds its

@@ -53,6 +53,8 @@ class LiveStrokeRibbonTest {
         holdEnds = stroke.tool == Tool.PEN || stroke.tool == Tool.HIGHLIGHTER,
         finished = finished,
         smoothScale = stroke.smoothScale,
+        speedTop = stroke.config.speedTop,
+        speedSmoothing = stroke.config.speedSmoothing,
     )
 
     private fun assertSameInk(tool: Tool, finished: Boolean) {

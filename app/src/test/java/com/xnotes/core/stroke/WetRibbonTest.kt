@@ -48,6 +48,8 @@ class WetRibbonTest {
             smooth = true,
             holdEnds = tool == Tool.PEN || tool == Tool.HIGHLIGHTER,
             smoothScale = smoothScale,
+            speedTop = config.speedTop,
+            speedSmoothing = config.speedSmoothing,
         )
 
     private fun build(
@@ -70,6 +72,8 @@ class WetRibbonTest {
         holdEnds = tool == Tool.PEN || tool == Tool.HIGHLIGHTER,
         finished = false,
         smoothScale = smoothScale,
+        speedTop = config.speedTop,
+        speedSmoothing = config.speedSmoothing,
     )
 
     /** Grow a ribbon over [samples], checking it against the batch build at every single length. */
@@ -78,8 +82,8 @@ class WetRibbonTest {
         samples: List<Sample>,
         smoothScale: Double = 1.0,
         speedScale: Double = 1.0,
+        config: ToolConfig = configFor(tool),
     ) {
-        val config = configFor(tool)
         val ribbon = ribbonFor(config, tool, smoothScale, speedScale)
         for (n in 1..samples.size) {
             val s = samples[n - 1]
@@ -140,6 +144,30 @@ class WetRibbonTest {
         assertMatchesAtEveryLength(Tool.SPEED, out)
     }
 
+    /** A stroke whose speed swings hard, with gaps where a gate would have dropped samples while the pen stood still. */
+    private fun jerkyTimedPath(count: Int): List<Sample> {
+        val out = ArrayList<Sample>(count)
+        var t = 0.0
+        for (i in 0 until count) {
+            val u = i * 0.09
+            out.add(Sample(40.0 + u * 26.0 + sin(u * 3.1) * 7.0, 60.0 + sin(u * 1.7) * 34.0, 0.6, t))
+            t += if (i % 23 == 22) 120.0 else 3.0 + 9.0 * (0.5 + 0.5 * sin(u * 0.7))
+        }
+        return out
+    }
+
+    @Test fun speedMatchesUnderAWideBlurAndPauses() {
+        val wide = configFor(Tool.SPEED).copy(baseWidth = 20.0, speedSmoothing = 1.0)
+        assertMatchesAtEveryLength(Tool.SPEED, jerkyTimedPath(160), config = wide)
+        assertMatchesAtEveryLength(Tool.SPEED, jerkyTimedPath(160), config = wide.copy(speedSmoothing = 0.0))
+    }
+
+    @Test fun speedSettledPointsNeverMoveUnderAWideBlur() {
+        val wide = configFor(Tool.SPEED).copy(baseWidth = 20.0, speedSmoothing = 1.0)
+        assertSettledPointsNeverMove(Tool.SPEED, jerkyTimedPath(200), wide)
+        assertSettledPointsNeverMove(Tool.SPEED, jerkyTimedPath(200), wide.copy(speedSmoothing = 0.0))
+    }
+
     @Test fun matchesOnAStrokeTooShortToSettleAnything() {
         for (len in 1..10) {
             assertMatchesAtEveryLength(Tool.PEN, path(len))
@@ -155,8 +183,7 @@ class WetRibbonTest {
      * length. Checked against the engine, so a ribbon that both drew and judged a point wrongly
      * cannot agree with itself into a pass.
      */
-    private fun assertSettledPointsNeverMove(tool: Tool, samples: List<Sample>) {
-        val config = configFor(tool)
+    private fun assertSettledPointsNeverMove(tool: Tool, samples: List<Sample>, config: ToolConfig = configFor(tool)) {
         val ribbon = ribbonFor(config, tool, 1.0, 1.0)
         val settledCx = HashMap<Int, Double>()
         val settledHw = HashMap<Int, Double>()
