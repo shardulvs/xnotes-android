@@ -7,24 +7,34 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -42,7 +52,9 @@ import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xnotes.R
+import com.xnotes.core.tools.ToolbarDistribution
 import com.xnotes.core.tools.ToolbarItem
+import com.xnotes.core.tools.ToolbarRegion
 import com.xnotes.core.tools.ToolbarLayout
 import com.xnotes.core.tools.ToolbarSection
 import com.xnotes.ui.icons.XnotesIcons
@@ -50,28 +62,34 @@ import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
 
 /**
- * The toolbar customizer, rendered inline inside Preferences. Each section is a bordered card whose
- * top strip (the empty space beside the delete X) is the grab area for dragging the whole section;
- * the cards sit side by side in a wrapping [FlowRow], and within a card the tool chips flow like the
- * real bar. Chips tap to show/hide and long-press to drag (within or across cards). The drag ghost
- * and the edge auto-scroll live in the caller (PreferencesPane) so the ghost can float above the
- * scroll; this body only paints, captures bounds, and forwards gesture events up.
+ * Inline toolbar editor: a single continuous layer list or Start/Center/End columns.
+ * Each section is a draggable card containing one to three lanes of draggable tool rows.
+ * Gesture ghosts and edge scrolling are hoisted to PreferencesPane to avoid clipping.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ToolbarCustomizerBody(
     layout: ToolbarLayout,
-    dragItem: ToolbarItem?,
-    dropTarget: Pair<Int, Int>?,
+    availableItems: Set<ToolbarItem>,
+    dragItem: Pair<Int, Int>?,
+    selectedEntry: Pair<Int, Int>?,
+    dropTarget: Triple<Int, Int, Int>?,
+    dragRegionTarget: ToolbarRegion?,
     dragSection: Int?,
-    sectionDropTarget: Int?,
-    chipBounds: MutableMap<ToolbarItem, Rect>,
+    sectionDropTarget: ToolbarSectionTarget?,
+    chipBounds: MutableMap<Pair<Int, Int>, Rect>,
+    laneBounds: MutableMap<Pair<Int, Int>, Rect>,
     sectionBounds: MutableMap<Int, Rect>,
     sectionGrabBounds: MutableMap<Int, Rect>,
+    regionBounds: MutableMap<ToolbarRegion, Rect>,
     onToggle: (Int, Int) -> Unit,
+    onSelect: (Int, Int) -> Unit,
+    onRemoveItem: (Int, Int) -> Unit,
+    onAddItem: (Int, Int, ToolbarItem) -> Unit,
+    onLanesChange: (Int, Int) -> Unit,
+    onRegionChange: (Int, ToolbarRegion) -> Unit,
     onDelete: (Int) -> Unit,
-    onAdd: () -> Unit,
-    onDragStart: (ToolbarItem, Offset) -> Unit,
+    onAdd: (Int, ToolbarRegion) -> Unit,
+    onDragStart: (Int, Int, Offset) -> Unit,
     onDrag: (Offset) -> Unit,
     onDrop: () -> Unit,
     onCancel: () -> Unit,
@@ -83,15 +101,47 @@ fun ToolbarCustomizerBody(
     val palette = LocalPalette.current
     val dragging = dragItem != null
     val draggingSection = dragSection != null
-    FlowRow(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
+    val groups: List<ToolbarRegion?> = if (layout.distribution == ToolbarDistribution.REGIONS)
+        ToolbarRegion.entries else listOf(null)
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        // Keep every layer readable on phones: scroll the three columns instead of squeezing them.
+        val compactColumns = layout.distribution == ToolbarDistribution.REGIONS && maxWidth < 720.dp
+        Row(Modifier.fillMaxWidth().then(if (compactColumns) Modifier.horizontalScroll(rememberScrollState()) else Modifier),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        groups.forEach { region ->
+            Column(
+                (if (compactColumns) Modifier.width(260.dp) else Modifier.weight(1f)).then(if (region != null)
+                    Modifier.onGloballyPositioned { regionBounds[region] = it.boundsInRoot() }
+                        .border(1.dp, (if (dragging && dragRegionTarget == region) palette.accent else palette.border)
+                            .toComposeColor(), MaterialTheme.shapes.medium).padding(10.dp)
+                    else Modifier),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+            if (region != null) {
+                Text(
+                    stringResource(when (region) {
+                        ToolbarRegion.START -> R.string.toolbar_region_start
+                        ToolbarRegion.CENTER -> R.string.toolbar_region_center
+                        ToolbarRegion.END -> R.string.toolbar_region_end
+                    }),
+                    color = palette.text.toComposeColor(), style = MaterialTheme.typography.titleSmall,
+                )
+            }
+            Column(
+                Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
         layout.sections.forEachIndexed { sec, section ->
-            if (draggingSection && sectionDropTarget == sec) SectionCaret()
+            if (region != null && section.region != region) return@forEachIndexed
+            if (draggingSection && sectionDropTarget == ToolbarSectionTarget(region ?: ToolbarRegion.START, sec)) SectionCaret()
             SectionCard(
+                label = "Section ${sec + 1}",
                 canDelete = layout.sections.size > 1,
+                lanes = section.lanes,
+                region = section.region,
+                regionsEnabled = region != null,
+                onLanesChange = { onLanesChange(sec, it) },
+                onRegionChange = { onRegionChange(sec, it) },
                 targeted = dragging && dropTarget?.first == sec,
                 dimmed = dragSection == sec,
                 onDelete = { onDelete(sec) },
@@ -102,39 +152,77 @@ fun ToolbarCustomizerBody(
                 onGrabDrop = onSectionDrop,
                 onGrabCancel = onSectionCancel,
             ) {
-                if (section.entries.isEmpty()) {
-                    Text(
-                        stringResource(R.string.drop_here),
-                        color = (if (dragging && dropTarget == sec to 0) palette.accent else palette.textDim).toComposeColor(),
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                    )
-                } else {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        section.entries.forEachIndexed { idx, entry ->
-                            if (dragging && dropTarget == sec to idx) InsertionCaret()
-                            ChipCell(
-                                item = entry.item,
-                                visible = entry.visible,
-                                dragging = dragItem == entry.item,
-                                onTap = { onToggle(sec, idx) },
-                                onDragStart = { local -> onDragStart(entry.item, local) },
-                                onDrag = onDrag,
-                                onDrop = onDrop,
-                                onCancel = onCancel,
-                                onBounds = { chipBounds[entry.item] = it },
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    repeat(section.lanes) { lane ->
+                        val cells = section.entries.withIndex().filter { it.value.lane == lane }
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onGloballyPositioned { laneBounds[sec to lane] = it.boundsInRoot() }
+                                .border(
+                                    1.dp,
+                                    (if (dragging && dropTarget?.first == sec && dropTarget.second == lane)
+                                        palette.accent else palette.border).toComposeColor(),
+                                    RoundedCornerShape(6.dp),
+                                )
+                                .padding(3.dp),
+                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                        ) {
+                            if (section.lanes > 1) {
+                                Text("Linha ${lane + 1}", color = palette.textDim.toComposeColor(), fontSize = 11.sp)
+                            }
+                            if (cells.isEmpty()) {
+                                Text(
+                                    stringResource(R.string.drop_here),
+                                    color = palette.textDim.toComposeColor(),
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                )
+                            }
+                            cells.forEach { (idx, entry) ->
+                                if (dragging && dropTarget == Triple(sec, lane, idx)) InsertionCaret()
+                                ChipCell(
+                                    item = entry.item,
+                                    visible = entry.visible,
+                                    layerStyle = true,
+                                    dragging = dragItem == (sec to idx),
+                                    selected = selectedEntry == (sec to idx),
+                                    onTap = { onSelect(sec, idx) },
+                                    onToggle = { onToggle(sec, idx) },
+                                    onRemove = { onRemoveItem(sec, idx) },
+                                    onDragStart = { local -> onDragStart(sec, idx, local) },
+                                    onDrag = onDrag,
+                                    onDrop = onDrop,
+                                    onCancel = onCancel,
+                                    onBounds = { chipBounds[sec to idx] = it },
+                                )
+                            }
+                            if (dragging && dropTarget == Triple(sec, lane, cells.lastOrNull()?.index?.plus(1) ?: section.entries.size)) InsertionCaret()
+                            AddItemPicker(
+                                items = availableItems.filter { item ->
+                                    item == ToolbarItem.COLORS || item == ToolbarItem.SPACER || layout.sections.none { sec ->
+                                        sec.entries.any { it.item == item && it.visible }
+                                    }
+                                },
+                                onChoose = { item -> onAddItem(sec, lane, item) },
                             )
                         }
-                        if (dragging && dropTarget == sec to section.entries.size) InsertionCaret()
                     }
                 }
             }
         }
-        if (draggingSection && sectionDropTarget == layout.sections.size) SectionCaret()
-        AddSectionChip(onClick = onAdd)
+        if (draggingSection && sectionDropTarget == ToolbarSectionTarget(region ?: ToolbarRegion.START, null)) SectionCaret()
+        if (dragging && region != null && dragRegionTarget == region && dropTarget == null) {
+            Text("Solte para criar uma section aqui", color = palette.accent.toComposeColor(), fontSize = 12.sp)
+        }
+        AddSectionChip(onClick = { lines -> onAdd(lines, region ?: ToolbarRegion.START) })
+            }
+            }
+        }
+        }
     }
 }
 
@@ -147,9 +235,10 @@ fun ToolbarCustomizerBody(
 internal fun toolbarDropTarget(
     layout: ToolbarLayout,
     finger: Offset,
-    chipBounds: Map<ToolbarItem, Rect>,
+    chipBounds: Map<Pair<Int, Int>, Rect>,
+    laneBounds: Map<Pair<Int, Int>, Rect>,
     sectionBounds: Map<Int, Rect>,
-): Pair<Int, Int>? {
+): Triple<Int, Int, Int>? {
     var sec = layout.sections.indices.firstOrNull { sectionBounds[it]?.contains(finger) == true } ?: -1
     if (sec < 0) {
         var best = Float.MAX_VALUE
@@ -162,28 +251,68 @@ internal fun toolbarDropTarget(
         }
     }
     if (sec < 0) return null
-    val entries = layout.sections[sec].entries
-    if (entries.isEmpty()) return sec to 0
-    fun before(r: Rect): Boolean = finger.y < r.top || (finger.y <= r.bottom && finger.x < r.center.x)
-    for (idx in entries.indices) {
-        val r = chipBounds[entries[idx].item] ?: continue
-        if (before(r)) return sec to idx
+    val section = layout.sections[sec]
+    val lane = if (section.lanes == 1) 0 else (0 until section.lanes).minByOrNull { row ->
+        val r = laneBounds[sec to row] ?: return@minByOrNull Float.MAX_VALUE
+        val dx = maxOf(r.left - finger.x, 0f, finger.x - r.right)
+        val dy = maxOf(r.top - finger.y, 0f, finger.y - r.bottom)
+        dx * dx + dy * dy
+    } ?: 0
+    val indexed = section.entries.withIndex().filter { it.value.lane == lane }
+    if (indexed.isEmpty()) return Triple(sec, lane, section.entries.size)
+    fun before(r: Rect): Boolean = finger.y < r.center.y
+    for ((idx, _) in indexed) {
+        val r = chipBounds[sec to idx] ?: continue
+        if (before(r)) return Triple(sec, lane, idx)
     }
-    return sec to entries.size
+    return Triple(sec, lane, indexed.last().index + 1)
 }
 
-/** Resolve the section insertion index (0..size) for a finger position in root coordinates. */
+internal data class ToolbarItemTarget(val region: ToolbarRegion?, val slot: Triple<Int, Int, Int>?)
+
+internal fun toolbarItemDropTarget(
+    layout: ToolbarLayout, finger: Offset,
+    chipBounds: Map<Pair<Int, Int>, Rect>, laneBounds: Map<Pair<Int, Int>, Rect>,
+    sectionBounds: Map<Int, Rect>, regionBounds: Map<ToolbarRegion, Rect>,
+): ToolbarItemTarget? {
+    if (layout.distribution == ToolbarDistribution.CONTINUOUS) {
+        return toolbarDropTarget(layout, finger, chipBounds, laneBounds, sectionBounds)
+            ?.let { ToolbarItemTarget(null, it) }
+    }
+    val region = nearestToolbarRegion(finger, regionBounds) ?: return null
+    val withinRegion = sectionBounds.filterKeys { layout.sections.getOrNull(it)?.region == region }
+    return ToolbarItemTarget(region, toolbarDropTarget(layout, finger, chipBounds, laneBounds, withinRegion))
+}
+
+private fun nearestToolbarRegion(finger: Offset, bounds: Map<ToolbarRegion, Rect>): ToolbarRegion? =
+    bounds.entries.minByOrNull { (_, rect) ->
+        val dx = maxOf(rect.left - finger.x, 0f, finger.x - rect.right)
+        val dy = maxOf(rect.top - finger.y, 0f, finger.y - rect.bottom)
+        dx * dx + dy * dy
+    }?.key
+
+/** Target column and position before a section; null means append to that column. */
+data class ToolbarSectionTarget(val region: ToolbarRegion, val beforeSection: Int? = null)
+
 internal fun toolbarSectionDropTarget(
     layout: ToolbarLayout,
     finger: Offset,
     sectionBounds: Map<Int, Rect>,
-): Int {
-    fun before(r: Rect): Boolean = finger.y < r.top || (finger.y <= r.bottom && finger.x < r.center.x)
-    for (sec in layout.sections.indices) {
-        val r = sectionBounds[sec] ?: continue
-        if (before(r)) return sec
+    regionBounds: Map<ToolbarRegion, Rect> = emptyMap(),
+): ToolbarSectionTarget {
+    if (layout.distribution == ToolbarDistribution.CONTINUOUS) {
+        val before = layout.sections.indices.firstOrNull { i ->
+            sectionBounds[i]?.let { r -> finger.y < r.center.y } == true
+        }
+        return ToolbarSectionTarget(ToolbarRegion.START, before)
     }
-    return layout.sections.size
+    // A drop can reach an empty region: use the column bounds, not the card bounds.
+    val region = nearestToolbarRegion(finger, regionBounds) ?: ToolbarRegion.START
+    val before = layout.sections.indices.firstOrNull { index ->
+        layout.sections[index].region == region &&
+            sectionBounds[index]?.let { finger.y < it.center.y } == true
+    }
+    return ToolbarSectionTarget(region, before)
 }
 
 /**
@@ -193,7 +322,13 @@ internal fun toolbarSectionDropTarget(
  */
 @Composable
 private fun SectionCard(
+    label: String,
     canDelete: Boolean,
+    lanes: Int,
+    region: ToolbarRegion,
+    regionsEnabled: Boolean,
+    onLanesChange: (Int) -> Unit,
+    onRegionChange: (ToolbarRegion) -> Unit,
     targeted: Boolean,
     dimmed: Boolean,
     onDelete: () -> Unit,
@@ -206,8 +341,10 @@ private fun SectionCard(
     content: @Composable () -> Unit,
 ) {
     val palette = LocalPalette.current
+    var sectionMenuOpen by remember { mutableStateOf(false) }
     SectionCardScaffold(
         modifier = Modifier
+            .fillMaxWidth()
             .alpha(if (dimmed) 0.35f else 1f)
             .onGloballyPositioned { onBounds(it.boundsInRoot()) }
             .clip(MaterialTheme.shapes.small)
@@ -216,6 +353,7 @@ private fun SectionCard(
         header = {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 SectionDragStrip(
+                    label = label,
                     // Explicit height: the card is measured with an unbounded max height, so
                     // fillMaxHeight would collapse the grab strip to 0px and nothing could be pressed.
                     modifier = Modifier.weight(1f).height(34.dp),
@@ -225,6 +363,50 @@ private fun SectionCard(
                     onDrop = onGrabDrop,
                     onCancel = onGrabCancel,
                 )
+                Box {
+                    Tooltip("Configurar linhas da section") {
+                        IconButton(onClick = { sectionMenuOpen = true }, modifier = Modifier.size(26.dp)) {
+                            Icon(
+                                XnotesIcons.more, "Configurar linhas da section",
+                                tint = palette.textDim.toComposeColor(),
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
+                    }
+                    DropdownMenu(expanded = sectionMenuOpen, onDismissRequest = { sectionMenuOpen = false }) {
+                        for (count in 1..3) {
+                            DropdownMenuItem(
+                                text = { Text(if (count == 1) "1 linha" else "$count linhas") },
+                                leadingIcon = if (lanes == count) {
+                                    { Icon(XnotesIcons.check, null, modifier = Modifier.size(16.dp)) }
+                                } else null,
+                                onClick = {
+                                    sectionMenuOpen = false
+                                    onLanesChange(count)
+                                },
+                            )
+                        }
+                        if (regionsEnabled) {
+                            HorizontalDivider()
+                            for (target in ToolbarRegion.entries) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(when (target) {
+                                        ToolbarRegion.START -> R.string.toolbar_region_start
+                                        ToolbarRegion.CENTER -> R.string.toolbar_region_center
+                                        ToolbarRegion.END -> R.string.toolbar_region_end
+                                    })) },
+                                    leadingIcon = if (region == target) {
+                                        { Icon(XnotesIcons.check, null, modifier = Modifier.size(16.dp)) }
+                                    } else null,
+                                    onClick = {
+                                        sectionMenuOpen = false
+                                        onRegionChange(target)
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
                 Tooltip(stringResource(R.string.delete_section)) {
                     IconButton(onClick = onDelete, enabled = canDelete, modifier = Modifier.size(26.dp)) {
                         Icon(
@@ -262,6 +444,7 @@ private fun SectionCardScaffold(
 /** The transparent top strip beside the X; long-press and drag it to reorder the whole section. */
 @Composable
 private fun SectionDragStrip(
+    label: String,
     modifier: Modifier,
     onBounds: (Rect) -> Unit,
     onDragStart: (Offset) -> Unit,
@@ -273,7 +456,8 @@ private fun SectionDragStrip(
     val dMove by rememberUpdatedState(onDrag)
     val dEnd by rememberUpdatedState(onDrop)
     val dCancel by rememberUpdatedState(onCancel)
-    Box(
+    val palette = LocalPalette.current
+    Row(
         modifier
             .onGloballyPositioned { onBounds(it.boundsInRoot()) }
             .pointerInput(Unit) {
@@ -284,7 +468,12 @@ private fun SectionDragStrip(
                     onDragCancel = { dCancel() },
                 )
             },
-    )
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Icon(XnotesIcons.menu, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp))
+        Text(label, color = palette.text.toComposeColor(), style = MaterialTheme.typography.labelMedium, maxLines = 1)
+    }
 }
 
 @Composable
@@ -292,7 +481,11 @@ private fun ChipCell(
     item: ToolbarItem,
     visible: Boolean,
     dragging: Boolean,
+    selected: Boolean,
+    layerStyle: Boolean = false,
     onTap: () -> Unit,
+    onToggle: () -> Unit,
+    onRemove: () -> Unit,
     onDragStart: (Offset) -> Unit,
     onDrag: (Offset) -> Unit,
     onDrop: () -> Unit,
@@ -306,10 +499,7 @@ private fun ChipCell(
     val dMove by rememberUpdatedState(onDrag)
     val dEnd by rememberUpdatedState(onDrop)
     val dCancel by rememberUpdatedState(onCancel)
-    ChipFace(
-        item = item,
-        visible = visible,
-        modifier = Modifier
+    val faceModifier = Modifier
             .alpha(if (dragging) 0.15f else 1f)
             .onGloballyPositioned { onBounds(it.boundsInRoot()) }
             .pointerInput(item) { detectTapGestures(onTap = { tap() }) }
@@ -320,8 +510,16 @@ private fun ChipCell(
                     onDragEnd = { dEnd() },
                     onDragCancel = { dCancel() },
                 )
-            },
-    )
+            }
+    if (layerStyle) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            LayerFace(item, visible, faceModifier.weight(1f), selected = selected, onToggle = onToggle)
+            Box(Modifier.size(30.dp).clip(MaterialTheme.shapes.small).clickable(onClick = onRemove),
+                contentAlignment = Alignment.Center) {
+                Icon(XnotesIcons.close, stringResource(R.string.remove), modifier = Modifier.size(14.dp))
+            }
+        }
+    } else ChipFace(item, visible, faceModifier)
 }
 
 /** The visual of a tool chip (icon + label, dimmed when hidden); shared by the bar editor and the
@@ -335,31 +533,73 @@ private fun ChipFace(item: ToolbarItem, visible: Boolean, modifier: Modifier = M
             .clip(MaterialTheme.shapes.small)
             .background(palette.surface.toComposeColor())
             .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.small)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(toolbarItemIcon(item), null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(14.dp))
-        Spacer(Modifier.width(4.dp))
-        Text(stringResource(item.labelRes), color = palette.text.toComposeColor(), fontSize = 12.sp)
+        Icon(itemIcon(item), null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(6.dp))
+        Text(stringResource(item.labelRes), color = palette.text.toComposeColor(), style = MaterialTheme.typography.labelMedium)
     }
 }
 
-/** The floating chip that tracks the finger during a chip drag (drawn at the pane root). */
+/** Compact layer row. Tap toggles visibility; hold the grip/row to reorder. */
 @Composable
-fun ToolbarDragGhost(item: ToolbarItem) {
+private fun LayerFace(item: ToolbarItem, visible: Boolean, modifier: Modifier, selected: Boolean = false, onToggle: (() -> Unit)? = null) {
     val palette = LocalPalette.current
     Row(
-        Modifier
-            .alpha(0.9f)
+        modifier
+            .fillMaxWidth()
             .clip(MaterialTheme.shapes.small)
             .background(palette.surface.toComposeColor())
-            .border(1.dp, palette.accent.toComposeColor(), MaterialTheme.shapes.small)
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .border(if (selected) 2.dp else 1.dp,
+                (if (selected) palette.accent else palette.border).toComposeColor(), MaterialTheme.shapes.small)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Icon(toolbarItemIcon(item), null, tint = palette.accent.toComposeColor(), modifier = Modifier.size(14.dp))
-        Spacer(Modifier.width(4.dp))
-        Text(stringResource(item.labelRes), color = palette.accent.toComposeColor(), fontSize = 12.sp)
+        Icon(XnotesIcons.menu, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(14.dp))
+        Icon(itemIcon(item), null, tint = (if (visible) palette.text else palette.textDim).toComposeColor(), modifier = Modifier.size(16.dp))
+        Text(
+            stringResource(item.labelRes),
+            color = (if (visible) palette.text else palette.textDim).toComposeColor(),
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            modifier = Modifier.weight(1f),
+        )
+        if (!visible) {
+            Text("Oculto", color = palette.textDim.toComposeColor(),
+                style = MaterialTheme.typography.labelSmall)
+        }
+        if (onToggle != null) {
+            Box(Modifier.size(30.dp).clip(MaterialTheme.shapes.small).clickable(onClick = onToggle),
+                contentAlignment = Alignment.Center) {
+                Icon(XnotesIcons.view, if (visible) "Ocultar elemento" else "Mostrar elemento",
+                    tint = (if (visible) palette.accent else palette.textDim).toComposeColor(),
+                    modifier = Modifier.size(16.dp))
+            }
+        } else {
+            Icon(XnotesIcons.view, null, tint = (if (visible) palette.accent else palette.textDim).toComposeColor(), modifier = Modifier.size(16.dp))
+        }
+    }
+}
+
+/** A lifted copy of the actual editor row, kept at its measured width and grab point.
+ * The visual reuses LayerFace so new row actions/icons stay consistent automatically. */
+@Composable
+fun ToolbarDragGhost(item: ToolbarItem, visible: Boolean, widthPx: Float) {
+    val palette = LocalPalette.current
+    val width = with(LocalDensity.current) { widthPx.toDp() }
+    Box(
+        Modifier
+            .width(width)
+            .alpha(0.94f)
+            .clip(MaterialTheme.shapes.small),
+    ) {
+        LayerFace(item, visible, Modifier.fillMaxWidth())
+        Box(
+            Modifier.matchParentSize()
+                .border(2.dp, palette.accent.toComposeColor(), MaterialTheme.shapes.small),
+        )
     }
 }
 
@@ -367,7 +607,6 @@ fun ToolbarDragGhost(item: ToolbarItem) {
  * A faithful floating copy of a whole section during a section drag, pinned to the dragged card's
  * width ([widthPx], root pixels) so its chips wrap exactly like the card and the shape never changes.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SectionCardGhost(section: ToolbarSection, widthPx: Float) {
     val palette = LocalPalette.current
@@ -393,46 +632,115 @@ fun SectionCardGhost(section: ToolbarSection, widthPx: Float) {
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
             )
         } else {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                section.entries.forEach { e -> ChipFace(e.item, e.visible) }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                repeat(section.lanes) { lane ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        section.entries.filter { it.lane == lane }.forEach { e ->
+                            ChipFace(e.item, e.visible)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Add a missing tool (or another Colors / Spacer block) directly to this section's chosen line. */
+@Composable
+private fun AddItemPicker(items: List<ToolbarItem>, onChoose: (ToolbarItem) -> Unit) {
+    val palette = LocalPalette.current
+    var open by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    Box {
+        Row(
+            Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small)
+                .clickable(enabled = items.isNotEmpty()) { query = ""; open = true }
+                .padding(horizontal = 10.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(XnotesIcons.plus, null, tint = palette.accent.toComposeColor(), modifier = Modifier.size(14.dp))
+            Text(stringResource(R.string.toolbar_add_element), color = palette.accent.toComposeColor(), fontSize = 12.sp)
+        }
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            modifier = Modifier.width(300.dp),
+        ) {
+            OutlinedTextField(
+                value = query, onValueChange = { query = it },
+                placeholder = { Text(stringResource(R.string.toolbar_search_elements)) },
+                singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            )
+            Column(Modifier.heightIn(max = 280.dp).verticalScroll(rememberScrollState())) {
+                val filtered = items.filter { item ->
+                    stringResource(item.labelRes).contains(query, ignoreCase = true) ||
+                        item.id.contains(query, ignoreCase = true) ||
+                        (item == ToolbarItem.COLORS && "colours".contains(query, ignoreCase = true))
+                }
+                if (filtered.isEmpty()) {
+                    Text(stringResource(R.string.toolbar_no_elements), modifier = Modifier.padding(12.dp), fontSize = 12.sp)
+                }
+                filtered.forEach { item ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(item.labelRes), fontSize = 13.sp) },
+                        leadingIcon = { Icon(itemIcon(item), null, modifier = Modifier.size(18.dp)) },
+                        onClick = { open = false; onChoose(item) },
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun AddSectionChip(onClick: () -> Unit) {
+private fun AddSectionChip(onClick: (Int) -> Unit) {
     val palette = LocalPalette.current
-    Row(
-        Modifier
-            .clip(MaterialTheme.shapes.small)
-            .border(1.dp, palette.accent.toComposeColor(), MaterialTheme.shapes.small)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(XnotesIcons.plus, stringResource(R.string.add_section), tint = palette.accent.toComposeColor(), modifier = Modifier.size(14.dp))
-        Spacer(Modifier.width(4.dp))
-        Text(stringResource(R.string.add_section), color = palette.accent.toComposeColor(), fontSize = 12.sp)
+    var menuOpen by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            Modifier
+                .clip(MaterialTheme.shapes.small)
+                .border(1.dp, palette.accent.toComposeColor(), MaterialTheme.shapes.small)
+                .clickable { menuOpen = true }
+                .padding(horizontal = 10.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(XnotesIcons.plus, stringResource(R.string.add_section), tint = palette.accent.toComposeColor(), modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(stringResource(R.string.add_section), color = palette.accent.toComposeColor(), fontSize = 12.sp)
+        }
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            DropdownMenuItem(text = { Text("Uma linha") }, onClick = {
+                menuOpen = false
+                onClick(1)
+            })
+            DropdownMenuItem(text = { Text("Duas linhas") }, onClick = {
+                menuOpen = false
+                onClick(2)
+            })
+            DropdownMenuItem(text = { Text("Três linhas") }, onClick = {
+                menuOpen = false
+                onClick(3)
+            })
+        }
     }
 }
 
 @Composable
 private fun InsertionCaret() {
-    Box(Modifier.width(2.dp).height(28.dp).background(LocalPalette.current.accent.toComposeColor()))
+    Box(Modifier.fillMaxWidth().height(2.dp).background(LocalPalette.current.accent.toComposeColor()))
 }
 
-/** Taller caret marking where a dragged section will land between cards. */
+/** Marker between layer-style section cards. */
 @Composable
 private fun SectionCaret() {
-    Box(Modifier.width(3.dp).height(56.dp).clip(RoundedCornerShape(2.dp)).background(LocalPalette.current.accent.toComposeColor()))
+    Box(Modifier.fillMaxWidth().height(3.dp)
+        .clip(RoundedCornerShape(2.dp)).background(LocalPalette.current.accent.toComposeColor()))
 }
 
 @Composable
-internal fun toolbarItemIcon(item: ToolbarItem): ImageVector = when (item) {
+internal fun itemIcon(item: ToolbarItem): ImageVector = when (item) {
     ToolbarItem.HOME -> XnotesIcons.home
     ToolbarItem.TITLE -> XnotesIcons.edit
     ToolbarItem.SIDEBAR -> XnotesIcons.sidebar
@@ -441,7 +749,6 @@ internal fun toolbarItemIcon(item: ToolbarItem): ImageVector = when (item) {
     ToolbarItem.CALLIGRAPHY -> ImageVector.vectorResource(R.drawable.ic_stroke_calligraphy)
     ToolbarItem.SPEED -> ImageVector.vectorResource(R.drawable.ic_stroke_speed)
     ToolbarItem.TAPER -> ImageVector.vectorResource(R.drawable.ic_stroke_taper)
-    ToolbarItem.SPACER -> XnotesIcons.more
     ToolbarItem.HIGHLIGHTER -> ImageVector.vectorResource(R.drawable.ic_stroke_highlighter)
     ToolbarItem.ERASER -> XnotesIcons.eraser
     ToolbarItem.PAN -> XnotesIcons.pan
@@ -468,6 +775,7 @@ internal fun toolbarItemIcon(item: ToolbarItem): ImageVector = when (item) {
     ToolbarItem.ZOOM_LOCK -> XnotesIcons.lock
     ToolbarItem.FULLSCREEN -> XnotesIcons.fullscreen
     ToolbarItem.COLORS -> XnotesIcons.more
+    ToolbarItem.SPACER -> XnotesIcons.grip
     ToolbarItem.WAYPOINTS -> XnotesIcons.bookmark
     ToolbarItem.MINIMAP -> XnotesIcons.map
 }
