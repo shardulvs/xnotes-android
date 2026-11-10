@@ -36,19 +36,23 @@ path. Width reflow and scaling an already outlined path are semantically differe
 
 ## Redmi Pad 2 results (2026-11-10, PR #428 development branch)
 
-Median CPU timings from one instrumentation run:
+Median CPU timings from a fresh instrumentation run **after the text resize fixes** (`9ebbd461`):
 
 | Scenario | 1 outlined | 1 native | 5 outlined | 5 native |
 | --- | ---: | ---: | ---: | ---: |
-| Cold mesh | 25.69 ms | 88.21 ms | 22.75 ms | 296.33 ms |
-| Hot mesh | 16.20 ms | 0.049 ms | 18.00 ms | 0.040 ms |
-| Save | 38.06 ms | 0.369 ms | 100.31 ms | 0.376 ms |
-| Load | 4,734.56 ms | 1.61 ms | 13,650.38 ms | 2.66 ms |
+| Cold mesh | 16.26 ms | 88.95 ms | 15.88 ms | 295.60 ms |
+| Hot mesh | 9.49 ms | 0.016 ms | 15.72 ms | 0.039 ms |
+| Save | 24.60 ms | 0.426 ms | 87.82 ms | 0.357 ms |
+| Load | 2,877.74 ms | 1.02 ms | 13,536.39 ms | 2.41 ms |
 | .xcanvas bytes | 27,505 | 339 | 132,771 | 376 |
 
-Native width reflow + mesh: 59.10 ms median, P95 67.14 ms (35 runs).
-The first mesh is still expensive; cache hits are fast, and the edit path dispatches
+Native width reflow + mesh: 59.60 ms median, P95 67.16 ms (35 runs).
+Outlining already-built shapes: 2.55 ms median, P95 5.52 ms (35 runs).
+The first native mesh is **slower** than meshing existing outline geometry; hot cache hits,
+save/load and file size are dramatically better for native text. The edit path dispatches
 cold meshes to a background executor. These are not measured end-to-end UI latencies.
+The previous run, before the resize fixes, was consistent in magnitude (native cold mesh
+88.21/296.33 ms and hot mesh 0.049/0.040 ms for one/five boxes), but individual runs vary.
 
 The async editor change aims to reduce input-thread stalls. Measure interaction latency separately
 with frame timing or a Macrobenchmark before claiming an end-to-end responsiveness improvement.
