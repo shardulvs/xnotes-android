@@ -78,25 +78,6 @@ object Geometry {
     /** Dot product of two vectors. */
     fun dot(a: Pt, b: Pt): Double = a.x * b.x + a.y * b.y
 
-    /**
-     * The four corners of the trapezoid bridging two swept brush discs — disc ([c0], [r0]) to disc
-     * ([c1], [r1]) — its long sides offset perpendicular to the segment between the centres so each
-     * corner lands on its disc's rim. Together with the two discs it forms one stroke segment's
-     * hole-free body. Empty when the centres coincide (a disc already covers the bridge). The four
-     * points are returned in a consistent (positive-area) winding so a nonzero fill of many quads
-     * plus their discs unions into solid ink instead of letting an opposite-wound overlap cancel a
-     * gap back out (the failure mode of a single self-overlapping ribbon outline at a sharp turn).
-     */
-    fun ribbonQuad(c0: Pt, r0: Double, c1: Pt, r1: Double): List<Pt> {
-        val d = c1 - c0
-        val len = d.length()
-        if (len < 1e-9) return emptyList()
-        val nrm = Pt(-d.y, d.x) / len
-        val q = listOf(c0 + nrm * r0, c1 + nrm * r1, c1 - nrm * r1, c0 - nrm * r0)
-        val area2 = (q[1].x - q[0].x) * (q[2].y - q[0].y) - (q[1].y - q[0].y) * (q[2].x - q[0].x)
-        return if (area2 < 0.0) q.asReversed() else q
-    }
-
     /** What [capsule] returns when one disc holds the other, so their hull is just the larger disc. */
     const val SWALLOWED = -1.0
 

@@ -91,35 +91,6 @@ class GeometryTest {
         assertEquals(1.0, perp.y, 1e-9)
     }
 
-    // --- Swept-disc ribbon bridge ---
-    private fun signedArea2(a: Pt, b: Pt, c: Pt) =
-        (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
-
-    @Test fun ribbonQuadCornersSitOnBothDiscRims() {
-        // Each of the four corners lies exactly on the rim of the disc it belongs to, so the quad
-        // meets the discs flush and the union has no gap and no overshoot.
-        val q = Geometry.ribbonQuad(Pt(0.0, 0.0), 3.0, Pt(10.0, 0.0), 5.0)
-        assertEquals(4, q.size)
-        for (p in q) {
-            val onFirst = p.distanceTo(Pt(0.0, 0.0))
-            val onSecond = p.distanceTo(Pt(10.0, 0.0))
-            assertTrue("corner on neither rim", kotlin.math.min(kotlin.math.abs(onFirst - 3.0), kotlin.math.abs(onSecond - 5.0)) < 1e-9)
-        }
-    }
-
-    @Test fun ribbonQuadWindsPositiveSoFillsUnion() {
-        // The quad is returned positively wound, regardless of which way the segment runs, so a
-        // nonzero fill of several quads plus their discs unions instead of cancelling a gap.
-        val forward = Geometry.ribbonQuad(Pt(0.0, 0.0), 3.0, Pt(10.0, 1.0), 4.0)
-        val backward = Geometry.ribbonQuad(Pt(10.0, 1.0), 4.0, Pt(0.0, 0.0), 3.0)
-        assertTrue(signedArea2(forward[0], forward[1], forward[2]) >= 0.0)
-        assertTrue(signedArea2(backward[0], backward[1], backward[2]) >= 0.0)
-    }
-
-    @Test fun ribbonQuadEmptyForCoincidentCentres() {
-        assertTrue(Geometry.ribbonQuad(Pt(5.0, 5.0), 3.0, Pt(5.0, 5.0), 4.0).isEmpty())
-    }
-
     // --- Hull of two brush discs ---
     private val tangents = DoubleArray(4)
 
