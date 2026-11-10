@@ -354,6 +354,10 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         )
         val token = textMeshSeq.incrementAndGet()
         textMeshGen[item] = token
+        if (item.canvasEditingHidden || item.text.isEmpty()) {
+            scene.remove(item)
+            return
+        }
         decodeExecutor.execute {
             // Skip queued work already superseded by subsequent drag events.
             if (textMeshGen[item] != token) return@execute

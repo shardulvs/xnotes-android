@@ -34,6 +34,19 @@ class ToolbarLayoutTest {
         assertEquals(listOf(ToolbarItem.FULLSCREEN), d.sections[10].entries.map { it.item })
     }
 
+    @Test fun canvasTextBoxIsAvailableAndVisibleOnExistingLayouts() {
+        val layout = ToolbarLayout.CANVAS_DEFAULT
+        assertTrue(layout.sections.flatMap { it.entries }.any { it.item == ToolbarItem.TEXT_BOX && it.visible })
+        assertTrue(ToolbarItem.TEXT_BOX in ToolbarLayout.CANVAS_ITEMS)
+        val previous = layout.toRaw().map { section ->
+            section.filterNot { it.first == ToolbarItem.TEXT_BOX.id }
+        }
+        val restored = ToolbarLayout.fromRaw(
+            previous, ToolbarLayout.CANVAS_ITEMS, ToolbarLayout.CANVAS_DEFAULT,
+        )
+        assertTrue(restored.sections.flatMap { it.entries }.any { it.item == ToolbarItem.TEXT_BOX && it.visible })
+    }
+
     @Test fun defaultContainsEveryItemOnce() {
         val items = ToolbarLayout.DEFAULT.items()
         assertEquals(ToolbarLayout.NOTE_ITEMS, items.toSet())
