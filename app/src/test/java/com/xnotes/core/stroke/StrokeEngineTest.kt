@@ -242,6 +242,40 @@ class StrokeEngineTest {
         assertEquals(3, g.pointCount)
     }
 
+    private fun pen(vararg pts: Pair<Double, Double>): StrokeGeometry =
+        StrokeEngine.build(pts.map { Sample(it.first, it.second, 1.0) }, 3.0, true, 0.35, 0.0, holdEnds = true)
+
+    @Test fun theOutlineIsTheLeftRailThenTheRightReversed() {
+        val g = pen(*Array(5) { (it * 4.0) to 0.0 })
+        val n = g.pointCount
+        for (i in 0 until n) {
+            assertEquals(g.outline[2 * i].toDouble(), g.leftX(i), 0.0)
+            assertEquals(g.outline[2 * i + 1].toDouble(), g.leftY(i), 0.0)
+            assertEquals(g.outline[2 * (2 * n - 1 - i)].toDouble(), g.rightX(i), 0.0)
+        }
+    }
+
+    @Test fun theRailsStraddleTheCentrelineByTheHalfWidth() {
+        val g = pen(*Array(6) { (it * 4.0) to 0.0 })
+        for (i in 0 until g.pointCount) {
+            assertEquals("left rail off the centreline", g.hw(i), hypot(g.leftX(i) - g.cx(i), g.leftY(i) - g.cy(i)), 1e-4)
+            assertEquals("right rail off the centreline", g.hw(i), hypot(g.rightX(i) - g.cx(i), g.rightY(i) - g.cy(i)), 1e-4)
+            assertEquals(g.cx(i), (g.leftX(i) + g.rightX(i)) / 2.0, 1e-4)
+            assertEquals(g.cy(i), (g.leftY(i) + g.rightY(i)) / 2.0, 1e-4)
+        }
+    }
+
+    @Test fun theRailsAreOnOppositeSidesEverywhere() {
+        val g = pen(0.0 to 0.0, 10.0 to 3.0, 18.0 to 14.0, 22.0 to 30.0)
+        for (i in 0 until g.pointCount) {
+            val lx = g.leftX(i) - g.cx(i)
+            val ly = g.leftY(i) - g.cy(i)
+            val rx = g.rightX(i) - g.cx(i)
+            val ry = g.rightY(i) - g.cy(i)
+            assertTrue("rails on the same side at $i", lx * rx + ly * ry < 0.0)
+        }
+    }
+
     @Test fun emptyInput() {
         val g = StrokeEngine.build(emptyList(), 3.0, true, 0.35, 0.0)
         assertTrue(g.outline.isEmpty())

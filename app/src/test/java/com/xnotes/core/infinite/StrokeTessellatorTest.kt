@@ -1,5 +1,6 @@
 package com.xnotes.core.infinite
 
+import com.xnotes.core.geometry.Geometry
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.stroke.Sample
 import com.xnotes.core.stroke.StrokeEngine
@@ -75,47 +76,6 @@ class StrokeTessellatorTest {
         val neg = d1 < -1e-12 || d2 < -1e-12 || d3 < -1e-12
         val pos = d1 > 1e-12 || d2 > 1e-12 || d3 > 1e-12
         return !(neg && pos)
-    }
-
-    // --- the rail reindex, as pure array math ---
-
-    @Test fun theRailsComeStraightOffTheOutline() {
-        val g = line(5)
-        val n = g.pointCount
-        for (i in 0 until n) {
-            // Left rail forward, right rail reversed: exactly what StrokeEngine packs.
-            assertEquals(g.outline[2 * i].toDouble(), StrokeTessellator.leftX(g, n, i), 0.0)
-            assertEquals(g.outline[2 * i + 1].toDouble(), StrokeTessellator.leftY(g, n, i), 0.0)
-            assertEquals(g.outline[2 * (2 * n - 1 - i)].toDouble(), StrokeTessellator.rightX(g, n, i), 0.0)
-        }
-    }
-
-    @Test fun theTwoRailsStraddleTheCenterlineByTheHalfWidth() {
-        val g = line(6)
-        val n = g.pointCount
-        for (i in 0 until n) {
-            val lx = StrokeTessellator.leftX(g, n, i)
-            val ly = StrokeTessellator.leftY(g, n, i)
-            val rx = StrokeTessellator.rightX(g, n, i)
-            val ry = StrokeTessellator.rightY(g, n, i)
-            assertEquals("left rail off the centerline", g.hw(i), hypot(lx - g.cx(i), ly - g.cy(i)), 1e-4)
-            assertEquals("right rail off the centerline", g.hw(i), hypot(rx - g.cx(i), ry - g.cy(i)), 1e-4)
-            // The midpoint of the two rails is the centerline point itself.
-            assertEquals(g.cx(i), (lx + rx) / 2.0, 1e-4)
-            assertEquals(g.cy(i), (ly + ry) / 2.0, 1e-4)
-        }
-    }
-
-    @Test fun theRailsAreOnOppositeSidesEverywhere() {
-        val g = geometryOf(0.0 to 0.0, 10.0 to 3.0, 18.0 to 14.0, 22.0 to 30.0)
-        val n = g.pointCount
-        for (i in 0 until n) {
-            val lx = StrokeTessellator.leftX(g, n, i) - g.cx(i)
-            val ly = StrokeTessellator.leftY(g, n, i) - g.cy(i)
-            val rx = StrokeTessellator.rightX(g, n, i) - g.cx(i)
-            val ry = StrokeTessellator.rightY(g, n, i) - g.cy(i)
-            assertTrue("rails on the same side at $i", lx * rx + ly * ry < 0.0)
-        }
     }
 
     // --- the dashed pen ---
@@ -294,29 +254,100 @@ class StrokeTessellatorTest {
         assertTrue(StrokeTessellator.circleSegments(3.0, Double.NaN) <= StrokeTessellator.MAX_CIRCLE_SEGMENTS)
     }
 
-    // --- join discs ---
+    // --- the swept disc ---
 
-    @Test fun aGentleCurveNeedsNoJoinDiscs() {
+    /**
+     * Calligraphy on a wave, so the nib widens and thins as fast as it may: a broad nib, and one so
+     * broad its width outruns the travel and a disc swallows its neighbour.
+     */
+    private fun swells(): List<StrokeGeometry> {
+        val pts = (0..80).map { Sample(it * 1.5, 22.0 * kotlin.math.sin(it * 1.5 / 9.0), 1.0) }
+        return listOf(StrokeEngine.build(pts, 12.0, true, 0.4, 0.6), StrokeEngine.build(pts, 24.0, true, 0.4, 0.9))
+    }
+
+    @Test fun theBroadestSwellReallySwallowsADisc() {
+        val g = swells().last()
+        assertTrue((0 until g.pointCount - 1).any {
+            kotlin.math.abs(g.hw(it + 1) - g.hw(it)) >= hypot(g.cx(it + 1) - g.cx(it), g.cy(it + 1) - g.cy(it))
+        })
+    }
+
+    /** Whether ([px], [py]) is in the disc swept down [g] with every radius grown by [grow]: the paged painter's ink. */
+    private fun inSweep(g: StrokeGeometry, px: Double, py: Double, grow: Double): Boolean {
+        for (i in 0 until g.pointCount) {
+            val r = g.hw(i) + grow
+            if (r > 0.0 && hypot(px - g.cx(i), py - g.cy(i)) <= r) return true
+        }
+        val n = DoubleArray(4)
+        for (i in 0 until g.pointCount - 1) {
+            val r0 = g.hw(i) + grow
+            val r1 = g.hw(i + 1) + grow
+            if (r0 <= 0.0 || r1 <= 0.0) continue
+            if (Geometry.capsule(g.cx(i), g.cy(i), r0, g.cx(i + 1), g.cy(i + 1), r1, n) == Geometry.SWALLOWED) continue
+            val ax = g.cx(i) + r0 * n[0]
+            val ay = g.cy(i) + r0 * n[1]
+            val bx = g.cx(i + 1) + r1 * n[0]
+            val by = g.cy(i + 1) + r1 * n[1]
+            val cx = g.cx(i + 1) + r1 * n[2]
+            val cy = g.cy(i + 1) + r1 * n[3]
+            val dx = g.cx(i) + r0 * n[2]
+            val dy = g.cy(i) + r0 * n[3]
+            if (inTriangle(px, py, ax, ay, bx, by, cx, cy) || inTriangle(px, py, ax, ay, cx, cy, dx, dy)) return true
+        }
+        return false
+    }
+
+    /** Every grid point around [g] at [step] spacing. */
+    private fun grid(g: StrokeGeometry, step: Double): List<Pair<Double, Double>> {
+        val widest = (0 until g.pointCount).maxOf { g.hw(it) }
+        val xs = (0 until g.pointCount).map { g.cx(it) }
+        val ys = (0 until g.pointCount).map { g.cy(it) }
+        val out = ArrayList<Pair<Double, Double>>()
+        var y = ys.min() - widest - 1.0
+        while (y <= ys.max() + widest + 1.0) {
+            var x = xs.min() - widest - 1.0
+            while (x <= xs.max() + widest + 1.0) {
+                out += x to y
+                x += step
+            }
+            y += step
+        }
+        return out
+    }
+
+    @Test fun theMeshFillsTheSweptDiscANotePaints() {
+        for (g in swells()) {
+            val m = StrokeTessellator.tessellate(g)
+            // What a shared join vertex may cut off a rim, plus a little: well under a pixel.
+            val margin = 0.01 * (0 until g.pointCount).maxOf { g.hw(it) }
+            var probed = 0
+            for ((x, y) in grid(g, 0.5)) {
+                if (!inSweep(g, x, y, -margin)) continue
+                probed++
+                assertTrue("the note paints ($x, $y) and the canvas does not", covers(m, x, y))
+            }
+            assertTrue("nothing was probed", probed > 2000)
+        }
+    }
+
+    @Test fun theMeshPaintsNothingPastTheSweptDisc() {
+        for (g in swells()) {
+            val m = StrokeTessellator.tessellate(g)
+            for ((x, y) in grid(g, 0.5)) {
+                if (inSweep(g, x, y, 1e-6)) continue
+                assertTrue("the canvas paints ($x, $y) and the note does not", !covers(m, x, y))
+            }
+        }
+    }
+
+    @Test fun aSmoothStrokeCostsTwoVerticesASample() {
         val pts = (0..20).map { (it * 3.0) to (it * 0.15) }
         val g = geometryOf(*pts.toTypedArray())
-        for (i in 1 until g.pointCount - 1) {
-            assertTrue(StrokeTessellator.turnAngle(g, i) < StrokeTessellator.JOIN_DISC_ANGLE)
-        }
-    }
-
-    @Test fun aRightAngleTurnsUpAsALargeTurnAngle() {
-        val g = geometryOf(0.0 to 0.0, 30.0 to 0.0, 30.0 to 30.0)
-        val worst = (1 until g.pointCount - 1).maxOf { StrokeTessellator.turnAngle(g, it) }
-        assertTrue("a right angle should read as a hard turn, got $worst", worst > StrokeTessellator.JOIN_DISC_ANGLE)
-    }
-
-    @Test fun turnAngleIsZeroAtTheEndsAndOnAStraightRun() {
-        val g = line(6)
-        assertEquals(0.0, StrokeTessellator.turnAngle(g, 0), 1e-12)
-        assertEquals(0.0, StrokeTessellator.turnAngle(g, g.pointCount - 1), 1e-12)
-        for (i in 1 until g.pointCount - 1) {
-            assertEquals(0.0, StrokeTessellator.turnAngle(g, i), 1e-6)
-        }
+        val m = StrokeTessellator.tessellate(g)
+        val last = g.pointCount - 1
+        val tol = StrokeTessellator.DEFAULT_TOLERANCE
+        val caps = 2 + StrokeTessellator.circleSegments(g.hw(0), tol) + StrokeTessellator.circleSegments(g.hw(last), tol)
+        assertEquals(2 * g.pointCount + caps, m.vertexCount)
     }
 
     // --- scale ---
