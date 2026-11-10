@@ -1159,4 +1159,15 @@
     <string name="toolbar_size_compact">Compact</string>
     <string name="toolbar_size_regular">Regular</string>
     <string name="toolbar_size_comfortable">Comfortable</string>
+    <string name="split_interface_title">Shared toolbar layout</string>
+    <string name="split_interface_note">xnote interface</string>
+    <string name="split_interface_canvas">xcanvas interface</string>
+    <string name="split_tool_unavailable">%1$s — unavailable in this document</string>
+    <string name="split_close_document">Close %1$s</string>
+    <string name="split_settings">Split view</string>
+    <string name="split_shared">Shared tools</string>
+    <string name="split_per_pane">Tools per pane</string>
+    <string name="split_shared_help">One toolbox controls the active document. Tap a document or its title to activate it.</string>
+    <string name="split_per_pane_help">Each document has its own toolbar and tool selection.</string>
+    <string name="split_mixed_help">For xnote + xcanvas only. Both documents use this layout; unavailable tools are disabled for the active format.</string>
 </resources>
