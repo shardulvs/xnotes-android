@@ -36,6 +36,7 @@ import com.xnotes.core.shapes.ShapeKind
 import com.xnotes.core.stroke.Sample
 import com.xnotes.core.stroke.Scribble
 import com.xnotes.core.stroke.ShapeRecognizer
+import com.xnotes.core.stroke.Stabilizer
 import com.xnotes.core.stroke.StrokeSimplify
 import com.xnotes.core.tape.TapeGeometry
 import com.xnotes.core.tools.EraseMode
@@ -295,6 +296,9 @@ class InfiniteInteraction(
     private var drawingPointerId = -1
     private var drawingIsStylus = false
     private var strokeStartTimeMs = 0L
+
+    /** The live stroke's stabilization, or null while its pen draws the nib as is. */
+    private var steadier: Stabilizer? = null
 
     // Pan and inertial fling, in viewport px and viewport px/s.
     private var lastPan = Pt.ZERO
@@ -785,9 +789,10 @@ class InfiniteInteraction(
             )
         }
         val straight = drawTool == Tool.HIGHLIGHTER && config.straightLine
+        val speedScale = z / devicePxPerDp().coerceAtLeast(1e-9)
         val stroke = Stroke(
             drawTool, config,
-            speedScale = z / devicePxPerDp().coerceAtLeast(1e-9),
+            speedScale = speedScale,
             straight = straight,
             smoothScale = InteractionController.smoothScaleFor(z),
         )
@@ -799,6 +804,8 @@ class InfiniteInteraction(
         strokeStartTimeMs = e.eventTime
         val p = viewport.viewportToContent(Pt(vx, vy))
         stroke.addSample(Sample(p.x, p.y, pressureOf(e, 0)))
+        steadier = Stabilizer.forStroke(config.stabilize && !straight, config.stabilizeTrail, config.stabilizeCrossover, speedScale)
+        steadier?.start(p.x, p.y, 0.0)
         liveStroke = stroke
         mode = CanvasPointerMode.DRAW
         // Only solid pens arm the snap: a highlighter or a straight-line drag never becomes a shape.
@@ -839,11 +846,25 @@ class InfiniteInteraction(
 
     private fun addStrokePoint(vx: Double, vy: Double, pressure: Double, timeMs: Long, force: Boolean) {
         val stroke = liveStroke ?: return
-        val p = viewport.viewportToContent(Pt(vx, vy))
-        val t = (timeMs - strokeStartTimeMs).toDouble()
+        val nib = viewport.viewportToContent(Pt(vx, vy))
+        var t = (timeMs - strokeStartTimeMs).toDouble()
         if (stroke.straight) {
-            stroke.setStraightEnd(Sample(p.x, p.y, pressure.coerceIn(0.0, 1.0), t))
+            stroke.setStraightEnd(Sample(nib.x, nib.y, pressure.coerceIn(0.0, 1.0), t))
             return
+        }
+        // A steadied stroke takes the point the filter has reached and draws on to the nib as a
+        // tip; the lift lands the nib itself, at the tip's time, so lifting changes nothing.
+        val steady = steadier
+        val p = when {
+            steady == null -> nib
+            force -> {
+                if (steady.moved) t = steady.tipTime
+                nib
+            }
+            else -> {
+                steady.step(nib.x, nib.y, t)
+                Pt(steady.x, steady.y)
+            }
         }
         val last = stroke.samples.lastOrNull()
         // Decimate by on-screen spacing rather than content spacing, so drawing while zoomed in
@@ -853,6 +874,7 @@ class InfiniteInteraction(
         if (force || last == null || Pt(last.x, last.y).manhattanTo(p) >= gate) {
             stroke.addSample(Sample(p.x, p.y, pressure.coerceIn(0.0, 1.0), t))
         }
+        if (steady != null && !force) stroke.setTip(Sample(nib.x, nib.y, pressure.coerceIn(0.0, 1.0), steady.tipTime))
     }
 
     private fun endDraw(e: MotionEvent) {
@@ -1783,8 +1805,10 @@ class InfiniteInteraction(
         dwellRunnable = null
         if (!dwellEligible) return
         val stroke = liveStroke ?: return
-        if (stroke.samples.size < InteractionController.SHAPE_MIN_SAMPLES) return
-        val rec = ShapeRecognizer.recognize(stroke.samples) ?: return
+        // A steadied stroke is judged as lifting it now would leave it, out to the nib.
+        val path = stroke.tip?.let { stroke.samples + it } ?: stroke.samples
+        if (path.size < InteractionController.SHAPE_MIN_SAMPLES) return
+        val rec = ShapeRecognizer.recognize(path) ?: return
         val width = stroke.config.baseWidth * InteractionController.SHAPE_PEN_PARITY
         val color = stroke.config.rgba // the as-drawn colour, not the alpha-scaled render one
         val dashed = stroke.tool == Tool.DASHED // a dashed pen snaps to a dashed shape
