@@ -88,6 +88,13 @@ class SettingsTest {
         assertTrue(back.prefs.hidePageBorders)
     }
 
+    @Test fun theSpeedPensSmoothingAndTopSpeedRoundTrip() {
+        val speed = com.xnotes.core.tools.ToolDefaults.configFor(Tool.SPEED).copy(speedSmoothing = 0.6, speedTop = 0.9)
+        val back = Settings.fromJson(Settings(tools = mapOf(Tool.SPEED to speed)).toJson()).configFor(Tool.SPEED)
+        assertEquals(0.6, back.speedSmoothing, 1e-9)
+        assertEquals(0.9, back.speedTop, 1e-9)
+    }
+
     @Test fun theMarkupToolsModeAndIntensityRoundTrip() {
         val markup = com.xnotes.core.tools.ToolConfig(markupMode = com.xnotes.core.tools.MarkupMode.SQUIGGLY, markupIntensity = 0.8)
         val back = Settings.fromJson(Settings(tools = mapOf(Tool.MARKUP to markup)).toJson())

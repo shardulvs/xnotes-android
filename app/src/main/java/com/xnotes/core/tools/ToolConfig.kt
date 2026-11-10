@@ -5,6 +5,8 @@ import com.xnotes.core.model.TapeItem
 import com.xnotes.core.model.TapeMode
 import com.xnotes.core.model.TapePattern
 import com.xnotes.core.stroke.StrokeEngine
+import kotlin.math.ln
+import kotlin.math.pow
 
 /**
  * Eraser behaviour (spec 04 §2): STROKE removes a whole stroke on contact; AREA removes only the
@@ -162,6 +164,17 @@ object ToolConversions {
     fun speedToStrength(speed: Double): Double = speed.coerceIn(0.0, 100.0) / 100.0 * 0.92
 
     fun strengthToSpeed(s: Double): Double = (s / 0.92) * 100.0
+
+    /** SMOOTHING (0..100) -> `speedSmoothing`, the blur along the path in pen widths, in [0, 1]. */
+    fun smoothingToBlur(smoothing: Double): Double = smoothing.coerceIn(0.0, 100.0) / 100.0
+
+    fun blurToSmoothing(b: Double): Double = (b * 100.0).coerceIn(0.0, 100.0)
+
+    /** TOP SPEED (0..100) -> `speedTop` in dp/ms, log-scaled from a third of the default to three times it. */
+    fun topSpeedToDpPerMs(top: Double): Double = StrokeEngine.SPEED_HI * 3.0.pow((top.coerceIn(0.0, 100.0) - 50.0) / 50.0)
+
+    fun dpPerMsToTopSpeed(v: Double): Double =
+        if (v > 0.0) (50.0 + 50.0 * ln(v / StrokeEngine.SPEED_HI) / ln(3.0)).coerceIn(0.0, 100.0) else 0.0
 
     /** INTENSITY (0..100, higher = brighter/wider halo) -> `neonStrength` in [0, 1]. */
     fun intensityToNeonStrength(intensity: Double): Double = intensity.coerceIn(0.0, 100.0) / 100.0

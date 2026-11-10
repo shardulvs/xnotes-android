@@ -42,6 +42,7 @@ import com.xnotes.core.pal.ImageCodec
 import com.xnotes.core.pal.TextMeasurer
 import com.xnotes.core.pdf.PdfPageGeometry
 import com.xnotes.core.stroke.Sample
+import com.xnotes.core.stroke.StrokeEngine
 import com.xnotes.core.stroke.StrokeSimplify
 import com.xnotes.core.shapes.Axis
 import com.xnotes.core.shapes.Elbow
@@ -408,6 +409,8 @@ class DocumentCodec(
         // New style fields are written only when set, so a plain pen/calligraphy
         // stroke's config is byte-for-byte what older versions wrote.
         if (s.config.speedStrength != 0.0) j.name("speed_strength").value(s.config.speedStrength)
+        if (s.config.speedSmoothing != StrokeEngine.DEFAULT_SPEED_SMOOTHING) j.name("speed_smoothing").value(s.config.speedSmoothing)
+        if (s.config.speedTop != StrokeEngine.SPEED_HI) j.name("speed_top").value(s.config.speedTop)
         if (s.config.taperEnabled) {
             j.name("taper_enabled").value(true)
             j.name("taper_min_factor").value(s.config.taperMinFactor)
@@ -1181,6 +1184,8 @@ class DocumentCodec(
         var directionStrength: Double? = null
         var rgba: Rgba? = null
         var speedStrength: Double? = null
+        var speedSmoothing: Double? = null
+        var speedTop: Double? = null
         var taperEnabled: Boolean? = null
         var taperLength: Double? = null
         var taperMinFactor: Double? = null
@@ -1327,6 +1332,8 @@ class DocumentCodec(
             directionStrength = c?.directionStrength ?: def.directionStrength,
             rgba = c?.rgba ?: InkPalette.LEGACY,
             speedStrength = c?.speedStrength ?: def.speedStrength,
+            speedSmoothing = c?.speedSmoothing ?: def.speedSmoothing,
+            speedTop = c?.speedTop ?: def.speedTop,
             taperEnabled = c?.let { it.taperEnabled ?: ((it.taperLength ?: 0.0) > 0.0) } ?: def.taperEnabled,
             // Absent on legacy taper strokes -> the legacy tip, so old tapers reload tapered.
             taperMinFactor = c?.taperMinFactor ?: ToolDefaults.LEGACY_TAPER_TIP,
@@ -1529,6 +1536,8 @@ class DocumentCodec(
                 "direction_strength" -> c.directionStrength = doubleOrNull(p)
                 "rgba" -> c.rgba = rgbaOrNull(p)
                 "speed_strength" -> c.speedStrength = doubleOrNull(p)
+                "speed_smoothing" -> c.speedSmoothing = doubleOrNull(p)
+                "speed_top" -> c.speedTop = doubleOrNull(p)
                 "taper_enabled" -> c.taperEnabled = boolOrNull(p)
                 "taper_length" -> c.taperLength = doubleOrNull(p)
                 "taper_min_factor" -> c.taperMinFactor = doubleOrNull(p)

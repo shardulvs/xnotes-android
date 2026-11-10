@@ -66,7 +66,9 @@
     <string name="caption_pressure">Pressure</string>
     <string name="caption_sensitivity">Sensitivity</string>
     <string name="caption_multiplier">Multiplier</string>
-    <string name="caption_speed">Speed</string>
+    <string name="caption_thinning">Thinning</string>
+    <string name="caption_smoothing">Smoothing</string>
+    <string name="caption_top_speed">Top speed</string>
     <string name="caption_tip_width">Tip width percentage</string>
     <string name="caption_width">Width</string>
     <string name="caption_scale">Scale</string>

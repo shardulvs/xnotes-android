@@ -49,6 +49,18 @@ class ToolsTest {
         assertEquals(0.0, ToolConversions.minFactorToSensitivity(1.0), 1e-9)
     }
 
+    @Test fun speedPenSlidersRoundTrip() {
+        val speed = ToolDefaults.configFor(Tool.SPEED)
+        assertEquals(25.0, ToolConversions.blurToSmoothing(speed.speedSmoothing), 1e-9)
+        assertEquals(50.0, ToolConversions.dpPerMsToTopSpeed(speed.speedTop), 1e-9)
+        assertEquals(0.2, ToolConversions.topSpeedToDpPerMs(0.0), 1e-9)
+        assertEquals(1.8, ToolConversions.topSpeedToDpPerMs(100.0), 1e-9)
+        for (x in listOf(0.0, 12.5, 50.0, 87.0, 100.0)) {
+            assertEquals(x, ToolConversions.blurToSmoothing(ToolConversions.smoothingToBlur(x)), 1e-9)
+            assertEquals(x, ToolConversions.dpPerMsToTopSpeed(ToolConversions.topSpeedToDpPerMs(x)), 1e-9)
+        }
+    }
+
     @Test fun multiplierRoundTrip() {
         // M = 4.0  <->  ds = 0.60 (calligraphy default)
         assertEquals(0.60, ToolConversions.multiplierToDirectionStrength(4.0), 1e-9)

@@ -84,7 +84,7 @@ import kotlin.math.roundToInt
 
 /**
  * Stroke-tool configuration popup (spec 10 §3): PRESSURE / SENSITIVITY, then the
- * tool's signature control: MULTIPLIER (calligraphy), SPEED (speed pen) or
+ * tool's signature control: MULTIPLIER (calligraphy), THINNING / SMOOTHING / TOP SPEED (speed pen) or
  * TIP WIDTH PERCENTAGE (taper pen), then WIDTH, and a NEON toggle (with INTENSITY) on
  * any stroke tool but the highlighter.
  */
@@ -96,6 +96,8 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
     var sensitivity by remember { mutableStateOf(ToolConversions.minFactorToSensitivity(base.pressureMinFactor).toFloat()) }
     var multiplier by remember { mutableStateOf(ToolConversions.directionStrengthToMultiplier(base.directionStrength).toFloat()) }
     var speed by remember { mutableStateOf(ToolConversions.strengthToSpeed(base.speedStrength).toFloat()) }
+    var smoothing by remember { mutableStateOf(ToolConversions.blurToSmoothing(base.speedSmoothing).toFloat()) }
+    var topSpeed by remember { mutableStateOf(ToolConversions.dpPerMsToTopSpeed(base.speedTop).toFloat()) }
     var taperTip by remember { mutableStateOf((base.taperMinFactor * 100).toFloat()) }
     var width by remember { mutableStateOf(base.baseWidth.toFloat()) }
     var glow by remember { mutableStateOf(base.neon) }
@@ -112,6 +114,8 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
         val m = ToolConversions.sensitivityToMinFactor(sensitivity.toDouble())
         val ds = if (tool == Tool.CALLIGRAPHY) ToolConversions.multiplierToDirectionStrength(multiplier.toDouble()) else 0.0
         val sp = if (tool == Tool.SPEED) ToolConversions.speedToStrength(speed.toDouble()) else 0.0
+        val blur = if (tool == Tool.SPEED) ToolConversions.smoothingToBlur(smoothing.toDouble()) else base.speedSmoothing
+        val top = if (tool == Tool.SPEED) ToolConversions.topSpeedToDpPerMs(topSpeed.toDouble()) else base.speedTop
         val tmf = if (tool == Tool.TAPER) taperTip.toDouble() / 100.0 else base.taperMinFactor
         val ha = if (tool == Tool.HIGHLIGHTER) ToolConversions.intensityToHighlighterAlpha(intensity.toDouble()) else base.highlighterAlpha
         editor.updateToolConfig(
@@ -122,6 +126,8 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
                 pressureMinFactor = m,
                 directionStrength = ds,
                 speedStrength = sp,
+                speedSmoothing = blur,
+                speedTop = top,
                 taperMinFactor = tmf,
                 neon = glow,
                 neonStrength = ToolConversions.intensityToNeonStrength(glowIntensity.toDouble()),
@@ -168,7 +174,9 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
                 SliderRow(stringResource(R.string.caption_multiplier), multiplier, 1f..5f) { multiplier = it; emit() }
             }
             if (tool == Tool.SPEED) {
-                SliderRow(stringResource(R.string.caption_speed), speed, 0f..100f) { speed = it; emit() }
+                SliderRow(stringResource(R.string.caption_thinning), speed, 0f..100f) { speed = it; emit() }
+                SliderRow(stringResource(R.string.caption_smoothing), smoothing, 0f..100f) { smoothing = it; emit() }
+                SliderRow(stringResource(R.string.caption_top_speed), topSpeed, 0f..100f) { topSpeed = it; emit() }
             }
             if (tool == Tool.TAPER) {
                 SliderRow(stringResource(R.string.caption_tip_width), taperTip, 0f..100f) { taperTip = it; emit() }

@@ -434,6 +434,19 @@ class DocumentCodecTest {
         for (i in samples.indices) assertEquals(drawn.samples[i].widthFactor, s.samples[i].widthFactor, 5e-4)
     }
 
+    @Test fun speedStrokeSmoothingAndTopSpeedRoundTrip() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        val cfg = ToolDefaults.configFor(Tool.SPEED).copy(speedSmoothing = 0.6, speedTop = 0.9)
+        page.items.add(Stroke(Tool.SPEED, cfg, listOf(Sample(0.0, 0.0, 1.0, 0.0), Sample(9.0, 0.0, 1.0, 8.0)), 0.5))
+        page.items.add(Stroke(Tool.PEN, ToolDefaults.configFor(Tool.PEN), listOf(Sample(0.0, 0.0, 1.0), Sample(9.0, 0.0, 1.0))))
+        doc.pages.add(page)
+        val back = roundTrip(doc).pages[0].items
+        assertEquals(0.6, (back[0] as Stroke).config.speedSmoothing, 1e-9)
+        assertEquals(0.9, (back[0] as Stroke).config.speedTop, 1e-9)
+        assertEquals(ToolDefaults.configFor(Tool.PEN).speedTop, (back[1] as Stroke).config.speedTop, 1e-9)
+    }
+
     @Test fun speedStrokeFromBeforeKeptWidthsWorksThemOutOnLoad() {
         val doc = Document(dpi = 150)
         val page = Page(1240.0, 1754.0)
