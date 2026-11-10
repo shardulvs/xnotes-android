@@ -219,8 +219,8 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
     }
 
     private fun writeStroke(j: JsonWrite, s: Stroke) {
-        // Per-sample time is only meaningful to the speed pen, so it's written as an optional
-        // 4th element only then; every other stroke serializes without it.
+        // Per-sample time and kept width are only meaningful to the speed pen, so they're written as
+        // optional 4th and 5th elements only then; every other stroke serializes without them.
         val withTime = s.config.speedStrength > 0.0
         j.beginObject()
         j.name("kind").value(Stroke.KIND)
@@ -255,7 +255,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         // content px and 0.001 pressure are far below anything visible. Rounding is idempotent,
         // so re-saving an untouched canvas stays byte-stable.
         j.name("samples").beginArray()
-        for (sm in s.samples) j.samplePoint(sm.x, sm.y, sm.pressure, if (withTime) sm.t else null)
+        for (sm in s.samples) j.samplePoint(sm.x, sm.y, sm.pressure, if (withTime) sm.t else null, sm.widthFactor.takeIf { withTime && it > 0.0 })
         j.endArray()
         if (withTime) j.name("speed_scale").value(s.speedScale)
         // The zoom the stroke was drawn at, as the scale on the ink low-pass lengths, so it
@@ -933,7 +933,9 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             highlighterInverse = c?.highlighterInverse ?: def.highlighterInverse,
         )
         val stroke = Stroke(tool, config, emptyList(), s.speedScale, s.straight, s.smoothScale)
-        s.samples?.let { stroke.setSamples(it.xs, it.ys, it.ps, it.ts, it.n) }
+        s.samples?.let { stroke.setSamples(it.xs, it.ys, it.ps, it.ts, it.n, it.ws) }
+        // Speed ink saved before its widths were kept works them out once, as it is drawn now.
+        stroke.freezeSpeedWidths()
         stroke.cuts = s.cuts
         return stroke
     }
@@ -1142,7 +1144,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             return null
         }
         val out = RawSamples()
-        val tuple = DoubleArray(4)
+        val tuple = DoubleArray(5)
         p.beginArray()
         while (p.hasNext()) {
             if (p.peek() != JsonPull.Token.BEGIN_ARRAY) {
@@ -1150,14 +1152,15 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                 continue
             }
             // NaN back from [JsonPull.nextSample] means the slot held nothing readable, which is
-            // not the same as a zero: pressure then defaults to full, and the 4th element
-            // (relative ms, only speed-pen strokes carry it) to none.
+            // not the same as a zero: pressure then defaults to full, and the 4th and 5th elements
+            // (relative ms and kept width, only speed-pen strokes carry them) to none.
             p.nextSample(tuple)
             out.add(
                 if (tuple[0].isNaN()) 0.0 else tuple[0],
                 if (tuple[1].isNaN()) 0.0 else tuple[1],
                 if (tuple[2].isNaN()) 1.0 else tuple[2],
                 if (tuple[3].isNaN()) 0.0 else tuple[3],
+                if (tuple[4].isNaN()) 0.0 else tuple[4],
             )
         }
         p.endArray()

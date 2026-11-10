@@ -276,6 +276,17 @@ class CanvasCodecTest {
         assertEquals(9000.0, (all[0] as ShapeItem).start.x, 1e-9)
     }
 
+    @Test fun speedStrokeKeepsItsWidthsThroughASave() {
+        val doc = InfiniteDocument()
+        val samples = (0..30).map { Sample(it * 3.0, 0.0, 1.0, it * (4.0 + it % 5)) }
+        val drawn = Stroke(Tool.SPEED, ToolDefaults.configFor(Tool.SPEED), samples, speedScale = 0.5)
+        drawn.freezeSpeedWidths()
+        doc.add(drawn)
+        val s = roundTrip(doc).items[0] as Stroke
+        assertTrue(s.keepsSpeedWidths)
+        for (i in samples.indices) assertEquals(drawn.samples[i].widthFactor, s.samples[i].widthFactor, 5e-4)
+    }
+
     @Test fun everyStrokeToolRoundTrips() {
         val doc = InfiniteDocument()
         val tools = listOf(Tool.PEN, Tool.DASHED, Tool.CALLIGRAPHY, Tool.SPEED, Tool.TAPER, Tool.HIGHLIGHTER)

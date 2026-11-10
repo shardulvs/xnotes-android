@@ -1858,6 +1858,7 @@ class InfiniteInteraction(
 
     /** Shed the samples the ribbon does not need, at the tolerance the draw zoom justifies. */
     private fun simplifyForCommit(stroke: Stroke) {
+        stroke.freezeSpeedWidths()
         if (StrokeSimplify.enabled && !stroke.straight) {
             val eps = (InteractionController.SIMPLIFY_EPS / viewport.zoom)
                 .coerceAtMost(InteractionController.SIMPLIFY_EPS)

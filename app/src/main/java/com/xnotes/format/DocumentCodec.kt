@@ -392,8 +392,8 @@ class DocumentCodec(
     }
 
     private fun writeStroke(j: JsonWrite, s: Stroke) {
-        // Per-sample time is only meaningful to the speed pen, so it's written as an
-        // optional 4th element only then — every other stroke serializes unchanged.
+        // Per-sample time and kept width are only meaningful to the speed pen, so they're written as
+        // optional 4th and 5th elements only then; every other stroke serializes unchanged.
         val withTime = s.config.speedStrength > 0.0
         j.beginObject()
         j.name("kind").value(Stroke.KIND)
@@ -431,7 +431,7 @@ class DocumentCodec(
         // content px (2dp) and 0.001 pressure (3dp) are far below anything visible, and a
         // 500 Hz note shrinks ~2.3x. Rounding is idempotent, so re-saves stay byte-stable.
         j.name("samples").beginArray()
-        for (sm in s.samples) j.samplePoint(sm.x, sm.y, sm.pressure, if (withTime) sm.t else null)
+        for (sm in s.samples) j.samplePoint(sm.x, sm.y, sm.pressure, if (withTime) sm.t else null, sm.widthFactor.takeIf { withTime && it > 0.0 })
         j.endArray()
         // The speed pen's gesture-speed scale (zoom ÷ density at pen-down) reconstructs its
         // width on reload; written alongside the per-sample times, only for that tool.
@@ -1339,7 +1339,9 @@ class DocumentCodec(
             highlighterInverse = c?.highlighterInverse ?: def.highlighterInverse,
         )
         val stroke = Stroke(tool, config, emptyList(), s.speedScale, s.straight, s.smoothScale)
-        s.samples?.let { stroke.setSamples(it.xs, it.ys, it.ps, it.ts, it.n) }
+        s.samples?.let { stroke.setSamples(it.xs, it.ys, it.ps, it.ts, it.n, it.ws) }
+        // Speed ink saved before its widths were kept works them out once, as it is drawn now.
+        stroke.freezeSpeedWidths()
         stroke.cuts = s.cuts
         return stroke
     }
@@ -1549,7 +1551,7 @@ class DocumentCodec(
             return null
         }
         val out = RawSamples()
-        val tuple = DoubleArray(4)
+        val tuple = DoubleArray(5)
         p.beginArray()
         while (p.hasNext()) {
             if (p.peek() != JsonPull.Token.BEGIN_ARRAY) {
@@ -1557,14 +1559,15 @@ class DocumentCodec(
                 continue
             }
             // NaN back from [JsonPull.nextSample] means the slot held nothing readable, which is
-            // not the same as a zero: pressure then defaults to full, and the 4th element
-            // (relative ms, only speed-pen strokes carry it) to none.
+            // not the same as a zero: pressure then defaults to full, and the 4th and 5th elements
+            // (relative ms and kept width, only speed-pen strokes carry them) to none.
             p.nextSample(tuple)
             out.add(
                 if (tuple[0].isNaN()) 0.0 else tuple[0],
                 if (tuple[1].isNaN()) 0.0 else tuple[1],
                 if (tuple[2].isNaN()) 1.0 else tuple[2],
                 if (tuple[3].isNaN()) 0.0 else tuple[3],
+                if (tuple[4].isNaN()) 0.0 else tuple[4],
             )
         }
         p.endArray()

@@ -420,6 +420,33 @@ class DocumentCodecTest {
         assertEquals(33.0, s.samples[2].t, 1e-9)
     }
 
+    @Test fun speedStrokeKeepsItsWidthsThroughASave() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        val samples = (0..30).map { Sample(it * 3.0, 0.0, 1.0, it * (4.0 + it % 5)) }
+        val drawn = Stroke(Tool.SPEED, ToolDefaults.configFor(Tool.SPEED), samples, 0.5)
+        drawn.freezeSpeedWidths()
+        page.items.add(drawn)
+        doc.pages.add(page)
+
+        val s = roundTrip(doc).pages[0].items[0] as Stroke
+        assertTrue(s.keepsSpeedWidths)
+        for (i in samples.indices) assertEquals(drawn.samples[i].widthFactor, s.samples[i].widthFactor, 5e-4)
+    }
+
+    @Test fun speedStrokeFromBeforeKeptWidthsWorksThemOutOnLoad() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        val samples = (0..30).map { Sample(it * 3.0, 0.0, 1.0, it * (4.0 + it % 5)) }
+        page.items.add(Stroke(Tool.SPEED, ToolDefaults.configFor(Tool.SPEED), samples, 0.5))
+        doc.pages.add(page)
+
+        val s = roundTrip(doc).pages[0].items[0] as Stroke
+        assertTrue(s.keepsSpeedWidths)
+        val fresh = Stroke(Tool.SPEED, ToolDefaults.configFor(Tool.SPEED), samples, 0.5).apply { freezeSpeedWidths() }
+        for (i in samples.indices) assertEquals(fresh.samples[i].widthFactor, s.samples[i].widthFactor, 1e-6)
+    }
+
     @Test fun neonAndTaperFlagsRoundTrip() {
         val doc = Document(dpi = 150)
         val page = Page(1240.0, 1754.0)
