@@ -42,7 +42,7 @@ import kotlin.math.roundToInt
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun CanvasStylesPopup(editor: InfiniteEditor, onDismiss: () -> Unit) {
+fun CanvasStylesPopup(editor: InfiniteEditor, onConfigureToolbars: () -> Unit = {}, onDismiss: () -> Unit) {
     var background by remember { mutableStateOf(editor.document.background) }
     // Mirrors the paged StylesPopup: the row shows once the background differs from the saved
     // new-canvas default and stays for the popup session, and a stock background hides it.
@@ -135,10 +135,14 @@ fun CanvasStylesPopup(editor: InfiniteEditor, onDismiss: () -> Unit) {
                 Spacer(Modifier.size(4.dp))
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                // A stock background hides the checkbox, so Reset is also how the saved default is forgotten.
+                // A stock background hides the checkbox, so Reset also forgets the saved default.
                 ModeChip(stringResource(R.string.reset), selected = false) {
                     apply(CanvasBackground())
                     editor.saveNewCanvasBackground(null)
+                }
+                ModeChip(stringResource(R.string.configure_toolbars), selected = false) {
+                    onDismiss()
+                    onConfigureToolbars()
                 }
             }
         }

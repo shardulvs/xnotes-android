@@ -696,7 +696,7 @@ internal fun StyleCaption(text: String) {
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ViewMenuPopup(editor: Editor, onDismiss: () -> Unit) {
+fun ViewMenuPopup(editor: Editor, onConfigureToolbars: () -> Unit = {}, onDismiss: () -> Unit) {
     val defaults = editor.viewDefaults
     val overrides = editor.viewOverrides
     val vs = editor.viewSettings
@@ -777,7 +777,11 @@ fun ViewMenuPopup(editor: Editor, onDismiss: () -> Unit) {
                 }
                 Spacer(Modifier.size(4.dp))
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                ModeChip(stringResource(R.string.configure_toolbars), false) {
+                    onDismiss()
+                    onConfigureToolbars()
+                }
                 ModeChip(stringResource(R.string.reset), false) { apply(ViewOverrides()) }
             }
         }

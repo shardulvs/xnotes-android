@@ -1,8 +1,5 @@
 package com.xnotes.ui
 
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.size
-
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
@@ -19,6 +16,8 @@ import androidx.compose.ui.unit.dp
 import com.xnotes.R
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolbarItem
+import com.xnotes.core.tools.ToolbarGeometry
+import com.xnotes.core.tools.ToolbarLayout
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.toComposeColor
 
@@ -56,6 +55,9 @@ fun InfiniteToolbar(
     onInsertAudio: () -> Unit = {},
     onRecordAudio: () -> Unit = {},
     onTakePhoto: () -> Unit = {},
+    onConfigureToolbars: () -> Unit = {},
+    layout: ToolbarLayout = editor.toolbarLayout,
+    geometry: ToolbarGeometry? = null,
 ) {
     // The stroke tools use the same designed drawables the paged toolbar does, so a pen looks like
     // a pen on either canvas rather than like a generic glyph.
@@ -85,14 +87,13 @@ fun InfiniteToolbar(
     var switcherIndex by remember { mutableStateOf<Int?>(null) }
 
     // Pinned outside the scrolling strip so closing a split pane is always one tap away.
-    ToolbarFrame(armed = editor.tool, trailing = onClosePane?.let { { ClosePaneButton(it) } }) {
-        val sections = editor.toolbarLayout.visibleSections
-        sections.forEachIndexed { index, section ->
-            if (index > 0) Separator()
-            for (entry in section.visibleEntries) {
+    ToolbarFrame(armed = editor.tool, layout = layout, geometry = geometry, trailing = onClosePane?.let { { ClosePaneButton(it) } }) {
+        ToolbarSections(layout) { _, section ->
+            ToolbarSectionGrid(section) { entry ->
                 when (val item = entry.item) {
-                    ToolbarItem.SPACER -> Spacer(Modifier.size(24.dp))
-        ToolbarItem.HOME -> ToolbarIcon(XnotesIcons.prev, stringResource(R.string.toolbar_home)) { onOpenBackstage() }
+                    ToolbarItem.SPACER -> ToolbarSpacer(entry)
+                    ToolbarItem.HOME -> ToolbarIcon(XnotesIcons.prev, stringResource(R.string.toolbar_home)) { onOpenBackstage() }
+
                     // A name has no room down a side rail.
                     ToolbarItem.TITLE -> if (!LocalBar.current.vertical) Label(if (editor.document.displayName == null && editor.document.path == null) stringResource(R.string.untitled) else editor.title, Modifier.padding(end = 4.dp))
 
@@ -148,7 +149,8 @@ fun InfiniteToolbar(
                     )
 
                     ToolbarItem.COLORS ->
-                        editor.toolbarColors.take(editor.toolbarColorCount).forEachIndexed { i, color ->
+                        entry.colorIndices(editor.toolbarColorCount).forEach { i ->
+                            val color = editor.toolbarColors[i]
                             Box {
                                 Swatch(color.toComposeColor(), active = editor.activeColorIndex == i, drag = editor, ink = color) {
                                     if (editor.activeColorIndex == i) switcherIndex = i else editor.pickColor(i)
@@ -167,7 +169,7 @@ fun InfiniteToolbar(
                     // number was.
                     ToolbarItem.STYLES -> Box {
                         ToolbarIcon(XnotesIcons.sliders, stringResource(R.string.toolbar_styles), active = stylesOpen) { stylesOpen = true }
-                        if (stylesOpen) CanvasStylesPopup(editor) { stylesOpen = false }
+                        if (stylesOpen) CanvasStylesPopup(editor, onConfigureToolbars) { stylesOpen = false }
                     }
                     ToolbarItem.WAYPOINTS -> Box {
                         ToolbarIcon(XnotesIcons.bookmark, stringResource(R.string.toolbar_waypoints), active = waypointsOpen) { waypointsOpen = true }

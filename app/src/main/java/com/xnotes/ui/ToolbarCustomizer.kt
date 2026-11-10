@@ -338,7 +338,7 @@ private fun ChipFace(item: ToolbarItem, visible: Boolean, modifier: Modifier = M
             .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(itemIcon(item), null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(14.dp))
+        Icon(toolbarItemIcon(item), null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(14.dp))
         Spacer(Modifier.width(4.dp))
         Text(stringResource(item.labelRes), color = palette.text.toComposeColor(), fontSize = 12.sp)
     }
@@ -357,7 +357,7 @@ fun ToolbarDragGhost(item: ToolbarItem) {
             .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(itemIcon(item), null, tint = palette.accent.toComposeColor(), modifier = Modifier.size(14.dp))
+        Icon(toolbarItemIcon(item), null, tint = palette.accent.toComposeColor(), modifier = Modifier.size(14.dp))
         Spacer(Modifier.width(4.dp))
         Text(stringResource(item.labelRes), color = palette.accent.toComposeColor(), fontSize = 12.sp)
     }
@@ -432,7 +432,7 @@ private fun SectionCaret() {
 }
 
 @Composable
-private fun itemIcon(item: ToolbarItem): ImageVector = when (item) {
+internal fun toolbarItemIcon(item: ToolbarItem): ImageVector = when (item) {
     ToolbarItem.HOME -> XnotesIcons.home
     ToolbarItem.TITLE -> XnotesIcons.edit
     ToolbarItem.SIDEBAR -> XnotesIcons.sidebar

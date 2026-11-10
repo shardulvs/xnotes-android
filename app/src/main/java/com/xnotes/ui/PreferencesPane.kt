@@ -123,6 +123,7 @@ fun PreferencesPane(
     onImportCodeTheme: () -> Unit = {},
     onImportFont: () -> Unit = {},
     onBackup: (export: Boolean) -> Unit = {},
+    openToolbarEditor: Boolean = false,
 ) {
     val palette = LocalPalette.current
     val focusManager = LocalFocusManager.current
