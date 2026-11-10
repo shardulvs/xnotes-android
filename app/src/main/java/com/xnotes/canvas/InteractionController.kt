@@ -76,6 +76,7 @@ import com.xnotes.core.stroke.RecognizedShape
 import com.xnotes.core.stroke.Scribble
 import com.xnotes.core.stroke.Sample
 import com.xnotes.core.stroke.ShapeRecognizer
+import com.xnotes.core.stroke.Stabilizer
 import com.xnotes.core.stroke.StrokeSimplify
 import com.xnotes.core.tools.EraseMode
 import com.xnotes.core.tools.InkPalette
@@ -270,6 +271,9 @@ class InteractionController(
 
     /** Event time of the live stroke's first sample; later samples store `eventTime − this` (the speed pen reads it). */
     private var strokeStartTimeMs = 0L
+
+    /** The live stroke's stabilization, or null while its pen draws the nib as is. */
+    private var steadier: Stabilizer? = null
     private var drawingPointerId = -1
     private var drawingIsStylus = false
 
@@ -1224,8 +1228,11 @@ class InteractionController(
         snapRunStartEdge = null
         snapCurrentEdge = null
         snapPenViewport = null
-        val first = state.toPageSpace(pageIndex, state.viewportToContent(magnetize(downViewport)))
+        val down = state.viewportToContent(magnetize(downViewport))
+        val first = state.toPageSpace(pageIndex, down)
         stroke.addSample(Sample(first.x, first.y, pressure)) // first sample: t = 0
+        steadier = Stabilizer.forStroke(cfg.stabilize && !straight, cfg.stabilizeTrail, cfg.stabilizeCrossover, speedScale)
+        steadier?.start(down.x, down.y, 0.0)
         liveStroke = stroke
         strokePageIndex = pageIndex
         mode = PointerMode.DRAW
@@ -1267,13 +1274,29 @@ class InteractionController(
         val pi = strokePageIndex ?: return
         if (state.pageRects.getOrNull(pi) == null) return
         val vp = magnetize(Pt(vx, vy))
-        val content = state.viewportToContent(vp)
+        val nib = state.viewportToContent(vp)
+        var t = (timeMs - strokeStartTimeMs).toDouble()
+        // A steadied stroke takes the point the filter has reached and draws on to the nib as a
+        // tip; the lift lands the nib itself, at the tip's time, so lifting changes nothing.
+        val steady = steadier?.takeIf { !stroke.straight }
+        val content = when {
+            steady == null -> nib
+            force -> {
+                if (steady.moved) t = steady.tipTime
+                nib
+            }
+            else -> {
+                steady.step(nib.x, nib.y, t)
+                Pt(steady.x, steady.y)
+            }
+        }
         // The pen has walked onto another page: carry the stroke over rather than let it slide
         // under the paper. A straight line is one segment by definition and never hands over.
         if (!stroke.straight) {
             val onPage = state.pageIndexAtContent(content)
             if (onPage != null && onPage != pi) {
-                handOverStroke(stroke, pi, onPage, content, pressure, timeMs)
+                handOverStroke(stroke, pi, onPage, content, pressure, t)
+                if (steady != null && !force) showTip(nib, pressure, steady.tipTime)
                 return
             }
         }
@@ -1284,7 +1307,7 @@ class InteractionController(
             // it snaps flat like a dragged line, unless the ruler is already steering the angle.
             val start = stroke.samples.firstOrNull()
             val end = if (start != null && !ruler.visible) ResizeMath.snapAxis(Pt(start.x, start.y), local) else local
-            stroke.setStraightEnd(Sample(end.x, end.y, pressure.coerceIn(0.0, 1.0), (timeMs - strokeStartTimeMs).toDouble()))
+            stroke.setStraightEnd(Sample(end.x, end.y, pressure.coerceIn(0.0, 1.0), t))
             return
         }
         val last = stroke.samples.lastOrNull()
@@ -1294,8 +1317,9 @@ class InteractionController(
         // zoomed in, so strokes drawn while zoomed faceted into ~zoom-px chords.
         val gate = (MIN_SAMPLE_DIST / state.zoom).coerceAtMost(MIN_SAMPLE_DIST)
         if (force || last == null || Pt(last.x, last.y).manhattanTo(local) >= gate) {
-            stroke.addSample(Sample(local.x, local.y, pressure.coerceIn(0.0, 1.0), (timeMs - strokeStartTimeMs).toDouble()))
+            stroke.addSample(Sample(local.x, local.y, pressure.coerceIn(0.0, 1.0), t))
         }
+        if (steady != null && !force) showTip(nib, pressure, steady.tipTime)
         // Real movement restarts the hold-to-snap clock; staying within the slop lets it mature,
         // so the snap fires only once the pen has actually come to rest. (Sub-slop jitter is ignored
         // even when a sample is decimated out above, so a trembling-but-still pen still triggers.)
@@ -1303,6 +1327,14 @@ class InteractionController(
             dwellAnchor = Pt(vx, vy)
             armDwell()
         }
+    }
+
+    /** Draw the live stroke on to the nib at [content], where its steadied samples have not reached yet. */
+    private fun showTip(content: Pt, pressure: Double, t: Double) {
+        val stroke = liveStroke ?: return
+        val pi = strokePageIndex ?: return
+        val local = state.toPageSpace(pi, content)
+        stroke.setTip(Sample(local.x, local.y, pressure.coerceIn(0.0, 1.0), t))
     }
 
     /**
@@ -1320,7 +1352,7 @@ class InteractionController(
         toPage: Int,
         content: Pt,
         pressure: Double,
-        timeMs: Long,
+        t: Double,
     ) {
         // A stroke long enough to reach the next page is a line, not a held shape.
         cancelDwell()
@@ -1339,9 +1371,7 @@ class InteractionController(
             next.addSample(Sample(bridge.x, bridge.y, last.pressure, last.t))
         }
         val local = state.toPageSpace(toPage, content)
-        next.addSample(
-            Sample(local.x, local.y, pressure.coerceIn(0.0, 1.0), (timeMs - strokeStartTimeMs).toDouble()),
-        )
+        next.addSample(Sample(local.x, local.y, pressure.coerceIn(0.0, 1.0), t))
         liveStroke = next
         strokePageIndex = toPage
         requestRender()
@@ -1492,8 +1522,10 @@ class InteractionController(
         if (!dwellEligible) return
         val stroke = liveStroke ?: return
         val pi = strokePageIndex ?: return
-        if (stroke.samples.size < SHAPE_MIN_SAMPLES) return // not enough yet; the next move re-arms
-        val rec = ShapeRecognizer.recognize(stroke.samples) ?: return // not a shape; the next move re-arms
+        // A steadied stroke is judged as lifting it now would leave it, out to the nib.
+        val path = stroke.tip?.let { stroke.samples + it } ?: stroke.samples
+        if (path.size < SHAPE_MIN_SAMPLES) return // not enough yet; the next move re-arms
+        val rec = ShapeRecognizer.recognize(path) ?: return // not a shape; the next move re-arms
         commitRecognizedShape(stroke, pi, rec)
     }
 
