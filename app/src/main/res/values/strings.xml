@@ -1159,4 +1159,6 @@
     <string name="toolbar_size_compact">Compact</string>
     <string name="toolbar_size_regular">Regular</string>
     <string name="toolbar_size_comfortable">Comfortable</string>
+    <string name="toolbar_unified_pen">Pen group</string>
+    <string name="toolbar_pen_advanced_settings">Advanced settings</string>
 </resources>
