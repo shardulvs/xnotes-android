@@ -82,15 +82,19 @@ class TextItem(
         pointSize = snap.pointSize
     }
 
-    /** Text never rotates. A uniform (corner) scale grows the wrap width, reserved height, and font
-     *  size together; a single-axis (edge) scale changes only the wrap width or the reserved height
-     *  and leaves the font size alone. The vertical scale reserves at least the current content
-     *  height first, so dragging the bottom edge of an auto-height box actually grows it. */
+    /** Corner scaling changes font size and wrap width together. Keep auto-height automatic:
+     *  materializing it into a reserved height prevents a scaled-down box from shrinking.
+     *  Vertical edge resizing alone creates an explicit reserved height. */
     override fun applyTransform(t: Affine) {
+        val originalContentHeight = if (!t.isUniformScale && t.scaleY != 1.0) contentHeight() else 0.0
         pos = t.apply(pos)
         width *= t.scaleX
-        if (t.scaleY != 1.0) height = maxOf(height, contentHeight()) * t.scaleY
-        if (t.isUniformScale) pointSize *= t.scaleX
+        if (t.isUniformScale) {
+            pointSize *= t.scaleX
+            if (height > 0.0) height *= t.scaleY
+        } else if (t.scaleY != 1.0) {
+            height = maxOf(height, originalContentHeight) * t.scaleY
+        }
     }
 
     companion object {

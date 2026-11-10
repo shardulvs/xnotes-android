@@ -1212,8 +1212,9 @@ class InfiniteInteraction(
      */
     private fun beginLiftedTransform(sel: CanvasSelection, at: Pt, resize: Boolean) {
         transformPointer = at
-        liveTextReflow = resize && sel.items.singleOrNull() is TextItem &&
-            grabHandle in setOf(HandleId.L, HandleId.R, HandleId.T, HandleId.B)
+        // Use native text layout for every handle, including corner font scaling. The GL lift
+        // otherwise briefly redraws the original glyph size while the new mesh is generated.
+        liveTextReflow = resize && sel.items.singleOrNull() is TextItem
         lastTextReflowNanos = 0L
         if (liveTextReflow) {
             liftedTransform = false
