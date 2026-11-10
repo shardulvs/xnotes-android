@@ -4,6 +4,7 @@ import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.TapeItem
 import com.xnotes.core.model.TapeMode
 import com.xnotes.core.model.TapePattern
+import com.xnotes.core.stroke.Stabilizer
 import com.xnotes.core.stroke.StrokeEngine
 import kotlin.math.ln
 import kotlin.math.pow
@@ -106,6 +107,12 @@ data class ToolConfig(
     val speedSmoothing: Double = StrokeEngine.DEFAULT_SPEED_SMOOTHING,
     /** Speed pen: the speed in dp/ms at which the line reaches its thinnest. Only used by [Tool.SPEED]. */
     val speedTop: Double = StrokeEngine.SPEED_HI,
+    /** Stabilization: steady the nib's path while drawing (see [Stabilizer]). Any ink pen; never written to a file. */
+    val stabilize: Boolean = false,
+    /** Stabilization: the most the steadied line trails a fast nib, in dp. */
+    val stabilizeTrail: Double = Stabilizer.DEFAULT_TRAIL,
+    /** Stabilization: the speed in dp/s below which movement counts as slow and is steadied hardest. */
+    val stabilizeCrossover: Double = Stabilizer.DEFAULT_CROSSOVER,
 ) {
     companion object {
         const val DEFAULT_MARKUP_INTENSITY = 0.9
@@ -175,6 +182,20 @@ object ToolConversions {
 
     fun dpPerMsToTopSpeed(v: Double): Double =
         if (v > 0.0) (50.0 + 50.0 * ln(v / StrokeEngine.SPEED_HI) / ln(3.0)).coerceIn(0.0, 100.0) else 0.0
+
+    /** STRENGTH (0..100) -> `stabilizeTrail` in dp, linear: 100 trails a fast nib by at most 12 dp, about 2 mm. */
+    fun strengthToTrail(strength: Double): Double = strength.coerceIn(0.0, 100.0) * TRAIL_PER_STRENGTH
+
+    fun trailToStrength(trail: Double): Double = (trail / TRAIL_PER_STRENGTH).coerceIn(0.0, 100.0)
+
+    /** CROSSOVER (0..100) -> `stabilizeCrossover` in dp/s, log-scaled from a third of the default to three times it. */
+    fun crossoverToDpPerS(crossover: Double): Double =
+        Stabilizer.DEFAULT_CROSSOVER * 3.0.pow((crossover.coerceIn(0.0, 100.0) - 50.0) / 50.0)
+
+    fun dpPerSToCrossover(v: Double): Double =
+        if (v > 0.0) (50.0 + 50.0 * ln(v / Stabilizer.DEFAULT_CROSSOVER) / ln(3.0)).coerceIn(0.0, 100.0) else 0.0
+
+    private const val TRAIL_PER_STRENGTH = 0.12
 
     /** INTENSITY (0..100, higher = brighter/wider halo) -> `neonStrength` in [0, 1]. */
     fun intensityToNeonStrength(intensity: Double): Double = intensity.coerceIn(0.0, 100.0) / 100.0

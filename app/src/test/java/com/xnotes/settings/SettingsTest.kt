@@ -95,6 +95,15 @@ class SettingsTest {
         assertEquals(0.9, back.speedTop, 1e-9)
     }
 
+    @Test fun stabilizationRoundTripsPerPen() {
+        val pen = com.xnotes.core.tools.ToolDefaults.configFor(Tool.PEN).copy(stabilize = true, stabilizeTrail = 7.2, stabilizeCrossover = 30.0)
+        val back = Settings.fromJson(Settings(tools = mapOf(Tool.PEN to pen)).toJson())
+        assertEquals(true, back.configFor(Tool.PEN).stabilize)
+        assertEquals(7.2, back.configFor(Tool.PEN).stabilizeTrail, 1e-9)
+        assertEquals(30.0, back.configFor(Tool.PEN).stabilizeCrossover, 1e-9)
+        assertEquals(false, back.configFor(Tool.HIGHLIGHTER).stabilize)
+    }
+
     @Test fun theMarkupToolsModeAndIntensityRoundTrip() {
         val markup = com.xnotes.core.tools.ToolConfig(markupMode = com.xnotes.core.tools.MarkupMode.SQUIGGLY, markupIntensity = 0.8)
         val back = Settings.fromJson(Settings(tools = mapOf(Tool.MARKUP to markup)).toJson())

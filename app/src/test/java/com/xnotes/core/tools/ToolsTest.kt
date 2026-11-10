@@ -61,6 +61,21 @@ class ToolsTest {
         }
     }
 
+    @Test fun stabilizationSlidersMapToTheirSettings() {
+        val pen = ToolDefaults.configFor(Tool.PEN)
+        assertEquals(false, pen.stabilize)
+        assertEquals(30.0, ToolConversions.trailToStrength(pen.stabilizeTrail), 1e-9)
+        assertEquals(50.0, ToolConversions.dpPerSToCrossover(pen.stabilizeCrossover), 1e-9)
+        assertEquals(12.0, ToolConversions.strengthToTrail(100.0), 1e-9)
+        assertEquals(0.0, ToolConversions.strengthToTrail(-5.0), 1e-9)
+        assertEquals(pen.stabilizeCrossover / 3.0, ToolConversions.crossoverToDpPerS(0.0), 1e-9)
+        assertEquals(pen.stabilizeCrossover * 3.0, ToolConversions.crossoverToDpPerS(100.0), 1e-9)
+        for (x in listOf(0.0, 12.5, 50.0, 87.0, 100.0)) {
+            assertEquals(x, ToolConversions.trailToStrength(ToolConversions.strengthToTrail(x)), 1e-9)
+            assertEquals(x, ToolConversions.dpPerSToCrossover(ToolConversions.crossoverToDpPerS(x)), 1e-9)
+        }
+    }
+
     @Test fun multiplierRoundTrip() {
         // M = 4.0  <->  ds = 0.60 (calligraphy default)
         assertEquals(0.60, ToolConversions.multiplierToDirectionStrength(4.0), 1e-9)
