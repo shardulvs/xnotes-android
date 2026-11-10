@@ -1017,7 +1017,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         if (editingLabel != null || editingTextItem != null) return
         val at = viewport.viewportToContent(vp)
         val text = document.itemsIn(Rect(at.x - 1.0, at.y - 1.0, 2.0, 2.0)).lastOrNull {
-            it is TextItem && !it.locked && it.contains(at) && it !in selectedBefore
+            it is TextItem && !it.locked && it.contains(at)
         } as? TextItem
         if (text != null) {
             startTextItemEdit(text)
@@ -1033,6 +1033,14 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     /** Start an editable text box at the point tapped with the canvas text tool. */
     private fun createTextItem(at: Pt) {
         commitText()
+        // Re-enter an existing box rather than stacking an empty box over it.
+        val existing = document.itemsIn(Rect(at.x - 1.0, at.y - 1.0, 2.0, 2.0)).lastOrNull {
+            it is TextItem && !it.locked && it.contains(at)
+        } as? TextItem
+        if (existing != null) {
+            startTextItemEdit(existing)
+            return
+        }
         val item = TextItem(
             at, TextItem.DEFAULT_WIDTH, 0.0, "", inkColor,
             textPointSize, textFace, textMeasurer,
@@ -1073,8 +1081,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     override fun updateEditingText(text: String) {
         editingTextItem?.let {
             it.text = text
+            // Keep the native editor and its IME selection/caret alive while typing.
+            // Replacing EditingField for each keystroke resets the Compose text field.
             document.itemChanged(it)
-            refreshField()
             return
         }
         val shape = editingLabel ?: return
