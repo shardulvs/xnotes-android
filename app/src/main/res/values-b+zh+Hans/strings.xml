@@ -76,6 +76,9 @@
     <string name="caption_intensity">强度</string>
     <string name="caption_straight_line">直线</string>
     <string name="caption_inverse">反向</string>
+    <string name="caption_stabilization">防抖</string>
+    <string name="caption_strength">强度</string>
+    <string name="caption_crossover">慢速阈值</string>
     <string name="caption_neon">发光效果</string>
     <string name="tape_straight">直线</string>
     <string name="tape_freehand">手绘</string>

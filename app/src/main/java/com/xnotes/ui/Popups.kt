@@ -85,8 +85,8 @@ import kotlin.math.roundToInt
 /**
  * Stroke-tool configuration popup (spec 10 §3): PRESSURE / SENSITIVITY, then the
  * tool's signature control: MULTIPLIER (calligraphy), THINNING / SMOOTHING / TOP SPEED (speed pen) or
- * TIP WIDTH PERCENTAGE (taper pen), then WIDTH, and a NEON toggle (with INTENSITY) on
- * any stroke tool but the highlighter.
+ * TIP WIDTH PERCENTAGE (taper pen), then WIDTH, a STABILIZATION toggle (with STRENGTH and
+ * CROSSOVER), and a NEON toggle (with INTENSITY) on any stroke tool but the highlighter.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -109,6 +109,9 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
     var intensity by remember { mutableStateOf(ToolConversions.highlighterAlphaToIntensity(base.highlighterAlpha).toFloat()) }
     var inverse by remember { mutableStateOf(base.highlighterInverse) }
     var colorOverride by remember { mutableStateOf(base.colorOverride) }
+    var steady by remember { mutableStateOf(base.stabilize) }
+    var steadyStrength by remember { mutableStateOf(ToolConversions.trailToStrength(base.stabilizeTrail).toFloat()) }
+    var crossover by remember { mutableStateOf(ToolConversions.dpPerSToCrossover(base.stabilizeCrossover).toFloat()) }
 
     fun emit() {
         val m = ToolConversions.sensitivityToMinFactor(sensitivity.toDouble())
@@ -138,6 +141,9 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
                 highlighterAlpha = ha,
                 highlighterInverse = inverse,
                 colorOverride = colorOverride,
+                stabilize = steady,
+                stabilizeTrail = ToolConversions.strengthToTrail(steadyStrength.toDouble()),
+                stabilizeCrossover = ToolConversions.crossoverToDpPerS(crossover.toDouble()),
             ),
         )
     }
@@ -197,6 +203,14 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
                 // INVERSE swaps the multiply blend for a screen one, so the marker lightens the
                 // page instead of darkening it. A multiply has nothing to darken on a dark page.
                 ToggleRow(stringResource(R.string.caption_inverse), inverse) { inverse = it; emit() }
+            }
+            // STABILIZATION steadies the path while drawing; a straight line has nothing to steady.
+            if (tool.isStroke && !(tool == Tool.HIGHLIGHTER && straight)) {
+                ToggleRow(stringResource(R.string.caption_stabilization), steady) { steady = it; emit() }
+                if (steady) {
+                    SliderRow(stringResource(R.string.caption_strength), steadyStrength, 0f..100f) { steadyStrength = it; emit() }
+                    SliderRow(stringResource(R.string.caption_crossover), crossover, 0f..100f) { crossover = it; emit() }
+                }
             }
             // Glow is offered on every stroke tool except the highlighter (translucent) and the
             // dashed pen (it draws a line, not a fillable ribbon, so a halo has nothing to hug).
