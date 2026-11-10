@@ -53,7 +53,6 @@ import com.xnotes.core.tools.ToolbarLayout
 import com.xnotes.core.tools.ToolbarScale
 import com.xnotes.core.tools.ToolbarWorkspace
 import com.xnotes.settings.ToolbarLook
-import com.xnotes.settings.ToolbarPosition
 import com.xnotes.settings.ToolbarSize
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
