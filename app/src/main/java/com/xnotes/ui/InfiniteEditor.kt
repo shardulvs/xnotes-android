@@ -268,7 +268,10 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             itemsRevision++
             // Drop any mesh job still running for it, so its result cannot file the record again.
             if (item is ImageItem) vectorMeshGen.remove(item)
-            if (item is TextItem) textMeshGen.remove(item)
+            if (item is TextItem) {
+                textMeshGen.remove(item)
+                textMeshPreview.remove(item)
+            }
             scene.remove(item)
             if (item === AudioPlayback.session?.item) AudioPlayback.closeIfGone(this@InfiniteEditor)
         }
@@ -358,6 +361,29 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             scene.remove(item)
             return
         }
+        // Publish an inexpensive visual transform now, before the pointer-up lift clears.
+        // The worker replaces it with correctly reflowed glyphs once tessellation finishes.
+        textMeshPreview[item]?.takeIf { it.text == snapshot.text }?.let { previous ->
+            val from = previous.meshed.bounds
+            val to = snapshot.bounds()
+            // Only move the previous glyph mesh. Scaling it to the new width would stretch
+            // individual letters; the worker will replace it with correctly wrapped lines.
+            val dx = to.left - from.left
+            val dy = to.top - from.top
+            val parts = previous.meshed.parts.map { part ->
+                val mesh = part.mesh
+                val positions = mesh.positions.copyOf()
+                for (i in positions.indices step 2) {
+                    positions[i] += dx
+                    positions[i + 1] += dy
+                }
+                MeshPart(
+                    com.xnotes.core.infinite.MeshData(positions, mesh.offsets, mesh.indices, mesh.colors),
+                    snapshot.rgba, part.pass, part.glow, part.covers,
+                )
+            }
+            scene.upsert(item, parts, to)
+        }
         decodeExecutor.execute {
             // Skip queued work already superseded by subsequent drag events.
             if (textMeshGen[item] != token) return@execute
@@ -367,12 +393,21 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             view.post {
                 if (!textMeshGen.remove(item, token)) return@post
                 scene.lastTessellateMs = elapsed
-                if (meshed == null || meshed.isEmpty) scene.remove(item)
-                else scene.upsert(item, meshed.parts, meshed.bounds)
+                if (meshed == null || meshed.isEmpty) {
+                    textMeshPreview.remove(item)
+                    scene.remove(item)
+                } else {
+                    textMeshPreview[item] = TextMeshPreview(meshed, snapshot.text)
+                    scene.upsert(item, meshed.parts, meshed.bounds)
+                }
                 view.publish()
             }
         }
     }
+
+    private data class TextMeshPreview(val meshed: MeshedItem, val text: String)
+    /** Last fully tessellated geometry per live text item; used for immediate drag previews. */
+    private val textMeshPreview = java.util.WeakHashMap<TextItem, TextMeshPreview>()
 
     private val textMeshGen = java.util.concurrent.ConcurrentHashMap<TextItem, Long>()
     private val textMeshSeq = java.util.concurrent.atomic.AtomicLong()
@@ -444,6 +479,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         scene.reset()
         vectorMeshGen.clear()
         textMeshGen.clear()
+        textMeshPreview.clear()
         scene.batch { for (item in document.items) pushItem(item) }
         scene.setOrder(document.items)
     }
