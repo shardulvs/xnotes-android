@@ -28,7 +28,9 @@ import kotlin.math.min
  *  - the **speed** pen's centred window, [StrokeEngine.SPEED_WINDOW_MS] of moving time ahead, and
  *    its blur, [StrokeEngine.SPEED_BLUR_REACH] sigmas of path ahead;
  *  - the **calligraphy** head, which pins every point flat until the stroke first fills
- *    [StrokeEngine.HEAD_LEN] and then rewrites them once.
+ *    [StrokeEngine.HEAD_LEN] and then rewrites them once;
+ *  - the **calligraphy** reversal, which can only be ruled in or out once the stroke has run
+ *    [StrokeEngine.reversalWait] past the turn.
  *
  * The taper pen settles nothing: its profile is a fraction of the *total* arc, so every point it
  * has ever drawn moves each time the stroke gets longer. [supports] turns it down.
@@ -71,10 +73,14 @@ class WetRibbon(
     private var tx = EMPTY_D
     private var ty = EMPTY_D
 
-    /** Elapsed ms, cumulative *raw* travel and cumulative moving time: only the speed pen's window reads them. */
+    /** Elapsed ms, cumulative *raw* travel and cumulative moving time: the speed pen's window reads them. */
     private var times = EMPTY_D
     private var rawCum = EMPTY_D
     private var tau = EMPTY_D
+
+    /** The raw samples, which the calligraphy nib judges a reversal by, along with [rawCum]. */
+    private var rawX = EMPTY_D
+    private var rawY = EMPTY_D
 
     /** Smoothed travel up to each sample, and each sample's speed factor before the blur. */
     private var pathArc = EMPTY_D
@@ -106,6 +112,8 @@ class WetRibbon(
     private val headLen = StrokeEngine.headLen(smoothScale)
     private val openLen = StrokeEngine.openLen(smoothScale, baseWidth)
     private val closeLen = StrokeEngine.closeLen(smoothScale, baseWidth)
+    private val reversalWait = StrokeEngine.reversalWait(smoothScale, baseWidth)
+    private val turnScratch = DoubleArray(StrokeEngine.REVERSAL_SCRATCH)
 
     /** Tangents are final below this; the last one is always a backward difference and provisional. */
     private var tanDone = 0
@@ -212,9 +220,15 @@ class WetRibbon(
             sp[0] = pressure
             if (timed) {
                 times[0] = t
-                rawCum[0] = 0.0
                 tau[0] = 0.0
+            }
+            if (timed || ds > 0.0) {
+                rawCum[0] = 0.0
                 pathArc[0] = 0.0
+            }
+            if (ds > 0.0) {
+                rawX[0] = x
+                rawY[0] = y
             }
         } else {
             sx[i] = if (smooth) StrokeEngine.emaStep(sx[i - 1], lastRawX, x, step, smoothLen) else x
@@ -223,9 +237,15 @@ class WetRibbon(
             arc += hypot(sx[i] - sx[i - 1], sy[i] - sy[i - 1])
             if (timed) {
                 times[i] = t
-                rawCum[i] = rawCum[i - 1] + step
                 tau[i] = tau[i - 1] + StrokeEngine.movingStep(t - times[i - 1], step, floor)
+            }
+            if (timed || ds > 0.0) {
+                rawCum[i] = rawCum[i - 1] + step
                 pathArc[i] = arc
+            }
+            if (ds > 0.0) {
+                rawX[i] = x
+                rawY[i] = y
             }
         }
         lastRawX = x
@@ -293,14 +313,21 @@ class WetRibbon(
         nibDone = k + 1
     }
 
-    /** Carry the nib's slew limiter forward over every point whose tangent has stopped moving. */
+    /** Re-run the nib from its last final value: the rate, and any reversal the newest samples confirm or rule out. */
     private fun extendNib() {
         if (ds <= 0.0 || headK < 0) return
-        for (i in nibDone until pointCount - 1) {
-            nibValue = StrokeEngine.nibStep(nibValue, ty[i], stepAlong(i), openLen, closeLen)
-            nib[i] = nibValue
-            nibDone = i + 1
+        val n = pointCount
+        // A point's nib is final once no reversal at or before it can still be confirmed or ruled out.
+        var f = nibDone
+        while (f + 1 < n && rawCum[n - 1] > rawCum[f + 1] + reversalWait) f++
+        var d = nibValue
+        for (i in nibDone until n) {
+            if (i == f) nibValue = d
+            d = StrokeEngine.nibStep(d, ty[i], stepAlong(i), openLen, closeLen)
+            d = StrokeEngine.backfill(d, rawX, rawY, rawCum, n, i, reversalWait, turnScratch)
+            nib[i] = d
         }
+        nibDone = f
     }
 
     /** Travel along the smoothed centreline into point [i]; what the nib measures its rate against. */
@@ -318,16 +345,6 @@ class WetRibbon(
         if (timed) refreshSpeed(n)
         val target = settleTarget()
 
-        // The last point's nib value rides on a tangent that is still moving, so it is computed
-        // fresh here rather than committed to [nib].
-        val liveNib = if (ds <= 0.0 || headK < 0) {
-            -1.0
-        } else if (n - 1 < nibDone) {
-            nib[n - 1]
-        } else {
-            StrokeEngine.nibStep(nibValue, ty[n - 1], stepAlong(n - 1), openLen, closeLen)
-        }
-
         val held = holdEnds && pressureEnabled
         blurScratch[0] = blurCursor[0]
         for (i in from until n) {
@@ -337,7 +354,7 @@ class WetRibbon(
                 n == 1 -> 0.0
                 ds <= 0.0 -> ty[i]
                 headK < 0 -> -1.0
-                else -> (if (i < nibDone) nib[i] else liveNib).coerceIn(-1.0, StrokeEngine.DOT_DIR_Y)
+                else -> nib[i].coerceIn(-1.0, StrokeEngine.DOT_DIR_Y)
             }
             val pressure = if (held) StrokeEngine.heldPressureAt(sp, n, i) else sp[i]
             var h = StrokeEngine.halfWidth(baseWidth, pressureEnabled, m, ds, pressure, dir)
@@ -401,6 +418,7 @@ class WetRibbon(
         }
         // Calligraphy pins every point to the head until the head exists, then rewrites them once.
         if (ds > 0.0 && headK < 0) return 0
+        if (ds > 0.0) s = min(s, nibDone)
         if (timed) {
             // The head's window is clamped to the stroke's first span, so nothing is final until that span is past.
             if (tau[n - 1] <= 2.0 * StrokeEngine.SPEED_WINDOW_MS) return 0
@@ -429,10 +447,16 @@ class WetRibbon(
         ty = ty.copyOf(c)
         if (timed) {
             times = times.copyOf(c)
-            rawCum = rawCum.copyOf(c)
             tau = tau.copyOf(c)
-            pathArc = pathArc.copyOf(c)
             fSpeed = fSpeed.copyOf(c)
+        }
+        if (timed || ds > 0.0) {
+            rawCum = rawCum.copyOf(c)
+            pathArc = pathArc.copyOf(c)
+        }
+        if (ds > 0.0) {
+            rawX = rawX.copyOf(c)
+            rawY = rawY.copyOf(c)
         }
         if (ds > 0.0) nib = nib.copyOf(c)
         centerline = centerline.copyOf(2 * c)

@@ -156,6 +156,37 @@ class WetRibbonTest {
         return out
     }
 
+    /** Cursive strokes reversing sharply between hairline and downstroke, each followed by a short wobble. */
+    private fun cuspyPath(): List<Sample> {
+        val out = arrayListOf(Sample(30.0, 80.0, 0.6, 0.0))
+        var x = 30.0
+        var y = 80.0
+        var t = 0.0
+        fun leg(dx: Double, dy: Double, steps: Int) = repeat(steps) {
+            x += dx / steps
+            y += dy / steps
+            t += 4.0
+            out.add(Sample(x, y, 0.6, t))
+        }
+        repeat(4) {
+            leg(8.0, -36.0, 24)
+            leg(-3.0, 36.0, 24)
+            leg(6.0, -1.5, 3)
+            leg(4.0, 0.0, 4)
+        }
+        return out
+    }
+
+    @Test fun calligraphyMatchesAcrossReversals() {
+        assertMatchesAtEveryLength(Tool.CALLIGRAPHY, cuspyPath())
+        assertMatchesAtEveryLength(Tool.CALLIGRAPHY, cuspyPath(), config = configFor(Tool.CALLIGRAPHY).copy(baseWidth = 20.0))
+    }
+
+    @Test fun calligraphySettledPointsNeverMoveAcrossReversals() {
+        assertSettledPointsNeverMove(Tool.CALLIGRAPHY, cuspyPath())
+        assertSettledPointsNeverMove(Tool.CALLIGRAPHY, cuspyPath(), configFor(Tool.CALLIGRAPHY).copy(baseWidth = 20.0))
+    }
+
     @Test fun speedMatchesUnderAWideBlurAndPauses() {
         val wide = configFor(Tool.SPEED).copy(baseWidth = 20.0, speedSmoothing = 1.0)
         assertMatchesAtEveryLength(Tool.SPEED, jerkyTimedPath(160), config = wide)

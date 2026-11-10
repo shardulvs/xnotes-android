@@ -469,6 +469,86 @@ class StrokeEngineTest {
         }
     }
 
+    /** Calligraphy at the default ratio, pressure off, along legs walked in steps of about 1.5 px from (0, 0). */
+    private fun nib(width: Double, vararg legs: Pair<Double, Double>): StrokeGeometry {
+        val pts = arrayListOf(Sample(0.0, 0.0, 1.0))
+        var x = 0.0
+        var y = 0.0
+        for ((dx, dy) in legs) {
+            val n = maxOf(1, kotlin.math.round(hypot(dx, dy) / 1.5).toInt())
+            repeat(n) {
+                x += dx / n
+                y += dy / n
+                pts.add(Sample(x, y, 1.0))
+            }
+        }
+        return StrokeEngine.build(pts, width, false, 0.4, 0.6)
+    }
+
+    /** The sample [nib] puts at the end of [leg], where the pen turns. */
+    private fun cornerAfter(leg: Pair<Double, Double>) = maxOf(1, kotlin.math.round(hypot(leg.first, leg.second) / 1.5).toInt())
+
+    @Test fun aCursiveITopTurnsThickRightAtTheTurn() {
+        val up = 12.0 to -36.0
+        val g = nib(6.0, up, -6.0 to 36.0)
+        val corner = cornerAfter(up)
+        val hairline = g.hw(corner - 8)
+        val thick = g.hw(corner + 14)
+        assertEquals("the upstroke stays a hairline into the turn", hairline, g.hw(corner - 1), 0.05)
+        assertTrue("thick from the turn: ${g.hw(corner)} of $thick", g.hw(corner) > 0.9 * thick)
+    }
+
+    @Test fun aReversalSurvivesPenUpSampleReduction() {
+        val up = 12.0 to -36.0
+        val pts = ArrayList<Sample>()
+        var x = 0.0
+        var y = 0.0
+        pts.add(Sample(x, y, 1.0))
+        for ((dx, dy) in listOf(up, -6.0 to 36.0)) {
+            val n = maxOf(1, kotlin.math.round(hypot(dx, dy) / 1.5).toInt())
+            repeat(n) {
+                x += dx / n
+                y += dy / n
+                pts.add(Sample(x, y, 1.0))
+            }
+        }
+        val g = StrokeEngine.build(pts, 6.0, false, 0.4, 0.6)
+        val slim = StrokeSimplify.simplify(pts, g.halfWidths, 0.2)
+        val corner = slim.indexOfFirst { it == pts[cornerAfter(up)] }
+        assertTrue("the turn's own sample is kept", corner > 0)
+        val after = StrokeEngine.build(slim, 6.0, false, 0.4, 0.6)
+        assertEquals("still thick from the turn", g.hw(cornerAfter(up)).toDouble(), after.hw(corner).toDouble(), 0.05)
+    }
+
+    @Test fun aBackwardsWobbleShorterThanTheWaitStaysAHairline() {
+        val g = nib(6.0, 0.0 to -40.0, 0.0 to 2.0, 0.0 to -40.0)
+        assertTrue("widest ${g.halfWidths.max()}", g.halfWidths.max() < 0.5 * 3.0 * 1.6)
+    }
+
+    @Test fun aWiderNibWaitsLongerBeforeAReversalCounts() {
+        // A 6 px backwards hook holds past a default nib's 3 px wait, but not past a 20 px nib's 10.
+        val hook = arrayOf(0.0 to -40.0, 0.0 to 6.0, 0.0 to -40.0)
+        assertTrue("the default nib takes it as a stroke", nib(6.0, *hook).halfWidths.max() > 0.8 * 3.0 * 1.6)
+        assertTrue("the wide nib does not", nib(20.0, *hook).halfWidths.max() < 0.5 * 10.0 * 1.6)
+    }
+
+    @Test fun aReversalBetween120And160StartsPartWayThick() {
+        fun startShare(turnDeg: Double): Double {
+            val a = Math.toRadians(turnDeg)
+            val up = 0.0 to -40.0
+            val g = nib(6.0, up, 40.0 * sin(a) to -40.0 * cos(a))
+            val corner = cornerAfter(up)
+            val hairline = g.hw(corner - 8)
+            return (g.hw(corner) - hairline) / (g.hw(g.pointCount - 7) - hairline)
+        }
+        val gentle = startShare(110.0)
+        val between = startShare(140.0)
+        val sharp = startShare(175.0)
+        assertTrue("110: $gentle, 140: $between, 175: $sharp", gentle < between && between < sharp)
+        assertTrue("a near retrace starts at full width: $sharp", sharp > 0.9)
+        assertTrue("110 degrees only swells: $gentle", gentle < 0.35)
+    }
+
     @Test fun topSpeedSetsWhereTheLineIsThinnest() {
         val pts = (0..40).map { Sample(it * 2.0, 0.0, 1.0, it * 4.0) } // a steady 0.5 dp/ms
         val partial = StrokeEngine.build(pts, 4.0, false, 1.0, 0.0, speedStrength = 0.8, speedTop = 0.6)
