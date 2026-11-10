@@ -22,6 +22,9 @@ import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
 import com.xnotes.core.tools.ToolDefaults
 import com.xnotes.core.tools.ToolbarLayout
+import com.xnotes.core.tools.ToolbarWorkspaces
+import com.xnotes.core.tools.ToolbarAnchor
+import com.xnotes.core.tools.ToolbarScale
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -56,6 +59,10 @@ data class Settings(
     val toolbarLayout: ToolbarLayout = ToolbarLayout.DEFAULT,
     /** The infinite canvas's own bar. A separate layout because the two hold different items. */
     val canvasToolbarLayout: ToolbarLayout = ToolbarLayout.CANVAS_DEFAULT,
+    /** Null means legacy settings: derive a workspace from the existing single-bar layouts. */
+    val toolbarWorkspaces: ToolbarWorkspaces? = null,
+    /** Named snapshots of the note and canvas toolbar profiles. */
+    val toolbarWorkspacePresets: List<ToolbarWorkspacePreset> = emptyList(),
     val activeColor: Int = 0,
     /** The tool armed when the app was last paused, re-armed on the next launch. */
     val lastTool: Tool = Tool.DEFAULT,
@@ -102,6 +109,45 @@ data class Settings(
 
     fun swatchesFor(role: SwatchRole): List<Rgba> = swatches[role] ?: role.defaults
 
+    /** Keep legacy primary fields synchronized without materializing legacy-only profiles. */
+    fun withToolbarLayout(context: com.xnotes.core.tools.ToolbarContext, layout: ToolbarLayout): Settings {
+        val updated = toolbarWorkspaces?.updateWorkspace(context) { it.replacePrimaryLayout(layout) }
+        return when (context) {
+            com.xnotes.core.tools.ToolbarContext.NOTE -> copy(toolbarLayout = layout, toolbarWorkspaces = updated)
+            com.xnotes.core.tools.ToolbarContext.CANVAS -> copy(canvasToolbarLayout = layout, toolbarWorkspaces = updated)
+        }
+    }
+
+    /** Full workspace edits also update the legacy layouts used by older readers. */
+    fun withToolbarWorkspaces(workspaces: ToolbarWorkspaces): Settings = copy(
+        toolbarWorkspaces = workspaces,
+        toolbarLayout = workspaces.note.bars.first().layout,
+        canvasToolbarLayout = workspaces.canvas.bars.first().layout,
+    )
+
+    /** Read old settings without rewriting or discarding a user's custom toolbar placement. */
+    fun effectiveToolbarWorkspaces(): ToolbarWorkspaces = toolbarWorkspaces
+        ?: ToolbarWorkspaces.fromLegacy(toolbarLayout, canvasToolbarLayout).let { legacy ->
+            val look = prefs.toolbarLook
+            val anchor = when (look.position) {
+                ToolbarPosition.TOP -> ToolbarAnchor.TOP_CENTER
+                ToolbarPosition.BOTTOM -> ToolbarAnchor.BOTTOM_CENTER
+                ToolbarPosition.LEFT -> ToolbarAnchor.CENTER_LEFT
+                ToolbarPosition.RIGHT -> ToolbarAnchor.CENTER_RIGHT
+            }
+            val scale = when (look.size) {
+                ToolbarSize.COMPACT -> ToolbarScale.COMPACT
+                ToolbarSize.REGULAR -> ToolbarScale.REGULAR
+                ToolbarSize.COMFORTABLE -> ToolbarScale.COMFORTABLE
+            }
+            fun withLook(workspace: com.xnotes.core.tools.ToolbarWorkspace) = workspace.copy(
+                bars = workspace.bars.map { bar ->
+                    bar.copy(geometry = bar.geometry.copy(anchor = anchor, scale = scale, floating = look.floating))
+                },
+            )
+            legacy.copy(note = withLook(legacy.note), canvas = withLook(legacy.canvas))
+        }
+
     fun withSwatch(role: SwatchRole, index: Int, color: Rgba): Settings {
         val current = swatchesFor(role)
         if (index !in current.indices) return this
@@ -121,6 +167,8 @@ data class Settings(
             .put("toolbar_color_count", toolbarColorCount)
             .put("toolbar_layout", toolbarLayoutJson(toolbarLayout))
             .put("canvas_toolbar_layout", toolbarLayoutJson(canvasToolbarLayout))
+            .apply { toolbarWorkspaces?.let { put("toolbar_workspaces", ToolbarWorkspaceJson.write(it)) } }
+            .put("toolbar_workspace_presets", ToolbarWorkspacePresetsJson.write(toolbarWorkspacePresets))
             .put("active_color", activeColor)
             .put("last_tool", lastTool.id)
             .put("recent_colors", JSONArray().apply { recentColors.forEach { put(rgbaArr(it)) } })
@@ -176,6 +224,8 @@ data class Settings(
                     ToolbarLayout.CANVAS_ITEMS,
                     ToolbarLayout.CANVAS_DEFAULT,
                 ),
+                toolbarWorkspaces = ToolbarWorkspaceJson.read(o.optJSONObject("toolbar_workspaces")),
+                toolbarWorkspacePresets = ToolbarWorkspacePresetsJson.read(o.optJSONArray("toolbar_workspace_presets")),
                 activeColor = o.optInt("active_color", 0).coerceIn(0, InkPalette.MAX_SWATCHES - 1),
                 // Only tools the toolbar can arm come back; a transient one (e.g. TEXT_BOX) would
                 // leave the bar showing a tool the user never picked.
