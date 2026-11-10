@@ -39,20 +39,26 @@ class Stroke(
      *  copy); otherwise the immutable style snapshot captured at pen-down. */
     var config: ToolConfig,
     samples: List<Sample> = emptyList(),
-    /** Content-px → dp scale captured at pen-down (zoom ÷ display density), so the speed
-     *  pen judges gesture speed in zoom- and device-independent units. 1.0 = unscaled. */
-    val speedScale: Double = 1.0,
+    speedScale: Double = 1.0,
     /** Straight-line mode: render as a raw segment (no position smoothing) so the line reaches
      *  exactly from the first sample to the last — the EMA low-pass otherwise pulls a 2-point
      *  stroke's far end to the midpoint, lagging it behind the stylus. */
     val straight: Boolean = false,
+    smoothScale: Double = 1.0,
+) : CanvasItem {
+
+    /** Content-px → dp scale captured at pen-down (zoom ÷ display density), so the speed
+     *  pen judges gesture speed in zoom- and device-independent units. 1.0 = unscaled. */
+    var speedScale = speedScale
+        private set
+
     /** Scale on every arc-length constant the engine measures the hand against: the low-pass
      *  lengths, the nib's head window and its widen/thin rates. Captured at pen-down
      *  as 1 ÷ zoom and capped at 1, so they are lengths of *gesture* rather than of page, and
      *  writing small at high zoom behaves as writing at 100% does. 1.0 = drawn at 100% zoom, and
-     *  the default for anything built without a pen. */
-    val smoothScale: Double = 1.0,
-) : CanvasItem {
+     *  the default for anything built without a pen. A resize scales it with the stroke. */
+    var smoothScale = smoothScale
+        private set
 
     override val kind = KIND
     override val resizable = false
@@ -668,7 +674,10 @@ class Stroke(
     }
 
     override fun snapshotGeometry(): GeometrySnapshot = pts.let {
-        StrokeSnapshot(it.ox, it.oy, it.xa.copyOf(it.n), it.ya.copyOf(it.n), it.pa.copyOf(it.n), it.ta?.copyOf(it.n), it.fa?.copyOf(it.n), config, cuts)
+        StrokeSnapshot(
+            it.ox, it.oy, it.xa.copyOf(it.n), it.ya.copyOf(it.n), it.pa.copyOf(it.n), it.ta?.copyOf(it.n), it.fa?.copyOf(it.n),
+            config, cuts, smoothScale, speedScale,
+        )
     }
 
     override fun restoreGeometry(snap: GeometrySnapshot) {
@@ -680,6 +689,8 @@ class Stroke(
         )
         config = snap.config
         cuts = snap.cuts
+        smoothScale = snap.smoothScale
+        speedScale = snap.speedScale
         invalidate()
     }
 
@@ -709,6 +720,11 @@ class Stroke(
                 dashLength = config.dashLength * k,
                 dashGap = config.dashGap * k,
             )
+            // Every length the engine measures along the stroke grows with it, so it rebuilds as itself, zoomed.
+            if (k > 0.0) {
+                smoothScale *= k
+                speedScale /= k
+            }
         }
         if (cuts.isNotEmpty()) cuts = cuts.map { it.mapped(t) }
         invalidate()
@@ -1007,4 +1023,6 @@ private class StrokeSnapshot(
     val fs: FloatArray?,
     val config: ToolConfig,
     val cuts: List<CutEdge>,
+    val smoothScale: Double,
+    val speedScale: Double,
 ) : GeometrySnapshot
