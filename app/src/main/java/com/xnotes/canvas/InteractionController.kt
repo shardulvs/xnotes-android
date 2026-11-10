@@ -289,6 +289,9 @@ class InteractionController(
      *  crossing lifts and re-lays as one undo step. Empty for a stroke that stayed on its page. */
     private val crossedSegments = mutableListOf<Command>()
 
+    /** The pieces a stroke left on the pages it crossed, with their page and whether ephemeral ink holds them. */
+    private val crossedPieces = mutableListOf<Triple<Stroke, Int, Boolean>>()
+
     // PAN + inertial fling
     private var lastPan = Pt.ZERO
     private var lastMoveMs = 0L
@@ -1348,7 +1351,9 @@ class InteractionController(
      *  joins the page it was drawn on and holds its command back for the one composite undo. */
     private fun retireCrossedSegment(stroke: Stroke, pageIndex: Int) {
         stroke.finished = true
-        if (wandMode && stroke.tool.isStroke) {
+        val fading = wandMode && stroke.tool.isStroke
+        crossedPieces.add(Triple(stroke, pageIndex, fading))
+        if (fading) {
             fadingStrokes.add(FadingStroke(stroke, pageIndex))
             frontInk?.holdFading(stroke)
             return
@@ -1356,11 +1361,25 @@ class InteractionController(
         crossedSegments.add(fileStroke(stroke, pageIndex))
     }
 
+    /** Speed pen: once the pen lifts, work the widths out across every page the stroke crossed, so no edge steps. */
+    private fun stitchCrossedSpeedWidths(last: Stroke) {
+        if (crossedPieces.isEmpty() || last.config.speedStrength <= 0.0) return
+        val before = crossedPieces.map { it.first.paintBounds() }
+        Stroke.stitchSpeedWidths(crossedPieces.map { it.first } + last)
+        for ((i, piece) in crossedPieces.withIndex()) {
+            val (stroke, pageIndex, fading) = piece
+            if (fading || frontInk?.holding(stroke) == true) continue
+            val page = state.document.pages.getOrNull(pageIndex) ?: continue
+            repairRegion(page, before[i].union(stroke.paintBounds()))
+        }
+    }
+
     /** Push this stroke's whole edit — every page it crossed plus [last], if any — as one undo
      *  step. A no-op when the stroke neither crossed a page nor committed anything. */
     private fun pushStrokeEdit(last: Command?) {
         val all = if (last == null) crossedSegments.toList() else crossedSegments + last
         crossedSegments.clear()
+        crossedPieces.clear()
         if (all.isEmpty()) return
         history.push(if (all.size == 1) all[0] else CompositeCommand(all))
         onContentChanged()
@@ -1395,6 +1414,7 @@ class InteractionController(
             // The pen is up: rebuild with lift-time rules on (a dot-sized calligraphy stroke
             // takes the nib's broad face) before the stroke is committed or held for fading.
             stroke.finished = true
+            stitchCrossedSpeedWidths(stroke)
             when {
                 // A bare tap whose only job was to dismiss the selection: drop the dot it would leave.
                 strokeDismissedSelection && tapCandidate -> Unit
@@ -4320,6 +4340,7 @@ class InteractionController(
         cancelDwell()
         clearFading()
         crossedSegments.clear() // they belong to the outgoing document, whose history is gone
+        crossedPieces.clear()
         dwellEligible = false
         mode = PointerMode.IDLE
         dismissPressAt = null

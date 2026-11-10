@@ -14,6 +14,8 @@ import com.xnotes.core.stroke.StrokeGeometry
 import com.xnotes.core.stroke.WetRibbon
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
+import kotlin.math.hypot
+import kotlin.math.max
 
 /**
  * The unit of inking (spec 02 §5.1). Holds the raw samples plus a snapshot of
@@ -880,6 +882,47 @@ class Stroke(
 
         /** First allocation for a live stroke; grows by doubling from here. */
         private const val INITIAL_CAPACITY = 32
+
+        /** Speed pen: one gesture cut at page edges, each later piece opening on a bridge to the last, widths worked out as one. */
+        fun stitchSpeedWidths(pieces: List<Stroke>) {
+            val first = pieces.firstOrNull() ?: return
+            val cfg = first.config
+            if (cfg.speedStrength <= 0.0 || pieces.any { it.pts.n == 0 }) return
+            val total = pieces.sumOf { it.pts.n } - (pieces.size - 1)
+            val times = DoubleArray(total)
+            val steps = DoubleArray(total)
+            val path = DoubleArray(total)
+            var at = 0
+            for ((k, piece) in pieces.withIndex()) {
+                val s = piece.pts
+                val n = s.n
+                val rx = DoubleArray(n) { s.ox + s.xa[it] }
+                val ry = DoubleArray(n) { s.oy + s.ya[it] }
+                val raw = DoubleArray(n)
+                for (i in 1 until n) raw[i] = hypot(rx[i] - rx[i - 1], ry[i] - ry[i - 1])
+                val len = StrokeEngine.SMOOTH_LEN * max(piece.smoothScale, 0.0)
+                val sx = if (piece.straight) rx else StrokeEngine.emaByArc(rx, raw, len)
+                val sy = if (piece.straight) ry else StrokeEngine.emaByArc(ry, raw, len)
+                for (i in (if (k == 0) 0 else 1) until n) {
+                    times[at] = s.t(i)
+                    if (at > 0) {
+                        steps[at] = raw[i]
+                        path[at] = path[at - 1] + hypot(sx[i] - sx[i - 1], sy[i] - sy[i - 1])
+                    }
+                    at++
+                }
+            }
+            val f = StrokeEngine.speedFactorsOver(
+                times, steps, path, total, cfg.speedStrength, cfg.speedTop, cfg.speedSmoothing * cfg.baseWidth, first.speedScale,
+            )
+            at = 0
+            for ((k, piece) in pieces.withIndex()) {
+                val n = piece.pts.n
+                val bridge = if (k == 0) 0 else 1
+                piece.keepSpeedWidths(DoubleArray(n) { i -> f[at + i - bridge] })
+                at += n - bridge
+            }
+        }
 
         /** [c] lerped a fraction [t] toward white (alpha preserved). */
         internal fun lighten(c: Rgba, t: Double): Rgba {

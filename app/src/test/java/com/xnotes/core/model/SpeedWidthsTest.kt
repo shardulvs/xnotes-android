@@ -80,6 +80,29 @@ class SpeedWidthsTest {
         for (k in 0 until kept.sampleCount) assertEquals(g.hw(sameMoment(s, kept, k)), kg.hw(k), 1e-6)
     }
 
+    @Test fun aStrokeCutAtAPageEdgeKeepsItsWidthsAcrossIt() {
+        val whole = drawn().apply { freezeSpeedWidths() }
+        val cut = 52
+        fun piece(from: Int, to: Int) =
+            Stroke(Tool.SPEED, whole.config, (from until to).map { whole.sampleAt(it).copy(widthFactor = 0.0) }, whole.speedScale)
+        val a = piece(0, cut + 1)
+        val b = piece(cut, whole.sampleCount)
+        val alone = listOf(piece(0, cut + 1), piece(cut, whole.sampleCount)).onEach { it.freezeSpeedWidths() }
+        Stroke.stitchSpeedWidths(listOf(a, b))
+        assertTrue(a.keepsSpeedWidths && b.keepsSpeedWidths)
+        fun worst(x: Stroke, y: Stroke): Double {
+            var w = 0.0
+            for (i in cut - 8..cut) w = maxOf(w, kotlin.math.abs(whole.sampleAt(i).widthFactor - x.sampleAt(i).widthFactor))
+            for (k in 0..8) w = maxOf(w, kotlin.math.abs(whole.sampleAt(cut + k).widthFactor - y.sampleAt(k).widthFactor))
+            return w
+        }
+        // Each piece smooths its own centreline from the bridge, so a trace of the cut stays in the blur.
+        val stitched = worst(a, b)
+        assertTrue("stitched $stitched", stitched < 0.02)
+        assertTrue("each piece alone ${worst(alone[0], alone[1])}", worst(alone[0], alone[1]) > 5 * stitched)
+        assertEquals("the bridge carries the width across", a.sampleAt(cut).widthFactor, b.sampleAt(0).widthFactor, 0.0)
+    }
+
     @Test fun undoingAnEditBringsTheWidthsBack() {
         val s = drawn().apply { freezeSpeedWidths() }
         val before = s.geometry().halfWidths.copyOf()
