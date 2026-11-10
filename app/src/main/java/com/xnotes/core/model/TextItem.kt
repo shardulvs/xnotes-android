@@ -39,6 +39,9 @@ class TextItem(
     /** Height the current text needs at the current width (empty ⇒ one line). */
     fun contentHeight(): Double = measurer.measure(text.ifEmpty { " " }, font, width, FLAGS).h
 
+    /** Outlines for the GL canvas. Paged notes continue to use native text drawing. */
+    fun glyphContours() = measurer.outline(text, font, width, FLAGS)
+
     override fun bounds(): Rect = Rect(pos.x, pos.y, width, maxOf(height, contentHeight()))
 
     override fun paint(r: Renderer) {

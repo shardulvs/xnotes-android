@@ -11,6 +11,7 @@ import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.Stroke
 import com.xnotes.core.model.TapeItem
+import com.xnotes.core.model.TextItem
 import com.xnotes.core.model.TapePattern
 import com.xnotes.core.pal.FontSpec
 import com.xnotes.core.stroke.RibbonPoints
@@ -113,6 +114,7 @@ object ItemMesher {
             is ConnectorItem -> meshConnector(item, tolerance)
             is AudioItem -> meshAudio(item, tolerance)
             is TapeItem -> meshTape(item, tolerance)
+            is TextItem -> meshText(item)
             else -> null // images carry a texture rather than a colour, and take their own path
         }
 
@@ -273,6 +275,12 @@ object ItemMesher {
         var min = Double.MAX_VALUE
         for (w in widths) if (w > 0f && w < min) min = w.toDouble()
         return if (min == Double.MAX_VALUE) 0.0 else min
+    }
+
+    private fun meshText(item: TextItem): MeshedItem? {
+        val part = ShapeTessellator.textPart(item.glyphContours(), item.rgba) { it + item.pos }
+            ?: return null
+        return MeshedItem(listOf(part), item.bounds(), 0.0)
     }
 
     private fun meshShape(shape: ShapeItem, tolerance: Double): MeshedItem? {
