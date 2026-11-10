@@ -299,6 +299,102 @@ class WetRibbonTest {
         }
     }
 
+    // --- the tip ---
+
+    /** A nib out ahead of sample [n], where a steadied stroke's trail leaves it. */
+    private fun tipAfter(samples: List<Sample>, n: Int): Sample {
+        val s = samples[n - 1]
+        val next = samples.getOrNull(n) ?: Sample(s.x + 1.5, s.y - 0.5, s.pressure, s.t + 7.0)
+        return Sample(next.x + 2.5, next.y - 1.25, (next.pressure + 0.1).coerceAtMost(1.0), next.t + 9.0)
+    }
+
+    private fun assertMatches(label: String, want: StrokeGeometry, got: WetRibbon) {
+        assertEquals("$label point count", want.pointCount, got.pointCount)
+        for (i in 0 until want.pointCount) {
+            assertEquals("$label cx[$i]", want.cx(i), got.cx(i), 0.0)
+            assertEquals("$label cy[$i]", want.cy(i), got.cy(i), 0.0)
+            assertEquals("$label hw[$i]", want.hw(i), got.hw(i), 0.0)
+        }
+        if (!want.hasRails) return
+        for (i in 0 until want.pointCount) {
+            assertEquals("$label leftX[$i]", want.leftX(i), got.leftX(i), 0.0)
+            assertEquals("$label rightY[$i]", want.rightY(i), got.rightY(i), 0.0)
+        }
+    }
+
+    private fun assertDiscBox(label: String, want: StrokeGeometry, got: WetRibbon) {
+        var minX = Double.POSITIVE_INFINITY
+        var minY = Double.POSITIVE_INFINITY
+        var maxX = Double.NEGATIVE_INFINITY
+        var maxY = Double.NEGATIVE_INFINITY
+        for (i in 0 until want.pointCount) {
+            minX = minOf(minX, want.cx(i) - want.hw(i))
+            maxX = maxOf(maxX, want.cx(i) + want.hw(i))
+            minY = minOf(minY, want.cy(i) - want.hw(i))
+            maxY = maxOf(maxY, want.cy(i) + want.hw(i))
+        }
+        val box = got.bounds()
+        assertEquals("$label box left", minX, box.left, 1e-9)
+        assertEquals("$label box top", minY, box.top, 1e-9)
+        assertEquals("$label box width", maxX - minX, box.w, 1e-9)
+        assertEquals("$label box height", maxY - minY, box.h, 1e-9)
+    }
+
+    /**
+     * Grow two ribbons over [samples], one with a tip after every sample. With the tip on it draws
+     * the samples plus the tip and settles no more than the other; once the tip is off, the other.
+     */
+    private fun assertTipLeavesNoTrace(tool: Tool, samples: List<Sample>, config: ToolConfig = configFor(tool)) {
+        val ribbon = ribbonFor(config, tool, 1.0, 1.0)
+        val plain = ribbonFor(config, tool, 1.0, 1.0)
+        for (n in 1..samples.size) {
+            val s = samples[n - 1]
+            ribbon.append(s.x, s.y, s.pressure, s.t)
+            plain.append(s.x, s.y, s.pressure, s.t)
+            assertMatches("$tool once the tip came off at n=$n", build(config, tool, samples.subList(0, n), 1.0, 1.0), ribbon)
+            assertEquals("$tool settled at n=$n", plain.settledCount, ribbon.settledCount)
+            val tip = tipAfter(samples, n)
+            ribbon.setTip(tip.x + 40.0, tip.y - 25.0, 0.2, tip.t + 30.0)
+            ribbon.setTip(tip.x, tip.y, tip.pressure, tip.t)
+            val want = build(config, tool, samples.subList(0, n) + tip, 1.0, 1.0)
+            assertMatches("$tool with a tip at n=$n", want, ribbon)
+            assertDiscBox("$tool with a tip at n=$n", want, ribbon)
+            assertEquals("$tool settled with a tip at n=$n", plain.settledCount, ribbon.settledCount)
+        }
+        ribbon.clearTip()
+        assertMatches("$tool after clearTip", build(config, tool, samples, 1.0, 1.0), ribbon)
+        assertDiscBox("$tool after clearTip", build(config, tool, samples, 1.0, 1.0), ribbon)
+        val more = tipAfter(samples, samples.size)
+        ribbon.append(more.x, more.y, more.pressure, more.t)
+        assertMatches("$tool growing on after clearTip", build(config, tool, samples + more, 1.0, 1.0), ribbon)
+    }
+
+    @Test fun aTipDrawsAsTheNextSampleAndLeavesNoTrace() {
+        assertTipLeavesNoTrace(Tool.PEN, path(140))
+        assertTipLeavesNoTrace(Tool.DASHED, path(140))
+        assertTipLeavesNoTrace(Tool.HIGHLIGHTER, path(140))
+        assertTipLeavesNoTrace(Tool.CALLIGRAPHY, path(140))
+        assertTipLeavesNoTrace(Tool.SPEED, path(140))
+    }
+
+    @Test fun aTipLeavesNoTraceAcrossReversalsPausesAndShortStrokes() {
+        assertTipLeavesNoTrace(Tool.CALLIGRAPHY, cuspyPath())
+        assertTipLeavesNoTrace(Tool.CALLIGRAPHY, cuspyPath(), configFor(Tool.CALLIGRAPHY).copy(baseWidth = 20.0))
+        val wide = configFor(Tool.SPEED).copy(baseWidth = 20.0, speedSmoothing = 1.0)
+        assertTipLeavesNoTrace(Tool.SPEED, jerkyTimedPath(160), wide)
+        for (len in 1..10) {
+            assertTipLeavesNoTrace(Tool.PEN, path(len))
+            assertTipLeavesNoTrace(Tool.CALLIGRAPHY, path(len))
+            assertTipLeavesNoTrace(Tool.SPEED, path(len))
+        }
+    }
+
+    @Test fun anEmptyRibbonTakesNoTip() {
+        val ribbon = ribbonFor(configFor(Tool.PEN), Tool.PEN, 1.0, 1.0)
+        ribbon.setTip(4.0, 5.0, 0.5, 0.0)
+        assertEquals(0, ribbon.pointCount)
+    }
+
     // --- what the ribbon will not take on ---
 
     @Test fun theTaperPenIsTurnedDown() {

@@ -39,6 +39,9 @@ import kotlin.math.min
  * `finished = false`, point for point, which the tests hold it to. Lift-time rules (the calligraphy
  * dot and its tail cap) are not modelled here at all: they only fire once the pen is up, and the
  * stroke rebuilds through [StrokeEngine.build] then.
+ *
+ * A steadied stroke's samples trail the nib, and [setTip] draws the rest of the way as one more
+ * point taken back off before the next sample, which settles nothing and leaves no trace.
  */
 class WetRibbon(
     private val baseWidth: Double,
@@ -211,6 +214,123 @@ class WetRibbon(
 
     /** Take one more sample: extend every causal channel by a step, then redraw the live tail. */
     fun append(x: Double, y: Double, pressure: Double, t: Double) {
+        dropTip()
+        grow(x, y, pressure, t)
+    }
+
+    // --- the tip ---
+
+    /** Whether the last point is a [setTip] rather than a sample. */
+    private var tipped = false
+
+    /** The carried state as it stood before the tip went on, put back when it comes off. */
+    private val kept = Kept()
+
+    private class Kept {
+        var count = 0
+        var settled = 0
+        var lastX = 0.0
+        var lastY = 0.0
+        var lastP = 0.0
+        var arc = 0.0
+        var tanDone = 0
+        var carryTx = 0.0
+        var carryTy = 0.0
+        var headK = 0
+        var headDir = 0.0
+        var nibValue = 0.0
+        var nibDone = 0
+        var fFinal = 0
+        var speed0 = 0
+        var speed1 = 0
+        var blur = 0
+        var minX = 0.0
+        var minY = 0.0
+        var maxX = 0.0
+        var maxY = 0.0
+    }
+
+    /**
+     * Draw one more point at ([x], [y]) exactly as the next sample would, without taking it. It only
+     * writes past the samples or into the tail, so it comes off by putting the carried state back.
+     */
+    fun setTip(x: Double, y: Double, pressure: Double, t: Double) {
+        if (pointCount == 0) return
+        dropTip()
+        keep()
+        grow(x, y, pressure, t)
+        tipped = true
+        settledCount = kept.settled
+        minX = kept.minX
+        minY = kept.minY
+        maxX = kept.maxX
+        maxY = kept.maxY
+    }
+
+    /** Take the tip off and redraw the tail as the samples alone leave it. */
+    fun clearTip() {
+        if (!tipped) return
+        dropTip()
+        extendTangents()
+        extendNib()
+        rebuildTail()
+    }
+
+    /** Put the carried state back as it was before the tip; the next pass over the tail redraws it. */
+    private fun dropTip() {
+        if (!tipped) return
+        tipped = false
+        val k = kept
+        pointCount = k.count
+        settledCount = k.settled
+        lastRawX = k.lastX
+        lastRawY = k.lastY
+        lastRawP = k.lastP
+        arc = k.arc
+        tanDone = k.tanDone
+        carryTx = k.carryTx
+        carryTy = k.carryTy
+        headK = k.headK
+        headDir = k.headDir
+        nibValue = k.nibValue
+        nibDone = k.nibDone
+        fFinal = k.fFinal
+        speedCursor[0] = k.speed0
+        speedCursor[1] = k.speed1
+        blurCursor[0] = k.blur
+        minX = k.minX
+        minY = k.minY
+        maxX = k.maxX
+        maxY = k.maxY
+        snapshot = null
+    }
+
+    private fun keep() {
+        val k = kept
+        k.count = pointCount
+        k.settled = settledCount
+        k.lastX = lastRawX
+        k.lastY = lastRawY
+        k.lastP = lastRawP
+        k.arc = arc
+        k.tanDone = tanDone
+        k.carryTx = carryTx
+        k.carryTy = carryTy
+        k.headK = headK
+        k.headDir = headDir
+        k.nibValue = nibValue
+        k.nibDone = nibDone
+        k.fFinal = fFinal
+        k.speed0 = speedCursor[0]
+        k.speed1 = speedCursor[1]
+        k.blur = blurCursor[0]
+        k.minX = minX
+        k.minY = minY
+        k.maxX = maxX
+        k.maxY = maxY
+    }
+
+    private fun grow(x: Double, y: Double, pressure: Double, t: Double) {
         val i = pointCount
         ensure(i + 1)
         val step = if (i == 0) 0.0 else hypot(x - lastRawX, y - lastRawY)

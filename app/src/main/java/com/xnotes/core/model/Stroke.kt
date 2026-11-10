@@ -107,6 +107,14 @@ class Stroke(
     /** The live ribbon, for renderers that want to draw only the part of it still moving. */
     val wetRibbon: WetRibbon? get() = wet
 
+    /**
+     * The nib, while a steadied stroke's samples trail behind it: drawn as one more point, as if the
+     * pen lifted there, but never a sample. The next [addSample] takes it off.
+     */
+    @Volatile
+    var tip: Sample? = null
+        private set
+
     init {
         if (samples.isNotEmpty()) setSamples(samples)
     }
@@ -222,6 +230,7 @@ class Stroke(
         set(value) {
             if (field == value) return
             field = value
+            if (value) tip = null
             invalidate()
         }
 
@@ -249,16 +258,27 @@ class Stroke(
         // reading the float storage here costs nothing over passing a list of boxed samples.
         val s = pts
         val n = s.n
-        val rx = DoubleArray(n)
-        val ry = DoubleArray(n)
-        val rp = DoubleArray(n)
+        val tip = tip
+        val m = if (tip == null) n else n + 1
+        val rx = DoubleArray(m)
+        val ry = DoubleArray(m)
+        val rp = DoubleArray(m)
         for (i in 0 until n) {
             rx[i] = s.ox + s.xa[i]
             ry[i] = s.oy + s.ya[i]
             rp[i] = s.pa[i].toDouble()
         }
-        val rt = s.ta?.let { src -> DoubleArray(n) { src[it].toDouble() } }
-        val rf = s.fa?.let { src -> DoubleArray(n) { src[it].toDouble() } }
+        if (tip != null) {
+            rx[n] = tip.x
+            ry[n] = tip.y
+            rp[n] = tip.pressure
+        }
+        val rt = when {
+            tip == null -> s.ta?.let { src -> DoubleArray(n) { src[it].toDouble() } }
+            s.ta != null || tip.t != 0.0 -> DoubleArray(m) { if (it < n) s.t(it) else tip.t }
+            else -> null
+        }
+        val rf = if (tip == null) s.fa?.let { src -> DoubleArray(n) { src[it].toDouble() } } else null
         return StrokeEngine.build(
             rx, ry, rp, rt,
             config.baseWidth,
@@ -339,6 +359,7 @@ class Stroke(
     val hasGeometry get() = wet != null || cachedGeometry != null
 
     fun addSample(s: Sample) {
+        tip = null
         val cur = pts
         val n = cur.n
         val ox = if (n == 0) s.x else cur.ox
@@ -375,6 +396,38 @@ class Stroke(
         cachedGeometry = null
         cachedRawBounds = null
         cachedBounds = null
+    }
+
+    /** Draw [s] as the [tip], rounded as a stored sample would be, so committing it draws exactly what was shown. */
+    fun setTip(s: Sample) {
+        val cur = pts
+        if (cur.n == 0 || finished) return
+        val at = Sample(cur.ox + (s.x - cur.ox).toFloat(), cur.oy + (s.y - cur.oy).toFloat(), s.pressure.toFloat().toDouble(), s.t.toFloat().toDouble())
+        tip = at
+        cachedGeometry = null
+        cachedBounds = null
+        cachedClipped = null
+        liveRibbon()?.setTip(at.x, at.y, at.pressure, at.t)
+    }
+
+    /** Take the [tip] off, leaving the samples as they are. */
+    fun clearTip() {
+        if (tip == null) return
+        tip = null
+        wet?.clearTip()
+        cachedGeometry = null
+        cachedBounds = null
+        cachedClipped = null
+    }
+
+    /** The live ribbon holding every sample so far, started if need be; null where the pen has none. */
+    private fun liveRibbon(): WetRibbon? {
+        wet?.let { return it }
+        val w = wetOrStart() ?: return null
+        val s = pts
+        val i = s.n - 1
+        w.append(s.ox + s.xa[i], s.oy + s.ya[i], s.pa[i].toDouble(), s.t(i))
+        return w
     }
 
     /**
