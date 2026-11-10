@@ -124,6 +124,9 @@ class InfiniteInteraction(
     private val onCommitText: () -> Unit = {},
     /** A tap with the text-box tool creates a new editable canvas text item. */
     private val onCreateText: (Pt) -> Unit = {},
+    /** Use the paged editor's native text layout as a fast overlay while resizing. */
+    private val onTextResizeStart: (TextItem) -> Unit = {},
+    private val onTextResizeEnd: (TextItem) -> Unit = {},
     /** A pan that ended as a tap, at this content point, which an audio pill there may take. */
     private val onAudioTap: (Pt) -> Boolean = { false },
     /** Peel this tape back, or cover it again: a look, never an edit. */
@@ -1214,6 +1217,7 @@ class InfiniteInteraction(
         lastTextReflowNanos = 0L
         if (liveTextReflow) {
             liftedTransform = false
+            (sel.items.singleOrNull() as? TextItem)?.let(onTextResizeStart)
             return
         }
         liftedTransform = sel.items.all { it is Stroke || it is ShapeItem || it is TextItem || isVectorImage(it) }
@@ -1224,6 +1228,8 @@ class InfiniteInteraction(
     }
 
     private fun endLift() {
+        if (liveTextReflow) (selection()?.items?.singleOrNull() as? TextItem)?.let(onTextResizeEnd)
+        liveTextReflow = false
         liftedTransform = false
         bakedInLift = emptySet()
         liftItems = emptyList()
@@ -1279,10 +1285,12 @@ class InfiniteInteraction(
         val handle = grabHandle
         val wasResize = handle != null
         grabHandle = null
+        val resizedText = if (liveTextReflow) sel.items.singleOrNull() as? TextItem else null
         if (liveTextReflow && handle != null) {
             sel.resizeLive(handle, transformPointer, transformMargin)
         }
         liveTextReflow = false
+        resizedText?.let(onTextResizeEnd)
         // Finger up on a lifted drag: apply the whole thing to the model once, then hand the drawing
         // back to it.
         if (liftedTransform) {

@@ -100,12 +100,45 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     val pad = com.xnotes.gl.GlWetPad(appContext)
 
     /**
+     * During text resize, draw with the very same StaticLayout as paged XNote text.
+     * Layout is inexpensive; vector triangulation is deferred until the gesture ends.
+     */
+    private val nativeTextResize = object : android.view.View(appContext) {
+        var item: TextItem? = null
+
+        init {
+            setWillNotDraw(false)
+            isClickable = false
+            visibility = android.view.View.GONE
+        }
+
+        override fun onDraw(canvas: android.graphics.Canvas) {
+            val text = item ?: return
+            if (text.text.isEmpty()) return
+            val paint = com.xnotes.platform.AndroidText.textPaint(
+                text.font,
+                android.graphics.Color.argb(text.rgba.a, text.rgba.r, text.rgba.g, text.rgba.b),
+            )
+            val layout = com.xnotes.platform.AndroidText.layout(
+                text.text, text.width.toInt(), paint, TextItem.FLAGS,
+            )
+            val at = view.viewport.contentToViewport(text.pos)
+            canvas.save()
+            canvas.translate(at.x.toFloat(), at.y.toFloat())
+            canvas.scale(view.viewport.zoom.toFloat(), view.viewport.zoom.toFloat())
+            layout.draw(canvas)
+            canvas.restore()
+        }
+    }
+
+    /**
      * The two surfaces, in order. They are siblings rather than one view because the canvas needs a
      * multisampled config and the front buffer cannot have one.
      */
     val surfaces = android.widget.FrameLayout(appContext).apply {
         addView(view, android.widget.FrameLayout.LayoutParams(-1, -1))
         addView(pad, android.widget.FrameLayout.LayoutParams(-1, -1))
+        addView(nativeTextResize, android.widget.FrameLayout.LayoutParams(-1, -1))
     }
 
     val viewport: CanvasViewport get() = view.viewport
@@ -142,6 +175,8 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         isEditingText = { editingLabel != null || editingTextItem != null },
         onCommitText = { commitText() },
         onCreateText = { createTextItem(it) },
+        onTextResizeStart = { startNativeTextResize(it) },
+        onTextResizeEnd = { finishNativeTextResize(it) },
         onAudioTap = { tapAudio(it) },
         onPeelTape = { peelTape(it) },
         onUserMovedView = { AudioPlayback.userMoved(this) },
@@ -271,6 +306,11 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             if (item is TextItem) {
                 textMeshGen.remove(item)
                 textMeshPreview.remove(item)
+                if (nativeTextResize.item === item) {
+                    liveResizingText = null
+                    nativeTextResize.item = null
+                    nativeTextResize.visibility = android.view.View.GONE
+                }
             }
             scene.remove(item)
             if (item === AudioPlayback.session?.item) AudioPlayback.closeIfGone(this@InfiniteEditor)
@@ -350,7 +390,29 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
      * then mesh the snapshot off-thread. A generation token discards old resize/edit results.
      * The previous mesh remains visible until the newest result is ready.
      */
+    private var liveResizingText: TextItem? = null
+
+    private fun startNativeTextResize(item: TextItem) {
+        liveResizingText = item
+        textMeshGen.remove(item)
+        nativeTextResize.item = item
+        nativeTextResize.visibility = android.view.View.VISIBLE
+        nativeTextResize.invalidate()
+        scene.remove(item)
+        view.publish()
+    }
+
+    private fun finishNativeTextResize(item: TextItem) {
+        if (liveResizingText !== item) return
+        liveResizingText = null
+        pushTextAsync(item)
+    }
+
     private fun pushTextAsync(item: TextItem) {
+        if (liveResizingText === item) {
+            nativeTextResize.invalidate()
+            return
+        }
         val snapshot = TextItem(
             item.pos, item.width, item.height, item.text, item.rgba,
             item.pointSize, item.face, com.xnotes.platform.AndroidTextMeasurer(),
@@ -363,7 +425,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         }
         // Publish an inexpensive visual transform now, before the pointer-up lift clears.
         // The worker replaces it with correctly reflowed glyphs once tessellation finishes.
-        textMeshPreview[item]?.takeIf { it.text == snapshot.text }?.let { previous ->
+        textMeshPreview[item]?.takeIf { nativeTextResize.item !== item && it.text == snapshot.text }?.let { previous ->
             val from = previous.meshed.bounds
             val to = snapshot.bounds()
             // Only move the previous glyph mesh. Scaling it to the new width would stretch
@@ -399,6 +461,10 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
                 } else {
                     textMeshPreview[item] = TextMeshPreview(meshed, snapshot.text)
                     scene.upsert(item, meshed.parts, meshed.bounds)
+                }
+                if (nativeTextResize.item === item && liveResizingText !== item) {
+                    nativeTextResize.item = null
+                    nativeTextResize.visibility = android.view.View.GONE
                 }
                 view.publish()
             }
@@ -480,6 +546,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         vectorMeshGen.clear()
         textMeshGen.clear()
         textMeshPreview.clear()
+        liveResizingText = null
+        nativeTextResize.item = null
+        nativeTextResize.visibility = android.view.View.GONE
         scene.batch { for (item in document.items) pushItem(item) }
         scene.setOrder(document.items)
     }
@@ -2538,6 +2607,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     }
 
     private fun onViewChanged() {
+        nativeTextResize.invalidate()
         if (editingLabel != null) refreshField()
         // The connection marks are sized for the screen and only cover what is on it.
         if (interaction.marking) publishOverlay()
