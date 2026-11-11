@@ -34,6 +34,7 @@ import com.xnotes.core.pal.FontFace
 import com.xnotes.core.pal.ImageCodec
 import com.xnotes.core.pal.TextMeasurer
 import com.xnotes.core.stroke.Sample
+import com.xnotes.core.stroke.StrokeEngine
 import com.xnotes.core.shapes.Axis
 import com.xnotes.core.shapes.Elbow
 import com.xnotes.core.shapes.FreePath
@@ -219,8 +220,8 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
     }
 
     private fun writeStroke(j: JsonWrite, s: Stroke) {
-        // Per-sample time is only meaningful to the speed pen, so it's written as an optional
-        // 4th element only then; every other stroke serializes without it.
+        // Per-sample time and kept width are only meaningful to the speed pen, so they're written as
+        // optional 4th and 5th elements only then; every other stroke serializes without them.
         val withTime = s.config.speedStrength > 0.0
         j.beginObject()
         j.name("kind").value(Stroke.KIND)
@@ -234,6 +235,8 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         writeRgba(j, s.config.rgba)
         // New style fields are written only when set, so a plain pen stroke's config stays minimal.
         if (s.config.speedStrength != 0.0) j.name("speed_strength").value(s.config.speedStrength)
+        if (s.config.speedSmoothing != StrokeEngine.DEFAULT_SPEED_SMOOTHING) j.name("speed_smoothing").value(s.config.speedSmoothing)
+        if (s.config.speedTop != StrokeEngine.SPEED_HI) j.name("speed_top").value(s.config.speedTop)
         if (s.config.taperEnabled) {
             j.name("taper_enabled").value(true)
             j.name("taper_min_factor").value(s.config.taperMinFactor)
@@ -255,7 +258,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         // content px and 0.001 pressure are far below anything visible. Rounding is idempotent,
         // so re-saving an untouched canvas stays byte-stable.
         j.name("samples").beginArray()
-        for (sm in s.samples) j.samplePoint(sm.x, sm.y, sm.pressure, if (withTime) sm.t else null)
+        for (sm in s.samples) j.samplePoint(sm.x, sm.y, sm.pressure, if (withTime) sm.t else null, sm.widthFactor.takeIf { withTime && it > 0.0 })
         j.endArray()
         if (withTime) j.name("speed_scale").value(s.speedScale)
         // The zoom the stroke was drawn at, as the scale on the ink low-pass lengths, so it
@@ -795,6 +798,8 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         var directionStrength: Double? = null
         var rgba: Rgba? = null
         var speedStrength: Double? = null
+        var speedSmoothing: Double? = null
+        var speedTop: Double? = null
         var taperEnabled: Boolean? = null
         var taperMinFactor: Double? = null
         var neon: Boolean? = null
@@ -907,7 +912,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         val width = s.tapeWidth?.takeIf { it.isFinite() && it > 0.0 } ?: TapeItem.DEFAULT_WIDTH
         return TapeItem(
             TapeShape(mode, if (mode == TapeMode.FREEHAND) points else points.take(2), width),
-            s.rgba ?: InkPalette.DEFAULT,
+            s.rgba ?: InkPalette.LEGACY,
             TapePattern.fromId(s.pattern),
         )
     }
@@ -921,8 +926,10 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             pressureEnabled = c?.pressureEnabled ?: def.pressureEnabled,
             pressureMinFactor = c?.pressureMinFactor ?: def.pressureMinFactor,
             directionStrength = c?.directionStrength ?: def.directionStrength,
-            rgba = c?.rgba ?: def.rgba,
+            rgba = c?.rgba ?: InkPalette.LEGACY,
             speedStrength = c?.speedStrength ?: def.speedStrength,
+            speedSmoothing = c?.speedSmoothing ?: def.speedSmoothing,
+            speedTop = c?.speedTop ?: def.speedTop,
             taperEnabled = c?.taperEnabled ?: def.taperEnabled,
             taperMinFactor = c?.taperMinFactor ?: ToolDefaults.LEGACY_TAPER_TIP,
             neon = c?.neon ?: def.neon,
@@ -933,7 +940,9 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             highlighterInverse = c?.highlighterInverse ?: def.highlighterInverse,
         )
         val stroke = Stroke(tool, config, emptyList(), s.speedScale, s.straight, s.smoothScale)
-        s.samples?.let { stroke.setSamples(it.xs, it.ys, it.ps, it.ts, it.n) }
+        s.samples?.let { stroke.setSamples(it.xs, it.ys, it.ps, it.ts, it.n, it.ws) }
+        // Speed ink saved before its widths were kept works them out once, as it is drawn now.
+        stroke.freezeSpeedWidths()
         stroke.cuts = s.cuts
         return stroke
     }
@@ -1121,6 +1130,8 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                 "direction_strength" -> c.directionStrength = doubleOrNull(p)
                 "rgba" -> c.rgba = rgbaOrNull(p)
                 "speed_strength" -> c.speedStrength = doubleOrNull(p)
+                "speed_smoothing" -> c.speedSmoothing = doubleOrNull(p)
+                "speed_top" -> c.speedTop = doubleOrNull(p)
                 "taper_enabled" -> c.taperEnabled = boolOrNull(p)
                 "taper_min_factor" -> c.taperMinFactor = doubleOrNull(p)
                 "neon" -> c.neon = boolOrNull(p)
@@ -1142,7 +1153,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             return null
         }
         val out = RawSamples()
-        val tuple = DoubleArray(4)
+        val tuple = DoubleArray(5)
         p.beginArray()
         while (p.hasNext()) {
             if (p.peek() != JsonPull.Token.BEGIN_ARRAY) {
@@ -1150,14 +1161,15 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                 continue
             }
             // NaN back from [JsonPull.nextSample] means the slot held nothing readable, which is
-            // not the same as a zero: pressure then defaults to full, and the 4th element
-            // (relative ms, only speed-pen strokes carry it) to none.
+            // not the same as a zero: pressure then defaults to full, and the 4th and 5th elements
+            // (relative ms and kept width, only speed-pen strokes carry them) to none.
             p.nextSample(tuple)
             out.add(
                 if (tuple[0].isNaN()) 0.0 else tuple[0],
                 if (tuple[1].isNaN()) 0.0 else tuple[1],
                 if (tuple[2].isNaN()) 1.0 else tuple[2],
                 if (tuple[3].isNaN()) 0.0 else tuple[3],
+                if (tuple[4].isNaN()) 0.0 else tuple[4],
             )
         }
         p.endArray()

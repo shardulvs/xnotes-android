@@ -560,8 +560,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     var activeColorIndex by mutableStateOf(0)
         private set
-    var toolbarColors by mutableStateOf(InkPalette.presets)
+    /** The swatches of the appearance in use; the other appearance's wait in [otherSwatches]. */
+    var toolbarColors by mutableStateOf(InkPalette.dark)
         private set
+    private var otherSwatches = InkPalette.light
+    private var swatchesDark = true
     var toolbarColorCount by mutableStateOf(5)
         private set
     var toolbarLayout by mutableStateOf(ToolbarLayout.DEFAULT)
@@ -768,13 +771,6 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** The canvas siblings of [noteDebounceJob] / [noteWriteJob], for the same reasons. */
     private var canvasDebounceJob: kotlinx.coroutines.Job? = null
     private var canvasWriteJob: kotlinx.coroutines.Job? = null
-
-    /** Open a fresh, unsaved infinite canvas on top of backstage. */
-    fun newCanvas() {
-        val doc = com.xnotes.core.infinite.InfiniteDocument(created = System.currentTimeMillis())
-        settings.newCanvasBackground?.let { doc.background = it }
-        openCanvasDocument(doc, uri = null, displayName = null)
-    }
 
     /**
      * Read the `.xcanvas` at [uri] and push its editor on top of backstage. IO, so call it off the
@@ -1633,6 +1629,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         controller.frontInk = com.xnotes.canvas.FrontInk(state, view, pad)
         pad.onSurfaceLost = { controller.frontInk?.surfaceLost() }
         view.debugOverlay.frontHud = { controller.frontInk?.hud }
+        view.debugOverlay.steadyHud = { controller.steadyReadout.lines() }
+        controller.measureSteadying = { view.debugOverlay.enabled }
         view.afterLayout = { refreshView() }
         view.onScrollbarScrolled = { refreshView() }
         // The canvas starts at built-in defaults; push any non-default global View settings
@@ -2705,7 +2703,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     private fun applySettings() {
-        toolbarColors = settings.toolbarColors
+        swatchesDark = resolvedAppearance(settings.prefs) != "light"
+        toolbarColors = settings.toolbarColors(swatchesDark)
+        otherSwatches = settings.toolbarColors(!swatchesDark)
         toolbarColorCount = settings.toolbarColorCount
         toolbarLayout = settings.toolbarLayout
         canvasToolbarLayout = settings.canvasToolbarLayout
@@ -2735,7 +2735,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             MaterialColourMode.DUAL -> MaterialColors.seeded(p.materialDualSeed, dark, p.materialStyle, p.materialSurfaceSeed, p.materialContrast)
             MaterialColourMode.SINGLE -> MaterialColors.seeded(p.materialSingleSeed, dark, p.materialStyle, contrast = p.materialContrast)
             MaterialColourMode.SYSTEM -> dynamicMaterialColors(appContext, dark = dark)
-                ?: MaterialColors.seeded(Preferences.DEFAULT_ACCENT, dark = dark)
+                ?: MaterialColors.seeded(Preferences.DEFAULT_MATERIAL_DUAL, dark, surfaceSeed = Preferences.DEFAULT_MATERIAL_SURFACE)
         }
         return Palette.material(appearance, m)
     }
@@ -2757,6 +2757,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     private fun applyPagePrefsToState(p: Preferences) {
         palette = buildPalette(p)
+        com.xnotes.platform.AppNightMode.follow(appContext, p.uiAppearance)
+        useSwatchesFor(dark = resolvedAppearance(p) != "light")
         cornerStyle = p.cornerStyle
         toolbarLook = p.toolbarLook
         state.palette = palette
@@ -2924,7 +2926,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             settings = settings.copy(
                 tools = tools,
                 shapeConfig = controller.shapeConfig,
-                toolbarColors = toolbarColors,
+                toolbarColorsDark = if (swatchesDark) toolbarColors else otherSwatches,
+                toolbarColorsLight = if (swatchesDark) otherSwatches else toolbarColors,
                 toolbarColorCount = toolbarColorCount,
                 activeColor = activeColorIndex,
                 lastTool = tool,
@@ -4370,7 +4373,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     fun createBlankCanvasFile(treeUri: String, parentDocId: String, rawName: String): String? {
         val name = uniqueDocumentName(treeUri, parentDocId, rawName, com.xnotes.core.util.DocumentKind.CANVAS)
         return createNoteFile(treeUri, parentDocId, name) {
-            canvasCodec.write(com.xnotes.core.infinite.InfiniteDocument(created = System.currentTimeMillis()), it)
+            val doc = com.xnotes.core.infinite.InfiniteDocument(created = System.currentTimeMillis())
+            settings.newCanvasBackground?.let { bg -> doc.background = bg }
+            canvasCodec.write(doc, it)
         }
     }
 
@@ -6284,6 +6289,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         action == "redo" -> redo()
         action == "toggle_pan" -> toggleTool(Tool.PAN)
         action == "toggle_eraser" -> toggleTool(Tool.ERASER)
+        action == "toggle_lasso" -> toggleTool(Tool.LASSO)
         action == "toggle_previous" -> toggleToPreviousTool()
         else -> Unit
     }
@@ -6297,6 +6303,15 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** Switch to the single previous tool; no-op on a fresh launch with no previous tool. */
     private fun toggleToPreviousTool() {
         controller.previousTool?.let { selectTool(it) }
+    }
+
+    /** Show the light or the dark appearance's swatches; the armed slot stays, so the ink becomes its partner. */
+    private fun useSwatchesFor(dark: Boolean) {
+        if (dark == swatchesDark) return
+        otherSwatches = toolbarColors.also { toolbarColors = otherSwatches }
+        swatchesDark = dark
+        controller.inkColor = toolbarInk()
+        infiniteOrNull?.adoptSwatches(toolbarColors)
     }
 
     /** The colour selected on the toolbar, which typed and pasted ==text== highlights in. */
@@ -8987,8 +9002,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     // Held side buttons whose hardware also reports a quick click, so the user gets both (see
-    // ButtonClick): a click runs the side button's tap action. OnePlus Pad Go 2 Stylo -> F21.
-    private val penButtonClickKeycodes = setOf(android.view.KeyEvent.KEYCODE_F21)
+    // ButtonClick): a click runs the side button's tap action. OnePlus Pad Go 2 Stylo -> F21;
+    // Xiaomi Focus Pen Pro, which has no button, sends its pinch -> BUTTON_7.
+    private val penButtonClickKeycodes = setOf(
+        android.view.KeyEvent.KEYCODE_F21,
+        com.xnotes.canvas.InteractionController.FOCUS_PEN_PRO_PINCH_KEYCODE,
+    )
     private fun onPenButtonClick(e: android.view.KeyEvent) {
         val clicks = StylusButtonLatch.clicks
         if (e.action == android.view.KeyEvent.ACTION_DOWN) {
