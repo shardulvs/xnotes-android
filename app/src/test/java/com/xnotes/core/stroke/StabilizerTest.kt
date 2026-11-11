@@ -69,7 +69,7 @@ class StabilizerTest {
         val endX = 0.2 * t
         val endY = 0.1 * t
         assertTrue("trails while moving", endX - s.x > 1.0)
-        repeat(300) {
+        repeat(500) {
             t += 4.0
             s.step(endX, endY, t)
         }
@@ -84,6 +84,16 @@ class StabilizerTest {
                     val trail = trailAt(speed, cap, dt = dt)
                     assertTrue("cap $cap at $speed dp/s every $dt ms trails $trail", trail > 0.0 && trail < cap)
                 }
+            }
+        }
+    }
+
+    @Test fun theTrailIsTheDesignedOneAtAnyReportRate() {
+        val vc = Stabilizer.DEFAULT_CROSSOVER
+        for (speed in listOf(20.0, 60.0, 200.0, 600.0)) {
+            for (dt in listOf(2.0, 4.0, 8.0, 16.0)) {
+                val want = 6.0 * speed / (vc + speed)
+                assertEquals("$speed dp/s every $dt ms", want, trailAt(speed, 6.0, dt = dt), 1e-6 * want)
             }
         }
     }

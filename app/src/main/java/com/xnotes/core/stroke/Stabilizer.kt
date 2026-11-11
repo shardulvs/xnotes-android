@@ -27,9 +27,13 @@ class Stabilizer(val trail: Double, val crossover: Double, speedScale: Double) {
     var y = 0.0
         private set
 
-    /** The nib's velocity against the steadied point, low-passed, in content px per second. */
+    /** The nib's velocity, low-passed, in content px per second. */
     private var vx = 0.0
     private var vy = 0.0
+
+    /** Where the nib was at the last sample: its speed is read from its own movement, never against the trail. */
+    private var nibX = 0.0
+    private var nibY = 0.0
 
     /** When the last sample came in, ms. */
     private var time = 0.0
@@ -47,6 +51,8 @@ class Stabilizer(val trail: Double, val crossover: Double, speedScale: Double) {
         this.y = y
         vx = 0.0
         vy = 0.0
+        nibX = x
+        nibY = y
         time = t
         cutoff = minCutoff
         moved = false
@@ -58,8 +64,10 @@ class Stabilizer(val trail: Double, val crossover: Double, speedScale: Double) {
         if (!(dt > MIN_DT)) dt = FALLBACK_DT
         time = t
         val ad = alpha(dt, SPEED_CUTOFF)
-        vx += ad * ((px - x) / dt - vx)
-        vy += ad * ((py - y) / dt - vy)
+        vx += ad * ((px - nibX) / dt - vx)
+        vy += ad * ((py - nibY) / dt - vy)
+        nibX = px
+        nibY = py
         cutoff = minCutoff + beta * hypot(vx, vy)
         val a = alpha(dt, cutoff)
         x += a * (px - x)
