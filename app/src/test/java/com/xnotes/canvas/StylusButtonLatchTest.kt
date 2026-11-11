@@ -26,16 +26,11 @@ class StylusButtonLatchTest {
     }
 
     @Test
-    fun focusPenProSqueezeKeyIsAHeldStylusButton() {
-        assertTrue(latch.onKey(InteractionController.FOCUS_PEN_PRO_SQUEEZE_KEYCODE, down = true))
+    fun focusPenProPinchKeyIsAHeldStylusButton() {
+        assertTrue(latch.onKey(InteractionController.FOCUS_PEN_PRO_PINCH_KEYCODE, down = true))
         assertTrue(latch.held)
-        assertTrue(latch.onKey(InteractionController.FOCUS_PEN_PRO_SQUEEZE_KEYCODE, down = false))
+        assertTrue(latch.onKey(InteractionController.FOCUS_PEN_PRO_PINCH_KEYCODE, down = false))
         assertFalse(latch.held)
-    }
-
-    @Test
-    fun focusPenProSqueezeKeyIsRecognizedByTheSharedKeyClassifier() {
-        assertTrue(StylusButtonLatch.isStylusButtonKey(KeyEvent.KEYCODE_BUTTON_7))
     }
 
     @Test

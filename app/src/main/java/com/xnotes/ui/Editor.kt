@@ -6299,24 +6299,6 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         else -> Unit
     }
 
-    private fun dispatchStylusGesture(action: String) {
-        if (action == "none") return
-        dispatchTapGesture(action)
-        if (settings.prefs.stylusHaptics) performStylusHaptic()
-    }
-
-    private fun performStylusHaptic() {
-        runCatching {
-            view.performHapticFeedback(
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-                    android.view.HapticFeedbackConstants.CONFIRM
-                } else {
-                    android.view.HapticFeedbackConstants.VIRTUAL_KEY
-                },
-            )
-        }
-    }
-
     /** Arm [target], or if it is already armed, return to the previous tool (no-op if none yet). */
     private fun toggleTool(target: Tool) {
         if (controller.tool == target) controller.previousTool?.let { selectTool(it) }
@@ -8974,10 +8956,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         // A canvas is on top: the same key stream drives its pen, so a Bluetooth or USI side
         // button behaves there exactly as it does on a note.
         val held = if (canvasOpen) infinite.onStylusButtonKey(e.keyCode, down) else controller.onStylusButtonKey(e.keyCode, down)
-        if (e.keyCode in penButtonClickKeycodes && (held || e.action == android.view.KeyEvent.ACTION_UP)) {
-            onPenButtonClick(e)
-        }
-        return held || e.keyCode in penButtonClickKeycodes
+        if (held && e.keyCode in penButtonClickKeycodes) onPenButtonClick(e)
+        return held
     }
 
     // Pens with no side button (e.g. Huawei M-Pencil) report a barrel double-tap as a vendor key
@@ -8992,7 +8972,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             val t = e.eventTime
             if (lastPenTapMs != 0L && t - lastPenTapMs <= penDoubleTapMs) {
                 lastPenTapMs = 0L
-                dispatchStylusGesture(preferences.stylusDoubleTap)
+                dispatchTapGesture(preferences.stylusDoubleTap)
             } else {
                 lastPenTapMs = t
             }
@@ -9018,7 +8998,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         when (e.action) {
             android.view.KeyEvent.ACTION_DOWN -> {
                 penTapDownCode = e.keyCode
-                dispatchStylusGesture(action)
+                dispatchTapGesture(action)
             }
             android.view.KeyEvent.ACTION_UP ->
                 if (penTapDownCode == e.keyCode) penTapDownCode = 0 else dispatchTapGesture(action)
@@ -9027,22 +9007,18 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     // Held side buttons whose hardware also reports a quick click, so the user gets both (see
-    // ButtonClick): a click runs the side button's tap action. OnePlus Pad Go 2 Stylo -> F21.
+    // ButtonClick): a click runs the side button's tap action. OnePlus Pad Go 2 Stylo -> F21;
+    // Xiaomi Focus Pen Pro, which has no button, sends its pinch -> BUTTON_7.
     private val penButtonClickKeycodes = setOf(
         android.view.KeyEvent.KEYCODE_F21,
-        com.xnotes.canvas.InteractionController.FOCUS_PEN_PRO_SQUEEZE_KEYCODE,
+        com.xnotes.canvas.InteractionController.FOCUS_PEN_PRO_PINCH_KEYCODE,
     )
     private fun onPenButtonClick(e: android.view.KeyEvent) {
         val clicks = StylusButtonLatch.clicks
-        val action = if (e.keyCode == com.xnotes.canvas.InteractionController.FOCUS_PEN_PRO_SQUEEZE_KEYCODE) {
-            preferences.stylusSqueeze
-        } else {
-            preferences.stylusButtonTap
-        }
         if (e.action == android.view.KeyEvent.ACTION_DOWN) {
-            if (e.repeatCount == 0 && action != "none") clicks.onPress(e.downTime)
+            if (e.repeatCount == 0 && preferences.stylusButtonTap != "none") clicks.onPress(e.downTime)
         } else if (clicks.onRelease(e.eventTime) && !e.isCanceled) {
-            dispatchStylusGesture(action)
+            dispatchTapGesture(preferences.stylusButtonTap)
         }
     }
 

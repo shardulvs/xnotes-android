@@ -14,8 +14,9 @@ import android.view.ViewConfiguration
  *  - the touch stream's `buttonState`, which most pens use;
  *  - the hovering generic-motion stream, for pens that report the button only while hovering and
  *    never in a touch event;
- *  - a `KeyEvent`, which Bluetooth and USI pens use, including one vendor code with no standard
- *    mapping ([InteractionController.VENDOR_HELD_BUTTON_KEYCODE]).
+ *  - a `KeyEvent`, which Bluetooth and USI pens use, including two vendor codes with no standard
+ *    mapping ([InteractionController.VENDOR_HELD_BUTTON_KEYCODE] and the Xiaomi Focus Pen Pro's
+ *    pinch, [InteractionController.FOCUS_PEN_PRO_PINCH_KEYCODE]).
  *
  * The last two are latched apart and either one holds the button: a pen that sends the key can
  * hover with an empty `buttonState` while it is down (the OnePlus Pad Go 2 Stylo does), and that
@@ -89,13 +90,14 @@ class StylusButtonLatch {
                 keyCode == KeyEvent.KEYCODE_STYLUS_BUTTON_TERTIARY ||
                 keyCode == KeyEvent.KEYCODE_STYLUS_BUTTON_TAIL ||
                 keyCode == InteractionController.VENDOR_HELD_BUTTON_KEYCODE ||
-                keyCode == InteractionController.FOCUS_PEN_PRO_SQUEEZE_KEYCODE
+                keyCode == InteractionController.FOCUS_PEN_PRO_PINCH_KEYCODE
     }
 }
 
 /**
  * Tells a click of a side button from a hold, for a button whose hardware reports both when it
- * goes down and when it comes up (the OnePlus Pad Go 2 Stylo's F21 does).
+ * goes down and when it comes up (the OnePlus Pad Go 2 Stylo's F21 and the Xiaomi Focus Pen Pro's
+ * pinch do).
  *
  * Such a button can be held and clicked, so the user gets both: held while the pen touches the
  * screen, it is the side button's hold tool through [StylusButtonLatch]; clicked, it runs the

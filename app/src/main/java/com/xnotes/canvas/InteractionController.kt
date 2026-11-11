@@ -4991,8 +4991,8 @@ class InteractionController(
          *  which reports a real down/up pair with auto-repeat rather than a momentary click). */
         const val VENDOR_HELD_BUTTON_KEYCODE = KeyEvent.KEYCODE_F21
 
-        /** Xiaomi Focus Pen Pro reports its squeeze zone as KEYCODE_BUTTON_7 with auto-repeat. */
-        const val FOCUS_PEN_PRO_SQUEEZE_KEYCODE = KeyEvent.KEYCODE_BUTTON_7
+        /** The Xiaomi Focus Pen Pro has no button and sends its pinch as a held key with auto-repeat. */
+        const val FOCUS_PEN_PRO_PINCH_KEYCODE = KeyEvent.KEYCODE_BUTTON_7
 
         /** Stylus side-button bits, widened past the S-Pen primary so pens on the secondary/tertiary lines count too. */
         val STYLUS_BUTTON_MASK =

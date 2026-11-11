@@ -55,10 +55,6 @@ data class Preferences(
      *  key press rather than a held state, e.g. HONOR Magic-Pencil whose click arrives as keycode
      *  333); "none" (default) disables it. */
     val stylusButtonTap: String = "none",
-    /** Action mapped to a Xiaomi Focus Pen Pro squeeze; "toggle_eraser" is the default. */
-    val stylusSqueeze: String = "toggle_eraser",
-    /** Whether recognized stylus gestures produce a short confirmation haptic. */
-    val stylusHaptics: Boolean = true,
     /** Action mapped to the first page-key side button (keycode 92); "none" disables it. */
     val stylusButton1Tap: String = "none",
     /** Action mapped to the second page-key side button (keycode 93); "none" disables it. */
@@ -149,8 +145,6 @@ data class Preferences(
         .put("three_finger_tap", threeFingerTap)
         .put("stylus_double_tap", stylusDoubleTap)
         .put("stylus_button_tap", stylusButtonTap)
-        .put("stylus_squeeze", stylusSqueeze)
-        .put("stylus_haptics", stylusHaptics)
         .put("stylus_button_1_tap", stylusButton1Tap)
         .put("stylus_button_2_tap", stylusButton2Tap)
         .put("volume_keys_turn_pages", volumeKeysTurnPages)
@@ -285,8 +279,6 @@ data class Preferences(
                 threeFingerTap = tapAction("three_finger_tap"),
                 stylusDoubleTap = tapAction("stylus_double_tap"),
                 stylusButtonTap = tapAction("stylus_button_tap"),
-                stylusSqueeze = tapAction("stylus_squeeze").let { if (o.has("stylus_squeeze")) it else "toggle_eraser" },
-                stylusHaptics = o.optBoolean("stylus_haptics", true),
                 stylusButton1Tap = tapAction("stylus_button_1_tap"),
                 stylusButton2Tap = tapAction("stylus_button_2_tap"),
                 volumeKeysTurnPages = o.optBoolean("volume_keys_turn_pages", false),
