@@ -29,7 +29,6 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.relocation.BringIntoViewModifierNode
-import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -114,7 +113,7 @@ interface TextEditHost {
  * (tap to commit, drag to scroll).
  */
 @Composable
-fun TextEditorOverlay(editor: TextEditHost, field: EditingField, screenSpaceText: Boolean = false) {
+fun TextEditorOverlay(editor: TextEditHost, field: EditingField) {
     val density = LocalDensity.current
     val palette = LocalPalette.current
     var value by remember { mutableStateOf(TextFieldValue(field.text, TextRange(field.text.length))) }
@@ -128,14 +127,10 @@ fun TextEditorOverlay(editor: TextEditHost, field: EditingField, screenSpaceText
     // draws through a zoom-scaled canvas). Re-wrapping at screen scale instead would break
     // lines at slightly different words, since advances and line rounding aren't linear in
     // font size. The graphicsLayer below applies the zoom at draw time, just like the canvas.
-    // XCanvas text editing uses true screen-space geometry: scaling BasicTextField with a
-    // graphicsLayer leaves its IME caret/selection handles in a different coordinate space.
-    // Paged XNote keeps the existing content-space rendering for compatibility.
-    val textScale = if (screenSpaceText) field.zoom.toFloat() else 1f
-    val z = if (screenSpaceText) 1f else field.zoom.toFloat()
-    val widthDp = with(density) { (field.width * textScale).toFloat().toDp() }
-    val heightDp = with(density) { (field.height * textScale).toFloat().toDp() }
-    val fontSp = with(density) { (field.fontPx * textScale).toFloat().toSp() }
+    val z = field.zoom.toFloat()
+    val widthDp = with(density) { field.width.toInt().toDp() }
+    val heightDp = with(density) { field.height.toFloat().toDp() }
+    val fontSp = with(density) { field.fontPx.toFloat().toSp() }
 
     /**
      * The field is measured through this wrapper with fully unbounded constraints and placed at
@@ -211,9 +206,6 @@ fun TextEditorOverlay(editor: TextEditHost, field: EditingField, screenSpaceText
                 color = field.rgba.toComposeColor(),
                 fontFamily = field.face.toComposeFamily(),
                 fontSize = fontSp,
-                // StaticLayout (the saved XCanvas renderer) uses includePad(false).
-                // Match its line-box top/bottom metrics while the Compose field is active.
-                platformStyle = PlatformTextStyle(includeFontPadding = false),
                 textAlign = if (field.centred) TextAlign.Center else TextAlign.Start,
             ),
             cursorBrush = SolidColor(palette.accent.toComposeColor()),

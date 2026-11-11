@@ -1482,7 +1482,7 @@ private fun EditorPane(
                         )
                         canvas.editingField?.let { field ->
                             androidx.compose.runtime.key(canvas.textEditSession) {
-                                com.xnotes.ui.TextEditorOverlay(canvas, field, screenSpaceText = true)
+                                com.xnotes.ui.TextEditorOverlay(canvas, field)
                             }
                         }
                         floatingBar()
