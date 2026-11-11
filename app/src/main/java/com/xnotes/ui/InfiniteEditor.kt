@@ -1053,6 +1053,11 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     private fun startTextItemEdit(item: TextItem) {
         commitText()
         interaction.clearSelection()
+        textMeshGen.remove(item)
+        if (nativeTextResize.item === item) {
+            nativeTextResize.item = null
+            nativeTextResize.visibility = android.view.View.GONE
+        }
         editingTextItem = item
         item.canvasEditingHidden = true
         document.itemChanged(item)
@@ -1135,6 +1140,14 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             if (beforeText != item.text) commands.add(EditText(item, beforeText, item.text))
             if (beforeStyle != TextStyle.of(item)) commands.add(RestyleText(item, beforeStyle, TextStyle.of(item)))
             item.canvasEditingHidden = false
+            // Keep large text visible with native StaticLayout while its GL mesh is built.
+            // Without this fallback, closing the editor leaves a blank area for the entire
+            // background tessellation (particularly noticeable on long paragraphs).
+            if (item.text.isNotBlank()) {
+                nativeTextResize.item = item
+                nativeTextResize.visibility = android.view.View.VISIBLE
+                nativeTextResize.invalidate()
+            }
             editingTextItem = null
             textItemBefore = null
             textStyleBefore = null
@@ -2391,8 +2404,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     /** Keyboard shortcuts. Only the ones that mean something without pages. */
     fun handleKeyDown(e: android.view.KeyEvent): Boolean {
-        // An open label's field takes the keys; only Escape ends it.
-        if (editingLabel != null) {
+        // A text box or shape label owns Backspace, Delete and navigation while editing.
+        // Otherwise canvas shortcuts can delete the selected item instead of its characters.
+        if (editingLabel != null || editingTextItem != null) {
             if (e.keyCode != android.view.KeyEvent.KEYCODE_ESCAPE) return false
             commitText()
             return true
