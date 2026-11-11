@@ -165,7 +165,19 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         itemsIn = { rect -> document.itemsIn(rect) },
         onSelectionChanged = { publishOverlay() },
         onCommitSelection = { commitSelection(it) },
-        onLiftSelection = { items, at -> scene.setLift(items, at) },
+        onLiftSelection = { items, at ->
+            scene.setLift(items, at)
+            // A recently reflowed text box may still use the native fallback while its GL
+            // mesh is being rebuilt. Move that fallback with the selection too, otherwise
+            // the outline follows the pointer while the glyphs remain at their old spot.
+            val nativeItem = nativeTextResize.item
+            if (nativeItem != null) {
+                val follows = nativeItem in items && at.isLinearIdentity
+                nativeTextResize.translationX = if (follows) (at.dx * viewport.zoom).toFloat() else 0f
+                nativeTextResize.translationY = if (follows) (at.dy * viewport.zoom).toFloat() else 0f
+                if (!follows) nativeTextResize.invalidate()
+            }
+        },
         devicePxPerDp = { devicePxPerDp },
         onMinimapPress = { vx, vy -> minimapTap(vx, vy) },
         onContextMenu = { vp, content, locked -> contextMenu = ContextMenuTarget(vp.x, vp.y, content, locked) },
