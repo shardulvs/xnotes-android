@@ -29,6 +29,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.relocation.BringIntoViewModifierNode
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -210,6 +211,9 @@ fun TextEditorOverlay(editor: TextEditHost, field: EditingField, screenSpaceText
                 color = field.rgba.toComposeColor(),
                 fontFamily = field.face.toComposeFamily(),
                 fontSize = fontSp,
+                // StaticLayout (the saved XCanvas renderer) uses includePad(false).
+                // Match its line-box top/bottom metrics while the Compose field is active.
+                platformStyle = PlatformTextStyle(includeFontPadding = false),
                 textAlign = if (field.centred) TextAlign.Center else TextAlign.Start,
             ),
             cursorBrush = SolidColor(palette.accent.toComposeColor()),

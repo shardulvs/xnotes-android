@@ -462,16 +462,19 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
                     textMeshPreview[item] = TextMeshPreview(meshed, snapshot.text)
                     scene.upsert(item, meshed.parts, meshed.bounds)
                 }
-                view.publish()
-                // The GL scene is queued, not presented yet. Keep the native fallback
-                // through the next frames so swapping renderers cannot flash blank.
                 if (nativeTextResize.item === item && liveResizingText !== item) {
-                    view.postDelayed({
-                        if (nativeTextResize.item === item && liveResizingText !== item && !item.canvasEditingHidden) {
-                            nativeTextResize.item = null
-                            nativeTextResize.visibility = android.view.View.GONE
+                    // Wait for the GL frame containing this mesh to be submitted before
+                    // removing the native fallback; a time-based delay can still blink.
+                    view.publishThen {
+                        view.post {
+                            if (nativeTextResize.item === item && liveResizingText !== item && !item.canvasEditingHidden) {
+                                nativeTextResize.item = null
+                                nativeTextResize.visibility = android.view.View.GONE
+                            }
                         }
-                    }, 48L)
+                    }
+                } else {
+                    view.publish()
                 }
             }
         }
