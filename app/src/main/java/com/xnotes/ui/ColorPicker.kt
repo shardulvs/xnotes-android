@@ -141,7 +141,7 @@ internal fun ColorPickerPopup(
                     tint = palette.text.toComposeColor(),
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
-                        .clickable { Eyedropper.target = { commit(it) } }
+                        .clickable { Eyedropper.arm { commit(it) } }
                         .padding(4.dp)
                         .size(20.dp),
                 )

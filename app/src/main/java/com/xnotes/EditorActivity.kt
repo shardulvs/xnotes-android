@@ -210,6 +210,9 @@ class EditorActivity : ComponentActivity() {
         return super.dispatchKeyEvent(event)
     }
 
+    private val eyedropperTouch by lazy { com.xnotes.ui.EyedropperTouch(window) }
+    private val superTouch: (MotionEvent) -> Boolean = { super.dispatchTouchEvent(it) }
+
     // Older Samsung builds (seen on a Tab S6 Lite, Android 13; gone by Android 15) tag a stylus
     // stroke made with the S-Pen button held with proprietary action codes instead of DOWN/MOVE/UP,
     // so the view tree never opens a touch target and the whole stroke is dropped. Rewrite them
@@ -218,12 +221,12 @@ class EditorActivity : ComponentActivity() {
         StylusButtonLatch.clicks.onTouch(ev) // a side-button press with the pen tip down is a hold, never a click
         val standard = standardPenAction(ev.actionMasked)
         if (standard < 0 || ev.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) {
-            return super.dispatchTouchEvent(ev)
+            return eyedropperTouch.dispatch(ev, superTouch)
         }
         val rewritten = MotionEvent.obtain(ev)
         rewritten.action = standard
         try {
-            return super.dispatchTouchEvent(rewritten)
+            return eyedropperTouch.dispatch(rewritten, superTouch)
         } finally {
             rewritten.recycle()
         }

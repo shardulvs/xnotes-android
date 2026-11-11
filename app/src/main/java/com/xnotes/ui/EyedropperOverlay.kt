@@ -1,20 +1,17 @@
 package com.xnotes.ui
 
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.opengl.GLSurfaceView
 import android.os.Handler
 import android.os.Looper
+import android.view.MotionEvent
 import android.view.PixelCopy
 import android.view.View
 import android.view.ViewGroup
+import android.view.Window
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
@@ -31,11 +28,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -45,57 +41,39 @@ import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
 import kotlin.math.roundToInt
 
-/** Where a colour picked by the eyedropper goes; null while no eyedropper is armed. */
+/** The armed eyedropper; [finger] (window px) and [sampled] feed the overlay's loupe. */
 object Eyedropper {
+    /** Where a picked colour goes; null while the eyedropper is not armed. */
     var target by mutableStateOf<((Rgba) -> Unit)?>(null)
+        private set
+    internal var finger by mutableStateOf<Offset?>(null)
+    internal var sampled by mutableStateOf<Rgba?>(null)
+
+    fun arm(onPick: (Rgba) -> Unit) {
+        finger = null
+        sampled = null
+        target = onPick
+    }
+
+    /** Disarms, handing [picked] to the target when there is one. */
+    fun end(picked: Rgba? = null) {
+        val t = target ?: return
+        target = null
+        finger = null
+        if (picked != null) t(picked)
+    }
 }
 
-/**
- * Full-screen touch layer shown while [Eyedropper.target] is set: a finger on the screen shows the
- * colour under it in a loupe above the finger (below it near the top edge), and lifting it hands that colour to the target.
- * Back cancels.
- */
+/** Draws the armed eyedropper: a hint until a finger lands, then the colour under it; Back cancels. */
 @Composable
 fun EyedropperOverlay() {
-    val target = Eyedropper.target ?: return
-    val view = LocalView.current
+    if (Eyedropper.target == null) return
     val density = LocalDensity.current
     val palette = LocalPalette.current
     var origin by remember { mutableStateOf(Offset.Zero) }
-    var finger by remember { mutableStateOf<Offset?>(null) }
-    var sampled by remember { mutableStateOf<Rgba?>(null) }
-    val sampler = remember(view) { PixelSampler(view) }
-    BackHandler { Eyedropper.target = null }
-    Box(
-        Modifier
-            .fillMaxSize()
-            .onGloballyPositioned { origin = it.positionInWindow() }
-            .pointerInput(target) {
-                awaitEachGesture {
-                    val down = awaitFirstDown()
-                    finger = down.position
-                    sampler.sample(origin + down.position) { sampled = it }
-                    var last = down.position
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                        change.consume()
-                        if (!change.pressed) break
-                        last = change.position
-                        finger = last
-                        sampler.sample(origin + last) { sampled = it }
-                    }
-                    sampler.sample(origin + last, force = true) { c ->
-                        finger = null
-                        if (c != null) {
-                            Eyedropper.target = null
-                            target(c)
-                        }
-                    }
-                }
-            },
-    ) {
-        val at = finger
+    BackHandler { Eyedropper.end() }
+    Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInWindow() }) {
+        val at = Eyedropper.finger?.minus(origin)
         if (at == null) {
             Text(
                 stringResource(R.string.eyedropper_hint),
@@ -118,32 +96,99 @@ fun EyedropperOverlay() {
                         IntOffset((at.x - half).roundToInt(), y.roundToInt())
                     }
                     .size(loupe)
-                    .border(3.dp, androidx.compose.ui.graphics.Color.White, CircleShape)
+                    .border(3.dp, Color.White, CircleShape)
                     .padding(3.dp)
-                    .border(1.dp, androidx.compose.ui.graphics.Color.Black, CircleShape)
-                    .background((sampled ?: Rgba(0, 0, 0, 0)).toComposeColor(), CircleShape),
+                    .border(1.dp, Color.Black, CircleShape)
+                    .background((Eyedropper.sampled ?: Rgba(0, 0, 0, 0)).toComposeColor(), CircleShape),
             )
         }
     }
 }
 
+/** The activity's touches: while armed one pointer picks, and two fingers go through to pan and zoom. */
+class EyedropperTouch(window: Window) {
+    private enum class Mode { PASS, PICK, SPENT }
+
+    private val sampler = PixelSampler(window)
+    private var mode = Mode.PASS
+    private var pointer = -1
+
+    fun dispatch(ev: MotionEvent, pass: (MotionEvent) -> Boolean): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            mode = if (Eyedropper.target != null) Mode.PICK else Mode.PASS
+            pointer = ev.getPointerId(0)
+        }
+        if (mode == Mode.PASS) return pass(ev)
+        if (mode == Mode.PICK) pick(ev, pass)
+        return true
+    }
+
+    private fun pick(ev: MotionEvent, pass: (MotionEvent) -> Boolean) {
+        val i = ev.findPointerIndex(pointer)
+        if (i < 0) return
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> aim(ev.getX(i), ev.getY(i))
+            MotionEvent.ACTION_POINTER_DOWN -> if (twoFingers(ev)) handOver(ev, pass)
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> if (ev.actionIndex == i) lift(ev.getX(i), ev.getY(i))
+            MotionEvent.ACTION_CANCEL -> stop()
+        }
+    }
+
+    private fun aim(x: Float, y: Float) {
+        Eyedropper.finger = Offset(x, y)
+        sampler.sample(x, y) { if (it != null && mode == Mode.PICK) Eyedropper.sampled = it }
+    }
+
+    private fun lift(x: Float, y: Float) {
+        mode = Mode.SPENT
+        sampler.sample(x, y, force = true) { if (it != null) Eyedropper.end(it) else Eyedropper.finger = null }
+    }
+
+    private fun stop() {
+        mode = Mode.SPENT
+        Eyedropper.finger = null
+    }
+
+    private fun twoFingers(ev: MotionEvent) = ev.pointerCount == 2 &&
+        ev.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER && ev.getToolType(1) == MotionEvent.TOOL_TYPE_FINGER
+
+    /** The canvas never saw the first finger, so it gets a down for it before the second. */
+    private fun handOver(ev: MotionEvent, pass: (MotionEvent) -> Boolean) {
+        mode = Mode.PASS
+        Eyedropper.finger = null
+        val k = 1 - ev.actionIndex
+        val props = MotionEvent.PointerProperties().also { ev.getPointerProperties(k, it) }
+        val coords = MotionEvent.PointerCoords().also { ev.getPointerCoords(k, it) }
+        val down = MotionEvent.obtain(
+            ev.downTime, ev.eventTime, MotionEvent.ACTION_DOWN, 1, arrayOf(props), arrayOf(coords),
+            ev.metaState, ev.buttonState, ev.xPrecision, ev.yPrecision, ev.deviceId, ev.edgeFlags, ev.source, ev.flags,
+        )
+        try {
+            pass(down)
+        } finally {
+            down.recycle()
+        }
+        pass(ev)
+    }
+}
+
 /** Reads single screen pixels: from the GL canvas surface when one is under the point, else the window. */
-private class PixelSampler(private val view: View) {
+private class PixelSampler(private val window: Window) {
     private val handler = Handler(Looper.getMainLooper())
     private val pixel = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
     private var busy = false
 
-    fun sample(window: Offset, force: Boolean = false, done: (Rgba?) -> Unit) {
+    fun sample(wx: Float, wy: Float, force: Boolean = false, done: (Rgba?) -> Unit) {
         if (busy && !force) return
-        val x = window.x.roundToInt()
-        val y = window.y.roundToInt()
+        val x = wx.roundToInt()
+        val y = wy.roundToInt()
         busy = true
         val finish = { ok: Boolean ->
             busy = false
             done(if (ok) pixel.getPixel(0, 0).let { Rgba((it shr 16) and 0xFF, (it shr 8) and 0xFF, it and 0xFF, 255) } else null)
         }
         try {
-            val surface = glSurfaceAt(view.rootView, x, y)
+            val surface = glSurfaceAt(window.decorView, x, y)
             if (surface != null) {
                 val loc = IntArray(2)
                 surface.getLocationInWindow(loc)
@@ -151,16 +196,14 @@ private class PixelSampler(private val view: View) {
                 val sy = y - loc[1]
                 PixelCopy.request(surface, android.graphics.Rect(sx, sy, sx + 1, sy + 1), pixel, { finish(it == PixelCopy.SUCCESS) }, handler)
             } else {
-                val w = view.context.findActivity()?.window ?: return finish(false)
-                PixelCopy.request(w, android.graphics.Rect(x, y, x + 1, y + 1), pixel, { finish(it == PixelCopy.SUCCESS) }, handler)
+                PixelCopy.request(window, android.graphics.Rect(x, y, x + 1, y + 1), pixel, { finish(it == PixelCopy.SUCCESS) }, handler)
             }
         } catch (e: IllegalArgumentException) {
             finish(false)
         }
     }
 
-    /** The shown GL surface (the infinite canvas) covering window point ([x], [y]), if any. The
-     *  window copy leaves a surface's pixels out, so those are read from the surface itself. */
+    /** The shown GL surface (the infinite canvas) covering window point ([x], [y]), if any. */
     private fun glSurfaceAt(v: View, x: Int, y: Int): GLSurfaceView? {
         if (!v.isShown) return null
         if (v is GLSurfaceView) {
@@ -171,10 +214,4 @@ private class PixelSampler(private val view: View) {
         if (v is ViewGroup) for (i in v.childCount - 1 downTo 0) glSurfaceAt(v.getChildAt(i), x, y)?.let { return it }
         return null
     }
-}
-
-private tailrec fun Context.findActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findActivity()
-    else -> null
 }
