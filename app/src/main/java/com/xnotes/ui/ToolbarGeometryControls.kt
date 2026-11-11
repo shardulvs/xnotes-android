@@ -1,5 +1,6 @@
 package com.xnotes.ui
 
+import com.xnotes.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -31,24 +32,25 @@ internal fun ToolbarGeometryControls(
     geometry: ToolbarGeometry,
     onChange: (ToolbarGeometry) -> Unit,
 ) {
+    val toolbarStrings = androidx.compose.ui.platform.LocalContext.current
     val screen = LocalConfiguration.current
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        ToolbarMeasure("Largura", geometry.widthDp, screen.screenWidthDp.coerceIn(48, 1200), 48, 1200) {
+        ToolbarMeasure(toolbarStrings.getString(R.string.toolbar_config_width), geometry.widthDp, screen.screenWidthDp.coerceIn(48, 1200), 48, 1200) {
             onChange(geometry.copy(widthDp = it))
         }
-        ToolbarMeasure("Altura", geometry.heightDp, 56, 48, 800) {
+        ToolbarMeasure(toolbarStrings.getString(R.string.toolbar_config_height), geometry.heightDp, 56, 48, 800) {
             onChange(geometry.copy(heightDp = it))
         }
-        ToolbarMeasure("Padding", geometry.paddingDp, 4, 0, 32) {
+        ToolbarMeasure(toolbarStrings.getString(R.string.toolbar_config_padding), geometry.paddingDp, 4, 0, 32) {
             onChange(geometry.copy(paddingDp = it))
         }
-        ToolbarMeasure("Espaçamento", geometry.spacingDp, 2, 0, 32) {
+        ToolbarMeasure(toolbarStrings.getString(R.string.toolbar_config_spacing), geometry.spacingDp, 2, 0, 32) {
             onChange(geometry.copy(spacingDp = it))
         }
-        ToolbarMeasure("Botões", geometry.elementSizeDp, 42, 28, 72) {
+        ToolbarMeasure(toolbarStrings.getString(R.string.toolbar_config_buttons), geometry.elementSizeDp, 42, 28, 72) {
             onChange(geometry.copy(elementSizeDp = it))
         }
     }
@@ -63,17 +65,18 @@ private fun ToolbarMeasure(
     maximum: Int,
     onChange: (Int?) -> Unit,
 ) {
+    val toolbarStrings = androidx.compose.ui.platform.LocalContext.current
     Column(Modifier.width(196.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "$title: ${value?.let { "$it dp" } ?: "automático"}",
+                "$title: ${value?.let { "$it dp" } ?: toolbarStrings.getString(R.string.toolbar_config_automatic)}",
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f),
             )
             // Keep the button's space even in auto mode; otherwise the row shifts
             // when the first slider touch creates an override.
             TextButton(enabled = value != null, onClick = { onChange(null) }) {
-                Text("Auto", style = MaterialTheme.typography.labelSmall)
+                Text(toolbarStrings.getString(R.string.toolbar_config_auto), style = MaterialTheme.typography.labelSmall)
             }
         }
         Slider(
@@ -92,9 +95,10 @@ internal fun ToolbarEntrySizeControls(
     defaultSizeDp: Int,
     onChange: (Int?) -> Unit,
 ) {
+    val toolbarStrings = androidx.compose.ui.platform.LocalContext.current
     if (entry == null) {
         Text(
-            "Toque em uma ferramenta do preview para ajustar o tamanho somente dela.",
+            toolbarStrings.getString(R.string.toolbar_config_tap_a_tool_in_the_preview_to_adjust_its_individual_size),
             style = MaterialTheme.typography.bodySmall,
         )
         return
@@ -105,7 +109,7 @@ internal fun ToolbarEntrySizeControls(
     )
     val isSpacer = entry.item == com.xnotes.core.tools.ToolbarItem.SPACER
     ToolbarMeasure(
-        title = if (isSpacer) "Espaço entre elementos" else "Tamanho individual",
+        title = if (isSpacer) toolbarStrings.getString(R.string.toolbar_config_space_between_tools) else toolbarStrings.getString(R.string.toolbar_config_individual_size),
         value = entry.sizeDp,
         defaultValue = if (isSpacer) ToolbarEntry.DEFAULT_SPACER_DP else defaultSizeDp.coerceIn(28, 72),
         minimum = if (isSpacer) 4 else 28,

@@ -35,7 +35,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.imePadding
+import com.xnotes.ui.visibleImeInsets
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -948,10 +948,10 @@ private fun EditorScreen(
     // forcing a re-render every time the bars hide. Non-fullscreen keeps the normal bar insets.
     // A DOCKED keyboard lifts only the open panes (the bottom format bar rides right above it) and
     // the snackbar; Home stays put and the keyboard slides over it. A floating keyboard reports no
-    // inset. Insets are consumed below so inner imePadding only adds what the bars don't cover.
+    // inset. Insets are consumed below so inner keyboard padding only adds what the bars don't cover.
     val contentInsets = if (fullscreen) WindowInsets(0, 0, 0, 0) else WindowInsets.systemBars
     Scaffold(
-        snackbarHost = { SnackbarHost(snackbar, Modifier.windowInsetsPadding(WindowInsets.ime.exclude(contentInsets))) },
+        snackbarHost = { SnackbarHost(snackbar, Modifier.windowInsetsPadding(visibleImeInsets().exclude(contentInsets))) },
         contentWindowInsets = contentInsets,
     ) { inner ->
         Box(modifier = Modifier.fillMaxSize().padding(inner).consumeWindowInsets(contentInsets)) {
@@ -1367,7 +1367,7 @@ private fun SplitHost(editor: Editor, actions: PaneActions) {
     val sideBySide = LocalConfiguration.current.orientation ==
         android.content.res.Configuration.ORIENTATION_LANDSCAPE
     val ratio = editor.splitRatio.coerceIn(MIN_PANE_RATIO, 1f - MIN_PANE_RATIO)
-    BoxWithConstraints(Modifier.fillMaxSize().then(SwallowTouches).imePadding()) {
+    BoxWithConstraints(Modifier.fillMaxSize().then(SwallowTouches).windowInsetsPadding(visibleImeInsets())) {
         val fullW = maxWidth
         val fullH = maxHeight
         val full = if (sideBySide) fullW else fullH

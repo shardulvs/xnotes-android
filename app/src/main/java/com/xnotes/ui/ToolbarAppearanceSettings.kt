@@ -21,7 +21,8 @@ internal fun ToolbarAppearanceSettings(
     onGeometryChange: (ToolbarGeometry) -> Unit,
     onScaleChange: (ToolbarScale) -> Unit,
 ) {
-    Text("Tamanho e espaçamento", style = MaterialTheme.typography.titleSmall)
+    val toolbarStrings = androidx.compose.ui.platform.LocalContext.current
+    Text(toolbarStrings.getString(R.string.toolbar_config_size_and_spacing), style = MaterialTheme.typography.titleSmall)
     ToolbarGeometryControls(geometry = geometry, onChange = onGeometryChange)
     Text(
         stringResource(R.string.pref_toolbar_size),

@@ -61,124 +61,124 @@ object ToolbarWorkspaceTemplates {
             ToolbarWorkspace.fromLegacy("canvas-primary", "Main toolbar", ToolbarLayout.CANVAS_DEFAULT),
         ),
         pair(
-            "builtin-focus", "Escrita sem distrações",
+            "builtin-focus", "Distraction-free writing",
             ToolbarLook(position = ToolbarPosition.BOTTOM, size = ToolbarSize.COMPACT, floating = true),
-            ToolbarWorkspace(listOf(bar("note-primary", "Escrita", layout(
+            ToolbarWorkspace(listOf(bar("note-primary", "Writing", layout(
                 ToolbarItem.PEN, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER, ToolbarItem.LASSO,
                 ToolbarItem.COLORS, ToolbarItem.UNDO, ToolbarItem.REDO,
             ), anchor = ToolbarAnchor.BOTTOM_CENTER, floating = true, scale = ToolbarScale.COMPACT))),
-            ToolbarWorkspace(listOf(bar("canvas-primary", "Escrita", layout(
+            ToolbarWorkspace(listOf(bar("canvas-primary", "Writing", layout(
                 ToolbarItem.PEN, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER, ToolbarItem.LASSO,
                 ToolbarItem.COLORS, ToolbarItem.UNDO, ToolbarItem.REDO,
             ), anchor = ToolbarAnchor.BOTTOM_CENTER, floating = true, scale = ToolbarScale.COMPACT))),
         ),
         pair(
-            "builtin-study", "Caderno de estudos",
+            "builtin-study", "Study notebook",
             ToolbarLook(position = ToolbarPosition.TOP, size = ToolbarSize.REGULAR),
             ToolbarWorkspace(listOf(
-                bar("note-primary", "Documento", layout(
+                bar("note-primary", "Document", layout(
                     ToolbarItem.HOME, ToolbarItem.TITLE, ToolbarItem.SIDEBAR, ToolbarItem.PAGE_NAV,
                     ToolbarItem.UNDO, ToolbarItem.REDO, ToolbarItem.VIEW,
                 )),
-                bar("writing", "Anotação", layout(
+                bar("writing", "Annotation", layout(
                     ToolbarItem.PEN, ToolbarItem.DASHED, ToolbarItem.HIGHLIGHTER,
                     ToolbarItem.ERASER, ToolbarItem.LASSO, ToolbarItem.COLORS,
                 ), anchor = ToolbarAnchor.BOTTOM_CENTER, floating = true, scale = ToolbarScale.COMPACT),
             )),
             ToolbarWorkspace(listOf(
-                bar("canvas-primary", "Documento", layout(
+                bar("canvas-primary", "Document", layout(
                     ToolbarItem.HOME, ToolbarItem.TITLE, ToolbarItem.WAYPOINTS,
                     ToolbarItem.MINIMAP, ToolbarItem.UNDO, ToolbarItem.REDO,
                 )),
-                bar("writing", "Anotação", layout(
+                bar("writing", "Annotation", layout(
                     ToolbarItem.PEN, ToolbarItem.DASHED, ToolbarItem.HIGHLIGHTER,
                     ToolbarItem.ERASER, ToolbarItem.LASSO, ToolbarItem.COLORS,
                 ), anchor = ToolbarAnchor.BOTTOM_CENTER, floating = true, scale = ToolbarScale.COMPACT),
             )),
         ),
         pair(
-            "builtin-pdf", "Revisão de documentos",
+            "builtin-pdf", "Document review",
             ToolbarLook(position = ToolbarPosition.TOP, size = ToolbarSize.COMPACT),
             ToolbarWorkspace(listOf(
-                bar("note-primary", "Navegação", layout(
+                bar("note-primary", "Navigation", layout(
                     ToolbarItem.HOME, ToolbarItem.TITLE, ToolbarItem.PAGE_NAV,
                     ToolbarItem.UNDO, ToolbarItem.REDO, ToolbarItem.FIT,
                 )),
-                bar("annotation", "Anotação", layout(
+                bar("annotation", "Annotation", layout(
                     ToolbarItem.PEN, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER,
                     ToolbarItem.LASSO, ToolbarItem.MARKUP, ToolbarItem.TEXT_BOX,
                     ToolbarItem.COLORS,
                 ), anchor = ToolbarAnchor.CENTER_RIGHT, floating = true, scale = ToolbarScale.COMPACT),
             )),
             ToolbarWorkspace(listOf(
-                bar("canvas-primary", "Navegação", layout(
+                bar("canvas-primary", "Navigation", layout(
                     ToolbarItem.HOME, ToolbarItem.TITLE, ToolbarItem.WAYPOINTS,
                     ToolbarItem.MINIMAP, ToolbarItem.UNDO, ToolbarItem.REDO, ToolbarItem.FIT,
                 )),
-                bar("annotation", "Anotação", layout(
+                bar("annotation", "Annotation", layout(
                     ToolbarItem.PEN, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER,
                     ToolbarItem.LASSO, ToolbarItem.WAND, ToolbarItem.IMAGE, ToolbarItem.COLORS,
                 ), anchor = ToolbarAnchor.CENTER_RIGHT, floating = true, scale = ToolbarScale.COMPACT),
             )),
         ),
         pair(
-            "builtin-drawing", "Desenho livre",
+            "builtin-drawing", "Free drawing",
             ToolbarLook(position = ToolbarPosition.TOP, size = ToolbarSize.COMPACT, floating = true),
             ToolbarWorkspace(listOf(
-                bar("note-primary", "Traços", twoRows(
+                bar("note-primary", "Drawing tools", twoRows(
                     listOf(ToolbarItem.PEN, ToolbarItem.DASHED, ToolbarItem.CALLIGRAPHY, ToolbarItem.HIGHLIGHTER),
                     listOf(ToolbarItem.ERASER, ToolbarItem.LASSO, ToolbarItem.SHAPE, ToolbarItem.RULER),
                 ), anchor = ToolbarAnchor.CENTER_LEFT, floating = true, scale = ToolbarScale.COMPACT),
-                bar("palette", "Cores", layout(ToolbarItem.COLORS, ToolbarItem.STYLES),
+                bar("palette", "Colors", layout(ToolbarItem.COLORS, ToolbarItem.STYLES),
                     anchor = ToolbarAnchor.BOTTOM_CENTER, floating = true, scale = ToolbarScale.COMPACT),
-                bar("navigation", "Ações", layout(ToolbarItem.HOME, ToolbarItem.UNDO, ToolbarItem.REDO),
+                bar("navigation", "Actions", layout(ToolbarItem.HOME, ToolbarItem.UNDO, ToolbarItem.REDO),
                     anchor = ToolbarAnchor.TOP_RIGHT, floating = true, scale = ToolbarScale.COMPACT),
             )),
             ToolbarWorkspace(listOf(
-                bar("canvas-primary", "Traços", twoRows(
+                bar("canvas-primary", "Drawing tools", twoRows(
                     listOf(ToolbarItem.PEN, ToolbarItem.DASHED, ToolbarItem.CALLIGRAPHY, ToolbarItem.HIGHLIGHTER),
                     listOf(ToolbarItem.ERASER, ToolbarItem.LASSO, ToolbarItem.SHAPE, ToolbarItem.WAND),
                 ), anchor = ToolbarAnchor.CENTER_LEFT, floating = true, scale = ToolbarScale.COMPACT),
-                bar("palette", "Cores", layout(ToolbarItem.COLORS, ToolbarItem.STYLES),
+                bar("palette", "Colors", layout(ToolbarItem.COLORS, ToolbarItem.STYLES),
                     anchor = ToolbarAnchor.BOTTOM_CENTER, floating = true, scale = ToolbarScale.COMPACT),
-                bar("navigation", "Ações", layout(ToolbarItem.HOME, ToolbarItem.UNDO, ToolbarItem.REDO),
+                bar("navigation", "Actions", layout(ToolbarItem.HOME, ToolbarItem.UNDO, ToolbarItem.REDO),
                     anchor = ToolbarAnchor.TOP_RIGHT, floating = true, scale = ToolbarScale.COMPACT),
             )),
         ),
         pair(
-            "builtin-markup", "Marcação rápida",
+            "builtin-markup", "Quick markup",
             ToolbarLook(position = ToolbarPosition.BOTTOM, size = ToolbarSize.COMPACT, floating = true),
             ToolbarWorkspace(listOf(
-                bar("note-primary", "Marcação", layout(
+                bar("note-primary", "Markup", layout(
                     ToolbarItem.PEN, ToolbarItem.DASHED, ToolbarItem.HIGHLIGHTER,
                     ToolbarItem.ERASER, ToolbarItem.LASSO, ToolbarItem.RULER,
                     ToolbarItem.SHAPE, ToolbarItem.COLORS,
                 ), anchor = ToolbarAnchor.BOTTOM_CENTER, floating = true, scale = ToolbarScale.COMPACT),
-                bar("document", "Documento", layout(
+                bar("document", "Document", layout(
                     ToolbarItem.HOME, ToolbarItem.TITLE, ToolbarItem.UNDO, ToolbarItem.REDO,
                 ), anchor = ToolbarAnchor.TOP_LEFT, floating = true, scale = ToolbarScale.COMPACT),
             )),
             ToolbarWorkspace(listOf(
-                bar("canvas-primary", "Marcação", layout(
+                bar("canvas-primary", "Markup", layout(
                     ToolbarItem.PEN, ToolbarItem.DASHED, ToolbarItem.HIGHLIGHTER,
                     ToolbarItem.ERASER, ToolbarItem.LASSO, ToolbarItem.SHAPE, ToolbarItem.COLORS,
                 ), anchor = ToolbarAnchor.BOTTOM_CENTER, floating = true, scale = ToolbarScale.COMPACT),
-                bar("document", "Documento", layout(
+                bar("document", "Document", layout(
                     ToolbarItem.HOME, ToolbarItem.TITLE, ToolbarItem.UNDO, ToolbarItem.REDO,
                 ), anchor = ToolbarAnchor.TOP_LEFT, floating = true, scale = ToolbarScale.COMPACT),
             )),
         ),
         pair(
-            "builtin-complete", "Barra completa",
+            "builtin-complete", "Complete toolbar",
             ToolbarLook(position = ToolbarPosition.TOP, size = ToolbarSize.REGULAR),
-            ToolbarWorkspace(listOf(bar("note-primary", "Organização", regions(
+            ToolbarWorkspace(listOf(bar("note-primary", "Organization", regions(
                 start = listOf(ToolbarItem.HOME, ToolbarItem.TITLE, ToolbarItem.UNDO, ToolbarItem.REDO),
                 center = listOf(ToolbarItem.PEN, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER,
                     ToolbarItem.LASSO, ToolbarItem.SHAPE, ToolbarItem.TEXT_BOX, ToolbarItem.IMAGE,
                     ToolbarItem.COLORS),
                 end = listOf(ToolbarItem.PAGE_NAV),
             )))),
-            ToolbarWorkspace(listOf(bar("canvas-primary", "Organização", regions(
+            ToolbarWorkspace(listOf(bar("canvas-primary", "Organization", regions(
                 start = listOf(ToolbarItem.HOME, ToolbarItem.TITLE, ToolbarItem.UNDO, ToolbarItem.REDO),
                 center = listOf(ToolbarItem.PEN, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER,
                     ToolbarItem.LASSO, ToolbarItem.SHAPE, ToolbarItem.IMAGE, ToolbarItem.COLORS),
@@ -186,24 +186,24 @@ object ToolbarWorkspaceTemplates {
             )))),
         ),
         pair(
-            "builtin-two-rows", "Duas linhas",
+            "builtin-two-rows", "Two rows",
             ToolbarLook(position = ToolbarPosition.BOTTOM, size = ToolbarSize.REGULAR, floating = true),
             ToolbarWorkspace(listOf(
-                bar("note-primary", "Ferramentas", twoRows(
+                bar("note-primary", "Tools", twoRows(
                     listOf(ToolbarItem.PEN, ToolbarItem.DASHED, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER),
                     listOf(ToolbarItem.LASSO, ToolbarItem.SHAPE, ToolbarItem.IMAGE, ToolbarItem.COLORS),
                 ), anchor = ToolbarAnchor.BOTTOM_CENTER, floating = true),
-                bar("navigation", "Navegação", layout(
+                bar("navigation", "Navigation", layout(
                     ToolbarItem.HOME, ToolbarItem.TITLE, ToolbarItem.PAGE_NAV,
                     ToolbarItem.UNDO, ToolbarItem.REDO,
                 ), anchor = ToolbarAnchor.TOP_CENTER, floating = true, scale = ToolbarScale.COMPACT),
             )),
             ToolbarWorkspace(listOf(
-                bar("canvas-primary", "Ferramentas", twoRows(
+                bar("canvas-primary", "Tools", twoRows(
                     listOf(ToolbarItem.PEN, ToolbarItem.DASHED, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER),
                     listOf(ToolbarItem.LASSO, ToolbarItem.SHAPE, ToolbarItem.IMAGE, ToolbarItem.COLORS),
                 ), anchor = ToolbarAnchor.BOTTOM_CENTER, floating = true),
-                bar("navigation", "Navegação", layout(
+                bar("navigation", "Navigation", layout(
                     ToolbarItem.HOME, ToolbarItem.TITLE, ToolbarItem.WAYPOINTS,
                     ToolbarItem.UNDO, ToolbarItem.REDO,
                 ), anchor = ToolbarAnchor.TOP_CENTER, floating = true, scale = ToolbarScale.COMPACT),

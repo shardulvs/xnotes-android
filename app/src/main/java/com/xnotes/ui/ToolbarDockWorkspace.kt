@@ -87,25 +87,26 @@ internal fun toolbarDockPlan(
             autoLength = if (vertical) bar.geometry.heightDp == null else bar.geometry.widthDp == null,
         )
     }
-    // The chosen lane is preferred, not a hard failure when the viewport shrinks.
-    // Always attempt other lanes on that same edge; do not move a dock to another edge.
+    return packToolbarLanes(windowWidth.value, windowHeight.value, requests)
+}
+
+/** Preferred lanes are tried first, then other lanes on the same edge, for both dock modes. */
+private fun packToolbarLanes(
+    width: Float,
+    height: Float,
+    requests: List<ToolbarDockRequest>,
+    gap: Float = 4f,
+): ToolbarDockPlan {
     val accepted = mutableListOf<ToolbarDockRequest>()
     val unplaced = mutableSetOf<String>()
     for (request in requests) {
         val candidates = (request.lane until ToolbarDockLayout.MAX_LANES) + (0 until request.lane)
-        var placed = false
-        for (lane in candidates) {
-            val shifted = request.copy(lane = lane)
-            val trial = ToolbarDockLayout.arrange(windowWidth.value, windowHeight.value, accepted + shifted)
-            if (trial.rejected.isEmpty()) {
-                accepted.add(shifted)
-                placed = true
-                break
-            }
+        val placed = candidates.asSequence().map { request.copy(lane = it) }.firstOrNull { shifted ->
+            ToolbarDockLayout.arrange(width, height, accepted + shifted, gap).rejected.isEmpty()
         }
-        if (!placed) unplaced.add(request.id)
+        if (placed == null) unplaced.add(request.id) else accepted.add(placed)
     }
-    val packed = ToolbarDockLayout.arrange(windowWidth.value, windowHeight.value, accepted)
+    val packed = ToolbarDockLayout.arrange(width, height, accepted, gap)
     return packed.copy(rejected = packed.rejected + unplaced)
 }
 
@@ -176,8 +177,7 @@ internal fun toolbarFloatingPlan(
 ): ToolbarDockPlan {
     val width = (stageWidth.value - 16f).coerceAtLeast(0f)
     val height = (stageHeight.value - 16f).coerceAtLeast(0f)
-    val accepted = mutableListOf<ToolbarDockRequest>()
-    val unplaced = mutableSetOf<String>()
+    val requests = mutableListOf<ToolbarDockRequest>()
     for ((index, bar) in workspace.bars.withIndex()) {
         if (!bar.visible || toolbarDockEdge(bar, index, look) != null) continue
         val anchor = if (index == 0 && !bar.geometry.floating && look.floating) when (look.position) {
@@ -193,26 +193,13 @@ internal fun toolbarFloatingPlan(
         val length = estimatedFloatingLength(bar, index, look, colorCount).coerceAtMost(axisLength)
         val depth = if (vertical) toolbarWidth(m, bar.layout, bar.geometry).value
             else toolbarHeight(m, bar.layout, bar.geometry).value
-        val preference = bar.geometry.dockLane
-        val candidates = (preference until ToolbarDockLayout.MAX_LANES) + (0 until preference)
-        var placed = false
-        for (lane in candidates) {
-            val request = ToolbarDockRequest(
-                id = bar.id, edge = edge, lane = lane,
-                alignment = toolbarFloatingAlignment(bar), length = length, depth = depth,
-            )
-            val attempt = ToolbarDockLayout.arrange(width, height, accepted + request, gap = 8f)
-            if (attempt.rejected.isEmpty()) {
-                accepted.add(request)
-                placed = true
-                break
-            }
-        }
-        if (!placed) unplaced.add(bar.id)
+        requests.add(ToolbarDockRequest(
+            id = bar.id, edge = edge, lane = bar.geometry.dockLane,
+            alignment = toolbarFloatingAlignment(bar), length = length, depth = depth,
+        ))
     }
-    val packed = ToolbarDockLayout.arrange(width, height, accepted, gap = 8f)
+    val packed = packToolbarLanes(width, height, requests, gap = 8f)
     return packed.copy(
         placements = packed.placements.map { it.copy(x = it.x + 8f, y = it.y + 8f) },
-        rejected = packed.rejected + unplaced,
     )
 }

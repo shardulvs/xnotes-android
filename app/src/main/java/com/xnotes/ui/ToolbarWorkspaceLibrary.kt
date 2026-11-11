@@ -1,5 +1,6 @@
 package com.xnotes.ui
 
+import com.xnotes.R
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
@@ -40,6 +41,7 @@ internal fun ToolbarWorkspaceLibrary(
     onImport: (List<ToolbarWorkspacePreset>) -> Int,
     onApply: (ToolbarWorkspacePreset, ToolbarContext?) -> Unit,
 ) {
+    val toolbarStrings = androidx.compose.ui.platform.LocalContext.current
     val context = LocalContext.current
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),
@@ -48,9 +50,9 @@ internal fun ToolbarWorkspaceLibrary(
             runCatching {
                 context.contentResolver.openOutputStream(uri)?.use { out ->
                     out.write(state.exportContent.toByteArray(Charsets.UTF_8))
-                } ?: error("Não foi possível abrir o arquivo.")
-            }.onSuccess { state.statusMessage = "Workspace exportado com sucesso." }
-                .onFailure { state.statusMessage = "Falha ao exportar: ${it.message}" }
+                } ?: error(toolbarStrings.getString(R.string.toolbar_config_could_not_open_the_file))
+            }.onSuccess { state.statusMessage = toolbarStrings.getString(R.string.toolbar_config_workspace_exported_successfully) }
+                .onFailure { state.statusMessage = toolbarStrings.getString(R.string.toolbar_config_export_failed, it.message) }
         }
     }
     val importLauncher = rememberLauncherForActivityResult(
@@ -59,14 +61,14 @@ internal fun ToolbarWorkspaceLibrary(
         if (uri != null) {
             runCatching {
                 val raw = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                    ?: error("Não foi possível ler o arquivo.")
-                require(raw.length <= 1_000_000) { "Arquivo muito grande." }
+                    ?: error(toolbarStrings.getString(R.string.toolbar_config_could_not_read_the_file))
+                require(raw.length <= 1_000_000) { toolbarStrings.getString(R.string.toolbar_config_file_is_too_large) }
                 onImport(ToolbarWorkspaceExchangeJson.import(raw))
             }.onSuccess { count ->
                 state.presets = getPresets()
-                state.statusMessage = if (count > 0) "$count workspace(s) importado(s)."
-                    else "Limite de 20 workspaces salvos atingido."
-            }.onFailure { state.statusMessage = "Falha ao importar: ${it.message}" }
+                state.statusMessage = if (count > 0) toolbarStrings.getString(R.string.toolbar_config_imported_count, count)
+                    else toolbarStrings.getString(R.string.toolbar_config_the_limit_of_20_saved_workspaces_has_been_reached)
+            }.onFailure { state.statusMessage = toolbarStrings.getString(R.string.toolbar_config_import_failed, it.message) }
         }
     }
     fun export(presets: List<ToolbarWorkspacePreset>, filename: String) {
@@ -80,7 +82,7 @@ internal fun ToolbarWorkspaceLibrary(
     if (state.visible) {
         ToolbarPresetsDialog(
             presets = state.presets,
-            templates = ToolbarWorkspaceTemplates.presets,
+            templates = localizedToolbarTemplates(context),
             statusMessage = state.statusMessage,
             selectedTab = state.selectedTab,
             onSelectTab = { state.selectedTab = it },
@@ -88,8 +90,8 @@ internal fun ToolbarWorkspaceLibrary(
                 val basename = preset.name.replace(Regex("[^a-zA-Z0-9_-]"), "_").take(40)
                 export(listOf(preset), "$basename.xworkspaces.json")
             },
-            onExportCurrent = { export(listOf(currentPreset()), "toolbar-atual.xworkspaces.json") },
-            onExportAll = { export(state.presets, "toolbars-salvas.xworkspaces.json") },
+            onExportCurrent = { export(listOf(currentPreset()), "current-toolbar.xworkspaces.json") },
+            onExportAll = { export(state.presets, "saved-toolbars.xworkspaces.json") },
             onImport = { importLauncher.launch(arrayOf("application/json", "application/octet-stream")) },
             onUseTemplate = { showPreview(it) },
             onSave = { name ->

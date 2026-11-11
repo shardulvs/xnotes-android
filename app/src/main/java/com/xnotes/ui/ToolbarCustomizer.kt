@@ -98,6 +98,7 @@ fun ToolbarCustomizerBody(
     onSectionDrop: () -> Unit,
     onSectionCancel: () -> Unit,
 ) {
+    val toolbarStrings = androidx.compose.ui.platform.LocalContext.current
     val palette = LocalPalette.current
     val dragging = dragItem != null
     val draggingSection = dragSection != null
@@ -135,7 +136,7 @@ fun ToolbarCustomizerBody(
             if (region != null && section.region != region) return@forEachIndexed
             if (draggingSection && sectionDropTarget == ToolbarSectionTarget(region ?: ToolbarRegion.START, sec)) SectionCaret()
             SectionCard(
-                label = "Section ${sec + 1}",
+                label = toolbarStrings.getString(R.string.toolbar_config_section_number, sec + 1),
                 canDelete = layout.sections.size > 1,
                 lanes = section.lanes,
                 region = section.region,
@@ -172,7 +173,7 @@ fun ToolbarCustomizerBody(
                             verticalArrangement = Arrangement.spacedBy(3.dp),
                         ) {
                             if (section.lanes > 1) {
-                                Text("Linha ${lane + 1}", color = palette.textDim.toComposeColor(), fontSize = 11.sp)
+                                Text(toolbarStrings.getString(R.string.toolbar_config_row_number, lane + 1), color = palette.textDim.toComposeColor(), fontSize = 11.sp)
                             }
                             if (cells.isEmpty()) {
                                 Text(
@@ -216,7 +217,7 @@ fun ToolbarCustomizerBody(
         }
         if (draggingSection && sectionDropTarget == ToolbarSectionTarget(region ?: ToolbarRegion.START, null)) SectionCaret()
         if (dragging && region != null && dragRegionTarget == region && dropTarget == null) {
-            Text("Solte para criar uma section aqui", color = palette.accent.toComposeColor(), fontSize = 12.sp)
+            Text(toolbarStrings.getString(R.string.toolbar_config_drop_to_create_a_section_here), color = palette.accent.toComposeColor(), fontSize = 12.sp)
         }
         AddSectionChip(onClick = { lines -> onAdd(lines, region ?: ToolbarRegion.START) })
             }
@@ -340,6 +341,7 @@ private fun SectionCard(
     onGrabCancel: () -> Unit,
     content: @Composable () -> Unit,
 ) {
+    val toolbarStrings = androidx.compose.ui.platform.LocalContext.current
     val palette = LocalPalette.current
     var sectionMenuOpen by remember { mutableStateOf(false) }
     SectionCardScaffold(
@@ -364,10 +366,10 @@ private fun SectionCard(
                     onCancel = onGrabCancel,
                 )
                 Box {
-                    Tooltip("Configurar linhas da section") {
+                    Tooltip(toolbarStrings.getString(R.string.toolbar_config_configure_section_rows)) {
                         IconButton(onClick = { sectionMenuOpen = true }, modifier = Modifier.size(26.dp)) {
                             Icon(
-                                XnotesIcons.more, "Configurar linhas da section",
+                                XnotesIcons.more, toolbarStrings.getString(R.string.toolbar_config_configure_section_rows),
                                 tint = palette.textDim.toComposeColor(),
                                 modifier = Modifier.size(14.dp),
                             )
@@ -545,6 +547,7 @@ private fun ChipFace(item: ToolbarItem, visible: Boolean, modifier: Modifier = M
 /** Compact layer row. Tap toggles visibility; hold the grip/row to reorder. */
 @Composable
 private fun LayerFace(item: ToolbarItem, visible: Boolean, modifier: Modifier, selected: Boolean = false, onToggle: (() -> Unit)? = null) {
+    val toolbarStrings = androidx.compose.ui.platform.LocalContext.current
     val palette = LocalPalette.current
     Row(
         modifier
@@ -573,7 +576,7 @@ private fun LayerFace(item: ToolbarItem, visible: Boolean, modifier: Modifier, s
         if (onToggle != null) {
             Box(Modifier.size(30.dp).clip(MaterialTheme.shapes.small).clickable(onClick = onToggle),
                 contentAlignment = Alignment.Center) {
-                Icon(XnotesIcons.view, if (visible) "Ocultar elemento" else "Mostrar elemento",
+                Icon(XnotesIcons.view, if (visible) toolbarStrings.getString(R.string.toolbar_config_hide_tool) else toolbarStrings.getString(R.string.toolbar_config_show_tool),
                     tint = (if (visible) palette.accent else palette.textDim).toComposeColor(),
                     modifier = Modifier.size(16.dp))
             }
@@ -695,6 +698,7 @@ private fun AddItemPicker(items: List<ToolbarItem>, onChoose: (ToolbarItem) -> U
 
 @Composable
 private fun AddSectionChip(onClick: (Int) -> Unit) {
+    val toolbarStrings = androidx.compose.ui.platform.LocalContext.current
     val palette = LocalPalette.current
     var menuOpen by remember { mutableStateOf(false) }
     Box {
@@ -711,15 +715,15 @@ private fun AddSectionChip(onClick: (Int) -> Unit) {
             Text(stringResource(R.string.add_section), color = palette.accent.toComposeColor(), fontSize = 12.sp)
         }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            DropdownMenuItem(text = { Text("Uma linha") }, onClick = {
+            DropdownMenuItem(text = { Text(toolbarStrings.getString(R.string.toolbar_config_one_row)) }, onClick = {
                 menuOpen = false
                 onClick(1)
             })
-            DropdownMenuItem(text = { Text("Duas linhas") }, onClick = {
+            DropdownMenuItem(text = { Text(toolbarStrings.getString(R.string.toolbar_config_two_rows)) }, onClick = {
                 menuOpen = false
                 onClick(2)
             })
-            DropdownMenuItem(text = { Text("Três linhas") }, onClick = {
+            DropdownMenuItem(text = { Text(toolbarStrings.getString(R.string.toolbar_config_three_rows)) }, onClick = {
                 menuOpen = false
                 onClick(3)
             })

@@ -75,6 +75,7 @@ private enum class ToolbarPropertyTab { BARS, DIMENSIONS, ELEMENTS }
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
+    val toolbarStrings = androidx.compose.ui.platform.LocalContext.current
     BackHandler(onBack = onBack)
     val palette = LocalPalette.current
     val focusManager = LocalFocusManager.current
@@ -110,7 +111,7 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
     val workspaceLibrary = remember { ToolbarWorkspaceLibraryState(editor.toolbarWorkspacePresets) }
     fun activeWorkspacePreset() = com.xnotes.settings.ToolbarWorkspacePreset(
         id = "current-export",
-        name = "Workspace atual",
+        name = toolbarStrings.getString(R.string.toolbar_config_current_workspace),
         workspaces = editor.toolbarWorkspaces,
         look = prefs.toolbarLook,
         colors = editor.toolbarColors,
@@ -162,7 +163,7 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
                 screenConfiguration.screenHeightDp.dp, editor.toolbarColorCount,
                 dockWorkspace = candidate.onlyItems(if (canvasTab) ToolbarLayout.CANVAS_ITEMS else ToolbarLayout.NOTE_ITEMS),
             )) {
-            dockError = "Sem espaço disponível. Reduza a barra, altere a borda ou escolha outra faixa."
+            dockError = toolbarStrings.getString(R.string.toolbar_config_no_space_available_resize_the_bar_change_its_edge_or_choose_another_lane)
             return
         }
         dockError = null
@@ -173,7 +174,7 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
     fun beginCopyToolbar() {
         val profiles = editor.toolbarWorkspaces
         if (canvasTab && profiles.shared) {
-            dockError = "Desative o perfil compartilhado antes de copiar uma barra do XCanvas."
+            dockError = toolbarStrings.getString(R.string.toolbar_config_disable_the_shared_profile_before_copying_an_xcanvas_bar)
             return
         }
         val targetCanvas = !canvasTab
@@ -183,7 +184,7 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
         val source = selectedBar()
         val initial = com.xnotes.core.tools.prepareToolbarTransfer(source, destination, target)
         if (initial.retainedCount == 0) {
-            dockError = "Esta barra não possui elementos compatíveis com o editor de destino."
+            dockError = toolbarStrings.getString(R.string.toolbar_config_this_bar_has_no_tools_compatible_with_the_destination_editor)
             return
         }
         val draft = planToolbarCopy(source,
@@ -191,7 +192,7 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
             prefs.toolbarLook, screenConfiguration.screenWidthDp.dp,
             screenConfiguration.screenHeightDp.dp, editor.toolbarColorCount)
         if (draft == null) {
-            dockError = "Não há espaço para esta barra no destino. Reduza suas dimensões antes de copiar."
+            dockError = toolbarStrings.getString(R.string.toolbar_config_there_is_no_room_for_this_bar_at_the_destination_resize_it_before_copying)
             return
         }
         dockError = null
@@ -320,7 +321,7 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
                         editor.toolbarColorCount,
                     )
                     if (id in floated.rejected) {
-                        dockError = "Limite de barras alcançado nas faixas atuais. Libere espaço antes de adicionar."
+                        dockError = toolbarStrings.getString(R.string.toolbar_config_the_current_lanes_are_full_free_up_space_before_adding_a_bar)
                     } else {
                         dockError = null
                         editor.applyToolbarWorkspaces(
@@ -340,7 +341,7 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
                     if (!toolbarPlacementFits(changed, prefs.toolbarLook,
                             screenConfiguration.screenWidthDp.dp, screenConfiguration.screenHeightDp.dp,
                             editor.toolbarColorCount)) {
-                        dockError = "A cópia não cabe nas faixas disponíveis. Ajuste o tamanho ou a organização."
+                        dockError = toolbarStrings.getString(R.string.toolbar_config_the_copy_does_not_fit_in_the_available_lanes_adjust_the_size_or_arrangement)
                     } else {
                         dockError = null
                         editor.applyToolbarWorkspaces(
@@ -363,7 +364,7 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
                 }
             }
             TextButton(onClick = { toolbarActionsExpanded = false; beginCopyToolbar() }) {
-                Text("Copiar para " + if (canvasTab) "XNotes" else "XCanvas")
+                Text(toolbarStrings.getString(R.string.toolbar_config_copy_to, if (canvasTab) "XNotes" else "XCanvas"))
             }
             }
             run {
@@ -401,7 +402,7 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
                                         screenConfiguration.screenWidthDp.dp, screenConfiguration.screenHeightDp.dp,
                                         editor.toolbarColorCount)
                                     if (candidate == null) {
-                                        dockError = "O padrão não cabe junto das outras barras. Reduza ou mova as barras antes de restaurar."
+                                        dockError = toolbarStrings.getString(R.string.toolbar_config_the_default_does_not_fit_alongside_the_other_bars_resize_or_move_them_befor)
                                     } else {
                                         dockError = null
                                         applyEdited(candidate.bars.first { it.id == selectedBar().id }.layout)
@@ -414,10 +415,10 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
                     }
                     TextButton(onClick = {
                         workspaceLibrary.show(editor.toolbarWorkspacePresets)
-                    }) { Text("Workspaces ▾", maxLines = 1) }
+                    }) { Text(toolbarStrings.getString(R.string.toolbar_config_workspaces) + " ▾", maxLines = 1) }
                     Box {
                         IconButton(onClick = { toolbarActionsExpanded = true }) {
-                            Icon(XnotesIcons.more, "Criar, duplicar ou copiar barra")
+                            Icon(XnotesIcons.more, toolbarStrings.getString(R.string.toolbar_config_create_duplicate_or_copy_a_bar))
                         }
                         DropdownMenu(
                             expanded = toolbarActionsExpanded,
@@ -474,15 +475,15 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Chip("Barras", toolbarPropertyTab == ToolbarPropertyTab.BARS) {
+                    Chip(toolbarStrings.getString(R.string.toolbar_config_bars), toolbarPropertyTab == ToolbarPropertyTab.BARS) {
                         selectedEntry = null
                         toolbarPropertyTab = ToolbarPropertyTab.BARS
                     }
-                    Chip("Aparência", toolbarPropertyTab == ToolbarPropertyTab.DIMENSIONS) {
+                    Chip(toolbarStrings.getString(R.string.toolbar_config_appearance), toolbarPropertyTab == ToolbarPropertyTab.DIMENSIONS) {
                         selectedEntry = null
                         toolbarPropertyTab = ToolbarPropertyTab.DIMENSIONS
                     }
-                    Chip("Elementos", toolbarPropertyTab == ToolbarPropertyTab.ELEMENTS) {
+                    Chip(toolbarStrings.getString(R.string.toolbar_config_elements), toolbarPropertyTab == ToolbarPropertyTab.ELEMENTS) {
                         toolbarPropertyTab = ToolbarPropertyTab.ELEMENTS
                     }
 
@@ -559,7 +560,7 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
                 editor.toolbarColorCount,
             ).placement(currentBar.id) else displayDockPlan.placement(currentBar.id)
             if (displayedPlacement != null && displayedPlacement.lane != currentBar.geometry.dockLane) {
-                Text("Redistribuída automaticamente para a Faixa ${displayedPlacement.lane + 1}.",
+                Text(toolbarStrings.getString(R.string.toolbar_config_redistributed_lane, displayedPlacement.lane + 1),
                     color = palette.accent.toComposeColor(), style = MaterialTheme.typography.bodySmall)
             }
                     }
@@ -569,7 +570,7 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
                 FieldLabel(stringResource(R.string.toolbar_preview))
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = { previewExpanded = !previewExpanded }) {
-                    Text(if (previewExpanded) "Reduzir" else "Ampliar")
+                    Text(if (previewExpanded) toolbarStrings.getString(R.string.toolbar_config_collapse) else toolbarStrings.getString(R.string.toolbar_config_expand))
                 }
             }
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {

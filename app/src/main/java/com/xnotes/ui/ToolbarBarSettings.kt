@@ -49,6 +49,7 @@ internal fun ToolbarBarSettings(
     onConfigureDock: (ToolbarGeometry, ToolbarLook) -> Unit,
     onReorder: (Int) -> Unit,
 ) {
+    val toolbarStrings = androidx.compose.ui.platform.LocalContext.current
     val isPrimary = barIndex == 0
     fun configureDock(geometry: ToolbarGeometry, nextLook: ToolbarLook = look) {
         onConfigureDock(geometry, nextLook)
@@ -88,21 +89,21 @@ internal fun ToolbarBarSettings(
             }
         }
         val secondaryDocked = currentBar.geometry.dockEdge != null && !currentBar.geometry.floating
-        ToolbarSettingsLabel("Posicionamento")
+        ToolbarSettingsLabel(toolbarStrings.getString(R.string.toolbar_config_placement))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            PreferenceChoiceChip("Encaixada", secondaryDocked) {
+            PreferenceChoiceChip(toolbarStrings.getString(R.string.toolbar_config_docked), secondaryDocked) {
                 configureDock(toolbarDockedGeometry(currentBar, barIndex, look))
             }
-            PreferenceChoiceChip("Flutuante", !secondaryDocked) {
+            PreferenceChoiceChip(toolbarStrings.getString(R.string.toolbar_config_floating), !secondaryDocked) {
                 configureDock(toolbarFloatingGeometry(currentBar, barIndex, look))
             }
         }
         if (secondaryDocked) {
-            ToolbarSettingsLabel("Borda")
+            ToolbarSettingsLabel(toolbarStrings.getString(R.string.toolbar_config_edge))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 for ((edge, label) in listOf(
-                    ToolbarDockEdge.TOP to "Superior", ToolbarDockEdge.BOTTOM to "Inferior",
-                    ToolbarDockEdge.LEFT to "Esquerda", ToolbarDockEdge.RIGHT to "Direita",
+                    ToolbarDockEdge.TOP to toolbarStrings.getString(R.string.toolbar_config_top), ToolbarDockEdge.BOTTOM to toolbarStrings.getString(R.string.toolbar_config_bottom),
+                    ToolbarDockEdge.LEFT to toolbarStrings.getString(R.string.toolbar_config_left), ToolbarDockEdge.RIGHT to toolbarStrings.getString(R.string.toolbar_config_right),
                 )) {
                     PreferenceChoiceChip(label, currentBar.geometry.dockEdge == edge) {
                         val geo = currentBar.geometry
@@ -168,23 +169,23 @@ internal fun ToolbarBarSettings(
     val floatingBar = !isPrimaryDock && !isSecondaryDock
     FlowRow(horizontalArrangement = Arrangement.spacedBy(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            ToolbarSettingsLabel(if (floatingBar) "Faixa flutuante preferida · máximo 3"
-                else "Faixa de encaixe · máximo 3 por borda")
+            ToolbarSettingsLabel(if (floatingBar) toolbarStrings.getString(R.string.toolbar_config_preferred_floating_lane_maximum_3)
+                else toolbarStrings.getString(R.string.toolbar_config_dock_lane_maximum_3_per_edge))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 for (lane in 0..2) {
-                    PreferenceChoiceChip("Faixa ${lane + 1}", currentBar.geometry.dockLane == lane) {
+                    PreferenceChoiceChip(toolbarStrings.getString(R.string.toolbar_config_lane_number, lane + 1), currentBar.geometry.dockLane == lane) {
                         configureDock(currentBar.geometry.copy(dockLane = lane))
                     }
                 }
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            ToolbarSettingsLabel("Alinhamento na faixa")
+            ToolbarSettingsLabel(toolbarStrings.getString(R.string.toolbar_config_lane_alignment))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 for ((align, label) in listOf(
-                    ToolbarDockAlignment.START to "Início",
-                    ToolbarDockAlignment.CENTER to "Centro",
-                    ToolbarDockAlignment.END to "Fim",
+                    ToolbarDockAlignment.START to toolbarStrings.getString(R.string.toolbar_config_start),
+                    ToolbarDockAlignment.CENTER to toolbarStrings.getString(R.string.toolbar_config_center),
+                    ToolbarDockAlignment.END to toolbarStrings.getString(R.string.toolbar_config_end),
                 )) {
                     PreferenceChoiceChip(label, (if (floatingBar) toolbarFloatingAlignment(currentBar)
                             else currentBar.geometry.dockAlignment) == align) {

@@ -1,5 +1,6 @@
 package com.xnotes.ui
 
+import com.xnotes.R
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -51,13 +52,14 @@ internal fun ToolbarCopyDialog(
     onCopy: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val toolbarStrings = androidx.compose.ui.platform.LocalContext.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Copiar barra para $targetLabel") },
+        title = { Text(toolbarStrings.getString(R.string.toolbar_config_copy_bar_to, targetLabel)) },
         text = {
             Column(Modifier.heightIn(max = 450.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Pré-visualização no destino · ${draft.retainedCount} elementos compatíveis")
+                Text(toolbarStrings.getString(R.string.toolbar_config_compatible_tools, draft.retainedCount))
                 ToolbarWorkspacePreview(
                     workspace = candidate,
                     look = look,
@@ -74,19 +76,19 @@ internal fun ToolbarCopyDialog(
                     onMoveBar = { _, _ -> },
                 )
                 if (draft.omitted.isNotEmpty()) {
-                    Text("Não serão copiados (${draft.omitted.size}): " +
-                        draft.omitted.joinToString { it.id.replace('_', ' ') })
-                } else Text("Todos os elementos são compatíveis.")
+                    Text(toolbarStrings.getString(R.string.toolbar_config_omitted_tools, draft.omitted.size) +
+                        draft.omitted.joinToString { toolbarStrings.getString(it.labelRes) })
+                } else Text(toolbarStrings.getString(R.string.toolbar_config_all_tools_are_compatible))
                 if (sharedCanvasWillDisable) {
-                    Text("O XCanvas usa o perfil compartilhado. Ao confirmar, seu perfil individual será ativado.")
+                    Text(toolbarStrings.getString(R.string.toolbar_config_xcanvas_uses_the_shared_profile_confirming_will_enable_its_individual_profi))
                 }
-                Text("Dimensões, seções, espaçamento e alinhamento da barra serão preservados.")
+                Text(toolbarStrings.getString(R.string.toolbar_config_bar_dimensions_sections_spacing_and_alignment_will_be_preserved))
             }
         },
         confirmButton = {
-            TextButton(onClick = onCopy, enabled = draft.retainedCount > 0) { Text("Copiar barra") }
+            TextButton(onClick = onCopy, enabled = draft.retainedCount > 0) { Text(toolbarStrings.getString(R.string.toolbar_config_copy_bar)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(toolbarStrings.getString(R.string.toolbar_config_cancel)) } },
     )
 }
 
@@ -108,6 +110,7 @@ internal fun ToolbarPresetsDialog(
     onImport: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val toolbarStrings = androidx.compose.ui.platform.LocalContext.current
     var saving by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
@@ -116,37 +119,37 @@ internal fun ToolbarPresetsDialog(
     var presetMenuOpen by remember { mutableStateOf<String?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Workspaces") },
+        title = { Text(toolbarStrings.getString(R.string.toolbar_config_workspaces)) },
         text = {
             Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(selected = selectedTab == 0, onClick = { onSelectTab(0) }, label = { Text("Meus salvos") })
-                    FilterChip(selected = selectedTab == 1, onClick = { onSelectTab(1) }, label = { Text("Modelos") })
+                    FilterChip(selected = selectedTab == 0, onClick = { onSelectTab(0) }, label = { Text(toolbarStrings.getString(R.string.toolbar_config_my_saved_workspaces)) })
+                    FilterChip(selected = selectedTab == 1, onClick = { onSelectTab(1) }, label = { Text(toolbarStrings.getString(R.string.toolbar_config_templates)) })
                 }
                 statusMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 if (selectedTab == 0) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = { saving = !saving; error = null }) { Text("Salvar atual") }
+                        TextButton(onClick = { saving = !saving; error = null }) { Text(toolbarStrings.getString(R.string.toolbar_config_save_current)) }
                         Spacer(Modifier.weight(1f))
                         Box {
                             IconButton(onClick = { libraryMenuOpen = true }) {
-                                Icon(XnotesIcons.more, contentDescription = "Importar e exportar workspaces")
+                                Icon(XnotesIcons.more, contentDescription = toolbarStrings.getString(R.string.toolbar_config_import_and_export_workspaces))
                             }
                             DropdownMenu(
                                 expanded = libraryMenuOpen,
                                 onDismissRequest = { libraryMenuOpen = false },
                             ) {
-                                DropdownMenuItem(text = { Text("Importar") }, onClick = {
+                                DropdownMenuItem(text = { Text(toolbarStrings.getString(R.string.toolbar_config_import)) }, onClick = {
                                     libraryMenuOpen = false
                                     onImport()
                                 })
-                                DropdownMenuItem(text = { Text("Exportar workspace atual") }, onClick = {
+                                DropdownMenuItem(text = { Text(toolbarStrings.getString(R.string.toolbar_config_export_current_workspace)) }, onClick = {
                                     libraryMenuOpen = false
                                     onExportCurrent()
                                 })
                                 if (presets.isNotEmpty()) {
-                                    DropdownMenuItem(text = { Text("Exportar todos os salvos") }, onClick = {
+                                    DropdownMenuItem(text = { Text(toolbarStrings.getString(R.string.toolbar_config_export_all_saved_workspaces)) }, onClick = {
                                         libraryMenuOpen = false
                                         onExportAll()
                                     })
@@ -158,7 +161,7 @@ internal fun ToolbarPresetsDialog(
                         OutlinedTextField(
                             value = name,
                             onValueChange = { name = it.take(48); error = null },
-                            label = { Text("Nome do workspace") },
+                            label = { Text(toolbarStrings.getString(R.string.toolbar_config_workspace_name)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -168,13 +171,13 @@ internal fun ToolbarPresetsDialog(
                                     saving = false
                                     name = ""
                                     error = null
-                                } else error = "Use um nome diferente (limite de 20)."
-                            }) { Text("Salvar") }
-                            TextButton(onClick = { saving = false }) { Text("Cancelar") }
+                                } else error = toolbarStrings.getString(R.string.toolbar_config_use_a_different_name_maximum_20)
+                            }) { Text(toolbarStrings.getString(R.string.toolbar_config_save)) }
+                            TextButton(onClick = { saving = false }) { Text(toolbarStrings.getString(R.string.toolbar_config_cancel)) }
                         }
                         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     }
-                    if (presets.isEmpty()) Text("Nenhum workspace salvo ainda.")
+                    if (presets.isEmpty()) Text(toolbarStrings.getString(R.string.toolbar_config_no_saved_workspaces_yet))
                     presets.forEach { preset ->
                         Column(
                             Modifier.fillMaxWidth()
@@ -189,22 +192,22 @@ internal fun ToolbarPresetsDialog(
                                     verticalArrangement = Arrangement.spacedBy(3.dp),
                                 ) {
                                     Text(preset.name, style = MaterialTheme.typography.titleSmall)
-                                    Text("${preset.workspaces.note.bars.size} barras XNotes · ${preset.workspaces.canvas.bars.size} XCanvas",
+                                    Text(toolbarStrings.getString(R.string.toolbar_config_profile_bar_counts, preset.workspaces.note.bars.size, preset.workspaces.canvas.bars.size),
                                         style = MaterialTheme.typography.bodySmall)
                                 }
                                 Box {
                                     IconButton(onClick = { presetMenuOpen = preset.id }) {
-                                        Icon(XnotesIcons.more, contentDescription = "Opções de ${preset.name}")
+                                        Icon(XnotesIcons.more, contentDescription = toolbarStrings.getString(R.string.toolbar_config_workspace_options, preset.name))
                                     }
                                     DropdownMenu(
                                         expanded = presetMenuOpen == preset.id,
                                         onDismissRequest = { presetMenuOpen = null },
                                     ) {
-                                        DropdownMenuItem(text = { Text("Exportar") }, onClick = {
+                                        DropdownMenuItem(text = { Text(toolbarStrings.getString(R.string.toolbar_config_export)) }, onClick = {
                                             presetMenuOpen = null
                                             onExportOne(preset)
                                         })
-                                        DropdownMenuItem(text = { Text("Excluir") }, onClick = {
+                                        DropdownMenuItem(text = { Text(toolbarStrings.getString(R.string.toolbar_config_delete)) }, onClick = {
                                             presetMenuOpen = null
                                             pendingDelete = preset.id
                                         })
@@ -213,8 +216,8 @@ internal fun ToolbarPresetsDialog(
                             }
                             if (pendingDelete == preset.id) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    TextButton(onClick = { onDelete(preset.id); pendingDelete = null }) { Text("Confirmar exclusão") }
-                                    TextButton(onClick = { pendingDelete = null }) { Text("Cancelar") }
+                                    TextButton(onClick = { onDelete(preset.id); pendingDelete = null }) { Text(toolbarStrings.getString(R.string.toolbar_config_confirm_deletion)) }
+                                    TextButton(onClick = { pendingDelete = null }) { Text(toolbarStrings.getString(R.string.toolbar_config_cancel)) }
                                 }
                             }
                         }
@@ -229,27 +232,27 @@ internal fun ToolbarPresetsDialog(
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
                             Text(template.name, style = MaterialTheme.typography.titleSmall)
-                            Text(workspaceTemplateDescription(template.id),
+                            Text(workspaceTemplateDescription(toolbarStrings, template.id),
                                 style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Fechar") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(toolbarStrings.getString(R.string.toolbar_config_close)) } },
     )
 }
 
-private fun workspaceTemplateDescription(id: String): String = when (id) {
-    "builtin-original" -> "Barra padrão do XNotes, para recomeçar uma personalização."
-    "builtin-focus" -> "Uma única barra inferior, compacta, para escrever sem distrações."
-    "builtin-study" -> "Navegação superior e escrita em uma barra independente na parte inferior."
-    "builtin-pdf" -> "Navegação de documentos acima e ferramentas de anotação à direita."
-    "builtin-drawing" -> "Traços organizados em duas linhas, paleta inferior e ações no topo."
-    "builtin-markup" -> "Estojo inferior de marcação com controles de documento separados."
-    "builtin-complete" -> "Todas as ações principais no topo, alinhadas em início, centro e fim."
-    "builtin-two-rows" -> "Ferramentas em duas fileiras na parte inferior e navegação no topo."
-    else -> "Outra disposição de ferramentas."
+private fun workspaceTemplateDescription(toolbarStrings: android.content.Context, id: String): String = when (id) {
+    "builtin-original" -> toolbarStrings.getString(R.string.toolbar_config_the_default_xnotes_toolbar_for_a_fresh_start)
+    "builtin-focus" -> toolbarStrings.getString(R.string.toolbar_config_one_compact_bottom_bar_for_distraction_free_writing)
+    "builtin-study" -> toolbarStrings.getString(R.string.toolbar_config_navigation_at_the_top_and_a_separate_writing_bar_at_the_bottom)
+    "builtin-pdf" -> toolbarStrings.getString(R.string.toolbar_config_document_navigation_above_and_annotation_tools_on_the_right)
+    "builtin-drawing" -> toolbarStrings.getString(R.string.toolbar_config_drawing_tools_in_two_rows_a_bottom_palette_and_actions_at_the_top)
+    "builtin-markup" -> toolbarStrings.getString(R.string.toolbar_config_a_bottom_markup_bar_with_separate_document_controls)
+    "builtin-complete" -> toolbarStrings.getString(R.string.toolbar_config_all_main_actions_at_the_top_aligned_at_the_start_center_and_end)
+    "builtin-two-rows" -> toolbarStrings.getString(R.string.toolbar_config_tools_in_two_rows_at_the_bottom_and_navigation_at_the_top)
+    else -> toolbarStrings.getString(R.string.toolbar_config_another_tool_arrangement)
 }
 
 /** Preview both profiles before replacing the live workspace with a saved or built-in layout. */
@@ -260,6 +263,7 @@ internal fun ToolbarPresetPreviewDialog(
     onApply: (ToolbarContext?) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val toolbarStrings = androidx.compose.ui.platform.LocalContext.current
     var canvasPreview by remember(preset.id) { mutableStateOf(canvasInitially) }
     var applyBoth by remember(preset.id) { mutableStateOf(false) }
     val context = if (canvasPreview) ToolbarContext.CANVAS else ToolbarContext.NOTE
@@ -294,18 +298,18 @@ internal fun ToolbarPresetPreviewDialog(
                 FilterChip(
                     selected = applyBoth,
                     onClick = { applyBoth = !applyBoth },
-                    label = { Text("Aplicar também ao outro editor") },
+                    label = { Text(toolbarStrings.getString(R.string.toolbar_config_also_apply_to_the_other_editor)) },
                 )
                 Text(if (applyBoth)
-                    "Substitui as barras de XNotes e XCanvas, além da aparência e paleta globais."
-                    else "Substitui somente as barras de ${if (canvasPreview) "XCanvas" else "XNotes"}. O outro editor, as cores e a aparência globais serão preservados.")
+                    toolbarStrings.getString(R.string.toolbar_config_replaces_xnotes_and_xcanvas_bars_along_with_the_global_appearance_and_palet)
+                    else toolbarStrings.getString(R.string.toolbar_config_apply_one_description, if (canvasPreview) "XCanvas" else "XNotes"))
             }
         },
         confirmButton = {
             TextButton(onClick = { onApply(if (applyBoth) null else context) }) {
-                Text(if (applyBoth) "Aplicar nos dois" else "Aplicar em ${if (canvasPreview) "XCanvas" else "XNotes"}")
+                Text(if (applyBoth) toolbarStrings.getString(R.string.toolbar_config_apply_to_both) else toolbarStrings.getString(R.string.toolbar_config_apply_to, if (canvasPreview) "XCanvas" else "XNotes"))
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Voltar à lista") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(toolbarStrings.getString(R.string.toolbar_config_back_to_list)) } },
     )
 }

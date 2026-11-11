@@ -40,6 +40,7 @@ internal fun ToolbarElementsEditor(
     onColorCountChange: (Int) -> Unit,
     onApplyLayout: (ToolbarLayout) -> Unit,
 ) {
+    val toolbarStrings = androidx.compose.ui.platform.LocalContext.current
     val palette = LocalPalette.current
     var selectedEntry by interaction.selectedEntry
     var dragItem by interaction.dragItem
@@ -62,9 +63,9 @@ internal fun ToolbarElementsEditor(
     fun retargetSection() = interaction.retargetSection(currentLayout())
     if (activeEntry != null) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Tamanho do elemento", style = MaterialTheme.typography.titleSmall)
+            Text(toolbarStrings.getString(R.string.toolbar_config_tool_size), style = MaterialTheme.typography.titleSmall)
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = { selectedEntry = null }) { Text("Fechar") }
+            TextButton(onClick = { selectedEntry = null }) { Text(toolbarStrings.getString(R.string.toolbar_config_close)) }
         }
         ToolbarEntrySizeControls(
             entry = activeEntry,
@@ -75,10 +76,10 @@ internal fun ToolbarElementsEditor(
         )
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Paleta de cores", style = MaterialTheme.typography.titleSmall)
+        Text(toolbarStrings.getString(R.string.toolbar_config_color_palette), style = MaterialTheme.typography.titleSmall)
         Spacer(Modifier.weight(1f))
         TextButton(onClick = { onToggleColorControls() }) {
-            Text(if (colorControlsExpanded) "Recolher" else "Configurar")
+            Text(if (colorControlsExpanded) toolbarStrings.getString(R.string.toolbar_config_collapse) else toolbarStrings.getString(R.string.toolbar_config_configure))
         }
     }
     if (colorControlsExpanded) {
@@ -96,7 +97,7 @@ internal fun ToolbarElementsEditor(
             steps = InkPalette.MAX_SWATCHES - 2,
             modifier = Modifier.width(280.dp),
         )
-        ElementsFieldLabel("Distribuir cores em ${layout.colorBlockCount} blocos")
+        ElementsFieldLabel(toolbarStrings.getString(R.string.toolbar_config_color_blocks, layout.colorBlockCount))
         if (colorCount > 1 && layout.colorBlockCount > 0) {
             Slider(
                 value = layout.colorBlockCount.coerceIn(1, colorCount).toFloat(),
@@ -123,7 +124,7 @@ internal fun ToolbarElementsEditor(
         TextButton(onClick = {
             selectedEntry = null
             onApplyLayout(currentLayout().gatherSectionsAtStart())
-        }) { Text("Reunir sections no início", fontSize = 12.sp) }
+        }) { Text(toolbarStrings.getString(R.string.toolbar_config_gather_sections_at_the_start), fontSize = 12.sp) }
     }
     ToolbarCustomizerBody(
         layout = layout,
