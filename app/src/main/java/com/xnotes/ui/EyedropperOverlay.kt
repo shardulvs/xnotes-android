@@ -82,9 +82,10 @@ fun EyedropperOverlay() {
     val density = LocalDensity.current
     val palette = LocalPalette.current
     var origin by remember { mutableStateOf(Offset.Zero) }
+    var width by remember { mutableIntStateOf(0) }
     BackHandler { Eyedropper.end() }
     DisposableEffect(Unit) { onDispose { Eyedropper.end() } }
-    Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInWindow() }) {
+    Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInWindow(); width = it.size.width }) {
         val at = Eyedropper.finger?.minus(origin)
         if (at == null) {
             Text(
@@ -105,7 +106,8 @@ fun EyedropperOverlay() {
                     .offset {
                         // Near the top edge the loupe drops below the finger instead.
                         val y = if (at.y - lift - half >= 0f) at.y - lift - half else at.y + lift - half
-                        IntOffset((at.x - half).roundToInt(), y.roundToInt())
+                        val x = (at.x - half).coerceIn(0f, (width - 2 * half).coerceAtLeast(0f))
+                        IntOffset(x.roundToInt(), y.roundToInt())
                     }
                     .size(loupe)
                     .border(3.dp, Color.White, CircleShape)
