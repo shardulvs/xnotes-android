@@ -103,9 +103,9 @@ class InfiniteInteraction(
     private val onCommitSelection: (com.xnotes.core.history.Command?) -> Unit = {},
     /** Draw [items] displaced by the drag so far, rather than moving them. An empty list ends it. */
     private val onLiftSelection: (List<CanvasItem>, LiftTransform) -> Unit = { _, _ -> },
-    /** Keep a single TextItem and its selection frame on the same native surface for the entire move. */
-    private val onTextMoveStart: (TextItem) -> Unit = {},
-    private val onTextMoveEnd: (TextItem) -> Unit = {},
+    /** Keep TextItem and selection on one surface during movement and text reflow. */
+    private val onTextGestureStart: (TextItem) -> Unit = {},
+    private val onTextGestureEnd: (TextItem) -> Unit = {},
     /** Content pixels per dp, so the speed pen judges gesture speed independently of zoom. */
     private val devicePxPerDp: () -> Double = { 1.0 },
     /** A press that landed on the minimap; returns true when it was consumed as navigation. */
@@ -127,9 +127,6 @@ class InfiniteInteraction(
     private val onCommitText: () -> Unit = {},
     /** A tap with the text-box tool creates a new editable canvas text item. */
     private val onCreateText: (Pt) -> Unit = {},
-    /** Use the paged editor's native text layout as a fast overlay while resizing. */
-    private val onTextResizeStart: (TextItem) -> Unit = {},
-    private val onTextResizeEnd: (TextItem) -> Unit = {},
     /** A pan that ended as a tap, at this content point, which an audio pill there may take. */
     private val onAudioTap: (Pt) -> Boolean = { false },
     /** Peel this tape back, or cover it again: a look, never an edit. */
@@ -766,7 +763,14 @@ class InfiniteInteraction(
             selection()?.previewMove(0.0, 0.0)
             selection()?.unfollow()
             onLiftSelection(emptyList(), LiftTransform.NONE)
-            movingText?.let(onTextMoveEnd)
+            movingText?.let(onTextGestureEnd)
+            onSelectionChanged()
+        }
+        if (mode == CanvasPointerMode.RESIZE && liveTextReflow) {
+            selection()?.restoreLiveGeometry()
+            (selection()?.items?.singleOrNull() as? TextItem)?.let(onTextGestureEnd)
+            liveTextReflow = false
+            grabHandle = null
             onSelectionChanged()
         }
         if (mode == CanvasPointerMode.VERTEX) abandonVertex()
@@ -1107,7 +1111,7 @@ class InfiniteInteraction(
         moveAnchor = at
         movedBy = Pt.ZERO
         mode = CanvasPointerMode.MOVE
-        (sel.items.singleOrNull() as? TextItem)?.let(onTextMoveStart)
+        (sel.items.singleOrNull() as? TextItem)?.let(onTextGestureStart)
         onLiftSelection(liftedOf(sel), LiftTransform.NONE)
     }
 
@@ -1204,7 +1208,7 @@ class InfiniteInteraction(
         sel.moveLive(movedBy.x, movedBy.y)
         if (movedBy != Pt.ZERO) sel.loneConnector?.letGo()
         onLiftSelection(emptyList(), LiftTransform.NONE)
-        movingText?.let(onTextMoveEnd)
+        movingText?.let(onTextGestureEnd)
         onCommitSelection(sel.buildCommand(movedOnly = true, dx = movedBy.x, dy = movedBy.y))
         onSelectionChanged()
         requestRender()
@@ -1226,7 +1230,7 @@ class InfiniteInteraction(
         lastTextReflowNanos = 0L
         if (liveTextReflow) {
             liftedTransform = false
-            (sel.items.singleOrNull() as? TextItem)?.let(onTextResizeStart)
+            (sel.items.singleOrNull() as? TextItem)?.let(onTextGestureStart)
             return
         }
         liftedTransform = sel.items.all { it is Stroke || it is ShapeItem || it is TextItem || isVectorImage(it) }
@@ -1237,7 +1241,7 @@ class InfiniteInteraction(
     }
 
     private fun endLift() {
-        if (liveTextReflow) (selection()?.items?.singleOrNull() as? TextItem)?.let(onTextResizeEnd)
+        if (liveTextReflow) (selection()?.items?.singleOrNull() as? TextItem)?.let(onTextGestureEnd)
         liveTextReflow = false
         liftedTransform = false
         bakedInLift = emptySet()
@@ -1299,7 +1303,7 @@ class InfiniteInteraction(
             sel.resizeLive(handle, transformPointer, transformMargin)
         }
         liveTextReflow = false
-        resizedText?.let(onTextResizeEnd)
+        resizedText?.let(onTextGestureEnd)
         // Finger up on a lifted drag: apply the whole thing to the model once, then hand the drawing
         // back to it.
         if (liftedTransform) {

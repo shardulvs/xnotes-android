@@ -327,6 +327,14 @@ class CanvasSelection(private val doc: InfiniteDocument) {
         refreshBox()
     }
 
+    /** Undo the live TextItem geometry of a cancelled resize without adding history. */
+    fun restoreLiveGeometry() {
+        if (startSnapshots.size != items.size) return
+        for (i in items.indices) items[i].restoreGeometry(startSnapshots[i])
+        startBox?.let { box = it }
+        doc.itemsChanged(items)
+    }
+
     /** Put the box back where the drag started, for a gesture that was cancelled rather than ended. */
     fun previewBack() {
         startBox?.let { box = it }

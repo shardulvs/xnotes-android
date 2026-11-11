@@ -43,7 +43,6 @@ internal class CanvasTextPreviewView(
         val color: Rgba,
     )
 
-    private var layoutItem: TextItem? = null
     private var layoutKey: LayoutKey? = null
     private var cachedLayout: StaticLayout? = null
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -75,7 +74,6 @@ internal class CanvasTextPreviewView(
         item = null
         liftDx = 0.0
         liftDy = 0.0
-        layoutItem = null
         layoutKey = null
         cachedLayout = null
         visibility = GONE
@@ -93,7 +91,7 @@ internal class CanvasTextPreviewView(
         val text = item ?: return
         if (text.text.isEmpty()) return
         val key = LayoutKey(text.text, text.width.toInt().coerceAtLeast(1), text.pointSize, text.face, text.rgba)
-        val layout = cachedLayout?.takeIf { layoutItem === text && layoutKey == key }
+        val layout = cachedLayout?.takeIf { layoutKey == key }
             ?: AndroidText.layout(
                 text.text, key.width,
                 AndroidText.textPaint(
@@ -102,7 +100,6 @@ internal class CanvasTextPreviewView(
                 ),
                 TextItem.FLAGS,
             ).also {
-                layoutItem = text
                 layoutKey = key
                 cachedLayout = it
             }

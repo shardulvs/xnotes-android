@@ -141,8 +141,8 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         itemsIn = { rect -> document.itemsIn(rect) },
         onSelectionChanged = { publishOverlay() },
         onCommitSelection = { commitSelection(it) },
-        onTextMoveStart = { textMeshes.startGesture(it) },
-        onTextMoveEnd = { textMeshes.finishGesture(it) },
+        onTextGestureStart = { textMeshes.startGesture(it) },
+        onTextGestureEnd = { textMeshes.finishGesture(it) },
         onLiftSelection = { items, at ->
             scene.setLift(items, at)
             textMeshes.updateLift(items, at)
@@ -156,8 +156,6 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         isEditingText = { editingLabel != null || editingTextItem != null },
         onCommitText = { commitText() },
         onCreateText = { createTextItem(it) },
-        onTextResizeStart = { textMeshes.startGesture(it) },
-        onTextResizeEnd = { textMeshes.finishGesture(it) },
         onAudioTap = { tapAudio(it) },
         onPeelTape = { peelTape(it) },
         onUserMovedView = { AudioPlayback.userMoved(this) },

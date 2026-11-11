@@ -277,35 +277,12 @@ object ItemMesher {
         return if (min == Double.MAX_VALUE) 0.0 else min
     }
 
-    /**
-     * A text item's GL geometry is expensive to outline and triangulate. Reuse it while its
-     * visual properties are unchanged; selection, redraw and viewport changes need no new mesh.
-     * Weak keys ensure removed items do not keep their glyph geometry alive.
-     */
-    private data class TextMeshKey(
-        val text: String,
-        val pos: Pt,
-        val width: Double,
-        val height: Double,
-        val rgba: Rgba,
-        val pointSize: Double,
-        val face: com.xnotes.core.pal.FontFace,
-    )
-
-    private val textMeshes = java.util.WeakHashMap<TextItem, Pair<TextMeshKey, MeshedItem?>>()
-
+    /** TextItem snapshots are meshed once per generation by CanvasTextMeshController.
+     * Caching each snapshot here only retains unused glyph geometry. */
     private fun meshText(item: TextItem): MeshedItem? {
         if (item.canvasEditingHidden) return null
-        val key = TextMeshKey(item.text, item.pos, item.width, item.height, item.rgba, item.pointSize, item.face)
-        synchronized(textMeshes) {
-            textMeshes[item]?.let { (cachedKey, cachedMesh) ->
-                if (cachedKey == key) return cachedMesh
-            }
-        }
         val part = ShapeTessellator.textPart(item.glyphContours(), item.rgba) { it + item.pos }
-        val result = part?.let { MeshedItem(listOf(it), item.bounds(), 0.0) }
-        synchronized(textMeshes) { textMeshes[item] = key to result }
-        return result
+        return part?.let { MeshedItem(listOf(it), item.bounds(), 0.0) }
     }
 
     private fun meshShape(shape: ShapeItem, tolerance: Double): MeshedItem? {

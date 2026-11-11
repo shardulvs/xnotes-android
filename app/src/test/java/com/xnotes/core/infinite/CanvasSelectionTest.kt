@@ -209,6 +209,21 @@ class CanvasSelectionTest {
         assertEquals(item.bounds().center.y, sel.box!!.center.y, 1e-6)
     }
 
+    @Test fun cancelledTextResizeRestoresOriginalGeometry() {
+        val item = TextItem(Pt(100.0, 100.0), width = 360.0,
+            text = "A long paragraph that wraps during resize. ".repeat(12),
+            pointSize = 20.0, measurer = FakeTextMeasurer())
+        val sel = CanvasSelection(docOf(item))
+        sel.select(listOf(item))
+        val before = item.snapshotGeometry()
+        val boxBefore = sel.box
+        sel.beginTransform()
+        sel.resizeLive(HandleId.R, Pt(200.0, 100.0))
+        sel.restoreLiveGeometry()
+        assertEquals(before, item.snapshotGeometry())
+        assertEquals(boxBefore, sel.box)
+    }
+
     @Test fun horizontalTextReflowDoesNotAccumulateReservedHeight() {
         // The shared FakeTextMeasurer counts explicit newlines only. This fixture models
         // width-dependent wrapping so the test exercises the actual reflow regression.
