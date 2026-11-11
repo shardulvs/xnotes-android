@@ -1,0 +1,11 @@
+- Pen stabilization
+- Improve Stroke engine
+- Improve Speed Pen
+- Improve Calligraphy Pen
+- New app icon and themes
+- New pen colours that follow light and dark mode
+- The Xiaomi Focus Pen Pro pinch now works as a side button
+- Fix faint horizontal lines inside ink
+- Fix ink changing shape at pen lift and on resize
+- Fix canvas ink differing from notes
+- Fix new canvases ignoring the default background
