@@ -26,6 +26,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -69,6 +70,9 @@ object Eyedropper {
         if (picked != null) t(picked)
     }
 }
+
+/** False where a picker sits in a window over the activity's (the New note screen), out of the overlay's reach. */
+internal val LocalEyedropper = staticCompositionLocalOf { true }
 
 /** Draws the armed eyedropper: a hint until a finger lands, then the colour under it; Back cancels. */
 @Composable
