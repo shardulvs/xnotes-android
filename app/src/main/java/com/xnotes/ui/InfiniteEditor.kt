@@ -287,7 +287,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             itemsRevision++
             // Drop any mesh job still running for it, so its result cannot file the record again.
             if (item is ImageItem) vectorMeshGen.remove(item)
-            if (item is TextItem) textMeshes.removed(item)
+            if (item is TextItem) textMeshes.beginEditing(item)
             scene.remove(item)
             if (item === AudioPlayback.session?.item) AudioPlayback.closeIfGone(this@InfiniteEditor)
         }
@@ -1717,8 +1717,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
                 bounds = (bounds ?: Rect(p.x, p.y, 0.0, 0.0)).union(Rect(p.x - pad, p.y - pad, 2 * pad, 2 * pad))
             }
         }
-        val nativeChrome = nativeTextResize.visibility == android.view.View.VISIBLE &&
-            nativeTextResize.item != null && nativeTextResize.item === selection.items.singleOrNull()
+        val nativeChrome = nativeTextResize.isShowing(selection.items.singleOrNull() as? TextItem)
         if (nativeChrome) nativeTextResize.invalidate()
         selection.chromeBox(margin)?.takeUnless { nativeChrome }?.let { box ->
             // A lone shape also shows the dots that edit its points, except while a drag carries it.

@@ -47,6 +47,12 @@ internal class CanvasTextPreviewView(
     private var cachedLayout: StaticLayout? = null
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val path = Path()
+    private val dashEffect = DashPathEffect(
+        floatArrayOf(
+            (OverlayTessellator.DASH_ON_DP * devicePxPerDp).toFloat(),
+            (OverlayTessellator.DASH_GAP_DP * devicePxPerDp).toFloat(),
+        ), 0f,
+    )
 
     init {
         setWillNotDraw(false)
@@ -64,10 +70,8 @@ internal class CanvasTextPreviewView(
         invalidate()
     }
 
-    fun clearIf(text: TextItem): Boolean {
-        if (item !== text) return false
-        clear()
-        return true
+    fun clearIf(text: TextItem) {
+        if (item === text) clear()
     }
 
     fun clear() {
@@ -79,7 +83,7 @@ internal class CanvasTextPreviewView(
         visibility = GONE
     }
 
-    fun isShowing(text: TextItem?): Boolean = text != null && item === text && visibility == VISIBLE
+    fun isShowing(text: TextItem?): Boolean = text != null && item === text
 
     fun setLift(dx: Double, dy: Double) {
         liftDx = dx
@@ -127,12 +131,7 @@ internal class CanvasTextPreviewView(
         path.close()
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = OverlayTessellator.OUTLINE_PX.toFloat()
-        paint.pathEffect = DashPathEffect(
-            floatArrayOf(
-                (OverlayTessellator.DASH_ON_DP * devicePxPerDp).toFloat(),
-                (OverlayTessellator.DASH_GAP_DP * devicePxPerDp).toFloat(),
-            ), 0f,
-        )
+        paint.pathEffect = dashEffect
         canvas.drawPath(path, paint)
         paint.pathEffect = null
         val top = viewport.contentToViewport(ResizeMath.obbTopMid(box))

@@ -1,5 +1,8 @@
 package com.xnotes.ui
 
+import android.app.Activity
+import android.content.Intent
+import android.os.SystemClock
 import android.test.InstrumentationTestCase
 import android.view.MotionEvent
 import com.xnotes.core.geometry.Pt
@@ -148,6 +151,40 @@ class CanvasTextEditFlowTest : InstrumentationTestCase() {
             val boxes = editor.document.items.filterIsInstance<TextItem>()
             assertEquals(1, boxes.size) // The empty draft is removed; the original stays intact.
             assertEquals("Previous box", boxes.single().text)
+        }
+    }
+
+    fun testLatestCommittedTextReplacesNativePreviewAfterGlFrame() {
+        val context = instrumentation.targetContext
+        val activity = instrumentation.startActivitySync(
+            Intent(Intent.ACTION_MAIN).setClassName(context.packageName, "com.xnotes.MainActivity")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        ) as Activity
+        val editor = newEditor()
+        try {
+            instrumentation.runOnMainSync {
+                activity.setContentView(editor.surfaces)
+                tap(editor, 150f, 180f, 1000L)
+                editor.updateEditingText("Earlier contents whose mesh may still be pending.")
+                editor.commitText()
+                tap(editor, 160f, 190f, 2500L)
+                assertNotNull(editor.editingField)
+                editor.updateEditingText("Latest contents must replace the older GL frame.")
+                editor.commitText()
+                val item = editor.document.items.filterIsInstance<TextItem>().single()
+                assertEquals("Latest contents must replace the older GL frame.", item.text)
+            }
+            val fallback = editor.surfaces.getChildAt(2) as CanvasTextPreviewView
+            val deadline = SystemClock.uptimeMillis() + 5000
+            do {
+                instrumentation.waitForIdleSync()
+                if (fallback.visibility == android.view.View.GONE) break
+                SystemClock.sleep(100)
+            } while (SystemClock.uptimeMillis() < deadline)
+            assertEquals("Native preview must hand off after the latest GL frame",
+                android.view.View.GONE, fallback.visibility)
+        } finally {
+            instrumentation.runOnMainSync { activity.finish() }
         }
     }
 
