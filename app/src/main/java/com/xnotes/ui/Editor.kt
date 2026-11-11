@@ -2967,14 +2967,21 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             applyToolbarWorkspaces(applyToolbarPresetToContext(toolbarWorkspaces, preset, targetContext))
             return
         }
-        toolbarColors = (preset.colors + InkPalette.presets.drop(preset.colors.size)).take(InkPalette.MAX_SWATCHES)
+        // A workspace preset stores one palette. Restore it for the active appearance only;
+        // XNotes 0.9.8 keeps separate light/dark swatches, so leave the other theme intact.
+        val fallback = if (swatchesDark) InkPalette.dark else InkPalette.light
+        toolbarColors = (preset.colors + fallback.drop(preset.colors.size)).take(InkPalette.MAX_SWATCHES)
         toolbarColorCount = preset.colorCount.coerceIn(1, InkPalette.MAX_SWATCHES)
         infiniteOrNull?.toolbarColors = toolbarColors
         infiniteOrNull?.toolbarColorCount = toolbarColorCount
         pickColor(activeColorIndex.coerceIn(0, toolbarColorCount - 1))
         applyHomePreferences(settings.prefs.copy(toolbarLook = preset.look))
         applyToolbarWorkspaces(preset.workspaces)
-        settings = settings.copy(toolbarColors = toolbarColors, toolbarColorCount = toolbarColorCount)
+        settings = settings.copy(
+            toolbarColorsDark = if (swatchesDark) toolbarColors else otherSwatches,
+            toolbarColorsLight = if (swatchesDark) otherSwatches else toolbarColors,
+            toolbarColorCount = toolbarColorCount,
+        )
         settingsRepo.save(settings)
     }
 

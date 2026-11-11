@@ -73,7 +73,7 @@ class ToolbarWorkspacePresetsTest {
         val saved = ToolbarWorkspacePreset(
             "saved-1", "Estudos", workspace,
             look = ToolbarLook(position = ToolbarPosition.BOTTOM, size = ToolbarSize.COMPACT, floating = true),
-            colors = com.xnotes.core.tools.InkPalette.presets.toMutableList().also {
+            colors = com.xnotes.core.tools.InkPalette.legacyPresets.toMutableList().also {
                 it[0] = com.xnotes.core.model.Rgba(12, 33, 44, 255)
             },
             colorCount = 1,

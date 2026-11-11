@@ -12,7 +12,7 @@ data class ToolbarWorkspacePreset(
     val name: String,
     val workspaces: ToolbarWorkspaces,
     val look: ToolbarLook = ToolbarLook(),
-    val colors: List<Rgba> = InkPalette.presets,
+    val colors: List<Rgba> = InkPalette.legacyPresets,
     val colorCount: Int = 5,
 )
 
@@ -53,11 +53,11 @@ internal object ToolbarWorkspacePresetsJson {
                 floating = lookJson?.optBoolean("floating", false) ?: false,
             )
             val colorJson = entry.optJSONArray("colors")
-            val colors = if (colorJson == null) InkPalette.presets else {
+            val colors = if (colorJson == null) InkPalette.legacyPresets else {
                 (0 until minOf(colorJson.length(), InkPalette.MAX_SWATCHES)).mapNotNull { colorIndex ->
                     val raw = colorJson.optJSONArray(colorIndex) ?: return@mapNotNull null
                     Rgba.fromList((0 until raw.length()).map { raw.optInt(it, 0) })
-                }.let { found -> (found + InkPalette.presets.drop(found.size)).take(InkPalette.MAX_SWATCHES) }
+                }.let { found -> (found + InkPalette.legacyPresets.drop(found.size)).take(InkPalette.MAX_SWATCHES) }
             }
             result.add(ToolbarWorkspacePreset(
                 id, name, profiles, look, colors,
