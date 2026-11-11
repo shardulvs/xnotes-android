@@ -119,6 +119,18 @@ internal fun ToolbarElementsEditor(
             onApplyLayout(currentLayout().setDistribution(ToolbarDistribution.REGIONS))
         }
     }
+    if (layout.distribution == ToolbarDistribution.REGIONS) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            PreferenceChoiceChip(stringResource(R.string.toolbar_pin_start), layout.pinStart) {
+                onApplyLayout(currentLayout().copy(pinStart = !currentLayout().pinStart))
+            }
+            PreferenceChoiceChip(stringResource(R.string.toolbar_pin_end), layout.pinEnd) {
+                onApplyLayout(currentLayout().copy(pinEnd = !currentLayout().pinEnd))
+            }
+        }
+        Text(stringResource(R.string.toolbar_pin_regions_hint),
+            color = palette.textDim.toComposeColor(), fontSize = 12.sp)
+    }
     if (layout.distribution == ToolbarDistribution.REGIONS &&
         layout.sections.any { it.region != ToolbarRegion.START }) {
         TextButton(onClick = {

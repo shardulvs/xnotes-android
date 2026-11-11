@@ -31,6 +31,41 @@ class ToolbarSectionDistributionTest {
         assertEquals(ToolbarRegion.END, layout.sections.first().region)
     }
 
+    @Test fun pinningStartAndEndLeavesOnlyCenterOnTheScrollingTrack() {
+        val base = ToolbarLayout(listOf(
+            ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN)), region = ToolbarRegion.END),
+            ToolbarSection(listOf(ToolbarEntry(ToolbarItem.HOME)), region = ToolbarRegion.START),
+            ToolbarSection(listOf(ToolbarEntry(ToolbarItem.COLORS)), region = ToolbarRegion.CENTER),
+            ToolbarSection(listOf(ToolbarEntry(ToolbarItem.ERASER)), region = ToolbarRegion.START),
+            ToolbarSection(listOf(ToolbarEntry(ToolbarItem.TITLE, visible = false)), region = ToolbarRegion.END),
+        ), distribution = ToolbarDistribution.REGIONS)
+        val both = base.copy(pinStart = true, pinEnd = true)
+        assertEquals(listOf(1, 3), toolbarPinnedRegionGroups(both).start.map { it.index })
+        assertEquals(listOf(2), toolbarPinnedRegionGroups(both).scrolling.map { it.index })
+        assertEquals(listOf(0), toolbarPinnedRegionGroups(both).end.map { it.index })
+        assertTrue(both.hasPinnedRegions)
+        assertFalse(toolbarCompactRegions(both, floating = true, explicitLengthDp = null))
+
+        val startOnly = base.copy(pinStart = true)
+        assertEquals(listOf(2, 0), toolbarPinnedRegionGroups(startOnly).scrolling.map { it.index })
+        assertTrue(toolbarPinnedRegionGroups(startOnly).end.isEmpty())
+        val endOnly = base.copy(pinEnd = true)
+        assertEquals(listOf(1, 3, 2), toolbarPinnedRegionGroups(endOnly).scrolling.map { it.index })
+        assertTrue(toolbarPinnedRegionGroups(endOnly).start.isEmpty())
+        assertFalse(base.hasPinnedRegions)
+        assertTrue(toolbarCompactRegions(base, floating = true, explicitLengthDp = null))
+    }
+
+    @Test fun pinnedFlagsWithHiddenOrMissingRegionDoNotForceFullLengthFloatingBar() {
+        val regions = ToolbarLayout(listOf(
+            ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN, visible = false)), region = ToolbarRegion.START),
+            ToolbarSection(listOf(ToolbarEntry(ToolbarItem.COLORS)), region = ToolbarRegion.CENTER),
+        ), distribution = ToolbarDistribution.REGIONS, pinStart = true, pinEnd = true)
+        assertFalse(regions.hasPinnedRegions)
+        assertTrue(toolbarCompactRegions(regions, floating = true, explicitLengthDp = null))
+        assertFalse(regions.setDistribution(ToolbarDistribution.CONTINUOUS).hasPinnedRegions)
+    }
+
     @Test fun onlyFloatingAutoLengthUsesCompactRegions() {
         val regions = ToolbarLayout(listOf(ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN)))),
             distribution = ToolbarDistribution.REGIONS)

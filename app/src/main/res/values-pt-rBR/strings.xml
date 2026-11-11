@@ -125,4 +125,8 @@
     <string name="toolbar_template_name_16">Ferramentas</string>
     <string name="toolbar_template_name_17">Original</string>
     <string name="toolbar_template_name_18">Main toolbar</string>
+
+    <string name="toolbar_pin_start">Fixar início</string>
+    <string name="toolbar_pin_end">Fixar fim</string>
+    <string name="toolbar_pin_regions_hint">As regiões fixas permanecem visíveis nas extremidades enquanto as outras ferramentas rolam no centro. Evite colocar ferramentas demais nas regiões fixas.</string>
 </resources>

@@ -111,7 +111,11 @@ data class Settings(
 
     /** Keep legacy primary fields synchronized without materializing legacy-only profiles. */
     fun withToolbarLayout(context: com.xnotes.core.tools.ToolbarContext, layout: ToolbarLayout): Settings {
-        val updated = toolbarWorkspaces?.updateWorkspace(context) { it.replacePrimaryLayout(layout) }
+        // Legacy settings only encode simple sections. A region layout needs the versioned
+        // workspace codec to retain its distribution, pinned edges and per-section metadata.
+        val stored = toolbarWorkspaces ?: if (layout.distribution == com.xnotes.core.tools.ToolbarDistribution.REGIONS ||
+            layout.pinStart || layout.pinEnd) effectiveToolbarWorkspaces() else null
+        val updated = stored?.updateWorkspace(context) { it.replacePrimaryLayout(layout) }
         return when (context) {
             com.xnotes.core.tools.ToolbarContext.NOTE -> copy(toolbarLayout = layout, toolbarWorkspaces = updated)
             com.xnotes.core.tools.ToolbarContext.CANVAS -> copy(canvasToolbarLayout = layout, toolbarWorkspaces = updated)

@@ -270,12 +270,14 @@ internal fun ToolbarFrame(
     val stretch = when {
         bar.vertical -> when {
             geometry?.heightDp != null -> Modifier.height(geometry.heightDp.dp)
-            look.floating && layout.distribution == ToolbarDistribution.REGIONS && geometry?.floating == true -> Modifier.fillMaxHeight()
+            look.floating && layout.distribution == ToolbarDistribution.REGIONS &&
+                (geometry?.floating == true || layout.hasPinnedRegions) -> Modifier.fillMaxHeight()
             look.floating -> Modifier
             else -> Modifier.fillMaxHeight()
         }
         geometry?.widthDp != null -> Modifier.width(geometry.widthDp.dp)
-        look.floating && layout.distribution == ToolbarDistribution.REGIONS && geometry?.floating == true -> Modifier.fillMaxWidth()
+        look.floating && layout.distribution == ToolbarDistribution.REGIONS &&
+            (geometry?.floating == true || layout.hasPinnedRegions) -> Modifier.fillMaxWidth()
         look.floating -> Modifier
         else -> Modifier.fillMaxWidth()
     }

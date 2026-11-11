@@ -22,7 +22,8 @@ import com.xnotes.core.tools.ToolbarSection
 
 /** The natural-size floating bar packs regions together; sized/docked bars keep physical anchors. */
 internal fun toolbarCompactRegions(layout: ToolbarLayout, floating: Boolean, explicitLengthDp: Int?): Boolean =
-    layout.distribution == ToolbarDistribution.REGIONS && floating && explicitLengthDp == null
+    layout.distribution == ToolbarDistribution.REGIONS && floating && explicitLengthDp == null &&
+        !layout.hasPinnedRegions
 
 internal val LocalCompactToolbarRegions = staticCompositionLocalOf { false }
 
@@ -49,6 +50,10 @@ internal fun ToolbarSections(
         return
     }
     if (visible.isEmpty()) return
+    if (layout.hasPinnedRegions) {
+        PinnedToolbarSections(layout, sectionContent)
+        return
+    }
     val vertical = LocalBar.current.vertical
     val groups = toolbarRegionGroups(layout)
     val present = groups.filterValues { it.isNotEmpty() }.keys
@@ -130,6 +135,97 @@ internal fun ToolbarSections(
                 }
                 Box(Modifier.weight(1f).clipToBounds(), contentAlignment = androidx.compose.ui.Alignment.CenterEnd) {
                     regionContent(ToolbarRegion.END)
+                }
+            }
+        }
+    }
+}
+
+/** Sections are stable by source index, even if the user reorders their regions. */
+internal data class ToolbarPinnedRegionGroups(
+    val start: List<IndexedValue<ToolbarSection>>,
+    val scrolling: List<IndexedValue<ToolbarSection>>,
+    val end: List<IndexedValue<ToolbarSection>>,
+)
+
+/** A disabled pin joins that edge's sections to the middle scrolling track. */
+internal fun toolbarPinnedRegionGroups(layout: ToolbarLayout): ToolbarPinnedRegionGroups {
+    val visible = toolbarCompactRegionSections(layout)
+    return ToolbarPinnedRegionGroups(
+        start = if (layout.pinStart) visible.filter { it.value.region == ToolbarRegion.START } else emptyList(),
+        scrolling = visible.filter { !((layout.pinStart && it.value.region == ToolbarRegion.START) ||
+            (layout.pinEnd && it.value.region == ToolbarRegion.END)) },
+        end = if (layout.pinEnd) visible.filter { it.value.region == ToolbarRegion.END } else emptyList(),
+    )
+}
+
+/**
+ * A single center viewport scrolls, while separately measured Start/End islands never move.
+ * Cap each island at 40% of the bar so the center always has a usable viewport. Overflowing
+ * pinned islands clip rather than stealing scroll gestures or obscuring the other regions.
+ * The same composable is shared by real bars and the workspace preview.
+ */
+@Composable
+private fun PinnedToolbarSections(
+    layout: ToolbarLayout,
+    sectionContent: @Composable (Int, ToolbarSection) -> Unit,
+) {
+    val groups = toolbarPinnedRegionGroups(layout)
+    val drawSections: @Composable (List<IndexedValue<ToolbarSection>>) -> Unit = { sections ->
+        sections.forEachIndexed { visual, indexed ->
+            if (visual > 0) Separator()
+            sectionContent(indexed.index, indexed.value)
+        }
+    }
+    if (LocalBar.current.vertical) {
+        BoxWithConstraints(Modifier.fillMaxHeight()) {
+            val maxPinned = maxHeight * 0.4f
+            Column(Modifier.fillMaxHeight(), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                if (groups.start.isNotEmpty()) {
+                    Box(Modifier.heightIn(max = maxPinned).clipToBounds()) {
+                        Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                            drawSections(groups.start)
+                        }
+                    }
+                }
+                Box(Modifier.weight(1f).clipToBounds(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                    Column(Modifier.verticalScroll(rememberScrollState()),
+                        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                        drawSections(groups.scrolling)
+                    }
+                }
+                if (groups.end.isNotEmpty()) {
+                    Box(Modifier.heightIn(max = maxPinned).clipToBounds()) {
+                        Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                            drawSections(groups.end)
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val maxPinned = maxWidth * 0.4f
+            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                if (groups.start.isNotEmpty()) {
+                    Box(Modifier.widthIn(max = maxPinned).clipToBounds()) {
+                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            drawSections(groups.start)
+                        }
+                    }
+                }
+                Box(Modifier.weight(1f).clipToBounds(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        drawSections(groups.scrolling)
+                    }
+                }
+                if (groups.end.isNotEmpty()) {
+                    Box(Modifier.widthIn(max = maxPinned).clipToBounds()) {
+                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            drawSections(groups.end)
+                        }
+                    }
                 }
             }
         }

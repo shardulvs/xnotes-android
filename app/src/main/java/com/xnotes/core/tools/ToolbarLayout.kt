@@ -112,7 +112,14 @@ data class ToolbarSection(
 data class ToolbarLayout(
     val sections: List<ToolbarSection>,
     val distribution: ToolbarDistribution = ToolbarDistribution.CONTINUOUS,
+    /** Keep Start visible while the remaining regions scroll; ignored in continuous mode. */
+    val pinStart: Boolean = false,
+    /** Keep End visible while the remaining regions scroll; ignored in continuous mode. */
+    val pinEnd: Boolean = false,
 ) {
+    val hasPinnedRegions: Boolean get() = distribution == ToolbarDistribution.REGIONS &&
+        sections.any { it.hasVisible &&
+            ((pinStart && it.region == ToolbarRegion.START) || (pinEnd && it.region == ToolbarRegion.END)) }
 
     /** Sections that paint on the real bar; a separator goes between consecutive ones. */
     val visibleSections: List<ToolbarSection> get() = sections.filter { it.hasVisible }

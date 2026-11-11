@@ -42,6 +42,20 @@ class ToolbarLayoutTest {
         assertEquals(layout, roundTrip)
     }
 
+    @Test fun pinnedRegionPreferencesSurviveModeSwitchAndSectionEdits() {
+        val base = ToolbarLayout(listOf(sec(ToolbarItem.PEN), sec(ToolbarItem.ERASER)),
+            distribution = ToolbarDistribution.REGIONS, pinStart = true, pinEnd = true)
+        val continuous = base.setDistribution(ToolbarDistribution.CONTINUOUS)
+        assertEquals(true, continuous.pinStart)
+        assertEquals(true, continuous.pinEnd)
+        assertFalse(continuous.hasPinnedRegions)
+        val changed = continuous.setDistribution(ToolbarDistribution.REGIONS)
+            .setSectionRegion(1, ToolbarRegion.END)
+        assertTrue(changed.hasPinnedRegions)
+        assertEquals(true, changed.pinStart)
+        assertEquals(true, changed.pinEnd)
+    }
+
     @Test fun switchingMainToolbarToRegionsDoesNotChangeDefault() {
         val original = ToolbarLayout.DEFAULT
         val regions = original.setDistribution(ToolbarDistribution.REGIONS)

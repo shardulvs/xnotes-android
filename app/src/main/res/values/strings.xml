@@ -1330,4 +1330,8 @@
     <string name="toolbar_template_name_16">Tools</string>
     <string name="toolbar_template_name_17">Original</string>
     <string name="toolbar_template_name_18">Main toolbar</string>
+
+    <string name="toolbar_pin_start">Pin Start</string>
+    <string name="toolbar_pin_end">Pin End</string>
+    <string name="toolbar_pin_regions_hint">Pinned regions stay visible at the edges while the remaining tools scroll in the middle. Make sure the pinned tools fit.</string>
 </resources>

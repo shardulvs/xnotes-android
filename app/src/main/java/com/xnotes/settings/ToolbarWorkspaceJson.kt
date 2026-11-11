@@ -54,6 +54,8 @@ internal object ToolbarWorkspaceJson {
                 .put("visible", bar.visible)
                 .put("geometry", writeGeometry(bar.geometry))
                 .put("distribution", bar.layout.distribution.name)
+                .put("pin_start", bar.layout.pinStart)
+                .put("pin_end", bar.layout.pinEnd)
                 .put("sections", JSONArray().apply {
                     for (section in bar.layout.sections) put(JSONObject()
                         .put("lanes", section.lanes)
@@ -169,6 +171,8 @@ internal object ToolbarWorkspaceJson {
                     migratedSections.ifEmpty { listOf(ToolbarSection(emptyList())) },
                     ToolbarDistribution.entries.firstOrNull { it.name == raw.optString("distribution") }
                         ?: ToolbarDistribution.CONTINUOUS,
+                    pinStart = raw.optBoolean("pin_start", false),
+                    pinEnd = raw.optBoolean("pin_end", false),
                 ),
                 visible = raw.optBoolean("visible", true),
                 geometry = readGeometry(raw.optJSONObject("geometry")),

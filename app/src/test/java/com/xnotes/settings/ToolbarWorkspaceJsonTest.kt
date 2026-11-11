@@ -38,6 +38,19 @@ class ToolbarWorkspaceJsonTest {
         assertEquals(ToolbarLayout.DEFAULT, initial.toolbarLayout)
     }
 
+    @Test fun firstPinnedRegionEditMaterializesWorkspaceAndSurvivesRestart() {
+        val initial = Settings()
+        assertNull(initial.toolbarWorkspaces)
+        val pinned = ToolbarLayout.DEFAULT.copy(
+            distribution = ToolbarDistribution.REGIONS, pinStart = true, pinEnd = true)
+        val updated = initial.withToolbarLayout(ToolbarContext.NOTE, pinned)
+        assertEquals(pinned, updated.toolbarWorkspaces!!.note.bars.first().layout)
+        val restored = Settings.fromJson(updated.toJson())
+        assertEquals(pinned, restored.effectiveToolbarWorkspaces().note.bars.first().layout)
+        assertEquals(ToolbarLayout.CANVAS_DEFAULT,
+            restored.effectiveToolbarWorkspaces().canvas.bars.first().layout)
+    }
+
     @Test fun primaryEditsRoundTripWithoutChangingSecondaryOrInactiveProfile() {
         val base = ToolbarWorkspaces.fromLegacy(ToolbarLayout.DEFAULT, ToolbarLayout.CANVAS_DEFAULT)
         val secondary = ToolbarBar("colors", "Colors", compactLayout(ToolbarItem.COLORS),
@@ -203,6 +216,25 @@ class ToolbarWorkspaceJsonTest {
         assertEquals(ToolbarDistribution.CONTINUOUS, oldLayout.distribution)
         assertEquals(ToolbarRegion.START, oldLayout.sections.single().region)
         assertEquals(3, oldLayout.sections.single().lanes)
+    }
+
+    @Test fun pinnedStartAndEndPersistSeparatelyWithoutChangingOldWorkspaces() {
+        val layout = ToolbarLayout(listOf(
+            ToolbarSection(listOf(ToolbarEntry(ToolbarItem.HOME)), region = ToolbarRegion.START),
+            ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN)), region = ToolbarRegion.CENTER),
+            ToolbarSection(listOf(ToolbarEntry(ToolbarItem.ERASER)), region = ToolbarRegion.END),
+        ), distribution = ToolbarDistribution.REGIONS, pinStart = true, pinEnd = true)
+        val json = ToolbarWorkspaceJson.write(ToolbarWorkspaces.fromLegacy(layout, ToolbarLayout.CANVAS_DEFAULT))
+        assertEquals(layout, ToolbarWorkspaceJson.read(json)!!.note.bars.single().layout)
+        val rawBar = json.getJSONObject("note").getJSONArray("bars").getJSONObject(0)
+        assertTrue(rawBar.getBoolean("pin_start"))
+        assertTrue(rawBar.getBoolean("pin_end"))
+        rawBar.remove("pin_start")
+        rawBar.remove("pin_end")
+        val old = ToolbarWorkspaceJson.read(json)!!.note.bars.single().layout
+        assertFalse(old.pinStart)
+        assertFalse(old.pinEnd)
+        assertEquals(layout.sections, old.sections)
     }
 
     @Test fun colorBlocksPersistAndV3AbsoluteRangesMigrateToDynamic() {
