@@ -172,10 +172,9 @@ class EyedropperTouch(window: Window) {
     }
 }
 
-/** Reads single screen pixels: from the GL canvas surface when one is under the point, else the window. */
+/** Reads single screen pixels: the window's, and the GL canvas surface's wherever the window shows through to it. */
 private class PixelSampler(private val window: Window) {
     private val handler = Handler(Looper.getMainLooper())
-    private val pixel = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
     private var busy = false
 
     fun sample(wx: Float, wy: Float, force: Boolean = false, done: (Rgba?) -> Unit) {
@@ -183,24 +182,29 @@ private class PixelSampler(private val window: Window) {
         val x = wx.roundToInt()
         val y = wy.roundToInt()
         busy = true
-        val finish = { ok: Boolean ->
-            busy = false
-            done(if (ok) pixel.getPixel(0, 0).let { Rgba((it shr 16) and 0xFF, (it shr 8) and 0xFF, it and 0xFF, 255) } else null)
+        val finish = { c: Rgba? -> busy = false; done(c) }
+        read(x, y, { r, b, l -> PixelCopy.request(window, r, b, l, handler) }) { top ->
+            val surface = if (top != null && top ushr 24 < 255) glSurfaceAt(window.decorView, x, y) else null
+            if (top == null || surface == null) return@read finish(top?.let { blend(it, null) })
+            val loc = IntArray(2).also { surface.getLocationInWindow(it) }
+            read(x - loc[0], y - loc[1], { r, b, l -> PixelCopy.request(surface, r, b, l, handler) }) { finish(blend(top, it)) }
         }
+    }
+
+    private fun read(x: Int, y: Int, request: (android.graphics.Rect, Bitmap, PixelCopy.OnPixelCopyFinishedListener) -> Unit, then: (Int?) -> Unit) {
+        val pixel = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
         try {
-            val surface = glSurfaceAt(window.decorView, x, y)
-            if (surface != null) {
-                val loc = IntArray(2)
-                surface.getLocationInWindow(loc)
-                val sx = x - loc[0]
-                val sy = y - loc[1]
-                PixelCopy.request(surface, android.graphics.Rect(sx, sy, sx + 1, sy + 1), pixel, { finish(it == PixelCopy.SUCCESS) }, handler)
-            } else {
-                PixelCopy.request(window, android.graphics.Rect(x, y, x + 1, y + 1), pixel, { finish(it == PixelCopy.SUCCESS) }, handler)
-            }
+            request(android.graphics.Rect(x, y, x + 1, y + 1), pixel) { then(if (it == PixelCopy.SUCCESS) pixel.getPixel(0, 0) else null) }
         } catch (e: IllegalArgumentException) {
-            finish(false)
+            then(null)
         }
+    }
+
+    /** The window pixel [top] over the surface pixel [under], so translucent chrome over the canvas reads as seen. */
+    private fun blend(top: Int, under: Int?): Rgba {
+        val a = (top ushr 24) / 255f
+        fun channel(shift: Int) = (((top shr shift) and 0xFF) * a + (((under ?: top) shr shift) and 0xFF) * (1 - a)).roundToInt()
+        return Rgba(channel(16), channel(8), channel(0), 255)
     }
 
     /** The shown GL surface (the infinite canvas) covering window point ([x], [y]), if any. */
