@@ -113,7 +113,7 @@ interface TextEditHost {
  * (tap to commit, drag to scroll).
  */
 @Composable
-fun TextEditorOverlay(editor: TextEditHost, field: EditingField) {
+fun TextEditorOverlay(editor: TextEditHost, field: EditingField, onTextChanged: ((String) -> Unit)? = null) {
     val density = LocalDensity.current
     val palette = LocalPalette.current
     var value by remember { mutableStateOf(TextFieldValue(field.text, TextRange(field.text.length))) }
@@ -145,7 +145,7 @@ fun TextEditorOverlay(editor: TextEditHost, field: EditingField) {
             value = value,
             onValueChange = {
                 value = it
-                editor.updateEditingText(it.text)
+                if (onTextChanged != null) onTextChanged(it.text) else editor.updateEditingText(it.text)
             },
             modifier = Modifier
                 .then(NoBringIntoViewElement)

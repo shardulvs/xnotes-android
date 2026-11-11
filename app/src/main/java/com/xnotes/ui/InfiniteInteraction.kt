@@ -103,6 +103,9 @@ class InfiniteInteraction(
     private val onCommitSelection: (com.xnotes.core.history.Command?) -> Unit = {},
     /** Draw [items] displaced by the drag so far, rather than moving them. An empty list ends it. */
     private val onLiftSelection: (List<CanvasItem>, LiftTransform) -> Unit = { _, _ -> },
+    /** Keep a single TextItem and its selection frame on the same native surface for the entire move. */
+    private val onTextMoveStart: (TextItem) -> Unit = {},
+    private val onTextMoveEnd: (TextItem) -> Unit = {},
     /** Content pixels per dp, so the speed pen judges gesture speed independently of zoom. */
     private val devicePxPerDp: () -> Double = { 1.0 },
     /** A press that landed on the minimap; returns true when it was consumed as navigation. */
@@ -759,9 +762,11 @@ class InfiniteInteraction(
         // A cancelled drag never happened: the model was never touched, so putting the box back and
         // dropping the lift is the whole undo.
         if (mode == CanvasPointerMode.MOVE) {
+            val movingText = selection()?.items?.singleOrNull() as? TextItem
             selection()?.previewMove(0.0, 0.0)
             selection()?.unfollow()
             onLiftSelection(emptyList(), LiftTransform.NONE)
+            movingText?.let(onTextMoveEnd)
             onSelectionChanged()
         }
         if (mode == CanvasPointerMode.VERTEX) abandonVertex()
@@ -1102,6 +1107,7 @@ class InfiniteInteraction(
         moveAnchor = at
         movedBy = Pt.ZERO
         mode = CanvasPointerMode.MOVE
+        (sel.items.singleOrNull() as? TextItem)?.let(onTextMoveStart)
         onLiftSelection(liftedOf(sel), LiftTransform.NONE)
     }
 
@@ -1194,9 +1200,11 @@ class InfiniteInteraction(
     /** Finger up: apply the whole move to the model once, then hand the drawing back to it. */
     private fun endMove() {
         val sel = selection() ?: return
+        val movingText = sel.items.singleOrNull() as? TextItem
         sel.moveLive(movedBy.x, movedBy.y)
         if (movedBy != Pt.ZERO) sel.loneConnector?.letGo()
         onLiftSelection(emptyList(), LiftTransform.NONE)
+        movingText?.let(onTextMoveEnd)
         onCommitSelection(sel.buildCommand(movedOnly = true, dx = movedBy.x, dy = movedBy.y))
         onSelectionChanged()
         requestRender()

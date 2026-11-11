@@ -105,6 +105,18 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
      */
     private val nativeTextResize = object : android.view.View(appContext) {
         var item: TextItem? = null
+        /** Content-space lift; kept in the same draw as the text and its selection frame. */
+        var liftDx = 0.0
+        var liftDy = 0.0
+        private var layoutItem: TextItem? = null
+        private var layoutText = ""
+        private var layoutWidth = 0
+        private var layoutSize = 0.0
+        private var layoutFace: FontFace? = null
+        private var layoutColor: Rgba? = null
+        private var cachedLayout: android.text.StaticLayout? = null
+        private val chromePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        private val chromePath = android.graphics.Path()
 
         init {
             setWillNotDraw(false)
@@ -115,19 +127,71 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         override fun onDraw(canvas: android.graphics.Canvas) {
             val text = item ?: return
             if (text.text.isEmpty()) return
-            val paint = com.xnotes.platform.AndroidText.textPaint(
-                text.font,
-                android.graphics.Color.argb(text.rgba.a, text.rgba.r, text.rgba.g, text.rgba.b),
-            )
-            val layout = com.xnotes.platform.AndroidText.layout(
-                text.text, text.width.toInt(), paint, TextItem.FLAGS,
-            )
-            val at = view.viewport.contentToViewport(text.pos)
+            val width = text.width.toInt().coerceAtLeast(1)
+            // Reuse XNote's StaticLayout between drags: rebuilding a long paragraph on every
+            // pointer sample blocks the UI and lets the GL selection frame fall behind.
+            val layout = cachedLayout?.takeIf {
+                layoutItem === text && layoutText == text.text && layoutWidth == width &&
+                    layoutSize == text.pointSize && layoutFace == text.face && layoutColor == text.rgba
+            } ?: run {
+                val paint = com.xnotes.platform.AndroidText.textPaint(
+                    text.font, android.graphics.Color.argb(text.rgba.a, text.rgba.r, text.rgba.g, text.rgba.b),
+                )
+                com.xnotes.platform.AndroidText.layout(text.text, width, paint, TextItem.FLAGS).also {
+                    cachedLayout = it
+                    layoutItem = text
+                    layoutText = text.text
+                    layoutWidth = width
+                    layoutSize = text.pointSize
+                    layoutFace = text.face
+                    layoutColor = text.rgba
+                }
+            }
+            val at = view.viewport.contentToViewport(Pt(text.pos.x + liftDx, text.pos.y + liftDy))
             canvas.save()
             canvas.translate(at.x.toFloat(), at.y.toFloat())
             canvas.scale(view.viewport.zoom.toFloat(), view.viewport.zoom.toFloat())
             layout.draw(canvas)
             canvas.restore()
+            // While a native fallback is visible, draw its handles here too. One canvas draw
+            // keeps text and frame aligned even if the separate GL renderer is a frame behind.
+            if (selection.items.singleOrNull() === text) drawNativeTextChrome(canvas)
+        }
+
+        private fun drawNativeTextChrome(canvas: android.graphics.Canvas) {
+            val zoom = viewport.zoom
+            val box = selection.chromeBox(OverlayTessellator.FRAME_MARGIN_PX / zoom) ?: return
+            val accent = palette?.accent ?: InkPalette.DEFAULT
+            chromePaint.color = android.graphics.Color.argb(accent.a, accent.r, accent.g, accent.b)
+            val corners = box.corners().map(viewport::contentToViewport)
+            chromePath.reset()
+            chromePath.moveTo(corners[0].x.toFloat(), corners[0].y.toFloat())
+            for (i in 1 until corners.size) chromePath.lineTo(corners[i].x.toFloat(), corners[i].y.toFloat())
+            chromePath.close()
+            chromePaint.style = android.graphics.Paint.Style.STROKE
+            chromePaint.strokeWidth = OverlayTessellator.OUTLINE_PX.toFloat()
+            chromePaint.pathEffect = android.graphics.DashPathEffect(
+                floatArrayOf(
+                    (OverlayTessellator.DASH_ON_DP * devicePxPerDp).toFloat(),
+                    (OverlayTessellator.DASH_GAP_DP * devicePxPerDp).toFloat(),
+                ), 0f,
+            )
+            canvas.drawPath(chromePath, chromePaint)
+            chromePaint.pathEffect = null
+            val top = viewport.contentToViewport(com.xnotes.canvas.ResizeMath.obbTopMid(box))
+            val grip = viewport.contentToViewport(
+                com.xnotes.canvas.ResizeMath.obbRotateGrip(box, OverlayTessellator.GRIP_ARM_PX / zoom),
+            )
+            canvas.drawLine(top.x.toFloat(), top.y.toFloat(), grip.x.toFloat(), grip.y.toFloat(), chromePaint)
+            chromePaint.style = android.graphics.Paint.Style.FILL
+            val half = (OverlayTessellator.HANDLE_PX / 2.0).toFloat()
+            for (handle in selection.handles(OverlayTessellator.FRAME_MARGIN_PX / zoom)) {
+                val pt = viewport.contentToViewport(handle.content)
+                canvas.drawRect(pt.x.toFloat() - half, pt.y.toFloat() - half,
+                    pt.x.toFloat() + half, pt.y.toFloat() + half, chromePaint)
+            }
+            canvas.drawCircle(grip.x.toFloat(), grip.y.toFloat(),
+                (OverlayTessellator.GRIP_PX / 2.0).toFloat(), chromePaint)
         }
     }
 
@@ -165,17 +229,18 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         itemsIn = { rect -> document.itemsIn(rect) },
         onSelectionChanged = { publishOverlay() },
         onCommitSelection = { commitSelection(it) },
+        onTextMoveStart = { startNativeTextResize(it) },
+        onTextMoveEnd = { finishNativeTextResize(it) },
         onLiftSelection = { items, at ->
             scene.setLift(items, at)
-            // A recently reflowed text box may still use the native fallback while its GL
-            // mesh is being rebuilt. Move that fallback with the selection too, otherwise
-            // the outline follows the pointer while the glyphs remain at their old spot.
+            // The fallback and its selection frame share one native draw. Never move the View
+            // separately from GL: independent View translations race against selection frames.
             val nativeItem = nativeTextResize.item
             if (nativeItem != null) {
                 val follows = nativeItem in items && at.isLinearIdentity
-                nativeTextResize.translationX = if (follows) (at.dx * viewport.zoom).toFloat() else 0f
-                nativeTextResize.translationY = if (follows) (at.dy * viewport.zoom).toFloat() else 0f
-                if (!follows) nativeTextResize.invalidate()
+                nativeTextResize.liftDx = if (follows) at.dx else 0.0
+                nativeTextResize.liftDy = if (follows) at.dy else 0.0
+                nativeTextResize.invalidate()
             }
         },
         devicePxPerDp = { devicePxPerDp },
@@ -404,12 +469,21 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
      */
     private var liveResizingText: TextItem? = null
 
-    private fun startNativeTextResize(item: TextItem) {
-        liveResizingText = item
-        textMeshGen.remove(item)
+    /** The native fallback must start from its item's actual position, never the last drag's View translation. */
+    private fun showNativeTextPreview(item: TextItem) {
+        nativeTextResize.translationX = 0f
+        nativeTextResize.translationY = 0f
+        nativeTextResize.liftDx = 0.0
+        nativeTextResize.liftDy = 0.0
         nativeTextResize.item = item
         nativeTextResize.visibility = android.view.View.VISIBLE
         nativeTextResize.invalidate()
+    }
+
+    private fun startNativeTextResize(item: TextItem) {
+        liveResizingText = item
+        textMeshGen.remove(item)
+        showNativeTextPreview(item)
         scene.remove(item)
         view.publish()
     }
@@ -482,6 +556,8 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
                             if (nativeTextResize.item === item && liveResizingText !== item && !item.canvasEditingHidden) {
                                 nativeTextResize.item = null
                                 nativeTextResize.visibility = android.view.View.GONE
+                                // Return the selection chrome to GL in the same transition.
+                                publishOverlay()
                             }
                         }
                     }
@@ -1066,8 +1142,11 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             startTextItemEdit(existing)
             return
         }
+        // XNote's 300px default is too narrow in XCanvas on a high-density tablet.
+        // Keep the initial field 300dp wide on screen, independent of canvas zoom.
+        val initialWidth = TextItem.DEFAULT_WIDTH * devicePxPerDp / viewport.zoom
         val item = TextItem(
-            at, TextItem.DEFAULT_WIDTH, 0.0, "", inkColor,
+            at, initialWidth, 0.0, "", inkColor,
             textPointSize, textFace, textMeasurer,
         )
         document.add(item)
@@ -1108,6 +1187,11 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         document.itemChanged(shape)
         refreshField()
         view.publish()
+    }
+
+    /** Ignore an IME callback from a text field that has already closed or been replaced. */
+    fun updateEditingTextIfSession(session: Long, text: String) {
+        if (session == textEditSession) updateEditingText(text)
     }
 
     override fun updateEditingText(text: String) {
@@ -1171,9 +1255,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             // Without this fallback, closing the editor leaves a blank area for the entire
             // background tessellation (particularly noticeable on long paragraphs).
             if (item.text.isNotBlank()) {
-                nativeTextResize.item = item
-                nativeTextResize.visibility = android.view.View.VISIBLE
-                nativeTextResize.invalidate()
+                showNativeTextPreview(item)
             }
             editingTextItem = null
             textItemBefore = null
@@ -1857,7 +1939,10 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
                 bounds = (bounds ?: Rect(p.x, p.y, 0.0, 0.0)).union(Rect(p.x - pad, p.y - pad, 2 * pad, 2 * pad))
             }
         }
-        selection.chromeBox(margin)?.let { box ->
+        val nativeChrome = nativeTextResize.visibility == android.view.View.VISIBLE &&
+            nativeTextResize.item != null && nativeTextResize.item === selection.items.singleOrNull()
+        if (nativeChrome) nativeTextResize.invalidate()
+        selection.chromeBox(margin)?.takeUnless { nativeChrome }?.let { box ->
             // A lone shape also shows the dots that edit its points, except while a drag carries it.
             val shape = (selection.items.singleOrNull() as? ShapeItem)?.takeIf { interaction.showsEditDots }
             parts += OverlayTessellator.selection(

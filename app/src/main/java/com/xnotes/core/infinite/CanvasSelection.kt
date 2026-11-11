@@ -98,6 +98,8 @@ class CanvasSelection(private val doc: InfiniteDocument) {
     private val loneTapeStrip: TapeItem? get() = (items.singleOrNull() as? TapeItem)?.takeIf { it.mode == TapeMode.STRAIGHT }
 
     private val CORNERS = setOf(HandleId.TL, HandleId.TR, HandleId.BL, HandleId.BR)
+    /** Prevent extreme text wrapping and near-zero boxes during quick handle drags. */
+    private val minCanvasTextWidth = 160.0
 
     private fun boxOf(of: List<CanvasItem>): Obb? =
         (of.singleOrNull() as? ShapeItem)?.frameObb()
@@ -232,22 +234,39 @@ class CanvasSelection(private val doc: InfiniteDocument) {
      */
     fun resizeLive(handle: HandleId, pointer: Pt, margin: Double = 0.0) {
         if (handle == HandleId.START || handle == HandleId.END) return dragTapeEnd(handle, pointer)
-        // Match XNote's TextItem resize: change the box width/height directly, then
-        // let the text layout reflow. A generic affine transform also scales glyphs
-        // and leaves the selection box unrelated to the actual wrapped text bounds.
-        (items.singleOrNull() as? TextItem)?.let { text ->
-            val (pos, width, height) = ResizeMath.resizeText(text.pos, text.width, text.bounds().h, handle, pointer)
-            text.setGeometry(TextHandle(pos, width, height))
+        // Match XNote's width/height reflow for edges. Corners retain XCanvas's
+        // proportional font scaling; both paths then read back the actual text bounds.
+        val text = items.singleOrNull() as? TextItem
+        text?.takeIf { handle !in CORNERS }?.let { item ->
+            val right = item.pos.x + item.width
+            val clamped = when (handle) {
+                HandleId.L -> Pt(kotlin.math.min(pointer.x, right - minCanvasTextWidth), pointer.y)
+                HandleId.R -> Pt(kotlin.math.max(pointer.x, item.pos.x + minCanvasTextWidth), pointer.y)
+                else -> pointer
+            }
+            val (pos, width, proposedHeight) = ResizeMath.resizeText(item.pos, item.width, item.bounds().h, handle, clamped)
+            // Reflow changes the measured height, not the user's reserved minimum. Saving
+            // the measured height on each horizontal drag makes long boxes grow forever.
+            val reservedHeight = if (handle == HandleId.L || handle == HandleId.R) item.height else proposedHeight
+            item.setGeometry(TextHandle(pos, width, reservedHeight))
             box = boxOf(items)
             doc.itemsChanged(items)
             return
         }
         val from = startBox ?: return
         val result = boxResize(from, handle, pointer, margin)
+        val transform = if (text != null && handle in CORNERS && result.obb.halfW * 2 < minCanvasTextWidth) {
+            // Corners scale the font uniformly. Clamp the scale about the opposite corner
+            // instead of stretching glyphs or allowing a nearly zero-width text box.
+            val local = Rect(-from.halfW, -from.halfH, from.halfW * 2, from.halfH * 2)
+            val anchor = ResizeMath.scaleForHandle(local, handle, from.worldToLocal(pointer)).anchor
+            val floor = minCanvasTextWidth / local.w
+            Affine.scaleAlongAxes(from.localToWorld(anchor), from.angle, floor, floor)
+        } else result.transform
         box = result.obb
-        applyLive(result.transform)
-        // A pill stops at its smallest by itself, so its box is read back from it.
-        if (items.all { it is AudioItem }) box = boxOf(items)
+        applyLive(transform)
+        // Read back actual text height after scaling, as for self-clamping audio pills.
+        if (text != null || items.all { it is AudioItem }) box = boxOf(items)
     }
 
     /**

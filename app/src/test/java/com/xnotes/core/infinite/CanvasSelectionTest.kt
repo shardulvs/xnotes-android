@@ -209,6 +209,78 @@ class CanvasSelectionTest {
         assertEquals(item.bounds().center.y, sel.box!!.center.y, 1e-6)
     }
 
+    @Test fun horizontalTextReflowDoesNotAccumulateReservedHeight() {
+        // The shared FakeTextMeasurer counts explicit newlines only. This fixture models
+        // width-dependent wrapping so the test exercises the actual reflow regression.
+        val base = FakeTextMeasurer()
+        val wrappingMeasurer = object : com.xnotes.core.pal.TextMeasurer by base {
+            override fun measure(text: String, font: com.xnotes.core.pal.FontSpec, wrapWidth: Double,
+                flags: com.xnotes.core.pal.TextFlags): Rect {
+                val rows = kotlin.math.ceil(text.length * font.pointSize * 0.6 / wrapWidth).toInt().coerceAtLeast(1)
+                return Rect(0.0, 0.0, wrapWidth, rows * base.lineHeight(font))
+            }
+        }
+        val item = TextItem(Pt(100.0, 100.0), width = 360.0,
+            text = "Long paragraphs can wrap and unwrap without leaving an oversized text box. ".repeat(8),
+            pointSize = 20.0, measurer = wrappingMeasurer)
+        val sel = CanvasSelection(docOf(item))
+        sel.select(listOf(item))
+        sel.beginTransform()
+        val initialHeight = item.bounds().h
+        sel.resizeLive(HandleId.R, Pt(180.0, 100.0))
+        val narrowHeight = item.bounds().h
+        assertTrue(narrowHeight > initialHeight)
+        sel.resizeLive(HandleId.R, Pt(460.0, 100.0))
+        assertEquals(0.0, item.height, 1e-9)
+        assertTrue(item.bounds().h < narrowHeight)
+        assertEquals(item.bounds().h / 2, sel.box!!.halfH, 1e-6)
+    }
+
+    @Test fun textBoxHasMinimumWidthAfterFastMoveAndRepeatedResizes() {
+        val item = TextItem(Pt(100.0, 100.0), width = 300.0,
+            text = "Long paragraph with wrapping ".repeat(40),
+            pointSize = 20.0, measurer = FakeTextMeasurer())
+        val sel = CanvasSelection(docOf(item))
+        sel.select(listOf(item))
+        sel.beginTransform()
+        sel.moveLive(900.0, 600.0)
+        sel.refreshBox()
+
+        sel.beginTransform()
+        sel.resizeLive(HandleId.R, Pt(item.pos.x + 5.0, item.pos.y + 10.0))
+        assertEquals(160.0, item.width, 1e-6)
+        assertEquals(0.0, item.height, 1e-6)
+        assertEquals(item.bounds().center.x, sel.box!!.center.x, 1e-6)
+
+        sel.refreshBox()
+        sel.beginTransform()
+        sel.resizeLive(HandleId.L, Pt(item.pos.x + item.width + 200.0, item.pos.y + 10.0))
+        assertEquals(160.0, item.width, 1e-6)
+        assertEquals(item.bounds().center.x, sel.box!!.center.x, 1e-6)
+
+        sel.refreshBox()
+        sel.beginTransform()
+        val before = item.bounds()
+        sel.resizeLive(HandleId.BR, Pt(before.left + 1.0, before.top + 1.0))
+        assertEquals(160.0, item.width, 1e-6)
+        assertEquals(item.bounds().center.x, sel.box!!.center.x, 1e-6)
+        assertEquals(item.bounds().center.y, sel.box!!.center.y, 1e-6)
+    }
+
+    @Test fun aTextCornerScalesFontProportionallyWithoutLosingItsBox() {
+        val item = TextItem(Pt(100.0, 100.0), width = 300.0,
+            text = "Long text that wraps as its box changes size. ".repeat(4),
+            pointSize = 20.0, measurer = FakeTextMeasurer())
+        val sel = CanvasSelection(docOf(item))
+        sel.select(listOf(item))
+        sel.beginTransform()
+        val original = item.bounds()
+        sel.resizeLive(HandleId.BR, Pt(original.right + 150.0, original.bottom + 100.0))
+        assertTrue("diagonal scale must change the font size", item.pointSize > 20.0)
+        assertEquals(item.bounds().center.x, sel.box!!.center.x, 1e-6)
+        assertEquals(item.bounds().center.y, sel.box!!.center.y, 1e-6)
+    }
+
     @Test fun aCornerDragScalesTheSelection() {
         val a = box(0.0, 0.0, 100.0, 100.0)
         val sel = CanvasSelection(docOf(a))
