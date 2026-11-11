@@ -18,6 +18,9 @@ val keystoreProperties = Properties().apply {
 android {
     namespace = "com.xnotes"
     compileSdk = 36
+    // Android's legacy instrumentation runner used by on-device canvas regression tests.
+    useLibrary("android.test.base")
+    useLibrary("android.test.runner")
     // Pinned toolchain for the vendored native builds (F-Droid reproducibility).
     ndkVersion = "27.0.12077973"
 
