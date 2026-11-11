@@ -25,6 +25,9 @@ class DebugOverlay {
     /** What the front buffer is doing, when there is one; installed by the host. */
     var frontHud: () -> String? = { null }
 
+    /** What stabilization did to the last stroke; installed by the host. */
+    var steadyHud: () -> List<String> = { emptyList() }
+
     fun toggle() {
         enabled = !enabled
     }
@@ -94,6 +97,11 @@ class DebugOverlay {
         val (rw, rh) = state.targetRasterSize()
         val res = if (rw > 0) "$rw x $rh" else "-"
         val lines = buildList {
+            val steady = steadyHud()
+            if (steady.isNotEmpty()) {
+                addAll(steady)
+                add("")
+            }
             add("%.0f fps   %.1f ms".format(fps, frameMs))
             add("cache res  $res")
             add("visible    ${snap.visiblePages} pg")

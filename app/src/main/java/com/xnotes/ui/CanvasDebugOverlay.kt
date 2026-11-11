@@ -58,6 +58,8 @@ fun CanvasDebugOverlay(editor: InfiniteEditor) {
 
     val v = editor.viewport
     val lines = buildList {
+        addAll(editor.interaction.steadyReadout.lines())
+        add("")
         // The rate is a count over the last second, and the panel's own rate is next to it, so a
         // number at the cap is recognizable as the cap rather than as headroom.
         add("fps       %.0f / %.0f".format(stats.fps, stats.displayHz))
