@@ -27,6 +27,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -1196,8 +1197,11 @@ internal fun DropdownMenu(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val palette = LocalPalette.current
+    val opened = remember(expanded) { Eyedropper.ended }
+    val ended = expanded && Eyedropper.ended != opened
+    LaunchedEffect(ended) { if (ended) onDismissRequest() }
     androidx.compose.material3.DropdownMenu(
-        expanded = expanded && Eyedropper.target == null,
+        expanded = expanded && Eyedropper.target == null && !ended,
         onDismissRequest = onDismissRequest,
         modifier = modifier,
         offset = LocalMenuOffset.current,

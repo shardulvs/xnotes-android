@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -46,6 +47,10 @@ object Eyedropper {
     /** Where a picked colour goes; null while the eyedropper is not armed. */
     var target by mutableStateOf<((Rgba) -> Unit)?>(null)
         private set
+
+    /** Bumped whenever the eyedropper ends, so the menus it hid close rather than reopen. */
+    var ended by mutableIntStateOf(0)
+        private set
     internal var finger by mutableStateOf<Offset?>(null)
     internal var sampled by mutableStateOf<Rgba?>(null)
 
@@ -60,6 +65,7 @@ object Eyedropper {
         val t = target ?: return
         target = null
         finger = null
+        ended++
         if (picked != null) t(picked)
     }
 }
