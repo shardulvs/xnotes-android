@@ -45,10 +45,10 @@ class CanvasTextEditFlowTest : InstrumentationTestCase() {
             val item = editor.document.items.filterIsInstance<TextItem>().single()
             editor.armTool(Tool.SELECT)
             editor.selection.select(listOf(item))
-            InfiniteEditor::class.java.getDeclaredMethod("startNativeTextResize", TextItem::class.java).apply {
+            val controller = InfiniteEditor::class.java.getDeclaredField("textMeshes").apply {
                 isAccessible = true
-                invoke(editor, item)
-            }
+            }.get(editor)
+            controller.javaClass.getMethod("startGesture", TextItem::class.java).invoke(controller, item)
             val fallback = editor.surfaces.getChildAt(2)
             fallback.layout(0, 0, 1300, 800)
             val original = android.graphics.Bitmap.createBitmap(1300, 800, android.graphics.Bitmap.Config.ARGB_8888)
@@ -57,8 +57,9 @@ class CanvasTextEditFlowTest : InstrumentationTestCase() {
 
             editor.selection.beginTransform()
             editor.selection.previewMove(250.0, 150.0)
-            fallback.javaClass.getMethod("setLiftDx", Double::class.javaPrimitiveType).invoke(fallback, 250.0)
-            fallback.javaClass.getMethod("setLiftDy", Double::class.javaPrimitiveType).invoke(fallback, 150.0)
+            fallback.javaClass.getMethod(
+                "setLift", Double::class.javaPrimitiveType, Double::class.javaPrimitiveType,
+            ).invoke(fallback, 250.0, 150.0)
             val moved = android.graphics.Bitmap.createBitmap(1300, 800, android.graphics.Bitmap.Config.ARGB_8888)
             fallback.draw(android.graphics.Canvas(moved))
             assertEquals(0, android.graphics.Color.alpha(moved.getPixel(100, 110)))
@@ -99,10 +100,10 @@ class CanvasTextEditFlowTest : InstrumentationTestCase() {
             fallback.translationX = 240f
             fallback.translationY = -170f
             // Exercise the native/GL transition itself, independent of pointer sampling.
-            InfiniteEditor::class.java.getDeclaredMethod("startNativeTextResize", TextItem::class.java).apply {
+            val controller = InfiniteEditor::class.java.getDeclaredField("textMeshes").apply {
                 isAccessible = true
-                invoke(editor, item)
-            }
+            }.get(editor)
+            controller.javaClass.getMethod("startGesture", TextItem::class.java).invoke(controller, item)
             assertEquals(0f, fallback.translationX)
             assertEquals(0f, fallback.translationY)
         }
