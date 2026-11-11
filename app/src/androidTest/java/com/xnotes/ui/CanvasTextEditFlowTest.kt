@@ -8,6 +8,17 @@ import com.xnotes.core.tools.Tool
 
 /** Exercises actual XCanvas taps and text sessions on Android. */
 class CanvasTextEditFlowTest : InstrumentationTestCase() {
+    private fun newEditor(zoom: Double = 1.0, width: Int = 1600, height: Int = 1000) =
+        InfiniteEditor(instrumentation.targetContext).apply {
+            newCanvas()
+            viewport.widthPx = width
+            viewport.heightPx = height
+            viewport.zoom = zoom
+            viewport.scrollX = 0.0
+            viewport.scrollY = 0.0
+            armTool(Tool.TEXT_BOX)
+        }
+
     private fun tap(editor: InfiniteEditor, x: Float, y: Float, time: Long) {
         val pointer = MotionEvent.PointerProperties().apply {
             id = 0
@@ -31,25 +42,15 @@ class CanvasTextEditFlowTest : InstrumentationTestCase() {
 
     fun testNativeTextAndSelectionChromeMoveTogether() {
         instrumentation.runOnMainSync {
-            val editor = InfiniteEditor(instrumentation.targetContext)
-            editor.newCanvas()
-            editor.viewport.widthPx = 1300
-            editor.viewport.heightPx = 800
-            editor.viewport.zoom = 1.0
-            editor.viewport.scrollX = 0.0
-            editor.viewport.scrollY = 0.0
-            editor.armTool(Tool.TEXT_BOX)
+            val editor = newEditor(width = 1300, height = 800)
             tap(editor, 100f, 110f, 1000L)
             editor.updateEditingText("Move this text with its selection frame")
             editor.commitText()
             val item = editor.document.items.filterIsInstance<TextItem>().single()
             editor.armTool(Tool.SELECT)
             editor.selection.select(listOf(item))
-            val controller = InfiniteEditor::class.java.getDeclaredField("textMeshes").apply {
-                isAccessible = true
-            }.get(editor)
-            controller.javaClass.getMethod("startGesture", TextItem::class.java).invoke(controller, item)
-            val fallback = editor.surfaces.getChildAt(2)
+            val fallback = editor.surfaces.getChildAt(2) as CanvasTextPreviewView
+            fallback.show(item)
             fallback.layout(0, 0, 1300, 800)
             val original = android.graphics.Bitmap.createBitmap(1300, 800, android.graphics.Bitmap.Config.ARGB_8888)
             fallback.draw(android.graphics.Canvas(original))
@@ -57,9 +58,7 @@ class CanvasTextEditFlowTest : InstrumentationTestCase() {
 
             editor.selection.beginTransform()
             editor.selection.previewMove(250.0, 150.0)
-            fallback.javaClass.getMethod(
-                "setLift", Double::class.javaPrimitiveType, Double::class.javaPrimitiveType,
-            ).invoke(fallback, 250.0, 150.0)
+            fallback.setLift(250.0, 150.0)
             val moved = android.graphics.Bitmap.createBitmap(1300, 800, android.graphics.Bitmap.Config.ARGB_8888)
             fallback.draw(android.graphics.Canvas(moved))
             assertEquals(0, android.graphics.Color.alpha(moved.getPixel(100, 110)))
@@ -71,12 +70,7 @@ class CanvasTextEditFlowTest : InstrumentationTestCase() {
 
     fun testNewCanvasTextBoxUsesScreenReadableWidthAtLowZoom() {
         instrumentation.runOnMainSync {
-            val editor = InfiniteEditor(instrumentation.targetContext)
-            editor.newCanvas()
-            editor.viewport.widthPx = 1600
-            editor.viewport.heightPx = 1000
-            editor.viewport.zoom = 0.5
-            editor.armTool(Tool.TEXT_BOX)
+            val editor = newEditor(zoom = 0.5)
             tap(editor, 100f, 110f, 1000L)
             val field = editor.editingField!!
             val density = instrumentation.targetContext.resources.displayMetrics.density
@@ -87,11 +81,7 @@ class CanvasTextEditFlowTest : InstrumentationTestCase() {
 
     fun testNativeTextPreviewDropsOldDragTranslationBeforeResize() {
         instrumentation.runOnMainSync {
-            val editor = InfiniteEditor(instrumentation.targetContext)
-            editor.newCanvas()
-            editor.viewport.widthPx = 1600
-            editor.viewport.heightPx = 1000
-            editor.armTool(Tool.TEXT_BOX)
+            val editor = newEditor()
             tap(editor, 100f, 110f, 1000L)
             editor.updateEditingText("Text that will be resized after moving")
             editor.commitText()
@@ -100,10 +90,7 @@ class CanvasTextEditFlowTest : InstrumentationTestCase() {
             fallback.translationX = 240f
             fallback.translationY = -170f
             // Exercise the native/GL transition itself, independent of pointer sampling.
-            val controller = InfiniteEditor::class.java.getDeclaredField("textMeshes").apply {
-                isAccessible = true
-            }.get(editor)
-            controller.javaClass.getMethod("startGesture", TextItem::class.java).invoke(controller, item)
+            (fallback as CanvasTextPreviewView).show(item)
             assertEquals(0f, fallback.translationX)
             assertEquals(0f, fallback.translationY)
         }
@@ -111,14 +98,7 @@ class CanvasTextEditFlowTest : InstrumentationTestCase() {
 
     fun testReopenEditAndCreateNewBoxKeepsTextAndPosition() {
         instrumentation.runOnMainSync {
-            val editor = InfiniteEditor(instrumentation.targetContext)
-            editor.newCanvas()
-            editor.viewport.widthPx = 1600
-            editor.viewport.heightPx = 1000
-            editor.viewport.zoom = 1.0
-            editor.viewport.scrollX = 0.0
-            editor.viewport.scrollY = 0.0
-            editor.armTool(Tool.TEXT_BOX)
+            val editor = newEditor()
 
             tap(editor, 100f, 110f, 1000L)
             assertEquals("", editor.editingField?.text)
@@ -152,14 +132,7 @@ class CanvasTextEditFlowTest : InstrumentationTestCase() {
 
     fun testTextToolTapAwayStartsBlankSessionAndDropsLateImeUpdates() {
         instrumentation.runOnMainSync {
-            val editor = InfiniteEditor(instrumentation.targetContext)
-            editor.newCanvas()
-            editor.viewport.widthPx = 1600
-            editor.viewport.heightPx = 1000
-            editor.viewport.zoom = 1.0
-            editor.viewport.scrollX = 0.0
-            editor.viewport.scrollY = 0.0
-            editor.armTool(Tool.TEXT_BOX)
+            val editor = newEditor()
             tap(editor, 100f, 110f, 1000L)
             editor.updateEditingText("Previous box")
             editor.commitText()
@@ -180,14 +153,7 @@ class CanvasTextEditFlowTest : InstrumentationTestCase() {
 
     fun testDoubleTapLongTextKeepsGeometryStable() {
         instrumentation.runOnMainSync {
-            val editor = InfiniteEditor(instrumentation.targetContext)
-            editor.newCanvas()
-            editor.viewport.widthPx = 1600
-            editor.viewport.heightPx = 1000
-            editor.viewport.zoom = 1.0
-            editor.viewport.scrollX = 0.0
-            editor.viewport.scrollY = 0.0
-            editor.armTool(Tool.TEXT_BOX)
+            val editor = newEditor()
             tap(editor, 90f, 100f, 1000L)
             val longText = "Long paragraph with many words and wrapping. ".repeat(70)
             editor.updateEditingText(longText)

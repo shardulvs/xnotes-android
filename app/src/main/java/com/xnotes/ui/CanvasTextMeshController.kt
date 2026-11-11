@@ -90,7 +90,7 @@ internal class CanvasTextMeshController(
             val meshed = ItemMesher.mesh(snapshot)
             val elapsed = (System.nanoTime() - started) / 1_000_000.0
             view.post {
-                if (!generations.remove(item, token)) return@post
+                if (generations[item] != token) return@post
                 scene.lastTessellateMs = elapsed
                 if (meshed == null || meshed.isEmpty) scene.remove(item)
                 else scene.upsert(item, meshed.parts, meshed.bounds)
@@ -98,7 +98,9 @@ internal class CanvasTextMeshController(
                 if (preview.isShowing(item) && manipulating !== item) {
                     view.publishThen {
                         view.post {
-                            if (preview.isShowing(item) && manipulating !== item && !item.canvasEditingHidden) {
+                            // A newer edit may have started since this GL frame was submitted.
+                            if (generations[item] == token && preview.isShowing(item) &&
+                                manipulating !== item && !item.canvasEditingHidden) {
                                 preview.clearIf(item)
                                 onPreviewHidden()
                             }

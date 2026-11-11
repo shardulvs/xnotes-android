@@ -142,6 +142,5 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
 
     testImplementation(libs.junit)
-    androidTestImplementation(libs.junit)
     testImplementation(libs.json)
 }
