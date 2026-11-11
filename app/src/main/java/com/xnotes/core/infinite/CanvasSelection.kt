@@ -19,6 +19,8 @@ import com.xnotes.core.model.GlueFollow
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.TapeItem
 import com.xnotes.core.model.TapeMode
+import com.xnotes.core.model.TextHandle
+import com.xnotes.core.model.TextItem
 import com.xnotes.core.tape.TapeGeometry
 
 /**
@@ -230,6 +232,16 @@ class CanvasSelection(private val doc: InfiniteDocument) {
      */
     fun resizeLive(handle: HandleId, pointer: Pt, margin: Double = 0.0) {
         if (handle == HandleId.START || handle == HandleId.END) return dragTapeEnd(handle, pointer)
+        // Match XNote's TextItem resize: change the box width/height directly, then
+        // let the text layout reflow. A generic affine transform also scales glyphs
+        // and leaves the selection box unrelated to the actual wrapped text bounds.
+        (items.singleOrNull() as? TextItem)?.let { text ->
+            val (pos, width, height) = ResizeMath.resizeText(text.pos, text.width, text.bounds().h, handle, pointer)
+            text.setGeometry(TextHandle(pos, width, height))
+            box = boxOf(items)
+            doc.itemsChanged(items)
+            return
+        }
         val from = startBox ?: return
         val result = boxResize(from, handle, pointer, margin)
         box = result.obb

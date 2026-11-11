@@ -2,6 +2,7 @@ package com.xnotes.core.infinite
 
 import com.xnotes.canvas.HandleId
 import com.xnotes.canvas.SelectionMath
+import com.xnotes.core.FakeTextMeasurer
 import com.xnotes.core.geometry.Affine
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
@@ -15,6 +16,7 @@ import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.Routing
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.Stroke
+import com.xnotes.core.model.TextItem
 import com.xnotes.core.stroke.Sample
 import com.xnotes.core.shapes.Axis
 import com.xnotes.core.shapes.Elbow
@@ -184,6 +186,28 @@ class CanvasSelectionTest {
     }
 
     // --- resizing ---
+
+    @Test fun aTextResizeUsesXNoteGeometryAndTracksReflow() {
+        val item = TextItem(Pt(100.0, 100.0), width = 300.0,
+            text = "Wrapping long text across several lines should change height when width changes. ".repeat(5),
+            pointSize = 20.0, measurer = FakeTextMeasurer())
+        val sel = CanvasSelection(docOf(item))
+        sel.select(listOf(item))
+        sel.beginTransform()
+        sel.resizeLive(HandleId.R, Pt(175.0, 120.0))
+        val actual = item.bounds()
+        assertEquals(20.0, item.pointSize, 1e-9)
+        assertEquals(actual.center.x, sel.box!!.center.x, 1e-6)
+        assertEquals(actual.center.y, sel.box!!.center.y, 1e-6)
+        assertEquals(actual.w / 2, sel.box!!.halfW, 1e-6)
+        assertEquals(actual.h / 2, sel.box!!.halfH, 1e-6)
+        // The next drag must move the reflowed text and its box together, without
+        // needing a deselect/reselect to repair stale selection geometry.
+        sel.beginTransform()
+        sel.moveLive(500.0, 300.0)
+        assertEquals(item.bounds().center.x, sel.box!!.center.x, 1e-6)
+        assertEquals(item.bounds().center.y, sel.box!!.center.y, 1e-6)
+    }
 
     @Test fun aCornerDragScalesTheSelection() {
         val a = box(0.0, 0.0, 100.0, 100.0)
