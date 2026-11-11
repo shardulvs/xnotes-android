@@ -8,10 +8,8 @@ import com.xnotes.core.vector.VectorContour
 import com.xnotes.core.vector.VectorSeg
 
 /**
- * Glyph outlines read back out of a platform `Path`, which below API 34 cannot be read verb by
- * verb. So it is walked with a `PathMeasure` at a fine step and then decimated: the walk gives
- * exact contour boundaries, which triangulation needs to tell a counter from a bowl, and the
- * decimation puts the straight parts back to two points each.
+ * Glyph outlines read from an Android Path. XCanvas uses native approximation for speed;
+ * other labels retain the original PathMeasure sampler. Both preserve contour boundaries.
  */
 internal object GlyphPaths {
 
@@ -36,6 +34,41 @@ internal object GlyphPaths {
                 if (thinned.size >= 3) out.add(contourOf(thinned))
             }
         } while (measure.nextContour() && guard-- > 0)
+        return out
+    }
+
+    /**
+     * Fast native contour approximation, available on minSdk 26.
+     * Path.approximate emits (distance fraction, x, y) triples and repeats a fraction
+     * across moveTo boundaries. Keep each contour separate so glyph counters survive.
+     */
+    fun approximateContours(source: Path, size: Double, errorEm: Double = 1.0 / 500.0): List<VectorContour> {
+        val triples = source.approximate((size * errorEm).toFloat().coerceAtLeast(0.0001f))
+        val out = ArrayList<VectorContour>()
+        val points = ArrayList<Pt>()
+        var previousFraction = Float.NaN
+        fun flush() {
+            if (points.size >= 3) {
+                val thinned = PathFlattener.decimate(points, size / DECIMATE_DENOMINATOR)
+                if (thinned.size >= 3) out.add(contourOf(thinned))
+            }
+            points.clear()
+        }
+        var i = 0
+        while (i + 2 < triples.size) {
+            val fraction = triples[i]
+            val point = Pt(triples[i + 1].toDouble(), triples[i + 2].toDouble())
+            // MoveTo produces equal fractions even when two contours share a vertex.
+            // Comparing coordinates here would merge them and destroy glyph counters.
+            if (points.isNotEmpty() && fraction == previousFraction) {
+                flush()
+                if (out.size >= MAX_CONTOURS) return out
+            }
+            if (points.isEmpty() || !near(points.last(), point)) points.add(point)
+            previousFraction = fraction
+            i += 3
+        }
+        flush()
         return out
     }
 

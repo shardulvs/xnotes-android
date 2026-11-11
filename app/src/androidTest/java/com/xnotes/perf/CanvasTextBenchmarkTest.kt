@@ -88,8 +88,11 @@ class CanvasTextBenchmarkTest : InstrumentationTestCase() {
         val content = ("Updated paragraph 0 with word wrapping. ").repeat(25)
         val text = TextItem(Pt(0.0, 0.0), 320.0, 0.0, content,
             style.rgba, style.pointSize, style.face, measurer)
-        val contours = measurer.outline(text.text, text.font, text.width, TextItem.FLAGS)
+        val contours = text.glyphContours()
         bench("long/outline", runs = 5) {
+            text.glyphContours().size.toLong()
+        }
+        bench("long/outline-legacy", runs = 5) {
             measurer.outline(text.text, text.font, text.width, TextItem.FLAGS).size.toLong()
         }
         bench("long/contours-to-mesh", runs = 5) {
