@@ -78,7 +78,7 @@ class StabilizerTest {
     }
 
     @Test fun aSteadySpeedNeverTrailsPastTheCap() {
-        for (cap in listOf(1.2, 3.6, 6.0, 12.0)) {
+        for (cap in listOf(1.2, 3.6, 6.0, 12.0, 24.0)) {
             for (speed in listOf(5.0, 20.0, 60.0, 200.0, 600.0, 2000.0, 8000.0)) {
                 for (dt in listOf(2.0, 4.0, 8.0, 16.0)) {
                     val trail = trailAt(speed, cap, dt = dt)

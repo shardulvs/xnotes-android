@@ -82,8 +82,8 @@ class Stabilizer(val trail: Double, val crossover: Double, speedScale: Double) {
     val tipTime: Double get() = time + lagMs
 
     companion object {
-        /** The trail a pen starts at, in dp: 30 on the Strength slider. */
-        const val DEFAULT_TRAIL = 3.6
+        /** The trail a pen starts at, in dp: 50 on the Strength slider. */
+        const val DEFAULT_TRAIL = 12.0
 
         /** The crossover a pen starts at, in dp/s: about 9 mm/s of hand travel. */
         const val DEFAULT_CROSSOVER = 2.0 * PI * 9.0

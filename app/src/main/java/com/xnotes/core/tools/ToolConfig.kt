@@ -183,7 +183,7 @@ object ToolConversions {
     fun dpPerMsToTopSpeed(v: Double): Double =
         if (v > 0.0) (50.0 + 50.0 * ln(v / StrokeEngine.SPEED_HI) / ln(3.0)).coerceIn(0.0, 100.0) else 0.0
 
-    /** STRENGTH (0..100) -> `stabilizeTrail` in dp, linear: 100 trails a fast nib by at most 12 dp, about 2 mm. */
+    /** STRENGTH (0..100) -> `stabilizeTrail` in dp, linear: 100 trails a fast nib by at most 24 dp, about 4 mm. */
     fun strengthToTrail(strength: Double): Double = strength.coerceIn(0.0, 100.0) * TRAIL_PER_STRENGTH
 
     fun trailToStrength(trail: Double): Double = (trail / TRAIL_PER_STRENGTH).coerceIn(0.0, 100.0)
@@ -195,7 +195,7 @@ object ToolConversions {
     fun dpPerSToCrossover(v: Double): Double =
         if (v > 0.0) (50.0 + 50.0 * ln(v / Stabilizer.DEFAULT_CROSSOVER) / ln(3.0)).coerceIn(0.0, 100.0) else 0.0
 
-    private const val TRAIL_PER_STRENGTH = 0.12
+    private const val TRAIL_PER_STRENGTH = 0.24
 
     /** INTENSITY (0..100, higher = brighter/wider halo) -> `neonStrength` in [0, 1]. */
     fun intensityToNeonStrength(intensity: Double): Double = intensity.coerceIn(0.0, 100.0) / 100.0

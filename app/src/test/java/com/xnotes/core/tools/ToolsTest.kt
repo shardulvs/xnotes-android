@@ -64,9 +64,9 @@ class ToolsTest {
     @Test fun stabilizationSlidersMapToTheirSettings() {
         val pen = ToolDefaults.configFor(Tool.PEN)
         assertEquals(false, pen.stabilize)
-        assertEquals(30.0, ToolConversions.trailToStrength(pen.stabilizeTrail), 1e-9)
+        assertEquals(50.0, ToolConversions.trailToStrength(pen.stabilizeTrail), 1e-9)
         assertEquals(50.0, ToolConversions.dpPerSToCrossover(pen.stabilizeCrossover), 1e-9)
-        assertEquals(12.0, ToolConversions.strengthToTrail(100.0), 1e-9)
+        assertEquals(24.0, ToolConversions.strengthToTrail(100.0), 1e-9)
         assertEquals(0.0, ToolConversions.strengthToTrail(-5.0), 1e-9)
         assertEquals(pen.stabilizeCrossover / 3.0, ToolConversions.crossoverToDpPerS(0.0), 1e-9)
         assertEquals(pen.stabilizeCrossover * 3.0, ToolConversions.crossoverToDpPerS(100.0), 1e-9)
