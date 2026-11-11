@@ -19,17 +19,8 @@ import com.xnotes.platform.AndroidRenderer
 import kotlinx.coroutines.delay
 
 /**
- * The GL canvas's debug HUD, toggled by a four-finger tap like the paged canvas's.
- *
- * It reports rather more than the paged one because the GL path has failure modes the paged path
- * simply does not have. Buffers that grow without bound, an EGL context silently rebuilt under the
- * app, a cull that stopped culling, a draw-call count creeping up as the geometry buffer
- * fragments, a driver that quietly refused multisampling: none of those show as anything but "it
- * feels wrong" until you can read them.
- *
- * Composed over the surface rather than drawn inside the GL frame, so it costs the render thread
- * nothing and cannot itself perturb what it is measuring. The panel is the paged HUD's own, so the
- * two look alike.
+ * The GL canvas's debug HUD, toggled by a four-finger tap and drawn with the paged HUD's panel.
+ * Composed over the surface rather than drawn in the GL frame, so it cannot perturb what it measures.
  */
 @Composable
 fun CanvasDebugOverlay(editor: InfiniteEditor) {
@@ -50,55 +41,22 @@ fun CanvasDebugOverlay(editor: InfiniteEditor) {
         }
     }
 
-    val v = editor.viewport
     val lines = buildList {
         addAll(editor.interaction.steadyReadout.lines())
         add("")
-        // The rate is a count over the last second, and the panel's own rate is next to it, so a
-        // number at the cap is recognizable as the cap rather than as headroom.
-        add("fps       %.0f / %.0f".format(stats.fps, stats.displayHz))
-        add("frame     %.2f ms".format(stats.frameMs))
-        add("worst     %.1f ms".format(stats.worstFrameMs))
-        add("late      ${stats.jankFrames}")
-        add("req/frame %.1f".format(stats.requestsPerFrame))
-        add("step      %.1f px".format(stats.stepPx))
-        add("jitter    %.0f%%".format(stats.stepJitter * 100))
-        add("zoom      %.3fx".format(v.zoom))
-        add("scroll    %.0f, %.0f".format(v.scrollX, v.scrollY))
-        add("viewport  ${v.widthPx} x ${v.heightPx}")
-        add("")
-        add("items     ${stats.items}")
-        add("visible   ${stats.visibleItems}")
-        add("draws     ${stats.drawCalls}")
-        add("wet verts ${stats.wetVertices}")
-        add("front     ${editor.pad.hud}")
-        add("textures  ${stats.textures} (${stats.texturesPending} pending)")
-        add("tex vram  ${fmtBytes(stats.textureBytes)}")
-        add("tessel    %.2f ms".format(stats.lastTessellateMs))
-        add("")
-        add("verts     ${stats.vertices} / ${stats.vertexCapacity}")
-        add("indices   ${stats.indices} / ${stats.indexCapacity}")
-        add("geom vram ${fmtBytes(stats.geometryBytes)}")
-        add("geom live ${fmtBytes(stats.liveGeometryBytes)}")
-        add("frag      ${fmtPercent(stats.liveGeometryBytes, stats.geometryBytes)}")
-        add("")
-        add("msaa      ${if (stats.msaaSamples >= 2) "${stats.msaaSamples}x" else "none"}")
-        add("ctx gen   ${stats.contextGen}")
-        add("gpu       ${stats.renderer.take(28)}")
-        add("check     ${stats.selfCheck.take(28)}")
-        add("")
+        add("%.0f fps   %.1f ms".format(stats.fps, stats.frameMs))
+        add("visible    ${stats.visibleItems} / ${stats.items}")
+        add("draws      ${stats.drawCalls}")
+        add("geometry   %.0f / %.0f MB".format(stats.liveGeometryBytes / MB, stats.geometryBytes / MB))
+        add("textures   ${stats.textures}  %.0f MB".format(stats.textureBytes / MB))
         add("heap  %.0f / %.0f MB".format(memory.heapUsedMb, memory.heapMaxMb))
         add("pss    %.0f MB".format(memory.pssMb))
         add("native %.0f MB".format(memory.nativeMb))
         add("gfx    %.0f MB".format(memory.gfxMb))
-        editor.renderFailure?.let {
-            add("")
-            add("GL FAILED $it")
-        }
-        if (editor.outOfMemory) {
-            add("")
-            add("GEOMETRY OUT OF MEMORY")
-        }
+        add("front     ${editor.pad.hud}")
+        if (editor.view.msaaSamples < 2) add("msaa       none")
+        editor.renderFailure?.let { add("GL FAILED $it") }
+        if (editor.outOfMemory) add("GEOMETRY OUT OF MEMORY")
     }
 
     Spacer(
@@ -133,12 +91,6 @@ private fun sampleMemory(): MemorySample {
         gfxMb = stat("summary.graphics"),
     )
 }
-
-private fun fmtBytes(bytes: Long): String =
-    if (bytes < 1024 * 1024) "%.0f KB".format(bytes / 1024.0) else "%.2f MB".format(bytes / MB)
-
-private fun fmtPercent(live: Long, total: Long): String =
-    if (total <= 0) "-" else "%.0f%% used".format(live * 100.0 / total)
 
 private const val MB = 1024.0 * 1024.0
 private const val REFRESH_MS = 250L

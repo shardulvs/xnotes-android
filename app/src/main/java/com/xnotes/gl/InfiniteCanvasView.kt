@@ -80,7 +80,7 @@ class InfiniteCanvasView @JvmOverloads constructor(
     val msaaSamples: Int get() = configChooser.chosenSamples
 
     /** What the last frame did. Read on the main thread; written whole on the GL thread. */
-    val stats: GlStats get() = glRenderer.stats.copy(msaaSamples = configChooser.chosenSamples)
+    val stats: GlStats get() = glRenderer.stats
 
     /** Fired on a clean four-finger tap, the same gesture that toggles the paged canvas's HUD. */
     var onFourFingerTap: (() -> Unit)? = null
@@ -135,9 +135,6 @@ class InfiniteCanvasView @JvmOverloads constructor(
         publish()
     }
 
-    /** Publish calls so far; the renderer differences them per frame for the debug readout. */
-    private var publishRequests = 0
-
     private var interactive = false
     private val idleRunnable = Runnable { stopInteractive() }
 
@@ -151,7 +148,6 @@ class InfiniteCanvasView @JvmOverloads constructor(
      * has landed rather than one sampled a frame earlier.
      */
     fun publish() {
-        publishRequests++
         glRenderer.frame = FrameState(
             zoom = viewport.zoom,
             scrollX = viewport.scrollX,
@@ -170,7 +166,6 @@ class InfiniteCanvasView @JvmOverloads constructor(
             insetRight = viewport.insetRight,
             insetBottom = viewport.insetBottom,
         )
-        glRenderer.publishRequests = publishRequests
         // In continuous mode the render thread is already drawing every refresh; otherwise ask for
         // a frame now. GLSurfaceView collapses a burst of requests into one draw by itself.
         if (!interactive) requestRender()
@@ -216,12 +211,6 @@ class InfiniteCanvasView @JvmOverloads constructor(
 
     /** Run [work] on the GL thread, for GPU state that must be touched with the context current. */
     fun onGlThread(work: () -> Unit) = queueEvent(work)
-
-    override fun onAttachedToWindow() {
-        super.onAttachedToWindow()
-        // A frame count only means something next to the rate the panel can actually show.
-        glRenderer.displayHz = (display?.refreshRate ?: 60f).toDouble()
-    }
 
     override fun onDetachedFromWindow() {
         removeCallbacks(idleRunnable)

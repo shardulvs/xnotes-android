@@ -325,9 +325,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             if (!pushVectorImage(item)) scene.upsertImage(item, item.paintBounds())
             return
         }
-        val started = System.nanoTime()
         val meshed = ItemMesher.mesh(item)
-        scene.lastTessellateMs = (System.nanoTime() - started) / 1_000_000.0
         if (meshed == null || meshed.isEmpty) {
             scene.remove(item)
             return
@@ -358,14 +356,12 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         val angle = item.angle
         val flip = item.flip
         decodeExecutor.execute {
-            val started = System.nanoTime()
             val parsed = com.xnotes.platform.VectorScenes.sceneFor(item.image.file)
             val parts = if (parsed == null) {
                 emptyList()
             } else {
                 VectorMesher.mesh(parsed, rect, orientation, angle, StrokeTessellator.DEFAULT_TOLERANCE, flip)
             }
-            val ms = (System.nanoTime() - started) / 1_000_000.0
             // The mesher stops at a vertex ceiling; say so rather than silently drawing part of it.
             if (parts.sumOf { it.mesh.vertexCount } >= VectorMesher.MAX_VERTICES) {
                 android.util.Log.w(
@@ -378,7 +374,6 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             // decided while it ran and put the item back on the canvas.
             view.post {
                 if (!vectorMeshGen.remove(item, token) || parts.isEmpty()) return@post
-                scene.lastTessellateMs = ms
                 scene.upsert(item, parts, bounds)
                 view.publish()
             }
