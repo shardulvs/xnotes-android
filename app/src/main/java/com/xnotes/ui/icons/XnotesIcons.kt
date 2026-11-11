@@ -56,14 +56,14 @@ object XnotesIcons {
     // The block and the paper it rests on, without Lucide's crease across the body. The crease
     // spent its life off-canvas behind the relative-moveto bug, and the plain block turned out
     // to read better at 22dp, so it stays gone on purpose.
+    val eraser = icon(
+        "m7 21-4.3-4.3a1.7 1.7 0 0 1 0-2.4l9.6-9.6a1.7 1.7 0 0 1 2.4 0l5.6 5.6a1.7 1.7 0 0 1 0 2.4L13 21Z",
+        "M22 21H7",
+    )
     val eyedropper = icon(
         "m2 22 1-1h3l9-9",
         "M3 21v-3l9-9",
         "m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z",
-    )
-    val eraser = icon(
-        "m7 21-4.3-4.3a1.7 1.7 0 0 1 0-2.4l9.6-9.6a1.7 1.7 0 0 1 2.4 0l5.6 5.6a1.7 1.7 0 0 1 0 2.4L13 21Z",
-        "M22 21H7",
     )
     val pan = icon("M5 9 2 12l3 3", "M9 5l3-3 3 3", "M15 19l-3 3-3-3", "M19 9l3 3-3 3", "M2 12h20", "M12 2v20")
     val select = icon("M3 3l7.07 16.97 2.51-7.39 7.39-2.51Z", "M13 13l6 6")
