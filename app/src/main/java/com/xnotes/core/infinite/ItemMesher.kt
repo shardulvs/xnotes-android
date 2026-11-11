@@ -281,7 +281,7 @@ object ItemMesher {
      * Caching each snapshot here only retains unused glyph geometry. */
     private fun meshText(item: TextItem): MeshedItem? {
         if (item.canvasEditingHidden) return null
-        val part = ShapeTessellator.textPart(item.glyphContours(), item.rgba) { it + item.pos }
+        val part = ShapeTessellator.textPart(item.glyphContours(), item.rgba, fastLongText = true) { it + item.pos }
         return part?.let { MeshedItem(listOf(it), item.bounds(), 0.0) }
     }
 

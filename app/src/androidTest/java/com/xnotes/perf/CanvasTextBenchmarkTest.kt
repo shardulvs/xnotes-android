@@ -84,6 +84,24 @@ class CanvasTextBenchmarkTest : InstrumentationTestCase() {
         }
     }
 
+    fun testLongTextGeometryBreakdown() {
+        val content = ("Updated paragraph 0 with word wrapping. ").repeat(25)
+        val text = TextItem(Pt(0.0, 0.0), 320.0, 0.0, content,
+            style.rgba, style.pointSize, style.face, measurer)
+        val contours = measurer.outline(text.text, text.font, text.width, TextItem.FLAGS)
+        bench("long/outline", runs = 5) {
+            measurer.outline(text.text, text.font, text.width, TextItem.FLAGS).size.toLong()
+        }
+        bench("long/contours-to-mesh", runs = 5) {
+            com.xnotes.core.infinite.ShapeTessellator.textPart(contours, text.rgba, fastLongText = true) { it }
+                ?.mesh?.indices?.size?.toLong() ?: 0L
+        }
+        bench("long/complete-mesh", runs = 5) {
+            ItemMesher.mesh(text)?.parts?.sumOf { it.mesh.indices.size.toLong() } ?: 0L
+        }
+        Log.i("PR428_BENCH", "long/contours n=" + contours.size)
+    }
+
     private fun tap(editor: InfiniteEditor, x: Float, y: Float) {
         val time = SystemClock.uptimeMillis()
         val properties = MotionEvent.PointerProperties().apply {
