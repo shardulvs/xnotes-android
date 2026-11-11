@@ -462,11 +462,17 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
                     textMeshPreview[item] = TextMeshPreview(meshed, snapshot.text)
                     scene.upsert(item, meshed.parts, meshed.bounds)
                 }
-                if (nativeTextResize.item === item && liveResizingText !== item) {
-                    nativeTextResize.item = null
-                    nativeTextResize.visibility = android.view.View.GONE
-                }
                 view.publish()
+                // The GL scene is queued, not presented yet. Keep the native fallback
+                // through the next frames so swapping renderers cannot flash blank.
+                if (nativeTextResize.item === item && liveResizingText !== item) {
+                    view.postDelayed({
+                        if (nativeTextResize.item === item && liveResizingText !== item && !item.canvasEditingHidden) {
+                            nativeTextResize.item = null
+                            nativeTextResize.visibility = android.view.View.GONE
+                        }
+                    }, 48L)
+                }
             }
         }
     }
@@ -1005,6 +1011,10 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     var editingField by mutableStateOf<com.xnotes.canvas.EditingField?>(null)
         private set
 
+    /** Stable identity for one edit session; never carry an IME buffer into another box. */
+    var textEditSession by mutableStateOf(0L)
+        private set
+
     override var textBar by mutableStateOf<com.xnotes.canvas.TextBar?>(null)
         private set
 
@@ -1059,6 +1069,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             nativeTextResize.visibility = android.view.View.GONE
         }
         editingTextItem = item
+        textEditSession++
         item.canvasEditingHidden = true
         document.itemChanged(item)
         textItemBefore = item.text
@@ -1073,6 +1084,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         commitText()
         interaction.clearSelection()
         editingLabel = shape
+        textEditSession++
         labelBefore = shape.label
         val l = shape.label ?: ShapeLabel("", ShapeLabel.styleFor(shape, textPointSize, textFace), textMeasurer).also { shape.label = it }
         textFace = l.style.face

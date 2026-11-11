@@ -1481,7 +1481,9 @@ private fun EditorPane(
                             update = { canvas.view.publish() },
                         )
                         canvas.editingField?.let { field ->
-                            com.xnotes.ui.TextEditorOverlay(canvas, field)
+                            androidx.compose.runtime.key(canvas.textEditSession) {
+                                com.xnotes.ui.TextEditorOverlay(canvas, field)
+                            }
                         }
                         floatingBar()
                         com.xnotes.ui.SelectionMenu(
