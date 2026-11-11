@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -82,6 +83,7 @@ fun EyedropperOverlay() {
     val palette = LocalPalette.current
     var origin by remember { mutableStateOf(Offset.Zero) }
     BackHandler { Eyedropper.end() }
+    DisposableEffect(Unit) { onDispose { Eyedropper.end() } }
     Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInWindow() }) {
         val at = Eyedropper.finger?.minus(origin)
         if (at == null) {
