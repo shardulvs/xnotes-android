@@ -136,16 +136,19 @@ internal fun ColorPickerPopup(
                 TabChip(stringResource(R.string.spectrum), tab == 1) { tab = 1 }
                 if (LocalEyedropper.current) {
                     Spacer(Modifier.weight(1f))
-                    Icon(
-                        XnotesIcons.eyedropper,
-                        contentDescription = stringResource(R.string.eyedropper),
-                        tint = palette.text.toComposeColor(),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable { Eyedropper.arm { commit(it) } }
-                            .padding(4.dp)
-                            .size(20.dp),
-                    )
+                    val label = stringResource(R.string.eyedropper)
+                    Tooltip(label) {
+                        Icon(
+                            XnotesIcons.eyedropper,
+                            contentDescription = label,
+                            tint = palette.text.toComposeColor(),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { Eyedropper.arm { commit(it) } }
+                                .padding(4.dp)
+                                .size(20.dp),
+                        )
+                    }
                 }
             }
             Spacer(Modifier.size(12.dp))
