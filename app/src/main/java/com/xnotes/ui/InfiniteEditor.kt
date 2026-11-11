@@ -451,6 +451,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             "redo" -> redo()
             "toggle_pan" -> toggleTool(Tool.PAN)
             "toggle_eraser" -> toggleTool(Tool.ERASER)
+            "toggle_lasso" -> toggleTool(Tool.LASSO)
             "toggle_previous" -> previousTool?.let { armTool(it) }
         }
     }

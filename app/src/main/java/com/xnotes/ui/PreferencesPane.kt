@@ -103,6 +103,7 @@ private val tapGestureOptions = listOf(
     "redo" to R.string.redo,
     "toggle_pan" to R.string.toggle_pan,
     "toggle_eraser" to R.string.toggle_eraser,
+    "toggle_lasso" to R.string.toggle_lasso,
     "toggle_previous" to R.string.toggle_previous,
 )
 
@@ -292,6 +293,11 @@ fun PreferencesPane(
             OptionDropdown(tapOptions, prefs.stylusDoubleTap) { update(prefs.copy(stylusDoubleTap = it)) }
             FieldLabel(stringResource(R.string.pref_stylus_button_tap))
             OptionDropdown(tapOptions, prefs.stylusButtonTap) { update(prefs.copy(stylusButtonTap = it)) }
+            FieldLabel(stringResource(R.string.pref_stylus_squeeze))
+            OptionDropdown(tapOptions, prefs.stylusSqueeze) { update(prefs.copy(stylusSqueeze = it)) }
+            CheckRow(stringResource(R.string.pref_stylus_haptics), prefs.stylusHaptics) {
+                update(prefs.copy(stylusHaptics = it))
+            }
             FieldLabel(stringResource(R.string.pref_redmi_buttons))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {

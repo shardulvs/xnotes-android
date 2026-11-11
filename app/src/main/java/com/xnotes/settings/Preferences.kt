@@ -55,6 +55,10 @@ data class Preferences(
      *  key press rather than a held state, e.g. HONOR Magic-Pencil whose click arrives as keycode
      *  333); "none" (default) disables it. */
     val stylusButtonTap: String = "none",
+    /** Action mapped to a Xiaomi Focus Pen Pro squeeze; "toggle_eraser" is the default. */
+    val stylusSqueeze: String = "toggle_eraser",
+    /** Whether recognized stylus gestures produce a short confirmation haptic. */
+    val stylusHaptics: Boolean = true,
     /** Action mapped to the first page-key side button (keycode 92); "none" disables it. */
     val stylusButton1Tap: String = "none",
     /** Action mapped to the second page-key side button (keycode 93); "none" disables it. */
@@ -145,6 +149,8 @@ data class Preferences(
         .put("three_finger_tap", threeFingerTap)
         .put("stylus_double_tap", stylusDoubleTap)
         .put("stylus_button_tap", stylusButtonTap)
+        .put("stylus_squeeze", stylusSqueeze)
+        .put("stylus_haptics", stylusHaptics)
         .put("stylus_button_1_tap", stylusButton1Tap)
         .put("stylus_button_2_tap", stylusButton2Tap)
         .put("volume_keys_turn_pages", volumeKeysTurnPages)
@@ -224,7 +230,7 @@ data class Preferences(
                 .let { if (it == "dark" || it == "light" || it == "oled") it else "system" }
             val template = o.optString("default_template", "color").let { if (it == "pdf") "pdf" else "color" }
             val zoomLockPan = o.optString("zoom_lock_pan", "single").let { if (it == "double" || it == "none") it else "single" }
-            val tapActions = setOf("none", "undo", "redo", "toggle_pan", "toggle_eraser", "toggle_previous")
+            val tapActions = setOf("none", "undo", "redo", "toggle_pan", "toggle_eraser", "toggle_lasso", "toggle_previous")
             fun tapAction(key: String) = o.optString(key, "none").let { if (it in tapActions) it else "none" }
             val legacySeed = Rgba.fromHex(o.optString("material_seed"))
             val legacyDual = o.optBoolean("material_dual_tone", false)
@@ -279,6 +285,8 @@ data class Preferences(
                 threeFingerTap = tapAction("three_finger_tap"),
                 stylusDoubleTap = tapAction("stylus_double_tap"),
                 stylusButtonTap = tapAction("stylus_button_tap"),
+                stylusSqueeze = tapAction("stylus_squeeze").let { if (o.has("stylus_squeeze")) it else "toggle_eraser" },
+                stylusHaptics = o.optBoolean("stylus_haptics", true),
                 stylusButton1Tap = tapAction("stylus_button_1_tap"),
                 stylusButton2Tap = tapAction("stylus_button_2_tap"),
                 volumeKeysTurnPages = o.optBoolean("volume_keys_turn_pages", false),
