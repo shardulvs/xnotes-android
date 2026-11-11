@@ -113,7 +113,7 @@ interface TextEditHost {
  * (tap to commit, drag to scroll).
  */
 @Composable
-fun TextEditorOverlay(editor: TextEditHost, field: EditingField) {
+fun TextEditorOverlay(editor: TextEditHost, field: EditingField, screenSpaceText: Boolean = false) {
     val density = LocalDensity.current
     val palette = LocalPalette.current
     var value by remember { mutableStateOf(TextFieldValue(field.text, TextRange(field.text.length))) }
@@ -127,10 +127,14 @@ fun TextEditorOverlay(editor: TextEditHost, field: EditingField) {
     // draws through a zoom-scaled canvas). Re-wrapping at screen scale instead would break
     // lines at slightly different words, since advances and line rounding aren't linear in
     // font size. The graphicsLayer below applies the zoom at draw time, just like the canvas.
-    val z = field.zoom.toFloat()
-    val widthDp = with(density) { field.width.toInt().toDp() }
-    val heightDp = with(density) { field.height.toFloat().toDp() }
-    val fontSp = with(density) { field.fontPx.toFloat().toSp() }
+    // XCanvas text editing uses true screen-space geometry: scaling BasicTextField with a
+    // graphicsLayer leaves its IME caret/selection handles in a different coordinate space.
+    // Paged XNote keeps the existing content-space rendering for compatibility.
+    val textScale = if (screenSpaceText) field.zoom.toFloat() else 1f
+    val z = if (screenSpaceText) 1f else field.zoom.toFloat()
+    val widthDp = with(density) { (field.width * textScale).toFloat().toDp() }
+    val heightDp = with(density) { (field.height * textScale).toFloat().toDp() }
+    val fontSp = with(density) { (field.fontPx * textScale).toFloat().toSp() }
 
     /**
      * The field is measured through this wrapper with fully unbounded constraints and placed at
