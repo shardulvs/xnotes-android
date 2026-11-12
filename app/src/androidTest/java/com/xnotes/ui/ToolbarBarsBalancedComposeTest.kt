@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.unit.dp
 import com.xnotes.core.tools.ToolbarAnchor
 import com.xnotes.core.tools.ToolbarBar
@@ -50,14 +51,23 @@ class ToolbarBarsBalancedComposeTest {
             .getUnclippedBoundsInRoot()
         val behavior = box("toolbar-behavior-controls")
         val placement = box("toolbar-placement-controls")
-        val position = box("toolbar-position-controls")
-        val lanes = box("toolbar-lane-controls")
         val sizes = box("toolbar-size-presets")
         val dimensions = box("toolbar-dimensions")
-        assertTrue("Behavior + Placement should share a row: $behavior vs $placement",
-            kotlin.math.abs((behavior.top - placement.top).value) <= 2f)
-        assertTrue("Position + Lane should share a row: $position vs $lanes",
-            kotlin.math.abs((position.top - lanes.top).value) <= 2f)
+        // Physical 1400px can be under 750dp. The inspector must switch from
+        // side-by-side to stacked rather than clip: both configurations are valid.
+        val sharedBehaviorRow = kotlin.math.abs((behavior.top - placement.top).value) <= 2f
+        assertTrue("Behavior and Placement must not overlap: $behavior / $placement",
+            if (sharedBehaviorRow) behavior.right <= placement.left + 3.dp
+            else behavior.bottom <= placement.top + 3.dp)
+        val positionTags = rule.onAllNodesWithTag("toolbar-position-controls", useUnmergedTree = true)
+            .fetchSemanticsNodes()
+        if (positionTags.isNotEmpty()) {
+            val position = box("toolbar-position-controls")
+            val lanes = box("toolbar-lane-controls")
+            assertTrue("Position + Lane must align in wide mode: $position / $lanes",
+                kotlin.math.abs((position.top - lanes.top).value) <= 2f &&
+                    position.right <= lanes.left + 3.dp)
+        }
         assertTrue("Size presets must precede sliders", sizes.bottom <= dimensions.top + 3.dp)
         rule.runOnIdle { screenWidth = 640.dp }
         rule.waitForIdle()
