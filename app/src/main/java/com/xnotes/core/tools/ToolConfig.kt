@@ -217,13 +217,12 @@ object ToolConversions {
         else -> 1.0..20.0
     }
 
-    /** WIDTH is whole px: [value] rounded to it and held inside the tool's own range.
-     *
-     *  A continuous slider could sit between two while the popup showed the rounded number, so
-     *  two strokes both labelled 2 were laid down at visibly different thicknesses. Whole px
-     *  makes the label the width, which is what a note needs to stay consistent. */
+    /** Every ink width slider moves in these steps, so the width its label shows is the width drawn. */
+    const val WIDTH_STEP = 0.5
+
+    /** [value] on the [WIDTH_STEP] grid, held inside the tool's own range. */
     fun snapWidth(tool: Tool, value: Double): Double {
         val range = widthRange(tool)
-        return value.roundToInt().toDouble().coerceIn(range.start, range.endInclusive)
+        return ((value / WIDTH_STEP).roundToInt() * WIDTH_STEP).coerceIn(range.start, range.endInclusive)
     }
 }

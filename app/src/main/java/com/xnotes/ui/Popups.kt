@@ -191,7 +191,7 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
             val range = ToolConversions.widthRange(tool)
             SliderRow(
                 stringResource(R.string.caption_width), width,
-                range.start.toFloat()..range.endInclusive.toFloat(), step = 1f,
+                range.start.toFloat()..range.endInclusive.toFloat(), step = ToolConversions.WIDTH_STEP.toFloat(),
             ) { width = it; emit() }
             // SCALE off: ink keeps a constant on-screen thickness whatever zoom you draw at.
             ToggleRow(stringResource(R.string.caption_scale), scale) { scale = it; emit() }
@@ -1147,12 +1147,12 @@ internal fun SliderRow(
     onChangeFinished: (() -> Unit)? = null,
     onChange: (Float) -> Unit,
 ) {
-    // A stepped row lands on whole stops, so the number in its label is the number the tool is
-    // given rather than a rounding of something sitting between two of them.
+    // A stepped row lands on its stops, so its label is the value given, not a rounding of it.
     val shown = if (step > 0f) snapTo(value, range, step) else value
+    val number = if (step % 1f != 0f) "%.1f".format(shown).trimEnd('0').trimEnd('.', ',') else "%.0f".format(shown)
     Column {
         Text(
-            "$label  ${"%.0f".format(shown)}",
+            "$label  $number",
             color = (if (enabled) LocalPalette.current.text else LocalPalette.current.textDim).toComposeColor(),
             fontSize = 12.sp,
         )
@@ -1171,7 +1171,7 @@ internal fun SliderRow(
     }
 }
 
-/** [value] moved to the nearest [step] within [range]: 2.4 to 2, 2.6 to 3, held at the ends. */
+/** [value] moved to the nearest [step] from the start of [range], held at its ends. */
 private fun snapTo(value: Float, range: ClosedFloatingPointRange<Float>, step: Float): Float {
     return (range.start + ((value - range.start) / step).roundToInt() * step)
         .coerceIn(range.start, range.endInclusive)
