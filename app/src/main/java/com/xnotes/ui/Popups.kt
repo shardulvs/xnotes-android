@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -464,13 +465,7 @@ private fun TemplateCustomizer(
     val palette = LocalPalette.current
     val dpi = editor.documentDpi
     Column(Modifier.width(286.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
-        Text(
-            stringResource(R.string.back_customize),
-            color = palette.accent.toComposeColor(),
-            fontWeight = FontWeight.Medium,
-            fontSize = 12.sp,
-            modifier = Modifier.clip(MaterialTheme.shapes.extraSmall).clickable(onClick = onBack).padding(vertical = 4.dp),
-        )
+        PopupBackLink(stringResource(R.string.back_customize), onBack)
         Text(
             t.name,
             color = palette.text.toComposeColor(),
@@ -696,7 +691,8 @@ internal fun StyleCaption(text: String) {
  * (resolved) view settings; a change writes that field's per-note override — stored
  * app-side like zoom/scroll, never in the file itself. Like [StylesPopup], the current
  * values can be saved as the global defaults every note without overrides follows
- * ("Default for all notes"), and Reset drops the note's overrides back onto them.
+ * ("Default for all notes"), and Reset drops the note's overrides back onto them. The PDF colour
+ * filters only show their values here; Adjust opens them on a page of their own.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -708,6 +704,7 @@ fun ViewMenuPopup(editor: Editor, onDismiss: () -> Unit) {
     var showDefaultRow by remember { mutableStateOf(editor.viewSettings != editor.viewDefaults) }
     // Unchecking "Default for all notes" goes back to the defaults this popup opened with.
     val openedDefaults = remember { editor.viewDefaults }
+    var filtering by remember { mutableStateOf(false) }
 
     fun apply(new: ViewOverrides) {
         editor.updateViewOverrides(new)
@@ -727,7 +724,18 @@ fun ViewMenuPopup(editor: Editor, onDismiss: () -> Unit) {
     fun setScrollbar(v: Boolean) = apply(overrides.copy(scrollbar = v))
 
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
-        Column(Modifier.width(300.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
+        if (filtering) Column(Modifier.width(300.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
+            PopupBackLink("\u2039  " + stringResource(R.string.caption_pdf_filters)) { filtering = false }
+            Spacer(Modifier.size(8.dp))
+            FilterSlider(stringResource(R.string.filter_contrast), vs.contrast, 200, ::setContrast)
+            FilterSlider(stringResource(R.string.filter_invert), vs.invert, 100, ::setInvert)
+            FilterSlider(stringResource(R.string.filter_brightness), vs.brightness, 200, ::setBrightness)
+            FilterSlider(stringResource(R.string.filter_sepia), vs.sepia, 200, ::setSepia)
+            Spacer(Modifier.size(4.dp))
+            FilterColorRow(stringResource(R.string.filter_multiply), vs.multiply, PdfColorFilter.MULTIPLY_OFF) { setMultiply(it) }
+            FilterColorRow(stringResource(R.string.filter_screen), vs.screen, PdfColorFilter.SCREEN_OFF) { setScreen(it) }
+            ToggleRow(stringResource(R.string.caption_keep_images), vs.keepImages) { setKeepImages(it) }
+        } else Column(Modifier.width(300.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
             PopupTitle(stringResource(R.string.title_view))
             StyleCaption(stringResource(R.string.caption_viewing_mode))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -743,14 +751,18 @@ fun ViewMenuPopup(editor: Editor, onDismiss: () -> Unit) {
             }
 
             Spacer(Modifier.size(10.dp))
-            StyleCaption(stringResource(R.string.caption_pdf_filters))
-            FilterSpinRow(stringResource(R.string.filter_contrast), vs.contrast, 0, 200) { setContrast(it) }
-            FilterSpinRow(stringResource(R.string.filter_invert), vs.invert, 0, 100) { setInvert(it) }
-            FilterSpinRow(stringResource(R.string.filter_brightness), vs.brightness, 0, 200) { setBrightness(it) }
-            FilterSpinRow(stringResource(R.string.filter_sepia), vs.sepia, 0, 200) { setSepia(it) }
-            FilterColorRow(stringResource(R.string.filter_multiply), vs.multiply, PdfColorFilter.MULTIPLY_OFF) { setMultiply(it) }
-            FilterColorRow(stringResource(R.string.filter_screen), vs.screen, PdfColorFilter.SCREEN_OFF) { setScreen(it) }
-            ToggleRow(stringResource(R.string.caption_keep_images), vs.keepImages) { setKeepImages(it) }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { StyleCaption(stringResource(R.string.caption_pdf_filters)) }
+                ModeChip(stringResource(R.string.adjust), false) { filtering = true }
+            }
+            Spacer(Modifier.size(4.dp))
+            val off = stringResource(R.string.off)
+            FilterValueRow(stringResource(R.string.filter_contrast), "${vs.contrast}%")
+            FilterValueRow(stringResource(R.string.filter_invert), "${vs.invert}%")
+            FilterValueRow(stringResource(R.string.filter_brightness), "${vs.brightness}%")
+            FilterValueRow(stringResource(R.string.filter_sepia), "${vs.sepia}%")
+            FilterValueRow(stringResource(R.string.filter_multiply), off, vs.multiply.takeIf { it != PdfColorFilter.MULTIPLY_OFF })
+            FilterValueRow(stringResource(R.string.filter_screen), off, vs.screen.takeIf { it != PdfColorFilter.SCREEN_OFF })
 
             Spacer(Modifier.size(10.dp))
             StyleCaption(stringResource(R.string.caption_rotate_degrees, vs.rotation))
@@ -788,26 +800,33 @@ fun ViewMenuPopup(editor: Editor, onDismiss: () -> Unit) {
     }
 }
 
-/** A labelled percentage spinfield (minus / value / plus, stepping by 5) for the PDF filters. */
+/** A PDF filter's value as the View menu shows it: [text], or a dot of [color] when it has one. */
 @Composable
-private fun FilterSpinRow(label: String, value: Int, min: Int, max: Int, onChange: (Int) -> Unit) {
+private fun FilterValueRow(label: String, text: String, color: Rgba? = null) {
     val palette = LocalPalette.current
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = palette.textDim.toComposeColor(), fontSize = 13.sp, modifier = Modifier.width(84.dp))
-        Box(Modifier.size(34.dp).clickable { onChange((value - 5).coerceIn(min, max)) }, contentAlignment = Alignment.Center) {
-            Text("−", color = palette.text.toComposeColor(), fontSize = 18.sp)
-        }
-        Text(
-            "$value%",
-            color = palette.text.toComposeColor(),
-            fontSize = 13.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.width(46.dp),
-        )
-        Box(Modifier.size(34.dp).clickable { onChange((value + 5).coerceIn(min, max)) }, contentAlignment = Alignment.Center) {
-            Text("+", color = palette.text.toComposeColor(), fontSize = 18.sp)
+        Box(Modifier.width(44.dp), contentAlignment = Alignment.CenterEnd) {
+            if (color != null) {
+                Box(
+                    Modifier.size(14.dp).clip(CircleShape).background(color.toComposeColor())
+                        .border(1.dp, palette.border.toComposeColor(), CircleShape),
+                )
+            } else {
+                Text(text, color = palette.text.toComposeColor(), fontSize = 13.sp)
+            }
         }
     }
+}
+
+/** A PDF filter's percentage slider. It applies on release, since every change re-renders the PDF. */
+@Composable
+private fun FilterSlider(label: String, value: Int, max: Int, onSet: (Int) -> Unit) {
+    var held by remember { mutableStateOf<Int?>(null) }
+    SliderRow(
+        label, (held ?: value).toFloat(), 0f..max.toFloat(), step = 1f, suffix = "%",
+        onChangeFinished = { held?.let(onSet); held = null },
+    ) { held = it.roundToInt() }
 }
 
 /**
@@ -1136,6 +1155,18 @@ internal fun PopupTitle(text: String) {
     )
 }
 
+/** The link at the top of a popup's nested page that leads back out of it. */
+@Composable
+private fun PopupBackLink(text: String, onBack: () -> Unit) {
+    Text(
+        text,
+        color = LocalPalette.current.accent.toComposeColor(),
+        fontWeight = FontWeight.Medium,
+        fontSize = 12.sp,
+        modifier = Modifier.clip(MaterialTheme.shapes.extraSmall).clickable(onClick = onBack).padding(vertical = 4.dp),
+    )
+}
+
 @Composable
 internal fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.width(220.dp)) {
@@ -1150,6 +1181,7 @@ internal fun SliderRow(
     value: Float,
     range: ClosedFloatingPointRange<Float>,
     step: Float = 0f,
+    suffix: String = "",
     enabled: Boolean = true,
     onChangeFinished: (() -> Unit)? = null,
     onChange: (Float) -> Unit,
@@ -1159,7 +1191,7 @@ internal fun SliderRow(
     val number = if (step % 1f != 0f) "%.1f".format(shown).trimEnd('0').trimEnd('.', ',') else "%.0f".format(shown)
     Column {
         Text(
-            "$label  $number",
+            "$label  $number$suffix",
             color = (if (enabled) LocalPalette.current.text else LocalPalette.current.textDim).toComposeColor(),
             fontSize = 12.sp,
         )
