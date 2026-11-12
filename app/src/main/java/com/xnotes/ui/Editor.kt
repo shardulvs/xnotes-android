@@ -7627,7 +7627,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             e.keyCode == android.view.KeyEvent.KEYCODE_MOVE_END -> flowLineEdge(start = false, extend = shift)
             else -> {
                 val ch = e.unicodeChar
-                if (ch == 0 || e.isAltPressed) return false
+                if (ch == 0) return false
                 val typed = deadKeys.accept(ch) ?: return true // a dead key waiting for its letter
                 flowText.applyReplace(flowText.selection, typed)
             }
