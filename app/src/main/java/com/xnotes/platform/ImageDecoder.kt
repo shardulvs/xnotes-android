@@ -25,7 +25,7 @@ import kotlin.math.max
  * size buckets (so a drag, a repeated sharpen, or a small zoom step is a plain bitmap blit).
  * On-screen draws go through [renderVectorSlice], which rasterizes only the region the caller can
  * actually show, so a deep zoom paints a viewport-sized bitmap instead of the whole document.
- * On-screen rasters have a bounded LRU of their own behind [cachedSampledFile], for the same reason.
+ * On-screen rasters share the rasterized-SVG cache through [cachedSampledFile], for the same reason.
  * Safe to call from any thread; every cache is thread-safe and memory-capped.
  */
 object ImageDecoder {
@@ -91,13 +91,13 @@ object ImageDecoder {
         val size = rasterSize(path) ?: return null
         val ss = sampleSize(size.width, size.height, mw, mh)
         val key = "$path@$ss"
-        rasterBitmapCache.get(key)?.let { return it }
+        bitmapCache.get(key)?.let { return it }
         val opts = BitmapFactory.Options().apply {
             inSampleSize = ss
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
         val bmp = BitmapFactory.decodeFile(path, opts) ?: return null
-        rasterBitmapCache.put(key, bmp)
+        bitmapCache.put(key, bmp)
         return bmp
     }
 
@@ -215,7 +215,7 @@ object ImageDecoder {
         if (last.bucket != bucket) return null
         if (wx0 < last.x0 || wy0 < last.y0 || wx1 > last.x1 || wy1 > last.y1) return null
         val key = sliceKey(path, bucket, last.x0, last.y0, last.x1 - last.x0, last.y1 - last.y0, last.docW, last.docH)
-        val bmp = svgBitmapCache.get(key) ?: return null
+        val bmp = bitmapCache.get(key) ?: return null
         return VectorSlice(
             bmp,
             last.x0.toDouble() / last.docW, last.y0.toDouble() / last.docH,
@@ -243,7 +243,7 @@ object ImageDecoder {
         docH: Int,
     ): Bitmap? {
         val key = sliceKey(path, bucket, x0, y0, w, h, docW, docH)
-        svgBitmapCache.get(key)?.let { return it }
+        bitmapCache.get(key)?.let { return it }
         val mpx = (w.toDouble() * h) / 1e6
         val cost = renderCost(path)
         var bmp: Bitmap? = null
@@ -259,7 +259,7 @@ object ImageDecoder {
             }.getOrNull() ?: return null
             cost.software = elapsedPerMpx(t, mpx, cost.software)
         }
-        svgBitmapCache.put(key, bmp)
+        bitmapCache.put(key, bmp)
         return bmp
     }
 
@@ -325,9 +325,9 @@ object ImageDecoder {
     // Vector-ness by path: the sniff opens the file, and image files are immutable temp files.
     private val vectorFlags = LruCache<String, Boolean>(64)
 
-    // Rasterized SVGs by path + bucket. Byte-bounded against the heap; entries are never recycled
-    // (callers may still be drawing them), eviction leaves them to the GC.
-    private val svgBitmapCache = object : LruCache<String, Bitmap>(
+    // Rasterized SVGs by path#bucket and decoded rasters by path@step. Byte-bounded against the heap;
+    // entries are never recycled (callers may still be drawing them), eviction leaves them to the GC.
+    private val bitmapCache = object : LruCache<String, Bitmap>(
         ((Runtime.getRuntime().maxMemory() / 6).coerceAtMost(96L shl 20) shr 10).toInt(),
     ) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount / 1024
@@ -335,14 +335,6 @@ object ImageDecoder {
 
     // Native raster sizes by path, for the same reason as [vectorFlags].
     private val rasterSizes = LruCache<String, ImageSize>(64)
-
-    // Decoded rasters by path + sample step, bounded and never recycled just like [svgBitmapCache].
-    // Image files are immutable temp files (a crop writes a new one), so a stale entry can't show.
-    private val rasterBitmapCache = object : LruCache<String, Bitmap>(
-        ((Runtime.getRuntime().maxMemory() / 6).coerceAtMost(96L shl 20) shr 10).toInt(),
-    ) {
-        override fun sizeOf(key: String, value: Bitmap) = value.byteCount / 1024
-    }
 
     private fun cachedSvg(path: String): SVG? {
         svgCache.get(path)?.let { return it }
@@ -383,14 +375,14 @@ object ImageDecoder {
         val longSide = (max(size.width, size.height) * fit).toInt().coerceAtLeast(1)
         val bucket = pow2AtLeast(longSide).coerceAtMost(VECTOR_RENDER_CAP_PX)
         val key = "$path#$bucket"
-        svgBitmapCache.get(key)?.let { return it }
+        bitmapCache.get(key)?.let { return it }
         val s = bucket.toDouble() / max(size.width, size.height)
         val bw = (size.width * s).toInt().coerceAtLeast(1)
         val bh = (size.height * s).toInt().coerceAtLeast(1)
         val bmp = runCatching {
             Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888).also { paintSlice(Canvas(it), svg, 0, 0, bw, bh) }
         }.getOrNull() ?: return null
-        svgBitmapCache.put(key, bmp)
+        bitmapCache.put(key, bmp)
         return bmp
     }
 
