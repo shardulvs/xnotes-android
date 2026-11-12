@@ -23,6 +23,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -1173,9 +1174,19 @@ internal fun SliderRow(
                 0
             },
             enabled = enabled,
+            // Stops this fine would draw as a speckled track; the label already names each one.
+            colors = if (step > 0f) NoTicks else SliderDefaults.colors(),
         )
     }
 }
+
+private val NoTicks
+    @Composable get() = SliderDefaults.colors(
+        activeTickColor = Color.Transparent,
+        inactiveTickColor = Color.Transparent,
+        disabledActiveTickColor = Color.Transparent,
+        disabledInactiveTickColor = Color.Transparent,
+    )
 
 /** [value] moved to the nearest [step] from the start of [range], held at its ends. */
 private fun snapTo(value: Float, range: ClosedFloatingPointRange<Float>, step: Float): Float {
