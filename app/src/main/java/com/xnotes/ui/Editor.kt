@@ -820,10 +820,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 val tmp = java.io.File.createTempFile("save", ".xcanvas", saveTmpDir)
                 try {
                     java.io.FileOutputStream(tmp).use { canvasCodec.write(doc, it) }
-                    val out = appContext.contentResolver.openOutputStream(android.net.Uri.parse(uri), "wt")
-                        ?: return@runCatching false
-                    out.use { java.io.FileInputStream(tmp).use { input -> input.copyTo(it, copyBuffer) } }
-                    rememberStamp(uri, java.io.FileInputStream(tmp).use { com.xnotes.format.ZipTail.read(it.channel) })
+                    // Opening the canvas truncates it, so the temp is opened first; see [copyOver].
+                    val copied = com.xnotes.core.util.copyOver(tmp, copyBuffer) {
+                        appContext.contentResolver.openOutputStream(android.net.Uri.parse(uri), "wt")
+                    }
+                    if (!copied) return@runCatching false
+                    rememberStamp(uri, entriesIn(tmp))
                     true
                 } finally {
                     tmp.delete()
@@ -4951,6 +4953,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
     }.getOrNull()
 
+    /** The zip directory of [temp], the file a save was just copied from, or null when it cannot be read. */
+    private fun entriesIn(temp: java.io.File): com.xnotes.format.ZipTail.Directory? =
+        runCatching { java.io.FileInputStream(temp).use { com.xnotes.format.ZipTail.read(it.channel) } }.getOrNull()
+
     /**
      * Keep what [uri] holds now as the file this editor knows: the stamp its provider reports, and
      * its zip directory, which is [entries] when the caller has just written the file and is read
@@ -5096,9 +5102,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 val timing = com.xnotes.format.DocumentCodec.WriteTiming()
                 java.io.FileOutputStream(tmp).use { codec.write(doc, it, timing = timing) }
                 val copyStart = System.nanoTime()
-                val out = appContext.contentResolver.openOutputStream(android.net.Uri.parse(uri), "wt")
-                    ?: return@runCatching false
-                out.use { java.io.FileInputStream(tmp).use { input -> input.copyTo(it, copyBuffer) } }
+                // Opening the note truncates it, so the temp is opened first; see [copyOver].
+                val copied = com.xnotes.core.util.copyOver(tmp, copyBuffer) {
+                    appContext.contentResolver.openOutputStream(android.net.Uri.parse(uri), "wt")
+                }
+                if (!copied) return@runCatching false
                 state.lastSaveEncodeMs = msBetween(encodeStart, copyStart) // all four for the debug overlay
                 state.lastSaveCopyMs = msSince(copyStart)
                 state.lastSaveManifestMs = timing.manifestMs
@@ -5107,7 +5115,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 state.lastSaveManifestBytes = timing.manifestBytes
                 state.lastSaveBytes = tmp.length() // live file size for the debug overlay
                 // The stamp is read back from the provider; the directory is the temp's, whose bytes the file now is.
-                rememberStamp(uri, java.io.FileInputStream(tmp).use { com.xnotes.format.ZipTail.read(it.channel) })
+                rememberStamp(uri, entriesIn(tmp))
                 true
             } finally {
                 tmp.delete()
