@@ -35,6 +35,7 @@ import com.xnotes.core.shapes.Elbow
 import com.xnotes.core.shapes.FreePath
 import com.xnotes.core.shapes.Head
 import com.xnotes.core.shapes.ShapeKind
+import com.xnotes.core.tools.InkPalette
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
 import com.xnotes.core.tools.ToolDefaults
@@ -274,6 +275,17 @@ class CanvasCodecTest {
         // z-order is list order: the far shape was added first and stays behind.
         val all = back.visibleItems(Rect(-1e5, -1e5, 2e5, 2e5))
         assertEquals(9000.0, (all[0] as ShapeItem).start.x, 1e-9)
+    }
+
+    @Test fun speedStrokeKeepsItsWidthsThroughASave() {
+        val doc = InfiniteDocument()
+        val samples = (0..30).map { Sample(it * 3.0, 0.0, 1.0, it * (4.0 + it % 5)) }
+        val drawn = Stroke(Tool.SPEED, ToolDefaults.configFor(Tool.SPEED), samples, speedScale = 0.5)
+        drawn.freezeSpeedWidths()
+        doc.add(drawn)
+        val s = roundTrip(doc).items[0] as Stroke
+        assertTrue(s.keepsSpeedWidths)
+        for (i in samples.indices) assertEquals(drawn.samples[i].widthFactor, s.samples[i].widthFactor, 5e-4)
     }
 
     @Test fun everyStrokeToolRoundTrips() {
@@ -570,6 +582,11 @@ class CanvasCodecTest {
         val s = doc.items[0] as Stroke
         assertTrue(s.config.taperEnabled)
         assertEquals(ToolDefaults.LEGACY_TAPER_TIP, s.config.taperMinFactor, 1e-9)
+    }
+
+    @Test fun inkSavedWithoutAColourReloadsInTheLegacyGreen() {
+        val doc = readManifest("""{"format":"xcanvas","items":[{"kind":"stroke","tool":"pen","samples":[[0,0,1]]}]}""")
+        assertEquals(InkPalette.LEGACY, (doc.items[0] as Stroke).config.rgba)
     }
 
     @Test fun legacyHighlightersReloadAtTheHistoricalAlpha() {

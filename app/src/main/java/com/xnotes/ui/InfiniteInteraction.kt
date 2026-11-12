@@ -37,6 +37,9 @@ import com.xnotes.core.shapes.ShapeKind
 import com.xnotes.core.stroke.Sample
 import com.xnotes.core.stroke.Scribble
 import com.xnotes.core.stroke.ShapeRecognizer
+import com.xnotes.core.stroke.Stabilizer
+import com.xnotes.core.stroke.SteadyReadout
+import com.xnotes.core.stroke.SteadyTrace
 import com.xnotes.core.stroke.StrokeSimplify
 import com.xnotes.core.tape.TapeGeometry
 import com.xnotes.core.tools.EraseMode
@@ -44,6 +47,7 @@ import com.xnotes.core.tools.InkPalette
 import com.xnotes.core.tools.ShapeConfig
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
+import com.xnotes.core.tools.ToolConversions
 import kotlin.math.exp
 
 /** What the current gesture is doing. */
@@ -108,6 +112,8 @@ class InfiniteInteraction(
     private val onTextGestureEnd: (TextItem) -> Unit = {},
     /** Content pixels per dp, so the speed pen judges gesture speed independently of zoom. */
     private val devicePxPerDp: () -> Double = { 1.0 },
+    /** Whether strokes are measured for [steadyReadout]; true only while the debug HUD is up. */
+    private val measureSteadying: () -> Boolean = { false },
     /** A press that landed on the minimap; returns true when it was consumed as navigation. */
     private val onMinimapPress: (Double, Double) -> Boolean = { _, _ -> false },
     /**
@@ -304,6 +310,15 @@ class InfiniteInteraction(
     private var drawingPointerId = -1
     private var drawingIsStylus = false
     private var strokeStartTimeMs = 0L
+
+    /** The live stroke's stabilization, or null while its pen draws the nib as is. */
+    private var steadier: Stabilizer? = null
+
+    /** Debug HUD: what stabilization did to the last stroke. */
+    val steadyReadout = SteadyReadout()
+
+    private val steadyTrace = SteadyTrace()
+    private var tracing = false
 
     // Pan and inertial fling, in viewport px and viewport px/s.
     private var lastPan = Pt.ZERO
@@ -809,9 +824,10 @@ class InfiniteInteraction(
             )
         }
         val straight = drawTool == Tool.HIGHLIGHTER && config.straightLine
+        val speedScale = z / devicePxPerDp().coerceAtLeast(1e-9)
         val stroke = Stroke(
             drawTool, config,
-            speedScale = z / devicePxPerDp().coerceAtLeast(1e-9),
+            speedScale = speedScale,
             straight = straight,
             smoothScale = InteractionController.smoothScaleFor(z),
         )
@@ -823,6 +839,10 @@ class InfiniteInteraction(
         strokeStartTimeMs = e.eventTime
         val p = viewport.viewportToContent(Pt(vx, vy))
         stroke.addSample(Sample(p.x, p.y, pressureOf(e, 0)))
+        steadier = Stabilizer.forStroke(config.stabilize && !straight, config.stabilizeTrail, config.stabilizeCrossover, speedScale)
+        steadier?.start(p.x, p.y, 0.0)
+        tracing = measureSteadying()
+        if (tracing) steadyTrace.start(p.x, p.y)
         liveStroke = stroke
         mode = CanvasPointerMode.DRAW
         // Only solid pens arm the snap: a highlighter or a straight-line drag never becomes a shape.
@@ -863,12 +883,27 @@ class InfiniteInteraction(
 
     private fun addStrokePoint(vx: Double, vy: Double, pressure: Double, timeMs: Long, force: Boolean) {
         val stroke = liveStroke ?: return
-        val p = viewport.viewportToContent(Pt(vx, vy))
-        val t = (timeMs - strokeStartTimeMs).toDouble()
+        val nib = viewport.viewportToContent(Pt(vx, vy))
+        var t = (timeMs - strokeStartTimeMs).toDouble()
         if (stroke.straight) {
-            stroke.setStraightEnd(Sample(p.x, p.y, pressure.coerceIn(0.0, 1.0), t))
+            stroke.setStraightEnd(Sample(nib.x, nib.y, pressure.coerceIn(0.0, 1.0), t))
             return
         }
+        // A steadied stroke takes the point the filter has reached and draws on to the nib as a
+        // tip; the lift lands the nib itself, at the tip's time, so lifting changes nothing.
+        val steady = steadier
+        val p = when {
+            steady == null -> nib
+            force -> {
+                if (steady.moved) t = steady.tipTime
+                nib
+            }
+            else -> {
+                steady.step(nib.x, nib.y, t)
+                Pt(steady.x, steady.y)
+            }
+        }
+        if (tracing && steady != null) steadyTrace.add(nib.x, nib.y, p.x, p.y)
         val last = stroke.samples.lastOrNull()
         // Decimate by on-screen spacing rather than content spacing, so drawing while zoomed in
         // keeps its detail instead of faceting into chords a zoom factor long.
@@ -877,6 +912,7 @@ class InfiniteInteraction(
         if (force || last == null || Pt(last.x, last.y).manhattanTo(p) >= gate) {
             stroke.addSample(Sample(p.x, p.y, pressure.coerceIn(0.0, 1.0), t))
         }
+        if (steady != null && !force) stroke.setTip(Sample(nib.x, nib.y, pressure.coerceIn(0.0, 1.0), steady.tipTime))
     }
 
     private fun endDraw(e: MotionEvent) {
@@ -899,6 +935,7 @@ class InfiniteInteraction(
             onWetStroke(null)
             return
         }
+        if (tracing && !tapCandidate) recordSteadying(stroke)
         // The pen is up: rebuild with lift-time rules on before the stroke is committed. The wet
         // buffer is deliberately not cleared here: the commit releases it in the same step, so no
         // frame can land between the two and blink.
@@ -906,6 +943,14 @@ class InfiniteInteraction(
         simplifyForCommit(stroke)
         if (scribbleErase(stroke)) return
         onCommitStroke(stroke)
+    }
+
+    /** Debug HUD: log what stabilization did to the stroke just lifted, or that it was off. */
+    private fun recordSteadying(stroke: Stroke) {
+        val cfg = stroke.config
+        val effect = if (steadier != null) steadyTrace.measure(stroke.speedScale * SteadyTrace.MM_PER_DP) else null
+        steadyReadout.last =
+            SteadyReadout.Row(ToolConversions.trailToStrength(cfg.stabilizeTrail), ToolConversions.dpPerSToCrossover(cfg.stabilizeCrossover), effect)
     }
 
     /** Scribble to erase: when [stroke] reads as a scribble over ink, erase that instead of committing it. */
@@ -1832,8 +1877,10 @@ class InfiniteInteraction(
         dwellRunnable = null
         if (!dwellEligible) return
         val stroke = liveStroke ?: return
-        if (stroke.samples.size < InteractionController.SHAPE_MIN_SAMPLES) return
-        val rec = ShapeRecognizer.recognize(stroke.samples) ?: return
+        // A steadied stroke is judged as lifting it now would leave it, out to the nib.
+        val path = stroke.tip?.let { stroke.samples + it } ?: stroke.samples
+        if (path.size < InteractionController.SHAPE_MIN_SAMPLES) return
+        val rec = ShapeRecognizer.recognize(path) ?: return
         val width = stroke.config.baseWidth * InteractionController.SHAPE_PEN_PARITY
         val color = stroke.config.rgba // the as-drawn colour, not the alpha-scaled render one
         val dashed = stroke.tool == Tool.DASHED // a dashed pen snaps to a dashed shape
@@ -1907,6 +1954,7 @@ class InfiniteInteraction(
 
     /** Shed the samples the ribbon does not need, at the tolerance the draw zoom justifies. */
     private fun simplifyForCommit(stroke: Stroke) {
+        stroke.freezeSpeedWidths()
         if (StrokeSimplify.enabled && !stroke.straight) {
             val eps = (InteractionController.SIMPLIFY_EPS / viewport.zoom)
                 .coerceAtMost(InteractionController.SIMPLIFY_EPS)

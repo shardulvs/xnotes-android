@@ -132,7 +132,7 @@ class CanvasTextBenchmarkTest : InstrumentationTestCase() {
         assertTrue("Unlock and wake the display before the GL benchmark",
             power.isInteractive && !keyguard.isKeyguardLocked)
         val activity = instrumentation.startActivitySync(
-            Intent(Intent.ACTION_MAIN).setClassName(context.packageName, "com.xnotes.MainActivity")
+            Intent(Intent.ACTION_MAIN).setClassName(context.packageName, "com.xnotes.EditorActivity")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         ) as Activity
         val editor = InfiniteEditor(context)
@@ -141,7 +141,6 @@ class CanvasTextBenchmarkTest : InstrumentationTestCase() {
         try {
             instrumentation.runOnMainSync {
                 activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                editor.newCanvas()
                 activity.setContentView(editor.surfaces)
                 editor.armTool(Tool.TEXT_BOX)
             }
@@ -169,11 +168,9 @@ class CanvasTextBenchmarkTest : InstrumentationTestCase() {
                     SystemClock.sleep(10)
                 }
                 elapsed[i] = SystemClock.elapsedRealtimeNanos() - start
-                // Separate CPU meshing time from GL scheduling and first-frame warmup.
-                val cpuMs = editor.view.stats.lastTessellateMs
                 Log.i("PR428_BENCH", "handoff/sample=" + i +
                     " elapsed_ms=" + elapsed[i] / 1e6 +
-                    " commit_ms=" + commit[i] / 1e6 + " recent_mesh_ms=" + cpuMs)
+                    " commit_ms=" + commit[i] / 1e6)
             }
             fun report(name: String, values: LongArray) {
                 val sorted = values.sorted()

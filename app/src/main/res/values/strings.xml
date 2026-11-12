@@ -66,7 +66,9 @@
     <string name="caption_pressure">Pressure</string>
     <string name="caption_sensitivity">Sensitivity</string>
     <string name="caption_multiplier">Multiplier</string>
-    <string name="caption_speed">Speed</string>
+    <string name="caption_thinning">Thinning</string>
+    <string name="caption_smoothing">Smoothing</string>
+    <string name="caption_top_speed">Top speed</string>
     <string name="caption_tip_width">Tip width percentage</string>
     <string name="caption_width">Width</string>
     <string name="caption_scale">Scale</string>
@@ -75,6 +77,9 @@
     <string name="caption_intensity">Intensity</string>
     <string name="caption_straight_line">Straight line</string>
     <string name="caption_inverse">Inverse</string>
+    <string name="caption_stabilization">Stabilization</string>
+    <string name="caption_strength">Strength</string>
+    <string name="caption_crossover">Crossover</string>
     <string name="caption_neon">Neon</string>
     <string name="tape_straight">Straight</string>
     <string name="tape_freehand">Freehand</string>
@@ -428,6 +433,7 @@
     <string name="pref_toolbar_help">Tap a tool to show or hide it. Long-press to drag it within or across sections. Long-press a section\'s top to move the whole section.</string>
     <string name="toggle_pan">Toggle pan</string>
     <string name="toggle_eraser">Toggle eraser</string>
+    <string name="toggle_lasso">Toggle lasso</string>
     <string name="toggle_previous">Toggle previous tool</string>
     <string name="pref_filename_template_help">YYYY YY MM DD HH mm ss expand to the creation date and time. # becomes the number that keeps the name free in its folder.</string>
     <string name="pref_next_note_named">The next note would be named %1$s</string>
@@ -815,6 +821,14 @@
     <string name="mit_license">MIT License</string>
     <string name="version_n">Version %1$s</string>
     <string name="version_copied">Version copied</string>
+    <string name="icon_bubblegum">Bubblegum and violet</string>
+    <string name="icon_cream_rose">Cream and rose</string>
+    <string name="icon_lime">Lime and violet</string>
+    <string name="icon_aqua">Aqua</string>
+    <string name="icon_ink_tile">Ink tile</string>
+    <string name="icon_classic">Classic</string>
+    <string name="icon_graphite">Graphite</string>
+    <string name="icon_cream_tile">Cream tile</string>
 
     <!-- Text formatting -->
     <string name="checkbox_item">Checkbox item</string>
@@ -1121,6 +1135,10 @@
     <string name="material_custom">Custom</string>
     <string name="material_indigo">Indigo</string>
     <string name="material_amber">Amber</string>
+    <string name="material_bubblegum">Bubblegum</string>
+    <string name="material_rose">Rose</string>
+    <string name="material_lime">Lime</string>
+    <string name="material_aqua">Aqua</string>
     <string name="material_morning">Morning</string>
     <string name="material_evening">Evening</string>
     <string name="material_sea">Sea</string>

@@ -148,6 +148,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             textMeshes.updateLift(items, at)
         },
         devicePxPerDp = { devicePxPerDp },
+        measureSteadying = { debugVisible },
         onMinimapPress = { vx, vy -> minimapTap(vx, vy) },
         onContextMenu = { vp, content, locked -> contextMenu = ContextMenuTarget(vp.x, vp.y, content, locked) },
         hasPasteContent = { hasClipboardItems || clipboardHasImage },
@@ -351,9 +352,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             textMeshes.update(item)
             return
         }
-        val started = System.nanoTime()
         val meshed = ItemMesher.mesh(item)
-        scene.lastTessellateMs = (System.nanoTime() - started) / 1_000_000.0
         if (meshed == null || meshed.isEmpty) {
             scene.remove(item)
             return
@@ -384,14 +383,12 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         val angle = item.angle
         val flip = item.flip
         decodeExecutor.execute {
-            val started = System.nanoTime()
             val parsed = com.xnotes.platform.VectorScenes.sceneFor(item.image.file)
             val parts = if (parsed == null) {
                 emptyList()
             } else {
                 VectorMesher.mesh(parsed, rect, orientation, angle, StrokeTessellator.DEFAULT_TOLERANCE, flip)
             }
-            val ms = (System.nanoTime() - started) / 1_000_000.0
             // The mesher stops at a vertex ceiling; say so rather than silently drawing part of it.
             if (parts.sumOf { it.mesh.vertexCount } >= VectorMesher.MAX_VERTICES) {
                 android.util.Log.w(
@@ -404,7 +401,6 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             // decided while it ran and put the item back on the canvas.
             view.post {
                 if (!vectorMeshGen.remove(item, token) || parts.isEmpty()) return@post
-                scene.lastTessellateMs = ms
                 scene.upsert(item, parts, bounds)
                 view.publish()
             }
@@ -483,6 +479,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             "redo" -> redo()
             "toggle_pan" -> toggleTool(Tool.PAN)
             "toggle_eraser" -> toggleTool(Tool.ERASER)
+            "toggle_lasso" -> toggleTool(Tool.LASSO)
             "toggle_previous" -> previousTool?.let { armTool(it) }
         }
     }
@@ -1190,6 +1187,12 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         onToolStyleChanged?.invoke()
     }
 
+    /** The host turned light or dark: its other swatches, the same slot armed, so the ink becomes that slot's colour. */
+    fun adoptSwatches(colors: List<Rgba>) {
+        toolbarColors = colors
+        colors.getOrNull(activeColorIndex)?.let { inkColor = it }
+    }
+
     fun setToolConfig(forTool: Tool, config: ToolConfig) {
         toolConfigs[forTool] = config
     }
@@ -1386,7 +1389,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     var onColorRemembered: ((Rgba) -> Unit)? = null
 
     /** The toolbar's swatches and recents, handed over by the host so both surfaces share them. */
-    var toolbarColors by mutableStateOf(InkPalette.presets)
+    var toolbarColors by mutableStateOf(InkPalette.dark)
     var activeColorIndex by mutableStateOf(0)
     var recentColors by mutableStateOf<List<Rgba>>(emptyList())
     var toolbarColorCount by mutableStateOf(5)
@@ -2372,10 +2375,6 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     private var meshedAudioLook: com.xnotes.core.model.AudioLook? = null
 
     // --- documents ---
-
-    fun newCanvas() {
-        replaceDocument(InfiniteDocument())
-    }
 
     fun replaceDocument(next: InfiniteDocument) {
         AudioRecording.stopFor(this) // closing the canvas places its recording

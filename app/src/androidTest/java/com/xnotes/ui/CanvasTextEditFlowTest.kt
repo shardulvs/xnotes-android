@@ -13,7 +13,6 @@ import com.xnotes.core.tools.Tool
 class CanvasTextEditFlowTest : InstrumentationTestCase() {
     private fun newEditor(zoom: Double = 1.0, width: Int = 1600, height: Int = 1000) =
         InfiniteEditor(instrumentation.targetContext).apply {
-            newCanvas()
             viewport.widthPx = width
             viewport.heightPx = height
             viewport.zoom = zoom
@@ -157,7 +156,7 @@ class CanvasTextEditFlowTest : InstrumentationTestCase() {
     fun testLatestCommittedTextReplacesNativePreviewAfterGlFrame() {
         val context = instrumentation.targetContext
         val activity = instrumentation.startActivitySync(
-            Intent(Intent.ACTION_MAIN).setClassName(context.packageName, "com.xnotes.MainActivity")
+            Intent(Intent.ACTION_MAIN).setClassName(context.packageName, "com.xnotes.EditorActivity")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         ) as Activity
         val editor = newEditor()

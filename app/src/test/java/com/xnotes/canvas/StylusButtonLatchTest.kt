@@ -26,6 +26,14 @@ class StylusButtonLatchTest {
     }
 
     @Test
+    fun focusPenProPinchKeyIsAHeldStylusButton() {
+        assertTrue(latch.onKey(InteractionController.FOCUS_PEN_PRO_PINCH_KEYCODE, down = true))
+        assertTrue(latch.held)
+        assertTrue(latch.onKey(InteractionController.FOCUS_PEN_PRO_PINCH_KEYCODE, down = false))
+        assertFalse(latch.held)
+    }
+
+    @Test
     fun aButtonInButtonStateLatchesAndLetsGo() {
         // S-Pen: the button rides in buttonState, on the touch itself and while hovering.
         assertTrue(latch.heldWith(MotionEvent.BUTTON_STYLUS_PRIMARY))

@@ -84,12 +84,9 @@ internal class CanvasTextMeshController(
         pending[item] = token
         executor.execute {
             if (pending[item] !== token) return@execute
-            val started = System.nanoTime()
             val meshed = ItemMesher.mesh(snapshot)
-            val elapsed = (System.nanoTime() - started) / 1_000_000.0
             view.post {
                 if (pending[item] !== token) return@post
-                scene.lastTessellateMs = elapsed
                 if (meshed == null || meshed.isEmpty) scene.remove(item)
                 else scene.upsert(item, meshed.parts, meshed.bounds)
 

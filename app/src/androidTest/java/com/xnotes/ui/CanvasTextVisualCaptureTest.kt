@@ -50,13 +50,12 @@ class CanvasTextVisualCaptureTest : InstrumentationTestCase() {
     fun testRapidLongTextMoveVisualFrames() {
         val target = instrumentation.targetContext
         val intent = Intent(Intent.ACTION_MAIN)
-            .setClassName(target.packageName, "com.xnotes.MainActivity")
+            .setClassName(target.packageName, "com.xnotes.EditorActivity")
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val activity = instrumentation.startActivitySync(intent) as Activity
         val editor = InfiniteEditor(target)
         try {
             instrumentation.runOnMainSync {
-                editor.newCanvas()
                 activity.setContentView(editor.surfaces)
             }
             instrumentation.waitForIdleSync()
