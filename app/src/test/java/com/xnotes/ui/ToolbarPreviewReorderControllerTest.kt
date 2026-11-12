@@ -2,6 +2,9 @@ package com.xnotes.ui
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import com.xnotes.core.tools.ToolbarBar
+import com.xnotes.core.tools.ToolbarLayout
+import com.xnotes.core.tools.ToolbarWorkspace
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -12,10 +15,16 @@ class ToolbarPreviewReorderControllerTest {
         "right" to Rect(220f, 0f, 320f, 45f),
     )
 
+    private val workspace = ToolbarWorkspace(listOf(
+        ToolbarBar("left", "Left", ToolbarLayout.DEFAULT),
+        ToolbarBar("middle", "Middle", ToolbarLayout.DEFAULT),
+        ToolbarBar("right", "Right", ToolbarLayout.DEFAULT),
+    ))
+
     @Test fun hoverDoesNotPersistAndReleaseKeepsSourceInDirectPlacementMode() {
         val state = ToolbarPreviewReorderController()
         for ((id, bounds) in initial) state.updateBounds(id, bounds)
-        state.start("middle", initial.keys.toList(), verticalAxis = false)
+        state.start("middle", initial.keys.toList(), verticalAxis = false, workspace = workspace)
         state.hover("middle", Offset(260f, 20f))
         assertEquals("middle", state.sourceId)
         assertEquals("right", state.targetId)
@@ -25,17 +34,22 @@ class ToolbarPreviewReorderControllerTest {
         assertNull(state.sourceId)
         assertNull(state.targetId)
         assertEquals("middle", state.lastReleasedId)
-        state.start("left", initial.keys.toList(), verticalAxis = false)
+        val projected = workspace.reorderVisualBar("middle", "right")
+        assertEquals(projected, state.displayedWorkspace(workspace))
+        assertEquals(projected, state.displayedWorkspace(projected))
+        state.acknowledge(projected)
+        assertEquals(projected, state.displayedWorkspace(projected))
+        state.start("left", initial.keys.toList(), verticalAxis = false, workspace = workspace)
         assertNull(state.lastReleasedId)
     }
 
     @Test fun invalidDropAndCancellationDoNotCommit() {
         val state = ToolbarPreviewReorderController()
         initial.forEach { (id, rect) -> state.updateBounds(id, rect) }
-        state.start("middle", listOf("middle", "right"), verticalAxis = false)
+        state.start("middle", listOf("middle", "right"), verticalAxis = false, workspace = workspace)
         assertFalse(state.drop("middle", Offset(10f, 20f)) { _, _ -> fail("invalid target") })
         assertNull(state.lastReleasedId)
-        state.start("middle", listOf("middle", "right"), verticalAxis = false)
+        state.start("middle", listOf("middle", "right"), verticalAxis = false, workspace = workspace)
         state.cancel("middle")
         assertNull(state.sourceId)
         assertNull(state.targetId)

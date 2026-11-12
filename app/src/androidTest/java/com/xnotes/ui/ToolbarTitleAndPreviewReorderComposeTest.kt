@@ -119,6 +119,59 @@ class ToolbarTitleAndPreviewReorderComposeTest {
         }
     }
 
+    @Test fun deferredWorkspaceCommitDoesNotFlashBarBackToOldSlot() {
+        // A persistence callback may only publish the updated workspace on the next
+        // recomposition or after an async preference write. The preview must render
+        // the proposed order *before* that acknowledgement arrives.
+        val layout = ToolbarLayout(listOf(ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN)))))
+        fun bar(id: String) = ToolbarBar(id, id, layout,
+            geometry = ToolbarGeometry(dockEdge = ToolbarDockEdge.TOP,
+                dockAlignment = ToolbarDockAlignment.CENTER, widthDp = 150, heightDp = 60))
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(bar("main"), bar("moving"), bar("target"))))
+        var pending: Pair<String, String>? = null
+        rule.setContent {
+            MaterialTheme {
+                Box(Modifier.width(850.dp)) {
+                    ToolbarWorkspacePreview(workspace = workspace, look = ToolbarLook(),
+                        selectedId = "moving", colors = emptyList(), activeColorIndex = 0,
+                        pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
+                        selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
+                        onMoveBar = { _, _ -> }, onReorderBar = { from, to -> pending = from to to })
+                }
+            }
+        }
+        rule.waitForIdle()
+        val source = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+        val initialX = source.fetchSemanticsNode().boundsInRoot.center.x
+        val targetBounds = rule.onNodeWithTag("preview-bar-target", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val delta = targetBounds.center - source.fetchSemanticsNode().boundsInRoot.center
+        source.performTouchInput {
+            down(center)
+            advanceEventTime(780)
+            moveBy(delta)
+            advanceEventTime(48)
+            up()
+        }
+        rule.waitForIdle()
+        rule.runOnIdle {
+            assertEquals("moving" to "target", pending)
+            // Simulate an external persistence layer not yet acknowledging the reorder.
+            assertNull(workspace.bars[1].geometry.visualOrder)
+        }
+        repeat(4) { frame ->
+            rule.mainClock.advanceTimeByFrame()
+            val currentX = source.fetchSemanticsNode().boundsInRoot.center.x
+            assertTrue("frame $frame flashed to origin; old=$initialX new=$currentX",
+                currentX > initialX + delta.x * 0.4f)
+        }
+        rule.runOnIdle { workspace = workspace.reorderVisualBar("moving", "target") }
+        rule.waitForIdle()
+        val acknowledgedX = source.fetchSemanticsNode().boundsInRoot.center.x
+        assertTrue("commit acknowledgement must not flash to old slot",
+            acknowledgedX > initialX + delta.x * 0.4f)
+    }
+
     @Test fun draggedBarTracksPointerAcrossLiveReorderPreviewWithoutJump() {
         val layout = ToolbarLayout(listOf(ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN)))))
         fun bar(id: String) = ToolbarBar(id, id, layout,

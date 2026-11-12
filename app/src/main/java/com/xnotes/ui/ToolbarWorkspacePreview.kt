@@ -26,8 +26,10 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
@@ -114,37 +116,21 @@ internal fun ToolbarWorkspacePreview(
     val screenDensity = LocalDensity.current
     var stageBounds by remember { mutableStateOf(Rect.Zero) }
     val reorder = remember { ToolbarPreviewReorderController() }
+    LaunchedEffect(workspace) { reorder.acknowledge(workspace) }
     val commitReorder by rememberUpdatedState(onReorderBar)
-    // The base workspace does not change on pointer motion. Cache these plans
-    // separately so editing a drag preview only repacks the temporary order.
-    val baseDockPlan = remember(workspace, look, screenWidth, screenHeight) {
-        toolbarDockPlan(workspace, look, screenWidth, screenHeight)
+    // Pure layout resolver remains independent from Compose state and gesture lifecycle.
+    val basePlan = remember(workspace, look, screenWidth, screenHeight, colors.size) {
+        toolbarPreviewLayoutPlan(workspace, look, screenWidth, screenHeight, colors.size)
     }
-    val baseFloatingPlan = remember(workspace, look, screenWidth, screenHeight, colors.size, baseDockPlan) {
-        toolbarFloatingPlan(workspace, look,
-            screenWidth - baseDockPlan.leftInset.dp - baseDockPlan.rightInset.dp,
-            screenHeight - baseDockPlan.topInset.dp - baseDockPlan.bottomInset.dp,
-            colors.size)
+    val peersByBar = remember(workspace, basePlan, onReorderBar != null) {
+        if (onReorderBar == null) emptyMap() else toolbarPreviewPeers(workspace, basePlan)
     }
-    val peersByBar = remember(workspace, baseDockPlan, baseFloatingPlan, onReorderBar != null) {
-        if (onReorderBar == null) emptyMap() else workspace.bars.associate { bar ->
-            bar.id to toolbarPreviewReorderPeers(workspace, bar.id, baseDockPlan, baseFloatingPlan)
+    val displayedWorkspace = reorder.displayedWorkspace(workspace)
+    val previewPlan = if (displayedWorkspace == workspace) basePlan
+        else remember(displayedWorkspace, look, screenWidth, screenHeight, colors.size) {
+            toolbarPreviewLayoutPlan(displayedWorkspace, look, screenWidth, screenHeight, colors.size)
         }
-    }
-    // Preview only the *visual* reorder; never modify persisted workspace mid-drag.
-    val displayedWorkspace = if (reorder.sourceId != null && reorder.targetId != null)
-        workspace.reorderVisualBar(reorder.sourceId!!, reorder.targetId!!) else workspace
-    val dockPlan = if (displayedWorkspace == workspace) baseDockPlan
-        else remember(displayedWorkspace, look, screenWidth, screenHeight) {
-            toolbarDockPlan(displayedWorkspace, look, screenWidth, screenHeight)
-        }
-    val floatingPlan = if (displayedWorkspace == workspace) baseFloatingPlan
-        else remember(displayedWorkspace, look, screenWidth, screenHeight, colors.size, dockPlan) {
-            toolbarFloatingPlan(displayedWorkspace, look,
-                screenWidth - dockPlan.leftInset.dp - dockPlan.rightInset.dp,
-                screenHeight - dockPlan.topInset.dp - dockPlan.bottomInset.dp,
-                colors.size)
-        }
+    val dockPlan = previewPlan.docked
     BoxWithConstraints(
         Modifier
             .fillMaxWidth()
@@ -195,16 +181,15 @@ internal fun ToolbarWorkspacePreview(
                 // preview reorder plan. Using the animated destination here moves the source
                 // a second time and makes it jump away from the pen/finger.
                 val isDraggedBar = reorder.sourceId == bar.id
-                val barDockPlan = if (isDraggedBar) baseDockPlan else dockPlan
-                val barFloatingPlan = if (isDraggedBar) baseFloatingPlan else floatingPlan
-                val dockPlacement = barDockPlan.placement(bar.id)
-                val floating = dockPlacement == null
-                val placement = dockPlacement ?: barFloatingPlan.placement(bar.id) ?: return@forEachIndexed
+                val barPlan = if (isDraggedBar) basePlan else previewPlan
+                val barPosition = barPlan.position(bar.id) ?: return@forEachIndexed
+                val placement = barPosition.placement
+                val floating = barPosition.floating
                 val anchor = bar.geometry.anchor
                 val vertical = placement.edge == com.xnotes.core.tools.ToolbarDockEdge.LEFT ||
                     placement.edge == com.xnotes.core.tools.ToolbarDockEdge.RIGHT
-                val x = placement.x + if (floating) barDockPlan.leftInset else 0f
-                val y = placement.y + if (floating) barDockPlan.topInset else 0f
+                val x = barPosition.x
+                val y = barPosition.y
                 // Only peers animate. Source follows the stylus while dragging and
                 // lands directly on the committed slot after release. Returning the
                 // source through an animated coordinate causes a visible snapback.
@@ -226,6 +211,9 @@ internal fun ToolbarWorkspacePreview(
                         reorder.updateBounds(bar.id, bounds)
                     }
                 val peers = peersByBar[bar.id].orEmpty()
+                // Gestures and animation state must belong to a bar ID, not to its
+                // list position when a workspace adds/removes or reorders neighbors.
+                key(bar.id) {
                 Box(positionModifier, contentAlignment = Alignment.Center) {
                     ToolbarDragSurface(
                         id = bar.id,
@@ -234,7 +222,7 @@ internal fun ToolbarWorkspacePreview(
                         paneBounds = stageBounds,
                         onMoveBar = onMoveBar,
                         onDragStart = if (onReorderBar == null) null else { _ ->
-                            reorder.start(bar.id, peers, vertical)
+                            reorder.start(bar.id, peers, vertical, workspace)
                         },
                         onDragPosition = if (onReorderBar == null) null else { finger ->
                             reorder.hover(bar.id, finger)
@@ -277,6 +265,7 @@ internal fun ToolbarWorkspacePreview(
                             palette.accent.toComposeColor(), RoundedCornerShape(8.dp))
                             .testTag("preview-reorder-target-${bar.id}"))
                     }
+                }
                 }
             }
 

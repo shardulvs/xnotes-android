@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import com.xnotes.core.tools.ToolbarWorkspace
 
 /**
  * One gesture's preview and commit state. Separates hit testing/transactions from
@@ -20,16 +21,42 @@ internal class ToolbarPreviewReorderController {
     var lastReleasedId by mutableStateOf<String?>(null)
         private set
 
+    /** Holds the destination through the asynchronous workspace acknowledgement. */
+    private data class PendingCommit(val from: String, val to: String, val order: List<String>)
+    private var pendingCommit by mutableStateOf<PendingCommit?>(null)
+
     val currentBounds: MutableMap<String, Rect> = mutableMapOf()
     private var initialBounds: Map<String, Rect> = emptyMap()
     private var peers: List<String> = emptyList()
     private var vertical = false
+    private var gestureWorkspace: ToolbarWorkspace? = null
+
+    private fun visualIds(workspace: ToolbarWorkspace): List<String> = workspace.bars
+        .withIndex().sortedWith(compareBy({ it.value.geometry.visualOrder ?: it.index }, { it.index }))
+        .map { it.value.id }
+
+    /** Never render the pre-drop slot while the callback publishes the new workspace. */
+    fun displayedWorkspace(workspace: ToolbarWorkspace): ToolbarWorkspace {
+        val from = sourceId
+        val target = targetId
+        if (from != null && target != null) return workspace.reorderVisualBar(from, target)
+        val pending = pendingCommit ?: return workspace
+        if (visualIds(workspace) == pending.order) return workspace
+        return workspace.reorderVisualBar(pending.from, pending.to)
+    }
+
+    /** Called from a workspace-keyed effect after the real change becomes observable. */
+    fun acknowledge(workspace: ToolbarWorkspace) {
+        if (pendingCommit?.order == visualIds(workspace)) pendingCommit = null
+    }
 
     fun updateBounds(id: String, bounds: Rect) {
         if (currentBounds[id] != bounds) currentBounds[id] = bounds
     }
 
-    fun start(id: String, candidates: List<String>, verticalAxis: Boolean) {
+    fun start(id: String, candidates: List<String>, verticalAxis: Boolean, workspace: ToolbarWorkspace) {
+        pendingCommit = null
+        gestureWorkspace = workspace
         lastReleasedId = null
         sourceId = id
         targetId = null
@@ -48,6 +75,10 @@ internal class ToolbarPreviewReorderController {
         val destination = toolbarPreviewReorderHit(id, peers, rootPointer, initialBounds, vertical)
         val accepted = destination != null && destination in peers && destination != id
         if (accepted) {
+            val expected = gestureWorkspace?.reorderVisualBar(id, destination!!)
+            if (expected != null) {
+                pendingCommit = PendingCommit(id, destination!!, visualIds(expected))
+            }
             lastReleasedId = id
             commit(id, destination!!)
         }
@@ -64,5 +95,6 @@ internal class ToolbarPreviewReorderController {
         targetId = null
         peers = emptyList()
         initialBounds = emptyMap()
+        gestureWorkspace = null
     }
 }
