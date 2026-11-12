@@ -199,15 +199,14 @@ private fun ToolbarItemView(
         ToolbarItem.SPACER -> ToolbarSpacer(entry)
 
         ToolbarItem.HOME -> ToolbarIcon(XnotesIcons.prev, stringResource(R.string.toolbar_home)) { onOpenBackstage() }
-        // A name has no room down a side rail.
-        ToolbarItem.TITLE -> if (!LocalBar.current.vertical) Tooltip(stringResource(R.string.rename_note)) {
-            Label(
-                if (editor.state.document.displayName == null && editor.state.document.path == null) stringResource(R.string.untitled) else editor.title,
-                modifier = Modifier
-                    .widthIn(max = 160.dp)
-                    .clip(MaterialTheme.shapes.extraSmall)
-                    .clickable { onRename() },
-            )
+        ToolbarItem.TITLE -> {
+            val title = if (editor.state.document.displayName == null && editor.state.document.path == null)
+                stringResource(R.string.untitled) else editor.title
+            if (LocalBar.current.vertical) VerticalToolbarTitle(title, onClick = onRename)
+            else Tooltip(stringResource(R.string.rename_note)) {
+                Label(title, modifier = Modifier.widthIn(max = 160.dp)
+                    .clip(MaterialTheme.shapes.extraSmall).clickable { onRename() })
+            }
         }
         ToolbarItem.SIDEBAR ->
             ToolbarIcon(XnotesIcons.sidebar, stringResource(R.string.side_panel), active = editor.sidebarVisible, shortcut = Keys.SIDEBAR) { editor.toggleSidebar() }

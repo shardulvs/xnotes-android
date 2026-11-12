@@ -96,8 +96,12 @@ fun InfiniteToolbar(
                     ToolbarItem.SPACER -> ToolbarSpacer(entry)
                     ToolbarItem.HOME -> ToolbarIcon(XnotesIcons.prev, stringResource(R.string.toolbar_home)) { onOpenBackstage() }
 
-                    // A name has no room down a side rail.
-                    ToolbarItem.TITLE -> if (!LocalBar.current.vertical) Label(if (editor.document.displayName == null && editor.document.path == null) stringResource(R.string.untitled) else editor.title, Modifier.padding(end = 4.dp))
+                    ToolbarItem.TITLE -> {
+                        val title = if (editor.document.displayName == null && editor.document.path == null)
+                            stringResource(R.string.untitled) else editor.title
+                        if (LocalBar.current.vertical) VerticalToolbarTitle(title)
+                        else Label(title, Modifier.padding(end = 4.dp))
+                    }
 
                     in CANVAS_TOOL_OF -> {
                         val tool = CANVAS_TOOL_OF.getValue(item)
