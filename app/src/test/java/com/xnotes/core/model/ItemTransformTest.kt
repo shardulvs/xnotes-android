@@ -35,6 +35,29 @@ class ItemTransformTest {
         assertEquals(8.0, s.config.baseWidth, 1e-9) // width * sqrt(det)=*2
     }
 
+    @Test fun aResizedStrokeRebuildsAsTheOriginalZoomed() {
+        for (tool in listOf(Tool.PEN, Tool.CALLIGRAPHY, Tool.TAPER, Tool.SPEED)) {
+            val samples = (0 until 80).map { i ->
+                val u = i * 0.09
+                Sample(40.0 + u * 26.0 + kotlin.math.sin(u * 3.1) * 7.0, 60.0 + kotlin.math.sin(u * 1.7) * 34.0, 0.5, i * 6.0)
+            }
+            val s = Stroke(tool, com.xnotes.core.tools.ToolDefaults.configFor(tool), samples, speedScale = 0.6)
+            val before = s.geometry()
+            val cx = FloatArray(before.pointCount) { before.centerline[2 * it] }
+            val hw = before.halfWidths.copyOf()
+            s.applyTransform(Affine.scaleAbout(Pt.ZERO, 2.0, 2.0))
+            val after = s.geometry()
+            for (i in 0 until after.pointCount) {
+                assertEquals("$tool centre $i", 2.0 * cx[i], after.cx(i), 1e-3)
+                assertEquals("$tool width $i", 2.0 * hw[i], after.hw(i), 1e-3)
+            }
+            val snap = s.snapshotGeometry()
+            s.applyTransform(Affine.scaleAbout(Pt.ZERO, 0.25, 0.25))
+            s.restoreGeometry(snap)
+            assertEquals("$tool undo", 2.0 * hw[40], s.geometry().hw(40), 1e-3)
+        }
+    }
+
     @Test fun rotateStrokeKeepsWidth() {
         val s = horizontalStroke(4.0)
         s.applyTransform(Affine.rotateAbout(Pt.ZERO, PI / 2))

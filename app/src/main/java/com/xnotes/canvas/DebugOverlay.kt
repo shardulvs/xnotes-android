@@ -25,6 +25,9 @@ class DebugOverlay {
     /** What the front buffer is doing, when there is one; installed by the host. */
     var frontHud: () -> String? = { null }
 
+    /** What stabilization did to the last stroke; installed by the host. */
+    var steadyHud: () -> List<String> = { emptyList() }
+
     fun toggle() {
         enabled = !enabled
     }
@@ -94,6 +97,11 @@ class DebugOverlay {
         val (rw, rh) = state.targetRasterSize()
         val res = if (rw > 0) "$rw x $rh" else "-"
         val lines = buildList {
+            val steady = steadyHud()
+            if (steady.isNotEmpty()) {
+                addAll(steady)
+                add("")
+            }
             add("%.0f fps   %.1f ms".format(fps, frameMs))
             add("cache res  $res")
             add("visible    ${snap.visiblePages} pg")
@@ -131,28 +139,32 @@ class DebugOverlay {
                 add(" saf copy  ${state.lastSaveCopyMs} ms")
             }
         }
-
-        // Measure each row as it will actually be laid out, not as one line: [Renderer.drawText]
-        // wraps to the rect's width, so a row too long for the panel used to be drawn over the one
-        // below it. Advancing by the wrapped height pushes the rest down instead.
-        val textW = PANEL_W - PAD_X * 2
-        val rowH = lines.map { AndroidText.blockHeight(it, textW.toInt(), FONT) }
-        val hintH = AndroidText.lineHeight(HINT_FONT)
-        val panelH = PAD_Y * 2 + rowH.sum() + HINT_GAP + hintH
-        val x = state.viewportW - PANEL_W - MARGIN
-        val y = MARGIN
-
-        r.fillRect(Rect(x, y, PANEL_W, panelH), PANEL_BG)
-
-        var ty = y + PAD_Y
-        for (i in lines.indices) {
-            r.drawText(lines[i], Rect(x + PAD_X, ty, textW, rowH[i]), FONT, TEXT)
-            ty += rowH[i]
-        }
-        r.drawText(HINT, Rect(x + PAD_X, ty + HINT_GAP, textW, hintH), HINT_FONT, TEXT_DIM)
+        drawPanel(r, lines, state.viewportW.toDouble())
     }
 
     companion object {
+        /** Draw [lines] as the HUD panel at the top right of a view [viewportW] px wide; the canvas's HUD shares it. */
+        fun drawPanel(r: AndroidRenderer, lines: List<String>, viewportW: Double) {
+            // Measure each row as it will actually be laid out, not as one line: [Renderer.drawText]
+            // wraps to the rect's width, so a row too long for the panel used to be drawn over the one
+            // below it. Advancing by the wrapped height pushes the rest down instead.
+            val textW = PANEL_W - PAD_X * 2
+            val rowH = lines.map { AndroidText.blockHeight(it, textW.toInt(), FONT) }
+            val hintH = AndroidText.lineHeight(HINT_FONT)
+            val panelH = PAD_Y * 2 + rowH.sum() + HINT_GAP + hintH
+            val x = viewportW - PANEL_W - MARGIN
+            val y = MARGIN
+
+            r.fillRect(Rect(x, y, PANEL_W, panelH), PANEL_BG)
+
+            var ty = y + PAD_Y
+            for (i in lines.indices) {
+                r.drawText(lines[i], Rect(x + PAD_X, ty, textW, rowH[i]), FONT, TEXT)
+                ty += rowH[i]
+            }
+            r.drawText(HINT, Rect(x + PAD_X, ty + HINT_GAP, textW, hintH), HINT_FONT, TEXT_DIM)
+        }
+
         private const val MB = 1024.0 * 1024.0
         private const val IDLE_GAP_NS = 200_000_000L // deltas longer than 200ms count as idle
         private const val MEM_SAMPLE_NS = 1_000_000_000L // re-read PSS from smaps at most once a second
