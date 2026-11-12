@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -43,6 +44,7 @@ import com.xnotes.settings.ToolbarLook
 import com.xnotes.settings.ToolbarPosition
 import com.xnotes.settings.ToolbarSize
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 
 /**
  * Hold anywhere on a toolbar's container to pick it up. Ordinary taps still reach
@@ -73,6 +75,25 @@ fun ToolbarDragSurface(
     var dragging by remember(id) { mutableStateOf(false) }
     var barBounds by remember(id) { mutableStateOf(Rect.Zero) }
     var dragStartInRoot by remember(id) { mutableStateOf(Offset.Zero) }
+    // Preserve the released position until the parent acknowledges a new anchor.
+    // Resetting drag *before* onMoveBar published its workspace caused the bar to
+    // briefly redraw at its previous slot, then snap forward (the visible flick).
+    var pendingAnchor by remember(id) { mutableStateOf<ToolbarAnchor?>(null) }
+    LaunchedEffect(anchor, pendingAnchor) {
+        val pending = pendingAnchor ?: return@LaunchedEffect
+        if (anchor == pending) {
+            // Modifier.offset already renders zero for the acknowledged anchor.
+            drag = Offset.Zero
+            pendingAnchor = null
+        } else {
+            // An invalid/rejected move must not leave a stranded toolbar forever.
+            delay(1000)
+            if (pendingAnchor == pending) {
+                drag = Offset.Zero
+                pendingAnchor = null
+            }
+        }
+    }
     // Keep the active pointer stream alive while the preview recomposes and rescales.
     // Pane bounds are read via updated state instead of restarting pointerInput on each
     // layout measurement. Such restarts used to cancel the drag on its first frame.
@@ -81,6 +102,7 @@ fun ToolbarDragSurface(
             val down = awaitFirstDown(requireUnconsumed = false)
             val held = awaitLongPressOrCancellation(down.id)
             if (held != null) {
+                pendingAnchor = null
                 drag = Offset.Zero
                 dragging = true
                 dragStartInRoot = barBounds.topLeft + held.position
@@ -104,6 +126,7 @@ fun ToolbarDragSurface(
                     }
                 }
                 if (canceled) {
+                    pendingAnchor = null
                     drag = Offset.Zero
                     dragging = false
                     cancelCallback?.invoke()
@@ -112,25 +135,38 @@ fun ToolbarDragSurface(
                     val droppedAt = dragStartInRoot + moved
                     val handledByPreview = dropCallback?.invoke(droppedAt) == true
                     val handled = moved.getDistance() >= 12f && handledByPreview
-                    drag = Offset.Zero
                     dragging = false
                     if (!handled && moved.getDistance() >= 12f && barBounds != Rect.Zero && paneBoundsNow != Rect.Zero) {
                         val center = barBounds.center + moved - paneBoundsNow.topLeft
-                        ToolbarAnchorResolver.nearest(
+                        val target = ToolbarAnchorResolver.nearest(
                             center.x, center.y, paneBoundsNow.width, paneBoundsNow.height,
-                        )?.let { target -> moveBarNow(id, target) }
+                        )
+                        if (target != null && target != anchor) {
+                            // Stay under the cursor until the new anchor is rendered.
+                            // Reordering uses a different optimistic preview transaction.
+                            pendingAnchor = target
+                            moveBarNow(id, target)
+                        } else {
+                            drag = Offset.Zero
+                            if (target != null) moveBarNow(id, target)
+                        }
+                    } else {
+                        drag = Offset.Zero
                     }
                 }
             }
         }
     }
+    // Acknowledgement changes the anchor and parent placement together; discard
+    // the old drag offset in that SAME composition to avoid a second overshoot.
+    val visualDrag = if (pendingAnchor != null && anchor == pendingAnchor) Offset.Zero else drag
     Box(
         Modifier
-            .offset { IntOffset(drag.x.roundToInt(), drag.y.roundToInt()) }
+            .offset { IntOffset(visualDrag.x.roundToInt(), visualDrag.y.roundToInt()) }
             .testTag("toolbar-drag-surface-$id")
             // A docked bar is an earlier sibling of the canvas. Lift it while moving so the
             // canvas (and adjacent split panes) cannot paint over the dragged toolbar.
-            .zIndex(if (dragging) 10f else 0f)
+            .zIndex(if (dragging || (pendingAnchor != null && anchor != pendingAnchor)) 10f else 0f)
             .onGloballyPositioned { if (drag == Offset.Zero) barBounds = it.boundsInRoot() }
             .then(gesture),
     ) {

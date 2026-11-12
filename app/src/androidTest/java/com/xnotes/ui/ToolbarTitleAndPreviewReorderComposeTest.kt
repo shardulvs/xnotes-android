@@ -119,6 +119,92 @@ class ToolbarTitleAndPreviewReorderComposeTest {
         }
     }
 
+    @Test fun incrementalDragEachFrameNeverReturnsToPriorPosition() {
+        val layout = ToolbarLayout(listOf(ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN)))))
+        fun bar(id: String) = ToolbarBar(id, id, layout,
+            geometry = ToolbarGeometry(dockEdge = ToolbarDockEdge.TOP,
+                dockAlignment = ToolbarDockAlignment.CENTER, widthDp = 150, heightDp = 60))
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(bar("main"), bar("moving"), bar("target"))))
+        rule.setContent {
+            MaterialTheme {
+                Box(Modifier.width(850.dp)) {
+                    ToolbarWorkspacePreview(workspace = workspace, look = ToolbarLook(),
+                        selectedId = "moving", colors = emptyList(), activeColorIndex = 0,
+                        pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Example",
+                        selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
+                        onMoveBar = { _, _ -> }, onReorderBar = { from, to ->
+                            workspace = workspace.reorderVisualBar(from, to)
+                        })
+                }
+            }
+        }
+        rule.waitForIdle()
+        val surface = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+        val before = surface.fetchSemanticsNode().boundsInRoot
+        val target = rule.onNodeWithTag("preview-bar-target", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val total = target.center.x - before.center.x
+        val step = total / 10f
+        surface.performTouchInput {
+            down(center)
+            advanceEventTime(780)
+            moveBy(Offset(step, 0f))
+            advanceEventTime(32)
+        }
+        rule.waitForIdle()
+        var last = surface.fetchSemanticsNode().boundsInRoot.center.x
+        repeat(9) { index ->
+            surface.performTouchInput { moveBy(Offset(step, 0f)); advanceEventTime(32) }
+            rule.waitForIdle()
+            val current = surface.fetchSemanticsNode().boundsInRoot.center.x
+            assertTrue("Bar reversed between frames $index: $last -> $current", current >= last - 5f)
+            assertTrue("Bar fell behind pointer on step ${index+1}: $current vs ${before.center.x + step*(index+2)}",
+                kotlin.math.abs(current - (before.center.x + step*(index+2))) <= 30f)
+            last = current
+        }
+        surface.performTouchInput { up() }
+    }
+
+    @Test fun dragMultipleSmallStepsShouldTrackPointerWithoutOscillations() {
+        val layout = ToolbarLayout(listOf(ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN)))))
+        fun bar(id: String) = ToolbarBar(id, id, layout,
+            geometry = ToolbarGeometry(dockEdge = ToolbarDockEdge.TOP,
+                dockAlignment = ToolbarDockAlignment.CENTER, widthDp = 150, heightDp = 60))
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(bar("main"), bar("moving"), bar("target"))))
+        rule.setContent {
+            MaterialTheme {
+                Box(Modifier.width(850.dp)) {
+                    ToolbarWorkspacePreview(workspace = workspace, look = ToolbarLook(),
+                        selectedId = "moving", colors = emptyList(), activeColorIndex = 0,
+                        pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Example",
+                        selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
+                        onMoveBar = { _, _ -> }, onReorderBar = { from, to ->
+                            workspace = workspace.reorderVisualBar(from, to)
+                        })
+                }
+            }
+        }
+        rule.waitForIdle()
+        val surface = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+        val before = surface.fetchSemanticsNode().boundsInRoot
+        val target = rule.onNodeWithTag("preview-bar-target", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val total = target.center - before.center
+        surface.performTouchInput {
+            down(center)
+            advanceEventTime(780)
+            repeat(16) {
+                moveBy(total / 16f)
+                advanceEventTime(24)
+            }
+        }
+        rule.waitForIdle()
+        val after = surface.fetchSemanticsNode().boundsInRoot
+        assertTrue("Repeated drag segments lost cursor: start=$before end=$after expected=$total",
+            kotlin.math.abs(after.center.x - before.center.x - total.x) <= 24f)
+        surface.performTouchInput { up() }
+    }
+
     @Test fun deferredWorkspaceCommitDoesNotFlashBarBackToOldSlot() {
         // A persistence callback may only publish the updated workspace on the next
         // recomposition or after an async preference write. The preview must render
