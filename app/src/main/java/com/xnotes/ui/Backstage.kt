@@ -231,7 +231,7 @@ fun Backstage(
         templateFromImage = onTemplateFromImage,
     )
     // The backstage is the root of the stack — ordinary base content, not a dialog. The activity
-    // window already runs edge-to-edge with the system bars hidden (MainActivity.applyFullscreen).
+    // window already runs edge-to-edge with the system bars hidden (EditorActivity.applyFullscreen).
     BackstageContent(editor, compact, view, onSelectView, calls, onExitApp, onImportCodeTheme, onImportFont, onBackup)
 }
 
