@@ -135,6 +135,8 @@
     <string name="toolbar_config_bar_and_appearance">Barra e aparência</string>
     <string name="toolbar_config_bar_details">Dados da barra</string>
     <string name="toolbar_config_bar_order">Ordem das barras</string>
-    <string name="toolbar_config_reorder_drag_hint">Selecione uma barra na prévia e segure a alça para reordenar as barras na mesma faixa.</string>
+    <string name="toolbar_config_reorder_drag_hint">Segure e arraste a barra na prévia para movê-la ou reordená-la na mesma faixa.</string>
     <string name="toolbar_config_reorder_handle">Arrastar para reordenar a barra nesta faixa</string>
+    <string name="toolbar_config_behavior">Comportamento</string>
+    <string name="toolbar_config_lane_and_alignment">Faixa e alinhamento</string>
 </resources>

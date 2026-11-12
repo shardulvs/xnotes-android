@@ -1340,6 +1340,8 @@
     <string name="toolbar_config_bar_and_appearance">Bar &amp; appearance</string>
     <string name="toolbar_config_bar_details">Bar details</string>
     <string name="toolbar_config_bar_order">Bar order</string>
-    <string name="toolbar_config_reorder_drag_hint">Select a bar in the preview and hold its grip to reorder bars in the same lane.</string>
+    <string name="toolbar_config_reorder_drag_hint">Hold and drag a bar in the preview to move it or reorder it within the same lane.</string>
     <string name="toolbar_config_reorder_handle">Drag to reorder toolbar in this lane</string>
+    <string name="toolbar_config_behavior">Behavior</string>
+    <string name="toolbar_config_lane_and_alignment">Lane &amp; alignment</string>
 </resources>
