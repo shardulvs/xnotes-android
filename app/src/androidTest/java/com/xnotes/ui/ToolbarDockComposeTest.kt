@@ -118,7 +118,7 @@ class ToolbarDockComposeTest {
                     barIndex = 0, barCount = 1, look = look,
                     onUpdateBar = { geometry = it(ToolbarBar("main", "Main", ToolbarLayout.DEFAULT, geometry = geometry)).geometry },
                     onConfigureDock = { next, nextLook -> geometry = next; look = nextLook },
-                    onReorder = {},
+
                 )
             }
         }
@@ -150,7 +150,7 @@ class ToolbarDockComposeTest {
                     barIndex = 1, barCount = 2, look = ToolbarLook(),
                     onUpdateBar = { geometry = it(ToolbarBar("nav", "Navigation", ToolbarLayout.DEFAULT, geometry = geometry)).geometry },
                     onConfigureDock = { next, _ -> geometry = next },
-                    onReorder = {},
+
                 )
             }
         }

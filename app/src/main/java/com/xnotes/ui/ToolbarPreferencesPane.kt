@@ -75,18 +75,6 @@ import kotlinx.coroutines.delay
 
 private enum class ToolbarPropertyTab { SETTINGS, ELEMENTS }
 
-@Composable
-private fun ToolbarInspectorCard(content: @Composable () -> Unit) {
-    val palette = LocalPalette.current
-    Column(
-        Modifier.fillMaxWidth()
-            .background(palette.panel.toComposeColor().copy(alpha = 0.55f), RoundedCornerShape(14.dp))
-            .border(1.dp, palette.border.toComposeColor().copy(alpha = 0.55f), RoundedCornerShape(14.dp))
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) { content() }
-}
-
 /** Dedicated toolbar editor, independent of the fork's general preferences. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -533,89 +521,16 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
                         )
                     }
                     if (toolbarPropertyTab == ToolbarPropertyTab.SETTINGS) {
-                        val selectedIndex = workspace.bars.indexOfFirst { it.id == currentBar.id }.coerceAtLeast(0)
-                        val selectedEdge = toolbarDockEdge(currentBar, selectedIndex, prefs.toolbarLook)
-                            ?: currentBar.geometry.anchor.floatingEdge()
-                        val isVertical = selectedEdge == com.xnotes.core.tools.ToolbarDockEdge.LEFT ||
-                            selectedEdge == com.xnotes.core.tools.ToolbarDockEdge.RIGHT
-                        // Identity is full-width and independent from all modifier controls.
-                        ToolbarInspectorCard {
-                            Text(stringResource(R.string.toolbar_config_bar_details),
-                                style = MaterialTheme.typography.titleSmall)
-                            androidx.compose.material3.OutlinedTextField(
-                                value = currentBar.name,
-                                onValueChange = { next ->
-                                    updateSelectedBar { it.copy(name = next.take(48)) }
-                                },
-                                label = { Text(stringResource(R.string.toolbar_name)) },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                        val details: @Composable () -> Unit = {
-                            ToolbarInspectorCard {
-                                ToolbarBarSettings(
-                                    currentBar = currentBar,
-                                    barIndex = selectedIndex,
-                                    barCount = workspace.bars.size,
-                                    look = prefs.toolbarLook,
-                                    onUpdateBar = { transform -> updateSelectedBar(transform) },
-                                    onConfigureDock = { geometry, nextLook -> configureDock(geometry, nextLook) },
-                                    onReorder = {}, // Reorder uses the existing preview move gesture.
-                                )
-                            }
-                        }
-                        val appearance: @Composable () -> Unit = {
-                            ToolbarInspectorCard {
-                                ToolbarAppearanceSettings(
-                                    geometry = currentBar.geometry,
-                                    vertical = isVertical,
-                                    onGeometryChange = { next -> configureDock(next) },
-                                    onScaleChange = { scale ->
-                                        val primary = currentBar.id == workspace.bars.first().id
-                                        val size = when (scale) {
-                                            com.xnotes.core.tools.ToolbarScale.COMPACT -> ToolbarSize.COMPACT
-                                            com.xnotes.core.tools.ToolbarScale.REGULAR -> ToolbarSize.REGULAR
-                                            com.xnotes.core.tools.ToolbarScale.COMFORTABLE -> ToolbarSize.COMFORTABLE
-                                        }
-                                        configureDock(currentBar.geometry.copy(scale = scale),
-                                            if (primary) prefs.toolbarLook.copy(size = size) else prefs.toolbarLook)
-                                    },
-                                )
-                                val isPrimaryDock = currentBar.id == workspace.bars.first().id &&
-                                    toolbarDockEdge(currentBar, 0, prefs.toolbarLook) != null
-                                val isSecondaryDock = currentBar.id != workspace.bars.first().id &&
-                                    currentBar.geometry.dockEdge != null && !currentBar.geometry.floating
-                                val floatingBar = !isPrimaryDock && !isSecondaryDock
-                                val dockPlan = toolbarDockPlan(workspace, prefs.toolbarLook,
-                                    screenConfiguration.screenWidthDp.dp, screenConfiguration.screenHeightDp.dp)
-                                val placement = if (floatingBar) toolbarFloatingPlan(
-                                    workspace, prefs.toolbarLook,
-                                    screenConfiguration.screenWidthDp.dp - dockPlan.leftInset.dp - dockPlan.rightInset.dp,
-                                    screenConfiguration.screenHeightDp.dp - dockPlan.topInset.dp - dockPlan.bottomInset.dp,
-                                    editor.toolbarColorCount).placement(currentBar.id)
-                                else dockPlan.placement(currentBar.id)
-                                if (placement != null && placement.lane != currentBar.geometry.dockLane) {
-                                    Text(toolbarStrings.getString(R.string.toolbar_config_redistributed_lane, placement.lane + 1),
-                                        color = palette.accent.toComposeColor(),
-                                        style = MaterialTheme.typography.bodySmall)
-                                }
-                            }
-                        }
-                        BoxWithConstraints(Modifier.fillMaxWidth()) {
-                            if (maxWidth >= 660.dp) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    verticalAlignment = Alignment.Top) {
-                                    Box(Modifier.weight(1f)) { details() }
-                                    Box(Modifier.weight(1f)) { appearance() }
-                                }
-                            } else {
-                                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                    details()
-                                    appearance()
-                                }
-                            }
-                        }
+                        ToolbarBarsInspector(
+                            workspace = workspace,
+                            selectedBar = currentBar,
+                            look = prefs.toolbarLook,
+                            screenWidth = screenConfiguration.screenWidthDp.dp,
+                            screenHeight = screenConfiguration.screenHeightDp.dp,
+                            colorCount = editor.toolbarColorCount,
+                            onUpdateBar = { updateSelectedBar(it) },
+                            onConfigureDock = { geometry, look -> configureDock(geometry, look) },
+                        )
                     }
                 }
             }

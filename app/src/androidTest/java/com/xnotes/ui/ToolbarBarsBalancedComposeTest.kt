@@ -37,7 +37,7 @@ class ToolbarBarsBalancedComposeTest {
                     Box(Modifier.weight(1f)) {
                         ToolbarBarSettings(currentBar = bar, barIndex = 1, barCount = 2,
                             look = ToolbarLook(floating = true), onUpdateBar = {},
-                            onConfigureDock = { _, _ -> }, onReorder = {})
+                            onConfigureDock = { _, _ -> })
                     }
                     Box(Modifier.weight(1f)) {
                         ToolbarAppearanceSettings(geometry = bar.geometry, vertical = false,
