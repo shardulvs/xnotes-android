@@ -203,10 +203,8 @@ private fun ToolbarItemView(
             val title = if (editor.state.document.displayName == null && editor.state.document.path == null)
                 stringResource(R.string.untitled) else editor.title
             if (LocalBar.current.vertical) VerticalToolbarTitle(title, onClick = onRename)
-            else Tooltip(stringResource(R.string.rename_note)) {
-                Label(title, modifier = Modifier.widthIn(max = 160.dp)
-                    .clip(MaterialTheme.shapes.extraSmall).clickable { onRename() })
-            }
+            else HorizontalToolbarTitle(title, onClick = onRename,
+                tooltip = stringResource(R.string.rename_note))
         }
         ToolbarItem.SIDEBAR ->
             ToolbarIcon(XnotesIcons.sidebar, stringResource(R.string.side_panel), active = editor.sidebarVisible, shortcut = Keys.SIDEBAR) { editor.toggleSidebar() }

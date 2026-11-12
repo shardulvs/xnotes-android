@@ -100,7 +100,7 @@ fun InfiniteToolbar(
                         val title = if (editor.document.displayName == null && editor.document.path == null)
                             stringResource(R.string.untitled) else editor.title
                         if (LocalBar.current.vertical) VerticalToolbarTitle(title)
-                        else Label(title, Modifier.padding(end = 4.dp))
+                        else HorizontalToolbarTitle(title)
                     }
 
                     in CANVAS_TOOL_OF -> {
