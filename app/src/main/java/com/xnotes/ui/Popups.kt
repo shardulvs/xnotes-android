@@ -724,7 +724,7 @@ fun ViewMenuPopup(editor: Editor, onDismiss: () -> Unit) {
     fun setScrollbar(v: Boolean) = apply(overrides.copy(scrollbar = v))
 
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
-        if (filtering) Column(Modifier.width(300.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
+        if (filtering) Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
             PopupBackLink("\u2039  " + stringResource(R.string.caption_pdf_filters)) { filtering = false }
             Spacer(Modifier.size(8.dp))
             FilterSlider(stringResource(R.string.filter_contrast), vs.contrast, 200, ::setContrast)
@@ -735,7 +735,7 @@ fun ViewMenuPopup(editor: Editor, onDismiss: () -> Unit) {
             FilterColorRow(stringResource(R.string.filter_multiply), vs.multiply, PdfColorFilter.MULTIPLY_OFF) { setMultiply(it) }
             FilterColorRow(stringResource(R.string.filter_screen), vs.screen, PdfColorFilter.SCREEN_OFF) { setScreen(it) }
             ToggleRow(stringResource(R.string.caption_keep_images), vs.keepImages) { setKeepImages(it) }
-        } else Column(Modifier.width(300.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
+        } else Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
             PopupTitle(stringResource(R.string.title_view))
             StyleCaption(stringResource(R.string.caption_viewing_mode))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
