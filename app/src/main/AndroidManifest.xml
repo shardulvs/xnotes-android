@@ -113,6 +113,39 @@
             </intent-filter>
         </activity-alias>
         <activity-alias
+            android:name=".IconSumi"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_sumi"
+            android:targetActivity=".EditorActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".IconPow"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_pow"
+            android:targetActivity=".EditorActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".IconMarbling"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_marbling"
+            android:targetActivity=".EditorActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
             android:name=".IconClassic"
             android:enabled="false"
             android:exported="true"

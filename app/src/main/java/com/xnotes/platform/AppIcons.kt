@@ -14,6 +14,9 @@ enum class AppIcon(val alias: String, @param:DrawableRes val icon: Int, @param:S
     CREAM_ROSE("com.xnotes.IconCreamRose", R.mipmap.ic_launcher_cream_rose, R.string.icon_cream_rose),
     INK_TILE("com.xnotes.IconInkTile", R.mipmap.ic_launcher_ink_tile, R.string.icon_ink_tile),
     GRAPHITE("com.xnotes.IconGraphite", R.mipmap.ic_launcher_graphite, R.string.icon_graphite),
+    SUMI("com.xnotes.IconSumi", R.mipmap.ic_launcher_sumi, R.string.icon_sumi),
+    POW("com.xnotes.IconPow", R.mipmap.ic_launcher_pow, R.string.icon_pow),
+    MARBLING("com.xnotes.IconMarbling", R.mipmap.ic_launcher_marbling, R.string.icon_marbling),
     CLASSIC("com.xnotes.IconClassic", R.mipmap.ic_launcher_classic, R.string.icon_classic),
 }
 

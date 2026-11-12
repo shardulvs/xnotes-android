@@ -825,6 +825,9 @@
     <string name="icon_cream_rose">Cream and rose</string>
     <string name="icon_ink_tile">Ink tile</string>
     <string name="icon_graphite">Graphite</string>
+    <string name="icon_sumi">Sumi</string>
+    <string name="icon_pow">Pow</string>
+    <string name="icon_marbling">Marbling</string>
     <string name="icon_classic">Classic</string>
 
     <!-- Text formatting -->
