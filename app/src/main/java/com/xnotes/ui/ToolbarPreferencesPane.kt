@@ -69,7 +69,7 @@ import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
 import kotlinx.coroutines.delay
 
-private enum class ToolbarPropertyTab { BARS, DIMENSIONS, ELEMENTS }
+private enum class ToolbarPropertyTab { SETTINGS, ELEMENTS }
 
 /** Dedicated toolbar editor, independent of the fork's general preferences. */
 @OptIn(ExperimentalLayoutApi::class)
@@ -97,7 +97,7 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
     val toolbarPropertiesScroll = rememberScrollState()
     val toolbarElementsScroll = rememberScrollState()
     var previewExpanded by remember { mutableStateOf(false) }
-    var toolbarPropertyTab by remember { mutableStateOf(ToolbarPropertyTab.BARS) }
+    var toolbarPropertyTab by remember { mutableStateOf(ToolbarPropertyTab.SETTINGS) }
     var colorControlsExpanded by remember { mutableStateOf(false) }
     var dockError by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(toolbarPropertyTab) { toolbarPropertiesScroll.scrollTo(0) }
@@ -454,7 +454,7 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
                     onSelectBar = { id ->
                         showBar(id)
                         selectedEntry = null
-                        toolbarPropertyTab = ToolbarPropertyTab.BARS
+                        toolbarPropertyTab = ToolbarPropertyTab.SETTINGS
                     },
                     onSelectEntry = { id, section, index ->
                         showBar(id)
@@ -467,6 +467,14 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
                             id, anchor,
                         )
                     },
+                    onReorderBar = { id, target ->
+                        val old = editedWorkspace()
+                        val updated = old.reorderVisualBar(id, target)
+                        if (updated != old) {
+                            editor.applyToolbarWorkspaces(editor.toolbarWorkspaces.updateWorkspace(editedContext()) { updated })
+                            selectedBarId = id
+                        }
+                    },
                 )
             }
             val propertyTabs: @Composable () -> Unit = {
@@ -475,13 +483,9 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Chip(toolbarStrings.getString(R.string.toolbar_config_bars), toolbarPropertyTab == ToolbarPropertyTab.BARS) {
+                    Chip(toolbarStrings.getString(R.string.toolbar_config_bar_and_appearance), toolbarPropertyTab == ToolbarPropertyTab.SETTINGS) {
                         selectedEntry = null
-                        toolbarPropertyTab = ToolbarPropertyTab.BARS
-                    }
-                    Chip(toolbarStrings.getString(R.string.toolbar_config_appearance), toolbarPropertyTab == ToolbarPropertyTab.DIMENSIONS) {
-                        selectedEntry = null
-                        toolbarPropertyTab = ToolbarPropertyTab.DIMENSIONS
+                        toolbarPropertyTab = ToolbarPropertyTab.SETTINGS
                     }
                     Chip(toolbarStrings.getString(R.string.toolbar_config_elements), toolbarPropertyTab == ToolbarPropertyTab.ELEMENTS) {
                         toolbarPropertyTab = ToolbarPropertyTab.ELEMENTS
@@ -492,7 +496,7 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
             val inspector: @Composable () -> Unit = {
                 Column(
                     Modifier.fillMaxWidth()
-                        .heightIn(max = if (toolbarPropertyTab == ToolbarPropertyTab.ELEMENTS) 380.dp else 500.dp)
+                        .heightIn(max = if (toolbarPropertyTab == ToolbarPropertyTab.ELEMENTS) 380.dp else 580.dp)
                         .onGloballyPositioned { viewport = it.boundsInRoot() }
                         .verticalScroll(if (toolbarPropertyTab == ToolbarPropertyTab.ELEMENTS)
                             toolbarElementsScroll else toolbarPropertiesScroll),
@@ -512,7 +516,30 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
                             onApplyLayout = { applyEdited(it) },
                         )
                     }
-                    if (toolbarPropertyTab == ToolbarPropertyTab.DIMENSIONS) {
+                    if (toolbarPropertyTab == ToolbarPropertyTab.SETTINGS) {
+                        val visualBars = workspace.bars.withIndex()
+                            .sortedWith(compareBy({ it.value.geometry.visualOrder ?: it.index }, { it.index }))
+                            .map { it.value }
+                        ToolbarBarSettings(
+                            currentBar = currentBar,
+                            barIndex = workspace.bars.indexOfFirst { it.id == currentBar.id },
+                            visualIndex = visualBars.indexOfFirst { it.id == currentBar.id },
+                            barCount = workspace.bars.size,
+                            look = prefs.toolbarLook,
+                            onUpdateBar = { transform -> updateSelectedBar(transform) },
+                            onConfigureDock = { geometry, look -> configureDock(geometry, look) },
+                            onReorder = { index ->
+                                val profiles = editor.toolbarWorkspaces
+                                val target = visualBars.getOrNull(index)
+                                if (target != null) {
+                                    val updated = editedWorkspace().reorderVisualBar(currentBar.id, target.id)
+                                    editor.applyToolbarWorkspaces(
+                                        profiles.updateWorkspace(editedContext()) { updated },
+                                    )
+                                }
+                            },
+                        )
+                        HorizontalDivider(Modifier.padding(vertical = 8.dp))
                         val selectedIndex = workspace.bars.indexOfFirst { it.id == currentBar.id }.coerceAtLeast(0)
                         val selectedEdge = toolbarDockEdge(currentBar, selectedIndex, prefs.toolbarLook)
                             ?: currentBar.geometry.anchor.floatingEdge()
@@ -530,23 +557,6 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
                                 }
                                 configureDock(currentBar.geometry.copy(scale = scale),
                                     if (primary) prefs.toolbarLook.copy(size = size) else prefs.toolbarLook)
-                            },
-                        )
-                    }
-                    if (toolbarPropertyTab == ToolbarPropertyTab.BARS) {
-                        ToolbarBarSettings(
-                            currentBar = currentBar,
-                            barIndex = workspace.bars.indexOfFirst { it.id == currentBar.id },
-                            barCount = workspace.bars.size,
-                            look = prefs.toolbarLook,
-                            onUpdateBar = { transform -> updateSelectedBar(transform) },
-                            onConfigureDock = { geometry, look -> configureDock(geometry, look) },
-                            onReorder = { index ->
-                                val profiles = editor.toolbarWorkspaces
-                                val updated = editedWorkspace().moveBar(currentBar.id, index)
-                                editor.applyToolbarWorkspaces(
-                                    profiles.updateWorkspace(editedContext()) { updated },
-                                )
                             },
                         )
                         val isPrimaryDock = currentBar.id == workspace.bars.first().id &&

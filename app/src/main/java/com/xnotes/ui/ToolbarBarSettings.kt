@@ -43,6 +43,7 @@ import com.xnotes.ui.theme.toComposeColor
 internal fun ToolbarBarSettings(
     currentBar: ToolbarBar,
     barIndex: Int,
+    visualIndex: Int = barIndex,
     barCount: Int,
     look: ToolbarLook,
     onUpdateBar: ((ToolbarBar) -> ToolbarBar) -> Unit,
@@ -54,6 +55,7 @@ internal fun ToolbarBarSettings(
     fun configureDock(geometry: ToolbarGeometry, nextLook: ToolbarLook = look) {
         onConfigureDock(geometry, nextLook)
     }
+    ToolbarSettingsLabel(stringResource(R.string.toolbar_config_bar_details))
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -68,26 +70,13 @@ internal fun ToolbarBarSettings(
         PreferenceChoiceChip(stringResource(R.string.toolbar_movable), currentBar.geometry.movable) {
             onUpdateBar { bar -> bar.copy(geometry = bar.geometry.copy(movable = !bar.geometry.movable)) }
         }
-    }
-    if (!isPrimary) {
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
+        if (!isPrimary) {
             PreferenceChoiceChip(stringResource(R.string.toolbar_visible), currentBar.visible) {
                 onUpdateBar { it.copy(visible = !it.visible) }
             }
-            if (barIndex > 1) {
-                TextButton(onClick = {
-                    onReorder(barIndex - 1)
-                }) { Text(stringResource(R.string.toolbar_move_up)) }
-            }
-            if (barIndex in 1 until barCount - 1) {
-                TextButton(onClick = {
-                    onReorder(barIndex + 1)
-                }) { Text(stringResource(R.string.toolbar_move_down)) }
-            }
         }
+    }
+    if (!isPrimary) {
         val secondaryDocked = currentBar.geometry.dockEdge != null && !currentBar.geometry.floating
         ToolbarSettingsLabel(toolbarStrings.getString(R.string.toolbar_config_placement))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -121,7 +110,7 @@ internal fun ToolbarBarSettings(
             )
         }
     } else {
-        ToolbarSettingsLabel(stringResource(R.string.toolbar_primary_appearance))
+        ToolbarSettingsLabel(stringResource(R.string.toolbar_config_placement))
         val floatingPrimary = toolbarDockEdge(currentBar, barIndex, look) == null
         val dockAnchor = when (currentBar.geometry.dockEdge?.toolbarPosition() ?: look.position) {
             ToolbarPosition.TOP -> ToolbarAnchor.TOP_CENTER
@@ -202,6 +191,22 @@ internal fun ToolbarBarSettings(
                         } else currentBar.geometry.anchor
                         configureDock(currentBar.geometry.copy(dockAlignment = align, anchor = anchor))
                     }
+                }
+            }
+        }
+    }
+    if (barCount > 1) {
+        ToolbarSettingsLabel(stringResource(R.string.toolbar_config_bar_order))
+        Text(stringResource(R.string.toolbar_config_reorder_drag_hint),
+            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+            color = LocalPalette.current.textDim.toComposeColor())
+        if (!isPrimary) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (visualIndex > 0) TextButton(onClick = { onReorder(visualIndex - 1) }) {
+                    Text(stringResource(R.string.toolbar_move_up))
+                }
+                if (visualIndex < barCount - 1) TextButton(onClick = { onReorder(visualIndex + 1) }) {
+                    Text(stringResource(R.string.toolbar_move_down))
                 }
             }
         }
