@@ -227,7 +227,9 @@ private fun PreviewBar(
         if (vertical) bar.geometry.heightDp else bar.geometry.widthDp)
     val autoLengthPinned = floating && bar.layout.hasPinnedRegions &&
         (if (vertical) bar.geometry.heightDp == null else bar.geometry.widthDp == null)
-    val shape = RoundedCornerShape(if (floating) 24.dp else 0.dp)
+    // Match the live ToolbarFrame shape, including the user's corner-style setting.
+    val shape = if (floating) androidx.compose.material3.MaterialTheme.shapes.extraLarge
+        else RoundedCornerShape(0.dp)
     val surface = Modifier
         .then(if (floating) Modifier.shadow(6.dp, shape) else Modifier)
         .clip(shape)

@@ -14,19 +14,17 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
+import androidx.compose.foundation.border
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.shape.RoundedCornerShape
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
 import androidx.compose.ui.Modifier
@@ -197,7 +195,7 @@ internal fun toolbarPinnedMiddleOffset(extent: Int, start: Int, middle: Int, end
  * horizontal and vertical follow exactly the same sizing policy.
  *
  * On a constrained bar the scrolling area is clipped, then Start/End are drawn on top,
- * with a small rounded, opaque seam and fade to mask tools moving under their edges.
+ * with a capsule-shaped fade in the same themed surface as the outer bar.
  */
 @Composable
 private fun PinnedToolbarSections(
@@ -211,7 +209,6 @@ private fun PinnedToolbarSections(
     val palette = LocalPalette.current
     val direction = LocalLayoutDirection.current
     val density = LocalDensity.current
-    val fadePx = with(density) { 10.dp.roundToPx() }
     val minPeekPx = with(density) { 24.dp.roundToPx() }
     val drawSections: @Composable (List<IndexedValue<ToolbarSection>>) -> Unit = { sections ->
         sections.forEachIndexed { visual, indexed ->
@@ -219,35 +216,47 @@ private fun PinnedToolbarSections(
             sectionContent(indexed.index, indexed.value)
         }
     }
+    // Pinned tools are integrated end caps of the *same* toolbar, not square floating cards.
+    // The capsule and its outline use the exact corner style of the parent ToolbarFrame.
+    // Draw the scroll seam just outside the cap, towards the middle; the parent bar clips
+    // it to its own silhouette. With no overflow, there is no extra surface or border.
+    val capShape = androidx.compose.material3.MaterialTheme.shapes.extraLarge
+    val fadePx = with(density) { 12.dp.toPx() }
     val pinnedGroup: @Composable (List<IndexedValue<ToolbarSection>>, Boolean) -> Unit = { sections, start ->
         val panel = palette.panel.toComposeColor()
-        val shape = RoundedCornerShape(7.dp)
-        val physicalStart = if (vertical) start else (start == (direction == LayoutDirection.Ltr))
-        val finish = if (showEdgeFinish) {
-            Modifier.drawWithContent {
-                drawContent()
-                val trailing = if (vertical) start else physicalStart
-                val from = if (trailing) (if (vertical) size.height else size.width) else -fadePx.toFloat()
-                val colors = if (trailing) listOf(panel, panel.copy(alpha = 0f))
-                    else listOf(panel.copy(alpha = 0f), panel)
-                drawRect(
-                    brush = if (vertical) Brush.verticalGradient(colors, startY = from, endY = from + fadePx)
-                        else Brush.horizontalGradient(colors, startX = from, endX = from + fadePx),
-                    topLeft = if (vertical) Offset(0f, from) else Offset(from, 0f),
-                    size = if (vertical) Size(size.width, fadePx.toFloat())
-                        else Size(fadePx.toFloat(), size.height),
-                )
-            }
+        val insideAtEnd = if (vertical) start else (start == (direction == LayoutDirection.Ltr))
+        val seam = if (showEdgeFinish) Modifier.drawWithContent {
+            drawContent()
+            val from = if (insideAtEnd) (if (vertical) size.height else size.width)
+                else -fadePx
+            val colors = if (insideAtEnd) listOf(panel, panel.copy(alpha = 0f))
+                else listOf(panel.copy(alpha = 0f), panel)
+            val gradient = if (vertical) Brush.verticalGradient(colors,
+                startY = from, endY = from + fadePx)
+            else Brush.horizontalGradient(colors, startX = from, endX = from + fadePx)
+            // Rounded fade, rather than the rectangular panel previously covering Center.
+            drawRoundRect(
+                brush = gradient,
+                topLeft = if (vertical) Offset(0f, from) else Offset(from, 0f),
+                size = if (vertical) Size(size.width, fadePx) else Size(fadePx, size.height),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(
+                    if (vertical) size.width / 2f else size.height / 2f),
+            )
         } else Modifier
-        val surface = if (showEdgeFinish) Modifier
-            .shadow(2.dp, shape).clip(shape).background(panel)
-            .border(0.5.dp, palette.border.toComposeColor(), shape)
+        val capSurface = if (showEdgeFinish) Modifier
+            .clip(capShape)
+            .background(panel)
+            .border(1.dp, palette.border.toComposeColor().copy(alpha = 0.7f), capShape)
         else Modifier
-        Box(finish) {
-            if (vertical) Column(surface, horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
-                drawSections(sections)
-            } else Row(surface, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                drawSections(sections)
+        Box(seam) {
+            if (vertical) {
+                Column(capSurface, horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                    drawSections(sections)
+                }
+            } else {
+                Row(capSurface, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    drawSections(sections)
+                }
             }
         }
     }
