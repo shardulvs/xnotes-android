@@ -47,9 +47,6 @@ class TextureCache(private val budgetBytes: Long = DEFAULT_BUDGET_BYTES) {
     var residentBytes: Long = 0
         private set
 
-    /** Images whose decode has been asked for and not yet arrived. */
-    val pendingCount: Int get() = decoding.size
-
     val textureCount: Int get() = entries.size
 
     /** A new context: every texture name is gone, so drop the lot rather than delete it. */
