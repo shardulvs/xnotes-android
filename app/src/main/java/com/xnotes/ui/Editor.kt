@@ -5335,6 +5335,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** Push a settings change into the canvas/caches; each View-menu feature reacts here. */
     private fun onViewSettingsChanged(prev: com.xnotes.canvas.ViewSettings, new: com.xnotes.canvas.ViewSettings) {
+        val beforeOrigin = state.origin()
         state.freeMovement = new.freeMovement
         if (prev.mode != new.mode || prev.rotation != new.rotation || prev.verticalScroll != new.verticalScroll) {
             // Re-group / re-orient / re-flow the pages, keep the reader on the same page, and
@@ -5357,12 +5358,20 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 state.goToPage(cur)
                 refreshView()
             }
-        } else if (prev.freeMovement != new.freeMovement && !new.verticalScroll && state.didInitialFit) {
-            if (new.freeMovement) {
-                state.fitWidthActive = false // free pinches never hold a fit
-                state.fitHeightActive = false
+        } else if (prev.freeMovement != new.freeMovement && state.didInitialFit) {
+            if (!new.verticalScroll) {
+                if (new.freeMovement) {
+                    state.fitWidthActive = false // free pinches never hold a fit
+                    state.fitHeightActive = false
+                }
+                state.goToPage(state.currentPageIndex()) // the page lands where the new rules put it
+            } else {
+                if (new.freeMovement) {
+                    state.scrollX = -beforeOrigin.x - state.flipOffsetX
+                    state.scrollY = -beforeOrigin.y - state.overscrollY
+                }
+                state.clampScroll()
             }
-            state.goToPage(state.currentPageIndex()) // the page lands where the new rules put it
             refreshView()
         }
         if (prev.rotation != new.rotation) {

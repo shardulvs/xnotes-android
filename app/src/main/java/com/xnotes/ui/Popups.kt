@@ -733,9 +733,7 @@ fun ViewMenuPopup(editor: Editor, onDismiss: () -> Unit) {
 
             Spacer(Modifier.size(10.dp))
             ToggleRow(stringResource(R.string.caption_vertical_scrolling), vs.verticalScroll) { setVerticalScroll(it) }
-            if (!vs.verticalScroll) {
-                ToggleRow(stringResource(R.string.caption_free_movement), vs.freeMovement) { setFreeMovement(it) }
-            }
+            ToggleRow(stringResource(R.string.caption_free_movement), vs.freeMovement) { setFreeMovement(it) }
 
             Spacer(Modifier.size(10.dp))
             StyleCaption(stringResource(R.string.caption_pdf_filters))

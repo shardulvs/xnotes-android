@@ -445,7 +445,7 @@ class CanvasState(
 
     /** When true, zoom is fixed (pinch pans only, zoom buttons/fit are no-ops). */
     var zoomLocked: Boolean = false
-    /** Paginated only: pages move up and down freely and pinches never snap to a fit (the View menu toggle). */
+    /** When true, pages move freely until any edge reaches the viewport centre (the View menu toggle). */
     var freeMovement: Boolean = false
 
     /**
@@ -731,6 +731,10 @@ class CanvasState(
         val rows = rowRanges()
         if (rows.isEmpty()) return false
         val rb = rowBounds(rows[currentRow.coerceIn(0, rows.lastIndex)])
+        if (freeMovement) {
+            val mid = clearCenter().x
+            return if (next) scrollX >= rb.right * zoom - mid - 1.0 else scrollX <= rb.left * zoom - mid + 1.0
+        }
         val minX = (rb.left - sideMargin) * zoom - insetLeft
         val maxX = (rb.right + sideMargin) * zoom - viewportW + insetRight
         if (maxX < minX) return true // the row fits: both edges at once
@@ -763,10 +767,11 @@ class CanvasState(
     fun origin(): Pt {
         val cw = contentW * zoom
         val ch = contentH * zoom
-        // Paginated: the row clamp centres the row when it fits, so the scroll always wins; the
-        // whole strip must never be centred (a spread or a taller page would push a page off centre).
-        val ox = (if (!verticalScroll || cw >= clearW) -scrollX else insetLeft + (clearW - cw) / 2.0) - flipOffsetX
-        val oy = (if (!verticalScroll || ch >= clearH) -scrollY else insetTop + (clearH - ch) / 2.0) - overscrollY
+        // Paginated (or free movement): the scroll always wins; the whole strip must never be
+        // force-centred (a spread or a taller page would push a page off centre, and free movement
+        // pans even when the content fits inside the viewport).
+        val ox = (if (!verticalScroll || freeMovement || cw >= clearW) -scrollX else insetLeft + (clearW - cw) / 2.0) - flipOffsetX
+        val oy = (if (!verticalScroll || freeMovement || ch >= clearH) -scrollY else insetTop + (clearH - ch) / 2.0) - overscrollY
         return Pt(ox, oy)
     }
 
@@ -783,11 +788,18 @@ class CanvasState(
     fun visibleContentRect(): Rect =
         Rect.fromPoints(viewportToContent(Pt(0.0, 0.0)), viewportToContent(Pt(viewportW.toDouble(), viewportH.toDouble())))
 
-    // A floating bar lets the scroll run past the content's edges by as much as it covers.
-    fun minScrollX(): Double = -insetLeft
-    fun minScrollY(): Double = -insetTop
-    fun maxScrollX(): Double = max(minScrollX(), ceil(contentW * zoom - viewportW + insetRight))
-    fun maxScrollY(): Double = max(minScrollY(), ceil(contentH * zoom - viewportH + insetBottom))
+    // A floating bar lets the scroll run past the content's edges by as much as it covers;
+    // free movement lets any page edge reach the middle of the clear area.
+    fun minScrollX(): Double =
+        if (freeMovement && pageRects.isNotEmpty()) sideMargin * zoom - clearCenter().x else -insetLeft
+    fun minScrollY(): Double =
+        if (freeMovement && pageRects.isNotEmpty()) vertMargin * zoom - clearCenter().y else -insetTop
+    fun maxScrollX(): Double =
+        if (freeMovement && pageRects.isNotEmpty()) max(minScrollX(), (contentW - sideMargin) * zoom - clearCenter().x)
+        else max(minScrollX(), ceil(contentW * zoom - viewportW + insetRight))
+    fun maxScrollY(): Double =
+        if (freeMovement && pageRects.isNotEmpty()) max(minScrollY(), (contentH - vertMargin) * zoom - clearCenter().y)
+        else max(minScrollY(), ceil(contentH * zoom - viewportH + insetBottom))
 
     fun clampScroll() {
         if (!verticalScroll && pageRects.isNotEmpty()) {
@@ -807,18 +819,21 @@ class CanvasState(
         val rows = rowRanges()
         if (rows.isEmpty()) return Pt(sx, sy)
         val rb = rowBounds(rows[rowIndex.coerceIn(0, rows.lastIndex)])
-        val minX = (rb.left - sideMargin) * zoom - insetLeft
-        val maxX = (rb.right + sideMargin) * zoom - viewportW + insetRight
-        val cx = if (maxX < minX) (minX + maxX) / 2.0 else sx.coerceIn(minX, maxX)
         if (!freeMovement) {
+            val minX = (rb.left - sideMargin) * zoom - insetLeft
+            val maxX = (rb.right + sideMargin) * zoom - viewportW + insetRight
+            val cx = if (maxX < minX) (minX + maxX) / 2.0 else sx.coerceIn(minX, maxX)
             // A page that fits sits centred and can't move, and a tall one stops at its margins.
             val minY = (rb.top - vertMargin) * zoom - insetTop
             val maxY = (rb.bottom + vertMargin) * zoom - viewportH + insetBottom
             return Pt(cx, if (maxY < minY) (minY + maxY) / 2.0 else sy.coerceIn(minY, maxY))
         }
-        // Free movement: a page moves until its top or bottom edge reaches the middle of the clear area.
-        val mid = clearCenter().y
-        return Pt(cx, sy.coerceIn(rb.top * zoom - mid, rb.bottom * zoom - mid))
+        // Free movement: a page moves until its edges reach the middle of the clear area.
+        val mid = clearCenter()
+        return Pt(
+            sx.coerceIn(rb.left * zoom - mid.x, rb.right * zoom - mid.x),
+            sy.coerceIn(rb.top * zoom - mid.y, rb.bottom * zoom - mid.y),
+        )
     }
 
     fun scrollBy(dx: Double, dy: Double) {
@@ -956,8 +971,12 @@ class CanvasState(
         val top = row.minOf { pageRects[it].top }
         val centerX = (row.minOf { pageRects[it].left } + row.maxOf { pageRects[it].right }) / 2.0
         // Scroll so the page top clears the toolbar with a small gap, so no part of the
-        // page is hidden behind the chrome.
-        scrollY = (top * zoom - TOP_GAP - insetTop).coerceAtLeast(-insetTop)
+        // page is hidden behind the chrome (or centre when the whole document fits vertically).
+        scrollY = if (freeMovement && contentH * zoom < clearH) {
+            (contentH / 2.0) * zoom - clearCenter().y
+        } else {
+            (top * zoom - TOP_GAP - insetTop).coerceAtLeast(-insetTop)
+        }
         scrollX = centerX * zoom - clearCenter().x
         clampScroll()
     }
@@ -1154,7 +1173,7 @@ class CanvasState(
         val center = clearCenter()
         val centerContentY = viewportToContent(center).y
         zoom = fitWidthZoom()
-        scrollX = minScrollX()
+        scrollX = if (verticalScroll) (contentW / 2.0) * zoom - center.x else rowTargetScroll(currentRow).x
         scrollY = centerContentY * zoom - center.y
         invalidateCachesForZoom()
         clampScroll()
@@ -2046,8 +2065,8 @@ class CanvasState(
     internal fun originFor(sx: Double, sy: Double, z: Double): Pt {
         val cw = contentW * z
         val ch = contentH * z
-        val ox = if (!verticalScroll || cw >= clearW) -sx else insetLeft + (clearW - cw) / 2.0
-        val oy = if (!verticalScroll || ch >= clearH) -sy else insetTop + (clearH - ch) / 2.0
+        val ox = if (!verticalScroll || freeMovement || cw >= clearW) -sx else insetLeft + (clearW - cw) / 2.0
+        val oy = if (!verticalScroll || freeMovement || ch >= clearH) -sy else insetTop + (clearH - ch) / 2.0
         return Pt(ox, oy)
     }
 
