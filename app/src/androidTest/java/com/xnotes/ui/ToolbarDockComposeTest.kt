@@ -210,7 +210,7 @@ class ToolbarDockComposeTest {
         rule.setContent {
             MaterialTheme {
                 CompositionLocalProvider(LocalToolbarLook provides look) {
-                    Box(Modifier.size(680.dp, 500.dp)) {
+                    Box(Modifier.size(680.dp, 500.dp).testTag("sizing-stage")) {
                         ToolbarFrame(armed = null, layout = ToolbarLayout.DEFAULT,
                             geometry = geometry) { Text("Actual toolbar") }
                     }
@@ -227,6 +227,14 @@ class ToolbarDockComposeTest {
         rule.waitForIdle()
         val vertical = rule.onNodeWithTag("toolbar-frame").getUnclippedBoundsInRoot()
         assertTrue("vertical depth: ${vertical.right - vertical.left}", (vertical.right - vertical.left).value in 65f..85f)
-        assertTrue("vertical length: ${vertical.bottom - vertical.top}", (vertical.bottom - vertical.top).value in 420f..440f)
+        // On a short device (e.g. 1600x720 at 320 dpi = 360dp high), Compose
+        // correctly clamps the requested 430dp length to the stage's measured height.
+        // Comparing against an unconditional 430dp would flag correct clipping as a bug.
+        val stage = rule.onNodeWithTag("sizing-stage").getUnclippedBoundsInRoot()
+        val availableHeight = (stage.bottom - stage.top).value
+        val expectedLength = minOf(430f, availableHeight)
+        assertTrue("vertical length: ${vertical.bottom - vertical.top} expected $expectedLength",
+            kotlin.math.abs((vertical.bottom - vertical.top).value - expectedLength) < 2f)
+        assertTrue("vertical exceeds stage: $vertical vs $stage", vertical.bottom <= stage.bottom + 1.dp)
     }
 }
