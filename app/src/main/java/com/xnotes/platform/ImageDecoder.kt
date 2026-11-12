@@ -75,15 +75,7 @@ object ImageDecoder {
         return scaled
     }
 
-    /**
-     * The image at [path] for a [maxWidth]×[maxHeight] box, served from a cache so a picture can be
-     * drawn every frame. A lifted (selected) picture on a page repaints on the UI thread each frame
-     * of a drag, and decoding a phone photo from disk that often is what made the drag crawl. A
-     * raster is kept at its sample step rather than scaled to the box, so it may be up to twice the
-     * box on each side (callers scale into place) and nearby box sizes share one bitmap: a resize
-     * or a zoom only decodes again when the step changes. An SVG takes [decodeSampledFile]'s own
-     * cached route. The bitmap is shared, so callers must never recycle or draw into it.
-     */
+    /** [decodeSampledFile] from the cache, kept at its sample step (up to twice the box); never recycle it. */
     fun cachedSampledFile(path: String, maxWidth: Int, maxHeight: Int): Bitmap? {
         val mw = maxWidth.coerceAtLeast(1)
         val mh = maxHeight.coerceAtLeast(1)
@@ -329,8 +321,7 @@ object ImageDecoder {
         return if (o.outWidth > 0 && o.outHeight > 0) ImageSize(o.outWidth, o.outHeight) else null
     }
 
-    // Memoized like [isVector]: even a bounds-only decode opens the file, and a cache hit in
-    // [cachedSampledFile] must not touch the disk at all.
+    // Memoized like [isVector], so a cache hit in [cachedSampledFile] never touches the disk.
     private fun rasterSize(path: String): ImageSize? =
         rasterSizes.get(path) ?: probeRaster(path)?.also { rasterSizes.put(path, it) }
 
@@ -436,10 +427,7 @@ object ImageDecoder {
     private const val HW_WORTH_MS_PER_MPX = 6.0
 }
 
-/**
- * Largest power-of-two sample step that keeps the decoded size at or above the requested box.
- * Kept outside [ImageDecoder] so it runs on the JVM without Android's caches behind it.
- */
+/** Largest power-of-two sample step that keeps the decode at or above the box; top level for JVM tests. */
 internal fun sampleSize(w: Int, h: Int, reqW: Int, reqH: Int): Int {
     var ss = 1
     while (w / (ss * 2) >= reqW && h / (ss * 2) >= reqH) ss *= 2

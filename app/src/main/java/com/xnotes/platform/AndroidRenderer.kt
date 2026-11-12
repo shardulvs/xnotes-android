@@ -320,8 +320,7 @@ class AndroidRenderer(private val canvas: Canvas) : Renderer {
     }
 
     // Decode the source only to the destination's device-pixel size (capped, never upscaled past the
-    // source) so a huge photo never fully decodes, and from the decoder's cache, because a lifted
-    // picture lands here every frame of a drag; the free angle, the mirror and the quarter turn
+    // source) so a huge photo never fully decodes; the free angle, the mirror and the quarter turn
     // all apply about the destination centre, the rect already carrying the quarter-turned
     // (w/h-swapped) box.
     override fun drawImage(image: ImageData, dest: Rect, orientation: Int, angle: Double, flip: Flip, part: Rect?) {
@@ -337,6 +336,7 @@ class AndroidRenderer(private val canvas: Canvas) : Renderer {
         val ph = p?.h ?: 1.0
         val reqW = ((if (turned) devH else devW) / pw).toInt().coerceIn(1, DECODE_CAP_PX)
         val reqH = ((if (turned) devW else devH) / ph).toInt().coerceIn(1, DECODE_CAP_PX)
+        // Cached, since a lifted picture lands here every frame of a drag.
         val bmp = ImageDecoder.cachedSampledFile(image.file.path, reqW, reqH) ?: return
         val uw = (if (turned) dest.h else dest.w).toFloat()
         val uh = (if (turned) dest.w else dest.h).toFloat()
