@@ -169,6 +169,11 @@ class CanvasTextBenchmarkTest : InstrumentationTestCase() {
                     SystemClock.sleep(10)
                 }
                 elapsed[i] = SystemClock.elapsedRealtimeNanos() - start
+                // Separate CPU meshing time from GL scheduling and first-frame warmup.
+                val cpuMs = editor.view.stats.lastTessellateMs
+                Log.i("PR428_BENCH", "handoff/sample=" + i +
+                    " elapsed_ms=" + elapsed[i] / 1e6 +
+                    " commit_ms=" + commit[i] / 1e6 + " recent_mesh_ms=" + cpuMs)
             }
             fun report(name: String, values: LongArray) {
                 val sorted = values.sorted()
