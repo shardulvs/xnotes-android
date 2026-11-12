@@ -119,6 +119,60 @@ class ToolbarTitleAndPreviewReorderComposeTest {
         }
     }
 
+    @Test fun movingAcrossEmptyPreviewSpaceKeepsLastReorderCandidateStable() {
+        val layout = ToolbarLayout(listOf(ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN)))))
+        fun bar(id: String) = ToolbarBar(id, id, layout,
+            geometry = ToolbarGeometry(dockEdge = ToolbarDockEdge.TOP,
+                dockAlignment = ToolbarDockAlignment.CENTER, widthDp = 150, heightDp = 60))
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(bar("main"), bar("moving"), bar("target"))))
+        rule.setContent {
+            MaterialTheme {
+                Box(Modifier.width(850.dp)) {
+                    ToolbarWorkspacePreview(workspace = workspace, look = ToolbarLook(),
+                        selectedId = "moving", colors = emptyList(), activeColorIndex = 0,
+                        pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
+                        selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
+                        onMoveBar = { _, _ -> }, onReorderBar = { id, other ->
+                            workspace = workspace.reorderVisualBar(id, other)
+                        })
+                }
+            }
+        }
+        rule.waitForIdle()
+        val source = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+        val target = rule.onNodeWithTag("preview-bar-target", useUnmergedTree = true)
+        val initialSource = source.fetchSemanticsNode().boundsInRoot.center
+        val dragToTarget = target.fetchSemanticsNode().boundsInRoot.center - initialSource
+        source.performTouchInput {
+            down(center)
+            advanceEventTime(780)
+            moveBy(dragToTarget)
+            advanceEventTime(48)
+        }
+        rule.waitForIdle()
+        val highlighted = rule.onNodeWithTag("preview-reorder-target-target", useUnmergedTree = true)
+        highlighted.assertExists()
+        val targetX = target.fetchSemanticsNode().boundsInRoot.center.x
+        // Cross a region which contains no candidate; only peers should move and
+        // their prospective slot must not spring back to the original order.
+        source.performTouchInput { moveBy(Offset(0f, 160f)); advanceEventTime(48) }
+        rule.waitForIdle()
+        highlighted.assertExists()
+        val afterGapX = target.fetchSemanticsNode().boundsInRoot.center.x
+        assertTrue("Peer returned toward old slot while pointer crossed an empty region: $targetX -> $afterGapX",
+            kotlin.math.abs(afterGapX - targetX) < 5f)
+        val sourceGap = source.fetchSemanticsNode().boundsInRoot.center
+        assertTrue("Dragged source changed its horizontal position while moving vertically",
+            kotlin.math.abs(sourceGap.x - initialSource.x - dragToTarget.x) < 10f)
+        // Return to the target and commit using the original frozen hit-box.
+        source.performTouchInput { moveBy(Offset(0f, -160f)); advanceEventTime(48); up() }
+        rule.waitForIdle()
+        rule.runOnIdle {
+            assertEquals(listOf("main", "target", "moving"),
+                workspace.bars.sortedBy { it.geometry.visualOrder }.map { it.id })
+        }
+    }
+
     @Test fun incrementalDragEachFrameNeverReturnsToPriorPosition() {
         val layout = ToolbarLayout(listOf(ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN)))))
         fun bar(id: String) = ToolbarBar(id, id, layout,
@@ -349,8 +403,25 @@ class ToolbarTitleAndPreviewReorderComposeTest {
             advanceEventTime(750)
             val delta = b.center - Offset(a.center.x, a.top + 4f)
             repeat(12) { moveBy(delta / 12f); advanceEventTime(16) }
-            up()
         }
+        rule.waitForIdle()
+        val candidate = rule.onNodeWithTag("preview-reorder-target-third", useUnmergedTree = true)
+        candidate.assertExists()
+        // The previous implementation reset the temporary order in empty space.
+        // That made the floating peers bounce back and forward during a gesture.
+        val peer = rule.onNodeWithTag("preview-bar-third", useUnmergedTree = true)
+        val previewX = peer.fetchSemanticsNode().boundsInRoot.center.x
+        repeat(2) {
+            barSurface.performTouchInput { moveBy(Offset(0f, 145f)); advanceEventTime(48) }
+            rule.waitForIdle()
+            candidate.assertExists()
+            assertTrue("Floating peer jumped back to its initial position",
+                kotlin.math.abs(peer.fetchSemanticsNode().boundsInRoot.center.x - previewX) < 5f)
+            barSurface.performTouchInput { moveBy(Offset(0f, -145f)); advanceEventTime(48) }
+            rule.waitForIdle()
+            candidate.assertExists()
+        }
+        barSurface.performTouchInput { up() }
         rule.waitForIdle()
         rule.runOnIdle {
             assertEquals("second" to "third", completed)

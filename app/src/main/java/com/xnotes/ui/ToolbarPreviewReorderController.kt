@@ -67,7 +67,16 @@ internal class ToolbarPreviewReorderController {
 
     fun hover(id: String, rootPointer: Offset) {
         if (sourceId != id) return
-        targetId = toolbarPreviewReorderHit(id, peers, rootPointer, initialBounds, vertical)
+        val candidate = toolbarPreviewReorderHit(id, peers, rootPointer, initialBounds, vertical)
+        if (candidate != null) {
+            // Reaching another peer updates the prospective order.
+            targetId = candidate
+        } else if (initialBounds[id]?.contains(rootPointer) == true) {
+            // Returning over the source deliberately cancels the preview.
+            targetId = null
+        }
+        // Empty space does not mean "restore old order". Keep the previous target
+        // stable while the pointer passes between bars or over the preview canvas.
     }
 
     fun drop(id: String, rootPointer: Offset, commit: (String, String) -> Unit): Boolean {

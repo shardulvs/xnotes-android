@@ -43,6 +43,22 @@ class ToolbarPreviewReorderControllerTest {
         assertNull(state.lastReleasedId)
     }
 
+    @Test fun hoveringThroughGapsDoesNotUndoThePreviewReorder() {
+        val state = ToolbarPreviewReorderController()
+        initial.forEach { (id, bounds) -> state.updateBounds(id, bounds) }
+        state.start("middle", initial.keys.toList(), verticalAxis = false, workspace = workspace)
+        state.hover("middle", Offset(260f, 20f))
+        assertEquals("right", state.targetId)
+        // Crossing empty preview space must not temporarily restore the old order.
+        state.hover("middle", Offset(350f, 110f))
+        assertEquals("right", state.targetId)
+        state.hover("middle", Offset(270f, 20f))
+        assertEquals("right", state.targetId)
+        // Returning over the original source deliberately cancels the preview.
+        state.hover("middle", Offset(160f, 20f))
+        assertNull(state.targetId)
+    }
+
     @Test fun invalidDropAndCancellationDoNotCommit() {
         val state = ToolbarPreviewReorderController()
         initial.forEach { (id, rect) -> state.updateBounds(id, rect) }
