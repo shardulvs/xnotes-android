@@ -92,6 +92,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.IntentCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.lifecycleScope
 import com.xnotes.R
 import com.xnotes.canvas.StylusButtonLatch
 import com.xnotes.ui.Editor
@@ -163,6 +164,22 @@ class EditorActivity : ComponentActivity() {
         // or from Recents after the process died or the app was updated; it was handled the first time.
         val rebuilt = savedInstanceState != null || (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
         if (!rebuilt) pendingImport = importUri(intent)
+        // An editor that a destroyed activity left behind may still be saving. This activity's is
+        // built once that is done; on a cold start nothing is pending and the content is set at once.
+        lifecycleScope.launch {
+            com.xnotes.ui.RetiredEditors.inProcess.await()
+            compose()
+        }
+        val content = findViewById<View>(android.R.id.content)
+        content.viewTreeObserver.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                if (launched) content.viewTreeObserver.removeOnPreDrawListener(this)
+                return launched
+            }
+        })
+    }
+
+    private fun compose() {
         setContent {
             val context = LocalContext.current
             val ed = remember { Editor(context).also { editor = it } }
@@ -191,13 +208,6 @@ class EditorActivity : ComponentActivity() {
                 }
             }
         }
-        val content = findViewById<View>(android.R.id.content)
-        content.viewTreeObserver.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
-            override fun onPreDraw(): Boolean {
-                if (launched) content.viewTreeObserver.removeOnPreDrawListener(this)
-                return launched
-            }
-        })
     }
 
     // Stylus side-button keys (Bluetooth/USI pens report the button only this way) are caught here,
@@ -266,6 +276,11 @@ class EditorActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         editor?.persist()
+    }
+
+    override fun onDestroy() {
+        editor?.retire() // the next activity waits for the saves this one began on pause
+        super.onDestroy()
     }
 
     // Playback never goes on with xnotes off screen; a split window that only lost focus is still on it.
