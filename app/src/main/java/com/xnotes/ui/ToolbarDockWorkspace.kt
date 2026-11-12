@@ -116,7 +116,11 @@ internal fun toolbarDockPlan(
     // the original length. The real renderer is constrained by the same placement box.
     // Cap both axes before the reservation pass: an oversized top bar must not be
     // rejected here and then incorrectly leave its space available to a side bar.
-    val safeDepthRequests = requests.map { request ->
+    val order = workspace.bars.withIndex().associate { it.value.id to
+        (it.value.geometry.visualOrder ?: it.index) }
+    val orderedRequests = requests.sortedWith(compareBy({ order.getValue(it.id) },
+        { workspace.bars.indexOfFirst { bar -> bar.id == it.id } }))
+    val safeDepthRequests = orderedRequests.map { request ->
         val vertical = request.edge == ToolbarDockEdge.LEFT || request.edge == ToolbarDockEdge.RIGHT
         request.copy(depth = request.depth.coerceAtMost(toolbarSafeDockDepth(
             if (vertical) windowWidth.value else windowHeight.value)))
@@ -242,10 +246,15 @@ internal fun toolbarFloatingPlan(
             alignment = toolbarFloatingAlignment(bar), length = length, depth = depth,
         ))
     }
+    // Primary-bar identity is list-based; layout order is separate and configurable.
+    val order = workspace.bars.withIndex().associate { it.value.id to
+        (it.value.geometry.visualOrder ?: it.index) }
+    val orderedRequests = requests.sortedWith(compareBy({ order.getValue(it.id) },
+        { workspace.bars.indexOfFirst { bar -> bar.id == it.id } }))
     // Floating regions must also adapt BOTH dimensions when the viewport shrinks.
     // Their saved preferred sizes remain intact, but the allocated rectangles must fit
     // the current screen and other floating bars, just like docked placement does.
-    val safeRequests = requests.map { request ->
+    val safeRequests = orderedRequests.map { request ->
         val vertical = request.edge == ToolbarDockEdge.LEFT || request.edge == ToolbarDockEdge.RIGHT
         request.copy(
             length = request.length.coerceAtMost(if (vertical) height else width),

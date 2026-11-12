@@ -132,4 +132,9 @@
     <string name="toolbar_pin_start">Fixar início</string>
     <string name="toolbar_pin_end">Fixar fim</string>
     <string name="toolbar_pin_regions_hint">As regiões fixas permanecem visíveis nas extremidades enquanto as outras ferramentas rolam no centro. Evite colocar ferramentas demais nas regiões fixas.</string>
+    <string name="toolbar_config_bar_and_appearance">Barra e aparência</string>
+    <string name="toolbar_config_bar_details">Dados da barra</string>
+    <string name="toolbar_config_bar_order">Ordem das barras</string>
+    <string name="toolbar_config_reorder_drag_hint">Selecione uma barra na prévia e segure a alça para reordenar as barras na mesma faixa.</string>
+    <string name="toolbar_config_reorder_handle">Arrastar para reordenar a barra nesta faixa</string>
 </resources>

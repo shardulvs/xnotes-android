@@ -1,9 +1,11 @@
 package com.xnotes.ui
 
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -19,29 +21,41 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.xnotes.R
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.core.model.Rgba
@@ -95,21 +109,44 @@ internal fun ToolbarWorkspacePreview(
     onSelectEntry: (String, Int, Int) -> Unit,
     selectedEntry: Pair<Int, Int>?,
     onMoveBar: (String, ToolbarAnchor) -> Unit,
+    /** Optional only in the editor, never in read-only workspace thumbnails. */
+    onReorderBar: ((String, String) -> Unit)? = null,
 ) {
     val palette = LocalPalette.current
+    val reorderHandleLabel = stringResource(R.string.toolbar_config_reorder_handle)
     val configuration = LocalConfiguration.current
     val screenWidth = configuration.screenWidthDp.dp
     val screenHeight = configuration.screenHeightDp.dp
     val screenDensity = LocalDensity.current
     var stageBounds by remember { mutableStateOf(Rect.Zero) }
-    // Exactly the same screen-space dock plan as the real note and canvas.
-    val dockPlan = toolbarDockPlan(workspace, look, screenWidth, screenHeight)
+    val barBounds = remember { mutableStateMapOf<String, Rect>() }
+    val gripBounds = remember { mutableStateMapOf<String, Rect>() }
+    var reorderSource by remember { mutableStateOf<String?>(null) }
+    var reorderTarget by remember { mutableStateOf<String?>(null) }
+    var reorderFinger by remember { mutableStateOf(Offset.Zero) }
+    var frozenBounds by remember { mutableStateOf<Map<String, Rect>>(emptyMap()) }
+    var frozenPeers by remember { mutableStateOf<List<String>>(emptyList()) }
+    var dragVertical by remember { mutableStateOf(false) }
+    val commitReorder by rememberUpdatedState(onReorderBar)
+    // Preview the *actual* new order without changing the stored workspace until drop.
+    val displayedWorkspace = if (reorderSource != null && reorderTarget != null)
+        workspace.reorderVisualBar(reorderSource!!, reorderTarget!!) else workspace
+    val dockPlan = toolbarDockPlan(displayedWorkspace, look, screenWidth, screenHeight)
     val floatingPlan = toolbarFloatingPlan(
-        workspace, look,
+        displayedWorkspace, look,
         screenWidth - dockPlan.leftInset.dp - dockPlan.rightInset.dp,
         screenHeight - dockPlan.topInset.dp - dockPlan.bottomInset.dp,
         colors.size,
     )
+    // Keep candidate lanes based on the original layout while the animated preview moves.
+    // Compute once per preview, rather than running both planners for every bar.
+    val baseDockPlan = if (displayedWorkspace == workspace) dockPlan
+        else toolbarDockPlan(workspace, look, screenWidth, screenHeight)
+    val baseFloatingPlan = if (displayedWorkspace == workspace) floatingPlan
+        else toolbarFloatingPlan(workspace, look,
+            screenWidth - baseDockPlan.leftInset.dp - baseDockPlan.rightInset.dp,
+            screenHeight - baseDockPlan.topInset.dp - baseDockPlan.bottomInset.dp,
+            colors.size)
     BoxWithConstraints(
         Modifier
             .fillMaxWidth()
@@ -163,8 +200,19 @@ internal fun ToolbarWorkspacePreview(
                     placement.edge == com.xnotes.core.tools.ToolbarDockEdge.RIGHT
                 val x = placement.x + if (floating) dockPlan.leftInset else 0f
                 val y = placement.y + if (floating) dockPlan.topInset else 0f
-                val positionModifier = Modifier.offset(x = x.dp, y = y.dp)
+                val smoothX by animateDpAsState(x.dp, label = "barReorderX-${bar.id}")
+                val smoothY by animateDpAsState(y.dp, label = "barReorderY-${bar.id}")
+                val positionModifier = Modifier.offset(x = smoothX, y = smoothY)
                     .width(placement.width.dp).height(placement.height.dp)
+                    .testTag("preview-bar-${bar.id}")
+                    .zIndex(if (reorderSource == bar.id) 2f else if (reorderTarget == bar.id) 1f else 0f)
+                    .onGloballyPositioned { coordinates ->
+                        val bounds = coordinates.boundsInRoot()
+                        if (barBounds[bar.id] != bounds) barBounds[bar.id] = bounds
+                    }
+                val peers = if (onReorderBar != null) toolbarPreviewReorderPeers(
+                    workspace, look, bar.id, baseDockPlan, baseFloatingPlan)
+                    else emptyList()
                 Box(positionModifier, contentAlignment = Alignment.Center) {
                     ToolbarDragSurface(
                         id = bar.id,
@@ -195,6 +243,82 @@ internal fun ToolbarWorkspacePreview(
                             onSelectEntry = { section, entry -> onSelectEntry(bar.id, section, entry) },
                             selectedEntry = if (bar.id == selectedId) selectedEntry else null,
                         )
+                    }
+                    if (reorderTarget == bar.id) {
+                        // The destination placeholder moves with the live rearranged toolbar.
+                        Box(Modifier.matchParentSize().border(2.dp,
+                            palette.accent.toComposeColor(), RoundedCornerShape(8.dp))
+                            .testTag("preview-reorder-target-${bar.id}"))
+                    }
+                    if (bar.id == selectedId && peers.size > 1 && onReorderBar != null) {
+                        val handle = Modifier.align(Alignment.TopEnd)
+                            // The whole preview is scaled; keep the drag affordance touchable.
+                            .requiredSize((30f / scale).dp)
+                            .onGloballyPositioned { coordinates ->
+                                gripBounds[bar.id] = coordinates.boundsInRoot()
+                            }
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(palette.panel.toComposeColor())
+                            .border(1.dp, palette.accent.toComposeColor(), RoundedCornerShape(9.dp))
+                            .testTag("preview-reorder-handle-${bar.id}")
+                            .semantics { contentDescription = reorderHandleLabel }
+                            .pointerInput(bar.id, peers) {
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = { finger ->
+                                        reorderSource = bar.id
+                                        reorderTarget = null
+                                        frozenBounds = barBounds.toMap()
+                                        frozenPeers = peers
+                                        dragVertical = vertical
+                                        reorderFinger = (gripBounds[bar.id]?.topLeft ?: Offset.Zero) + finger
+                                    },
+                                    onDrag = { change, displacement ->
+                                        change.consume()
+                                        reorderFinger += displacement
+                                        reorderTarget = toolbarPreviewReorderHit(
+                                            bar.id, frozenPeers, reorderFinger, frozenBounds,
+                                            dragVertical,
+                                        )
+                                    },
+                                    onDragEnd = {
+                                        val from = reorderSource
+                                        val to = reorderTarget
+                                        if (from != null && to != null && to in frozenPeers)
+                                            commitReorder?.invoke(from, to)
+                                        reorderSource = null
+                                        reorderTarget = null
+                                        frozenBounds = emptyMap()
+                                    },
+                                    onDragCancel = {
+                                        reorderSource = null
+                                        reorderTarget = null
+                                        frozenBounds = emptyMap()
+                                    },
+                                )
+                            }
+                        Box(handle, contentAlignment = Alignment.Center) {
+                            Text("≡", color = palette.accent.toComposeColor(),
+                                style = androidx.compose.material3.MaterialTheme.typography.titleSmall)
+                        }
+                    }
+                }
+            }
+            if (reorderSource != null && stageBounds != Rect.Zero) {
+                val source = workspace.bars.firstOrNull { it.id == reorderSource }
+                if (source != null) {
+                    Box(Modifier.offset {
+                        androidx.compose.ui.unit.IntOffset(
+                            (reorderFinger.x - stageBounds.left + 12f).toInt(),
+                            (reorderFinger.y - stageBounds.top - 24f).toInt(),
+                        )
+                    }.zIndex(20f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(palette.panel.toComposeColor())
+                        .border(1.dp, palette.accent.toComposeColor(), RoundedCornerShape(8.dp))
+                        .padding((7f / scale).dp)
+                        .testTag("preview-reorder-ghost")) {
+                        Text(source.name, color = palette.text.toComposeColor(),
+                            fontSize = (13f / scale).sp, maxLines = 1)
                     }
                 }
             }
@@ -356,7 +480,8 @@ private fun PreviewTool(
                 ToolbarIcon(XnotesIcons.zoomIn, stringResource(R.string.zoom_in), onClick = onSelect)
             }
             ToolbarItem.TITLE -> {
-                if (!vertical) Label(titleLabel, Modifier.widthIn(max = 160.dp))
+                if (vertical) VerticalToolbarTitle(titleLabel, onClick = onSelect)
+                else Label(titleLabel, Modifier.widthIn(max = 160.dp))
             }
             else -> {
                 // The real document/canvas toolbar uses the back arrow, not the Home house icon.

@@ -81,6 +81,7 @@ internal object ToolbarWorkspaceJson {
         .put("dock_lane", g.dockLane)
         .put("dock_alignment", g.dockAlignment.name)
         .apply {
+            g.visualOrder?.let { put("visual_order", it) }
             g.dockEdge?.let { put("dock_edge", it.name) }
             g.widthDp?.let { put("width_dp", it) }
             g.heightDp?.let { put("height_dp", it) }
@@ -200,6 +201,7 @@ internal object ToolbarWorkspaceJson {
             columns = raw.optInt("columns", 1),
             dockEdge = ToolbarDockEdge.entries.firstOrNull { it.name == raw.optString("dock_edge") },
             dockLane = raw.optInt("dock_lane", 0),
+            visualOrder = raw.optInt("visual_order").takeIf { raw.has("visual_order") && it in 0..128 },
             dockAlignment = ToolbarDockAlignment.entries.firstOrNull { it.name == raw.optString("dock_alignment") }
                 ?: ToolbarDockAlignment.CENTER,
         ).constrained()

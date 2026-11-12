@@ -34,6 +34,8 @@ data class ToolbarGeometry(
     val dockEdge: ToolbarDockEdge? = null,
     val dockLane: Int = 0,
     val dockAlignment: ToolbarDockAlignment = ToolbarDockAlignment.CENTER,
+    /** Rendering order within dock/floating lanes; independent of primary toolbar identity. */
+    val visualOrder: Int? = null,
 ) {
     /** Logical dimensions remain stable to the user when the toolbar rotates. The saved
      * width/height fields are retained for backwards-compatible workspace JSON. */
@@ -84,6 +86,7 @@ data class ToolbarGeometry(
         spacingDp = spacingDp?.coerceIn(0, 32),
         elementSizeDp = elementSizeDp?.coerceIn(28, 72),
         columns = columns.coerceIn(1, 6),
+        visualOrder = visualOrder?.coerceIn(0, 127),
         dockLane = dockLane.coerceIn(0, ToolbarDockLayout.MAX_LANES - 1),
     )
 }
@@ -108,7 +111,8 @@ data class ToolbarWorkspace(val bars: List<ToolbarBar>) {
 
     fun duplicateBar(id: String, newId: String, name: String): ToolbarWorkspace {
         val source = bars.firstOrNull { it.id == id } ?: return this
-        return addBar(source.copy(id = newId, name = name))
+        return addBar(source.copy(id = newId, name = name,
+            geometry = source.geometry.copy(visualOrder = null)))
     }
 
     /** Keep a primary bar as a recovery path, even if all its items are hidden. */
@@ -125,6 +129,22 @@ data class ToolbarWorkspace(val bars: List<ToolbarBar>) {
     /** Keep legacy single-bar edits in sync after secondary bars have been added. */
     fun replacePrimaryLayout(layout: ToolbarLayout): ToolbarWorkspace =
         bars.firstOrNull()?.let { replaceBar(it.copy(layout = layout)) } ?: this
+
+    /** A drag changes only lane ordering, never the first bar's primary identity.
+     * Existing workspaces use their saved list order until their first visual reorder. */
+    fun reorderVisualBar(id: String, targetId: String): ToolbarWorkspace {
+        if (id == targetId || bars.none { it.id == id } || bars.none { it.id == targetId }) return this
+        val ordered = bars.withIndex().sortedWith(compareBy(
+            { it.value.geometry.visualOrder ?: it.index }, { it.index },
+        )).map { it.value }.toMutableList()
+        val from = ordered.indexOfFirst { it.id == id }
+        val to = ordered.indexOfFirst { it.id == targetId }
+        ordered.add(to, ordered.removeAt(from))
+        val ranks = ordered.withIndex().associate { it.value.id to it.index }
+        return copy(bars = bars.map { bar ->
+            bar.copy(geometry = bar.geometry.copy(visualOrder = ranks.getValue(bar.id)))
+        })
+    }
 
     fun moveBar(id: String, toIndex: Int): ToolbarWorkspace {
         val index = bars.indexOfFirst { it.id == id }

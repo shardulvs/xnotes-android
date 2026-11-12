@@ -1337,4 +1337,9 @@
     <string name="toolbar_pin_start">Pin Start</string>
     <string name="toolbar_pin_end">Pin End</string>
     <string name="toolbar_pin_regions_hint">Pinned regions stay visible at the edges while the remaining tools scroll in the middle. Make sure the pinned tools fit.</string>
+    <string name="toolbar_config_bar_and_appearance">Bar &amp; appearance</string>
+    <string name="toolbar_config_bar_details">Bar details</string>
+    <string name="toolbar_config_bar_order">Bar order</string>
+    <string name="toolbar_config_reorder_drag_hint">Select a bar in the preview and hold its grip to reorder bars in the same lane.</string>
+    <string name="toolbar_config_reorder_handle">Drag to reorder toolbar in this lane</string>
 </resources>

@@ -38,6 +38,25 @@ class ToolbarWorkspaceJsonTest {
         assertEquals(ToolbarLayout.DEFAULT, initial.toolbarLayout)
     }
 
+    @Test fun visualOrderRoundTripsWithoutChangingWhichBarIsPrimary() {
+        val initial = ToolbarWorkspaces.fromLegacy(ToolbarLayout.DEFAULT, ToolbarLayout.CANVAS_DEFAULT)
+        val note = initial.note
+            .addBar(ToolbarBar("extra-1", "Extra 1", ToolbarLayout.DEFAULT,
+                geometry = ToolbarGeometry(dockEdge = ToolbarDockEdge.TOP, widthDp = 100)))
+            .addBar(ToolbarBar("extra-2", "Extra 2", ToolbarLayout.DEFAULT,
+                geometry = ToolbarGeometry(dockEdge = ToolbarDockEdge.TOP, widthDp = 100)))
+        val reordered = note.reorderVisualBar("extra-2", note.bars.first().id)
+        assertEquals(note.bars.first().id, reordered.bars.first().id)
+        val saved = ToolbarWorkspaceJson.write(initial.copy(note = reordered))
+        val restored = ToolbarWorkspaceJson.read(saved)!!
+        assertEquals(reordered, restored.note)
+        assertEquals(listOf("extra-2", note.bars.first().id, "extra-1"),
+            restored.note.bars.sortedBy { it.geometry.visualOrder }.map { it.id })
+        val original = ToolbarWorkspaceJson.write(initial)
+        assertFalse(original.getJSONObject("note").getJSONArray("bars").getJSONObject(0)
+            .getJSONObject("geometry").has("visual_order"))
+    }
+
     @Test fun firstPinnedRegionEditMaterializesWorkspaceAndSurvivesRestart() {
         val initial = Settings()
         assertNull(initial.toolbarWorkspaces)
