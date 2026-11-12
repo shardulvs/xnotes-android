@@ -115,7 +115,8 @@ internal fun ToolbarBarSettings(
             ToolbarAnchorGrid(
                 selected = currentBar.geometry.anchor,
                 onSelect = { anchor ->
-                    onUpdateBar { bar -> bar.copy(geometry = bar.geometry.copy(anchor = anchor)) }
+                    onUpdateBar { bar -> bar.copy(geometry = bar.geometry.movedTo(anchor,
+                        floating = true, fromEdge = bar.geometry.anchor.floatingEdge())) }
                 },
             )
         }

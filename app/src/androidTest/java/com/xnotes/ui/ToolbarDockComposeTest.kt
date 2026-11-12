@@ -37,6 +37,70 @@ import org.junit.Test
 class ToolbarDockComposeTest {
     @get:Rule val rule = createComposeRule()
 
+    @Test fun geometryControlsKeepLengthAndThicknessLabelsWhenRotating() {
+        var geometry by mutableStateOf(ToolbarGeometry(
+            dockEdge = ToolbarDockEdge.RIGHT, anchor = ToolbarAnchor.CENTER_RIGHT,
+            widthDp = 70, heightDp = 430,
+        ))
+        var vertical by mutableStateOf(true)
+        rule.setContent {
+            MaterialTheme {
+                ToolbarGeometryControls(geometry = geometry, vertical = vertical,
+                    onChange = { geometry = it })
+            }
+        }
+        rule.onNodeWithText("Length: 430 dp").assertExists()
+        rule.onNodeWithText("Thickness: 70 dp").assertExists()
+        rule.runOnIdle {
+            geometry = geometry.movedTo(ToolbarAnchor.TOP_CENTER, floating = false)
+            vertical = false
+        }
+        rule.waitForIdle()
+        rule.onNodeWithText("Length: 430 dp").assertExists()
+        rule.onNodeWithText("Thickness: 70 dp").assertExists()
+    }
+
+    @Test fun oversizedRightToTopDockRendersInsideStageInsteadOfDisappearing() {
+        var geometry by mutableStateOf(ToolbarGeometry(
+            anchor = ToolbarAnchor.CENTER_RIGHT, dockEdge = ToolbarDockEdge.RIGHT,
+            widthDp = 980, heightDp = 260,
+        ))
+        var look by mutableStateOf(ToolbarLook(position = ToolbarPosition.RIGHT))
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalToolbarLook provides look) {
+                    Column(Modifier.size(600.dp, 400.dp).testTag("oversize-stage")) {
+                        val main = ToolbarBar("main", "Main", ToolbarLayout.DEFAULT, geometry = geometry)
+                        ToolbarAround(
+                            bar = { ToolbarFrame(armed = null, layout = main.layout,
+                                geometry = main.geometry) { Text("Toolbar tools") } },
+                            onCover = { _, _, _, _ -> },
+                            barLayout = main.layout, barGeometry = main.geometry,
+                            workspace = ToolbarWorkspace(listOf(main)),
+                            dockedContent = { bar -> ToolbarFrame(armed = null,
+                                layout = bar.layout, geometry = bar.geometry) { Text("Tools") } },
+                            content = { floating -> Box(Modifier.fillMaxSize()) {
+                                Text("Canvas")
+                                floating()
+                            } },
+                        )
+                    }
+                }
+            }
+        }
+        rule.runOnIdle {
+            val main = ToolbarBar("main", "Main", ToolbarLayout.DEFAULT, geometry = geometry)
+            geometry = toolbarGeometryForDockSelection(main, 0, look, ToolbarDockEdge.TOP)
+            look = look.copy(position = ToolbarPosition.TOP)
+        }
+        rule.waitForIdle()
+        val bounds = rule.onNodeWithTag("toolbar-frame").getUnclippedBoundsInRoot()
+        val stage = rule.onNodeWithTag("oversize-stage").getUnclippedBoundsInRoot()
+        assertTrue("clipped toolbar must remain visible: $bounds", (bounds.bottom - bounds.top).value > 0f)
+        assertTrue("bar moved away from top: $bounds vs $stage", (bounds.top - stage.top).value < 2f)
+        assertTrue("toolbar exceeds screen after rotation: $bounds vs $stage", bounds.bottom <= stage.bottom + 1.dp)
+    }
+
     @Test fun primaryDockDirectionButtonsUpdateActualEdgeAndRotateBothDimensions() {
         var geometry by mutableStateOf(ToolbarGeometry(
             anchor = ToolbarAnchor.TOP_CENTER, dockEdge = ToolbarDockEdge.TOP,

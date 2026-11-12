@@ -35,7 +35,9 @@ class ToolbarModeConversionTest {
                     dockEdge = edge, heightDp = 600, anchor = ToolbarAnchor.TOP_CENTER))
                 val workspace = ToolbarWorkspace(if (index == 0) listOf(bar) else listOf(primary, bar))
                 val oldFloating = bar.copy(geometry = bar.geometry.copy(floating = true, dockEdge = null))
-                assertFalse(toolbarPlacementFits(workspace.replaceBar(oldFloating), ToolbarLook(), 1000.dp, 600.dp, 5))
+                // Previously rejected because the saved vertical thickness was 600dp
+                // on a 600dp-high screen. It now clips safely instead of disappearing.
+                assertTrue(toolbarPlacementFits(workspace.replaceBar(oldFloating), ToolbarLook(), 1000.dp, 600.dp, 5))
                 val converted = toolbarFloatingGeometry(bar, index, ToolbarLook())
                 assertEquals(if (edge == ToolbarDockEdge.LEFT) ToolbarAnchor.CENTER_LEFT else ToolbarAnchor.CENTER_RIGHT,
                     converted.anchor)

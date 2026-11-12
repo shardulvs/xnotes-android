@@ -59,7 +59,17 @@ class ToolbarCopyPlannerTest {
         })
         assertTrue(toolbarPlacementFits(ToolbarWorkspace(listOf(floating)), ToolbarLook(),
             500.dp, 300.dp, 5))
-        assertFalse(toolbarPlacementFits(docks.addBar(floating), ToolbarLook(),
-            500.dp, 300.dp, 5))
+        // Even if three docked lanes reserve almost all the document height, a
+        // floating bar is allocated the remaining *visible* space instead of
+        // being silently rejected by its saved preferred 80dp thickness.
+        val combined = docks.addBar(floating)
+        assertTrue(toolbarPlacementFits(combined, ToolbarLook(), 500.dp, 300.dp, 5))
+        val dockPlan = toolbarDockPlan(combined, ToolbarLook(), 500.dp, 300.dp)
+        val availableHeight = 300f - dockPlan.topInset - dockPlan.bottomInset
+        val adapted = toolbarFloatingPlan(combined, ToolbarLook(), 500.dp, availableHeight.dp, 5)
+        val placed = adapted.placement("floating")!!
+        assertTrue("floating must be visible", placed.height > 0f)
+        assertTrue("floating must stay inside remaining document", placed.y + placed.height <= availableHeight + 0.01f)
+        assertTrue("floating should adapt instead of reserving 80dp", placed.height < 80f)
     }
 }

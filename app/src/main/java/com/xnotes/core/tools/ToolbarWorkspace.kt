@@ -35,6 +35,15 @@ data class ToolbarGeometry(
     val dockLane: Int = 0,
     val dockAlignment: ToolbarDockAlignment = ToolbarDockAlignment.CENTER,
 ) {
+    /** Logical dimensions remain stable to the user when the toolbar rotates. The saved
+     * width/height fields are retained for backwards-compatible workspace JSON. */
+    fun lengthDp(vertical: Boolean): Int? = if (vertical) heightDp else widthDp
+    fun thicknessDp(vertical: Boolean): Int? = if (vertical) widthDp else heightDp
+    fun withLengthDp(value: Int?, vertical: Boolean): ToolbarGeometry =
+        if (vertical) copy(heightDp = value) else copy(widthDp = value)
+    fun withThicknessDp(value: Int?, vertical: Boolean): ToolbarGeometry =
+        if (vertical) copy(widthDp = value) else copy(heightDp = value)
+
     /** Move an edge without leaking length from the previous axis into the new thickness.
      * A 600×72 horizontal bar becomes 72×600 when moved to either vertical edge.
      * Null dimensions (automatic sizing) rotate exactly like explicit values.

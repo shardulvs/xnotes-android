@@ -18,12 +18,13 @@ import com.xnotes.ui.theme.toComposeColor
 @Composable
 internal fun ToolbarAppearanceSettings(
     geometry: ToolbarGeometry,
+    vertical: Boolean,
     onGeometryChange: (ToolbarGeometry) -> Unit,
     onScaleChange: (ToolbarScale) -> Unit,
 ) {
     val toolbarStrings = androidx.compose.ui.platform.LocalContext.current
     Text(toolbarStrings.getString(R.string.toolbar_config_size_and_spacing), style = MaterialTheme.typography.titleSmall)
-    ToolbarGeometryControls(geometry = geometry, onChange = onGeometryChange)
+    ToolbarGeometryControls(geometry = geometry, vertical = vertical, onChange = onGeometryChange)
     Text(
         stringResource(R.string.pref_toolbar_size),
         color = LocalPalette.current.accent.toComposeColor(),

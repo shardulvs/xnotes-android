@@ -37,6 +37,74 @@ class ToolbarPrimaryMoveTest {
         assertEquals(ToolbarDockEdge.TOP, original.dockEdge)
     }
 
+    @Test fun oversizedRightThicknessMustNotMakeToolbarDisappearWhenDockedOnTop() {
+        // Repro: Width is very high on the right rail. Rotating to the top turns
+        // that width into depth; this used to reject the bar entirely.
+        for (layout in listOf(ToolbarLayout.DEFAULT, ToolbarLayout.CANVAS_DEFAULT)) {
+            val initial = ToolbarBar("main", "Main", layout, geometry = ToolbarGeometry(
+                anchor = ToolbarAnchor.CENTER_RIGHT, dockEdge = ToolbarDockEdge.RIGHT,
+                widthDp = 980, heightDp = 260))
+            val rotated = toolbarGeometryForDockSelection(initial, 0,
+                ToolbarLook(position = ToolbarPosition.RIGHT), ToolbarDockEdge.TOP)
+            assertEquals(260, rotated.widthDp)
+            assertEquals(980, rotated.heightDp) // Save the user's size, even if clipped.
+            val plan = toolbarDockPlan(ToolbarWorkspace(listOf(initial.copy(geometry = rotated))),
+                ToolbarLook(position = ToolbarPosition.TOP), 1100.dp, 600.dp)
+            assertTrue("bar vanished after rotation: ${plan.rejected}", plan.rejected.isEmpty())
+            val placed = plan.placement("main")
+            assertNotNull("top bar should still render", placed)
+            assertEquals(ToolbarDockEdge.TOP, placed!!.edge)
+            assertEquals(0f, placed.y, 0.01f)
+            assertTrue("bar must fit viewport: $placed", placed.height in 1f..600f)
+        }
+    }
+
+    @Test fun lengthAndThicknessStayLogicalAcrossAllRotations() {
+        var geom = ToolbarGeometry(anchor = ToolbarAnchor.TOP_CENTER,
+            dockEdge = ToolbarDockEdge.TOP, widthDp = 470, heightDp = 84)
+        for ((anchor, vertical) in listOf(
+            ToolbarAnchor.CENTER_RIGHT to true,
+            ToolbarAnchor.BOTTOM_CENTER to false,
+            ToolbarAnchor.CENTER_LEFT to true,
+            ToolbarAnchor.TOP_CENTER to false,
+        )) {
+            geom = geom.movedTo(anchor, floating = false)
+            assertEquals(470, geom.lengthDp(vertical))
+            assertEquals(84, geom.thicknessDp(vertical))
+        }
+        assertEquals(310, geom.withLengthDp(310, vertical = false).lengthDp(false))
+        assertEquals(84, geom.withLengthDp(310, vertical = false).thicknessDp(false))
+    }
+
+    @Test fun extremeDimensionsNeverHidePrimaryWhenThereIsRoomForOneDock() {
+        val edges = listOf(ToolbarDockEdge.TOP, ToolbarDockEdge.RIGHT,
+            ToolbarDockEdge.BOTTOM, ToolbarDockEdge.LEFT)
+        for (layout in listOf(ToolbarLayout.DEFAULT, ToolbarLayout.CANVAS_DEFAULT)) {
+            for ((width, height) in listOf(1100 to 600, 700 to 360, 360 to 700)) {
+                for (edge in edges) {
+                    val geometry = ToolbarGeometry(
+                        dockEdge = edge,
+                        widthDp = 2048, heightDp = 2048,
+                    )
+                    val bar = ToolbarBar("main", "Main", layout, geometry = geometry)
+                    val plan = toolbarDockPlan(ToolbarWorkspace(listOf(bar)),
+                        ToolbarLook(position = edge.toolbarPosition()), width.dp, height.dp)
+                    val placement = plan.placement("main")
+                    assertNotNull("bar vanished at $edge on ${width}x$height: ${plan.rejected}", placement)
+                    val placed = placement!!
+                    val depth = if (edge == ToolbarDockEdge.LEFT || edge == ToolbarDockEdge.RIGHT)
+                        placed.width else placed.height
+                    assertTrue("oversized dock depth: $placed", depth in 1f..toolbarSafeDockDepth(
+                        if (edge == ToolbarDockEdge.LEFT || edge == ToolbarDockEdge.RIGHT)
+                            width.toFloat() else height.toFloat()))
+                    assertTrue("negative placement: $placed", placed.x >= 0 && placed.y >= 0)
+                    assertTrue("overflow placement: $placed", placed.x + placed.width <= width + 0.01f &&
+                        placed.y + placed.height <= height + 0.01f)
+                }
+            }
+        }
+    }
+
     @Test fun floatingDropIsNotCapturedByOldExplicitDock() {
         val moved = ToolbarGeometry(dockEdge = ToolbarDockEdge.TOP)
             .movedTo(ToolbarAnchor.BOTTOM_RIGHT, floating = true)

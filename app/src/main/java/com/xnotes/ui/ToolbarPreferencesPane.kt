@@ -513,8 +513,13 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
                         )
                     }
                     if (toolbarPropertyTab == ToolbarPropertyTab.DIMENSIONS) {
+                        val selectedIndex = workspace.bars.indexOfFirst { it.id == currentBar.id }.coerceAtLeast(0)
+                        val selectedEdge = toolbarDockEdge(currentBar, selectedIndex, prefs.toolbarLook)
+                            ?: currentBar.geometry.anchor.floatingEdge()
                         ToolbarAppearanceSettings(
                             geometry = currentBar.geometry,
+                            vertical = selectedEdge == com.xnotes.core.tools.ToolbarDockEdge.LEFT ||
+                                selectedEdge == com.xnotes.core.tools.ToolbarDockEdge.RIGHT,
                             onGeometryChange = { next -> configureDock(next) },
                             onScaleChange = { scale ->
                                 val primary = currentBar.id == workspace.bars.first().id

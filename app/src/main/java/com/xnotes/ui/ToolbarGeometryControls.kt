@@ -30,19 +30,26 @@ import kotlin.math.roundToInt
 @Composable
 internal fun ToolbarGeometryControls(
     geometry: ToolbarGeometry,
+    vertical: Boolean,
     onChange: (ToolbarGeometry) -> Unit,
 ) {
     val toolbarStrings = androidx.compose.ui.platform.LocalContext.current
     val screen = LocalConfiguration.current
+    val axisDp = if (vertical) screen.screenHeightDp else screen.screenWidthDp
+    val acrossDp = if (vertical) screen.screenWidthDp else screen.screenHeightDp
+    val maxLength = axisDp.coerceIn(48, 2048)
+    val maxThickness = toolbarSafeDockDepth(acrossDp.toFloat()).roundToInt().coerceAtLeast(48)
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        ToolbarMeasure(toolbarStrings.getString(R.string.toolbar_config_width), geometry.widthDp, screen.screenWidthDp.coerceIn(48, 1200), 48, 1200) {
-            onChange(geometry.copy(widthDp = it))
+        ToolbarMeasure(toolbarStrings.getString(R.string.toolbar_config_length), geometry.lengthDp(vertical),
+            maxLength, 48, maxLength) {
+            onChange(geometry.withLengthDp(it, vertical))
         }
-        ToolbarMeasure(toolbarStrings.getString(R.string.toolbar_config_height), geometry.heightDp, 56, 48, 800) {
-            onChange(geometry.copy(heightDp = it))
+        ToolbarMeasure(toolbarStrings.getString(R.string.toolbar_config_thickness), geometry.thicknessDp(vertical),
+            minOf(56, maxThickness), 48, maxThickness) {
+            onChange(geometry.withThicknessDp(it, vertical))
         }
         ToolbarMeasure(toolbarStrings.getString(R.string.toolbar_config_padding), geometry.paddingDp, 4, 0, 32) {
             onChange(geometry.copy(paddingDp = it))
@@ -85,6 +92,12 @@ private fun ToolbarMeasure(
             valueRange = minimum.toFloat()..maximum.toFloat(),
             modifier = Modifier.fillMaxWidth(),
         )
+        if (value != null && value > maximum) {
+            Text(
+                toolbarStrings.getString(R.string.toolbar_config_current_screen_limit, maximum),
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
     }
 }
 
