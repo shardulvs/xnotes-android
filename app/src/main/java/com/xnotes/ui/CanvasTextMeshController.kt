@@ -7,13 +7,22 @@ import com.xnotes.core.infinite.LiftTransform
 import com.xnotes.gl.CanvasScene
 import com.xnotes.gl.InfiniteCanvasView
 import com.xnotes.platform.AndroidTextMeasurer
+import com.xnotes.platform.CanvasTextRaster
+import android.content.Context
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executor
 
+/** Shared foreground worker. Text must never wait behind a large photo/SVG decode. */
+internal object CanvasTextWorker {
+    val executor: Executor = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+        Thread(task, "xnotes-text-mesh").apply { isDaemon = true }
+    }
+}
+
 /**
- * XCanvas's text-to-GL handoff. Model mutation and text layout remain shared with XNote.
- * During a gesture the native preview owns the text and chrome; one generation-checked
- * worker meshes the final snapshot, then hides the preview after a submitted GL frame.
+ * XCanvas's text-to-GL handoff. Text layout and edits still use the XNote model.
+ * A native preview owns text and selection chrome until the GL frame is ready.
  */
 internal class CanvasTextMeshController(
     private val scene: CanvasScene,
@@ -21,10 +30,17 @@ internal class CanvasTextMeshController(
     private val preview: CanvasTextPreviewView,
     private val executor: Executor,
     private val onPreviewHidden: () -> Unit,
+    context: Context,
 ) {
     /** Only in-flight meshes are retained; a completed frame releases its token. */
     private val pending = ConcurrentHashMap<TextItem, Any>()
     private var manipulating: TextItem? = null
+    private val rasterDir = File(context.cacheDir, "canvas-text-raster")
+    private val rasterFiles = java.util.IdentityHashMap<TextItem, File>()
+
+    private fun forgetRaster(item: TextItem) {
+        rasterFiles.remove(item)?.delete()
+    }
 
     fun startGesture(item: TextItem) {
         manipulating = item
@@ -55,12 +71,15 @@ internal class CanvasTextMeshController(
         pending.remove(item)
         if (manipulating === item) manipulating = null
         preview.clearIf(item)
+        forgetRaster(item)
     }
 
     fun reset() {
         pending.clear()
         manipulating = null
         preview.clear()
+        rasterFiles.values.forEach { it.delete() }
+        rasterFiles.clear()
     }
 
     fun update(item: TextItem) {
@@ -72,6 +91,7 @@ internal class CanvasTextMeshController(
         if (item.canvasEditingHidden || item.text.isEmpty()) {
             pending.remove(item)
             scene.remove(item)
+            forgetRaster(item)
             return
         }
 
@@ -84,11 +104,27 @@ internal class CanvasTextMeshController(
         pending[item] = token
         executor.execute {
             if (pending[item] !== token) return@execute
-            val meshed = ItemMesher.mesh(snapshot)
+            val colorGlyphs = CanvasTextRaster.needsColorGlyphs(snapshot.text)
+            val rendered = if (colorGlyphs) runCatching {
+                CanvasTextRaster.render(snapshot, rasterDir)
+            }.getOrNull() else null
+            val meshed = if (rendered == null) ItemMesher.mesh(snapshot) else null
             view.post {
-                if (pending[item] !== token) return@post
-                if (meshed == null || meshed.isEmpty) scene.remove(item)
-                else scene.upsert(item, meshed.parts, meshed.bounds)
+                if (pending[item] !== token) {
+                    rendered?.bitmap?.recycle()
+                    rendered?.image?.image?.file?.delete()
+                    return@post
+                }
+                if (rendered != null) {
+                    scene.textures.offerBitmap(rendered.image.image, rendered.bitmap)
+                    forgetRaster(item)
+                    rasterFiles[item] = rendered.image.image.file
+                    scene.upsertTextTexture(item, rendered.image, snapshot.bounds())
+                } else {
+                    forgetRaster(item)
+                    if (meshed == null || meshed.isEmpty) scene.remove(item)
+                    else scene.upsert(item, meshed.parts, meshed.bounds)
+                }
 
                 if (preview.isShowing(item) && manipulating !== item) {
                     // Release the native text only after the new GL frame is submitted.

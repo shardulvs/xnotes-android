@@ -210,6 +210,11 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         post(Edit.Upsert(item, emptyList(), bounds, item, false))
     }
 
+    /** Keep a native TextItem in the document/z-order, but draw its colored glyphs as a texture. */
+    fun upsertTextTexture(item: com.xnotes.core.model.TextItem, image: ImageItem, bounds: Rect) {
+        post(Edit.Upsert(item, emptyList(), bounds, image, false))
+    }
+
     fun remove(item: CanvasItem) {
         post(Edit.Remove(item))
     }

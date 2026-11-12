@@ -58,6 +58,11 @@ class TextureCache(private val budgetBytes: Long = DEFAULT_BUDGET_BYTES) {
         residentBytes = 0
     }
 
+    /** A newly rasterized text image can upload in the very next frame, with no second decode. */
+    fun offerBitmap(image: ImageData, bitmap: Bitmap) {
+        ready.add(Pending(image, bitmap, maxEdge(image)))
+    }
+
     /** Take in whatever finished decoding since the last frame. Call with the context current. */
     fun uploadPending() {
         while (true) {

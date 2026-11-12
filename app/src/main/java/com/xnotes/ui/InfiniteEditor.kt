@@ -267,7 +267,8 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     /** Isolates text meshing and gesture preview state from document orchestration. */
     private val textMeshes = CanvasTextMeshController(
-        scene, view, nativeTextResize, decodeExecutor, onPreviewHidden = ::publishOverlay,
+        scene, view, nativeTextResize, CanvasTextWorker.executor, onPreviewHidden = ::publishOverlay,
+        context = appContext,
     )
 
     /** Where inserted images are written; supplied by the host so both editors share one dir. */
