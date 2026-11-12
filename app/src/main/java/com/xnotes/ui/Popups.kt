@@ -1015,13 +1015,16 @@ fun TapeConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
     val base = remember { editor.toolConfig(Tool.TAPE) }
     var mode by remember { mutableStateOf(base.tapeMode) }
     var pattern by remember { mutableStateOf(base.tapePattern) }
-    var width by remember { mutableStateOf(base.baseWidth.toFloat()) }
+    var width by remember { mutableStateOf(ToolConversions.snapWidth(Tool.TAPE, base.baseWidth).toFloat()) }
     var scale by remember { mutableStateOf(base.scale) }
     var colorOverride by remember { mutableStateOf(base.colorOverride) }
 
     fun emit() = editor.updateToolConfig(
         Tool.TAPE,
-        base.copy(tapeMode = mode, tapePattern = pattern, baseWidth = width.toDouble(), scale = scale, colorOverride = colorOverride),
+        base.copy(
+            tapeMode = mode, tapePattern = pattern, baseWidth = ToolConversions.snapWidth(Tool.TAPE, width.toDouble()),
+            scale = scale, colorOverride = colorOverride,
+        ),
     )
 
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
@@ -1057,7 +1060,10 @@ fun TapeConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
             if (mode != TapeMode.RECTANGLE) {
                 Spacer(Modifier.size(4.dp))
                 val range = ToolConversions.widthRange(Tool.TAPE)
-                SliderRow(stringResource(R.string.caption_width), width, range.start.toFloat()..range.endInclusive.toFloat()) { width = it; emit() }
+                SliderRow(
+                    stringResource(R.string.caption_width), width,
+                    range.start.toFloat()..range.endInclusive.toFloat(), step = ToolConversions.WIDTH_STEP.toFloat(),
+                ) { width = it; emit() }
                 ToggleRow(stringResource(R.string.caption_scale), scale) { scale = it; emit() }
             }
             Spacer(Modifier.size(8.dp))
