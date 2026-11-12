@@ -254,6 +254,8 @@ internal fun ToolbarFrame(
     val depth = toolbarDepth(bar, layout)
     val compactRegions = toolbarCompactRegions(layout, look.floating,
         if (bar.vertical) geometry?.heightDp else geometry?.widthDp)
+    val autoLengthPinned = look.floating && layout.hasPinnedRegions &&
+        (if (bar.vertical) geometry?.heightDp == null else geometry?.widthDp == null)
     val glide = remember { ToolGlide() }
     val palette = LocalPalette.current
     val shape = MaterialTheme.shapes.extraLarge
@@ -270,14 +272,16 @@ internal fun ToolbarFrame(
     val stretch = when {
         bar.vertical -> when {
             geometry?.heightDp != null -> Modifier.height(geometry.heightDp.dp)
+            autoLengthPinned -> Modifier
             look.floating && layout.distribution == ToolbarDistribution.REGIONS &&
-                (geometry?.floating == true || layout.hasPinnedRegions) -> Modifier.fillMaxHeight()
+                geometry?.floating == true -> Modifier.fillMaxHeight()
             look.floating -> Modifier
             else -> Modifier.fillMaxHeight()
         }
         geometry?.widthDp != null -> Modifier.width(geometry.widthDp.dp)
+        autoLengthPinned -> Modifier
         look.floating && layout.distribution == ToolbarDistribution.REGIONS &&
-            (geometry?.floating == true || layout.hasPinnedRegions) -> Modifier.fillMaxWidth()
+            geometry?.floating == true -> Modifier.fillMaxWidth()
         look.floating -> Modifier
         else -> Modifier.fillMaxWidth()
     }
@@ -300,7 +304,8 @@ internal fun ToolbarFrame(
             ) {
                 Column(
                     Modifier
-                        .weight(1f, fill = !look.floating || (layout.distribution == ToolbarDistribution.REGIONS && !compactRegions))
+                        .then(if (autoLengthPinned) Modifier else Modifier.weight(1f,
+                            fill = !look.floating || (layout.distribution == ToolbarDistribution.REGIONS && !compactRegions)))
                         .then(if (layout.distribution == ToolbarDistribution.CONTINUOUS || compactRegions)
                             Modifier.verticalScroll(rememberScrollState()) else Modifier)
                         .padding(vertical = bar.padding)
@@ -316,7 +321,8 @@ internal fun ToolbarFrame(
             ) {
                 Row(
                     Modifier
-                        .weight(1f, fill = !look.floating || (layout.distribution == ToolbarDistribution.REGIONS && !compactRegions))
+                        .then(if (autoLengthPinned) Modifier else Modifier.weight(1f,
+                            fill = !look.floating || (layout.distribution == ToolbarDistribution.REGIONS && !compactRegions)))
                         .then(if (layout.distribution == ToolbarDistribution.CONTINUOUS || compactRegions)
                             Modifier.horizontalScroll(rememberScrollState()) else Modifier)
                         .padding(horizontal = bar.padding)

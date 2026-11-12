@@ -225,6 +225,8 @@ private fun PreviewBar(
     val metrics = resolvedBarMetrics(effectiveSize, bar.geometry).copy(vertical = vertical)
     val compactRegions = toolbarCompactRegions(bar.layout, floating,
         if (vertical) bar.geometry.heightDp else bar.geometry.widthDp)
+    val autoLengthPinned = floating && bar.layout.hasPinnedRegions &&
+        (if (vertical) bar.geometry.heightDp == null else bar.geometry.widthDp == null)
     val shape = RoundedCornerShape(if (floating) 24.dp else 0.dp)
     val surface = Modifier
         .then(if (floating) Modifier.shadow(6.dp, shape) else Modifier)
@@ -241,7 +243,7 @@ private fun PreviewBar(
         Column(
             surface
                 .then(if (bar.geometry.heightDp != null) Modifier.height(bar.geometry.heightDp.dp)
-                    else if (bar.layout.distribution == ToolbarDistribution.REGIONS) Modifier.height(availableHeight)
+                    else if (bar.layout.distribution == ToolbarDistribution.REGIONS && !autoLengthPinned) Modifier.height(availableHeight)
                     else if (floating) Modifier.heightIn(max = availableHeight) else Modifier.fillMaxHeight())
                 .width(toolbarWidth(metrics, bar.layout, bar.geometry))
                 .then(if (bar.layout.distribution == ToolbarDistribution.CONTINUOUS || compactRegions)
@@ -249,7 +251,7 @@ private fun PreviewBar(
                 .padding(vertical = metrics.padding),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            if (bar.layout.distribution == ToolbarDistribution.REGIONS && !compactRegions) {
+            if (bar.layout.distribution == ToolbarDistribution.REGIONS && !compactRegions && !autoLengthPinned) {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     PreviewSections(bar.layout, metrics, colors, activeColorIndex, pageNumber, pageCount, zoomLabel, titleLabel, onSelectEntry, selectedEntry, vertical = true, compactRegions = compactRegions)
                 }
@@ -261,7 +263,7 @@ private fun PreviewBar(
         Row(
             surface
                 .then(if (bar.geometry.widthDp != null) Modifier.width(bar.geometry.widthDp.dp)
-                    else if (bar.layout.distribution == ToolbarDistribution.REGIONS) Modifier.width(availableWidth)
+                    else if (bar.layout.distribution == ToolbarDistribution.REGIONS && !autoLengthPinned) Modifier.width(availableWidth)
                     else if (floating) Modifier.widthIn(max = availableWidth) else Modifier.fillMaxWidth())
                 .height(toolbarHeight(metrics, bar.layout, bar.geometry))
                 .then(if (bar.layout.distribution == ToolbarDistribution.CONTINUOUS || compactRegions)
@@ -269,7 +271,7 @@ private fun PreviewBar(
                 .padding(horizontal = metrics.padding),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (bar.layout.distribution == ToolbarDistribution.REGIONS && !compactRegions) {
+            if (bar.layout.distribution == ToolbarDistribution.REGIONS && !compactRegions && !autoLengthPinned) {
                 Box(Modifier.weight(1f).fillMaxHeight()) {
                     PreviewSections(bar.layout, metrics, colors, activeColorIndex, pageNumber, pageCount, zoomLabel, titleLabel, onSelectEntry, selectedEntry, vertical = false, compactRegions = compactRegions)
                 }

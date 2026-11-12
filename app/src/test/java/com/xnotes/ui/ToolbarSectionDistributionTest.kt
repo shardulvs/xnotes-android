@@ -56,6 +56,22 @@ class ToolbarSectionDistributionTest {
         assertTrue(toolbarCompactRegions(base, floating = true, explicitLengthDp = null))
     }
 
+    @Test fun pinnedEdgesPreserveNaturalWidthUntilTheBarRunsOutOfRoom() {
+        // Unconstrained: all tools can fit, no clipped or overlapping edge allocation.
+        assertEquals(440, toolbarPinnedScrollBudget(600, 80, 80, true, 20))
+        assertEquals(100, toolbarPinnedScrollBudget(400, 150, 150, true, 20))
+        // Constrained: keep a small track behind the fixed controls; the fade marks the seam.
+        assertEquals(20, toolbarPinnedScrollBudget(200, 120, 100, true, 20))
+        assertEquals(0, toolbarPinnedScrollBudget(200, 120, 100, false, 20))
+        assertEquals(10, toolbarPinnedScrollBudget(10, 8, 7, true, 20))
+    }
+
+    @Test fun constrainedMiddleUnderlapsOnlyWhenNecessary() {
+        assertEquals(200, toolbarPinnedMiddleOffset(600, 100, 200, 50))
+        assertEquals(260, toolbarPinnedMiddleOffset(400, 260, 80, 30))
+        assertEquals(110, toolbarPinnedMiddleOffset(300, 120, 80, 130))
+    }
+
     @Test fun pinnedFlagsWithHiddenOrMissingRegionDoNotForceFullLengthFloatingBar() {
         val regions = ToolbarLayout(listOf(
             ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN, visible = false)), region = ToolbarRegion.START),
