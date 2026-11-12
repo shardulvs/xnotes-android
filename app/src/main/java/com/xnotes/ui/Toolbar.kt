@@ -101,8 +101,10 @@ fun Toolbar(
     onRecordAudio: () -> Unit = {},
     onTakePhoto: () -> Unit = {},
     onConfigureToolbars: () -> Unit = {},
-    layout: ToolbarLayout = editor.toolbarLayout,
-    geometry: ToolbarGeometry? = null,
+    // Always supplied from the active workspace; caching the editor layout can silently
+    // discard customized pinned regions, especially when switching note/canvas panes.
+    layout: ToolbarLayout,
+    geometry: ToolbarGeometry?,
 ) {
     // The five stroke tools use the designed vector drawables (res/drawable/ic_stroke_*),
     // tinted at the call site like every other icon; the rest use the built-in line set.

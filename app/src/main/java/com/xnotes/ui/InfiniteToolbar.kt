@@ -56,8 +56,10 @@ fun InfiniteToolbar(
     onRecordAudio: () -> Unit = {},
     onTakePhoto: () -> Unit = {},
     onConfigureToolbars: () -> Unit = {},
-    layout: ToolbarLayout = editor.toolbarLayout,
-    geometry: ToolbarGeometry? = null,
+    // Always supplied from the active workspace; caching the editor layout can silently
+    // discard customized pinned regions, especially when switching note/canvas panes.
+    layout: ToolbarLayout,
+    geometry: ToolbarGeometry?,
 ) {
     // The stroke tools use the same designed drawables the paged toolbar does, so a pen looks like
     // a pen on either canvas rather than like a generic glyph.
