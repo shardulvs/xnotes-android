@@ -1,0 +1,68 @@
+package com.xnotes.ui
+
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+
+/**
+ * One gesture's preview and commit state. Separates hit testing/transactions from
+ * Compose rendering; neither the persistent workspace nor bar identity changes while
+ * the pointer is down. The last released bar bypasses slot animations until another
+ * drag begins, eliminating the old-slot flash after an otherwise valid reorder.
+ */
+internal class ToolbarPreviewReorderController {
+    var sourceId by mutableStateOf<String?>(null)
+        private set
+    var targetId by mutableStateOf<String?>(null)
+        private set
+    var lastReleasedId by mutableStateOf<String?>(null)
+        private set
+
+    val currentBounds: MutableMap<String, Rect> = mutableMapOf()
+    private var initialBounds: Map<String, Rect> = emptyMap()
+    private var peers: List<String> = emptyList()
+    private var vertical = false
+
+    fun updateBounds(id: String, bounds: Rect) {
+        if (currentBounds[id] != bounds) currentBounds[id] = bounds
+    }
+
+    fun start(id: String, candidates: List<String>, verticalAxis: Boolean) {
+        lastReleasedId = null
+        sourceId = id
+        targetId = null
+        initialBounds = currentBounds.toMap()
+        peers = candidates
+        vertical = verticalAxis
+    }
+
+    fun hover(id: String, rootPointer: Offset) {
+        if (sourceId != id) return
+        targetId = toolbarPreviewReorderHit(id, peers, rootPointer, initialBounds, vertical)
+    }
+
+    fun drop(id: String, rootPointer: Offset, commit: (String, String) -> Unit): Boolean {
+        if (sourceId != id) return false
+        val destination = toolbarPreviewReorderHit(id, peers, rootPointer, initialBounds, vertical)
+        val accepted = destination != null && destination in peers && destination != id
+        if (accepted) {
+            lastReleasedId = id
+            commit(id, destination!!)
+        }
+        clearGesture()
+        return accepted
+    }
+
+    fun cancel(id: String) {
+        if (sourceId == id) clearGesture()
+    }
+
+    private fun clearGesture() {
+        sourceId = null
+        targetId = null
+        peers = emptyList()
+        initialBounds = emptyMap()
+    }
+}

@@ -119,6 +119,63 @@ class ToolbarTitleAndPreviewReorderComposeTest {
         }
     }
 
+    @Test fun draggedBarTracksPointerAcrossLiveReorderPreviewWithoutJump() {
+        val layout = ToolbarLayout(listOf(ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN)))))
+        fun bar(id: String) = ToolbarBar(id, id, layout,
+            geometry = ToolbarGeometry(dockEdge = ToolbarDockEdge.TOP,
+                dockAlignment = ToolbarDockAlignment.CENTER, widthDp = 145, heightDp = 60))
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(bar("main"), bar("moving"), bar("target"))))
+        rule.setContent {
+            MaterialTheme {
+                Box(Modifier.width(850.dp)) {
+                    ToolbarWorkspacePreview(workspace = workspace, look = ToolbarLook(),
+                        selectedId = "moving", colors = emptyList(), activeColorIndex = 0,
+                        pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
+                        selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
+                        onMoveBar = { _, _ -> }, onReorderBar = { id, other ->
+                            workspace = workspace.reorderVisualBar(id, other)
+                        })
+                }
+            }
+        }
+        rule.waitForIdle()
+        val source = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+        val before = source.fetchSemanticsNode().boundsInRoot
+        val target = rule.onNodeWithTag("preview-bar-target", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val displacement = target.center - before.center
+        source.performTouchInput {
+            down(center)
+            advanceEventTime(780)
+            // One continuous dispatcher stream; split calls can inject an unrelated
+            // previousPosition when the view itself has moved between calls.
+            moveBy(displacement)
+            advanceEventTime(48)
+        }
+        rule.waitForIdle()
+        val hovered = source.fetchSemanticsNode().boundsInRoot
+        assertTrue("Source jumped while other bars reordered: before=$before hovered=$hovered",
+            kotlin.math.abs(hovered.center.x - before.center.x - displacement.x) <= 24f)
+        source.performTouchInput { up() }
+        // Check successive Compose frames, not only the final saved order. A single
+        // flash to the original slot was invisible to the old end-state tests.
+        repeat(4) { frame ->
+            rule.mainClock.advanceTimeByFrame()
+            val bounds = source.fetchSemanticsNode().boundsInRoot
+            assertTrue("Source flashed at original slot on frame $frame: before=$before now=$bounds",
+                bounds.center.x > before.center.x + displacement.x * 0.40f)
+        }
+        rule.waitForIdle()
+        val released = source.fetchSemanticsNode().boundsInRoot
+        assertTrue("Source snapped back toward original slot: before=$before released=$released",
+            released.center.x > before.center.x + displacement.x * 0.40f)
+        rule.runOnIdle {
+            assertEquals("main", workspace.bars.first().id)
+            assertEquals(listOf("main", "target", "moving"),
+                workspace.bars.sortedBy { it.geometry.visualOrder }.map { it.id })
+        }
+    }
+
     @Test fun sameLaneFloatingBarsCanBeReorderedByPreviewGesture() {
         val layout = ToolbarLayout(listOf(ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN)))))
         fun bar(id: String) = ToolbarBar(id, id, layout,
