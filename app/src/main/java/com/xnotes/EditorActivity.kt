@@ -292,10 +292,11 @@ class EditorActivity : ComponentActivity() {
     @Suppress("DEPRECATION") // RUNNING_* still arrive below Android 14
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        // The canvas keeps its rendered pages, so PDFium's pages and glyph caches can go while the
-        // UI is hidden; they load again when something new is drawn.
+        // The canvas keeps its rendered pages, so PDFium's pages and glyph caches and the decoded
+        // images can go while the UI is hidden; they load again when something new is drawn.
         if (level >= TRIM_MEMORY_UI_HIDDEN || level == TRIM_MEMORY_RUNNING_LOW || level == TRIM_MEMORY_RUNNING_CRITICAL) {
             com.xnotes.platform.PdfiumDocument.trimAll()
+            com.xnotes.platform.ImageDecoder.trim()
         }
     }
 

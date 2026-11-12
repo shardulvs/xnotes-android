@@ -112,6 +112,12 @@ object ImageDecoder {
         return scaled
     }
 
+    /** Drops the decoded and parsed images; they come back when next drawn. */
+    fun trim() {
+        bitmapCache.evictAll()
+        svgCache.evictAll()
+    }
+
     /** True when [path] holds a vector (SVG) source with no native pixel resolution.
      *  Memoized: the sniff opens the file, and a lifted image is re-drawn every frame. */
     fun isVector(path: String): Boolean =
