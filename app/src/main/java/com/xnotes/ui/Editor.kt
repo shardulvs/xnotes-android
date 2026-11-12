@@ -823,7 +823,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                     val out = appContext.contentResolver.openOutputStream(android.net.Uri.parse(uri), "wt")
                         ?: return@runCatching false
                     out.use { java.io.FileInputStream(tmp).use { input -> input.copyTo(it, copyBuffer) } }
-                    rememberStamp(uri)
+                    rememberStamp(uri, java.io.FileInputStream(tmp).use { com.xnotes.format.ZipTail.read(it.channel) })
                     true
                 } finally {
                     tmp.delete()
@@ -4621,6 +4621,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             viewStates.rekeyTree(from, to)
             docMeta.rekeyTree(from, to)
             knownStamps.remove(oldUri)?.let { knownStamps[newUri] = it }
+            knownEntries.remove(oldUri)?.let { knownEntries[newUri] = it }
             invalidateThumb(oldUri)
         }
         val tree = browseRoot?.let { android.net.Uri.parse(it) } ?: return
@@ -4908,6 +4909,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** The stamp each file carried after this editor last opened or wrote it, by uri. */
     private val knownStamps = java.util.concurrent.ConcurrentHashMap<String, FileStamp>()
 
+    /** Each file's zip directory as this editor last read or wrote it, by uri: what a moved stamp is checked against. */
+    private val knownEntries = java.util.concurrent.ConcurrentHashMap<String, com.xnotes.format.ZipTail.Directory>()
+
     /** Where a fork landed: the new file's uri, and the name to show the user. */
     private class Fork(val uri: String, val name: String)
 
@@ -4934,10 +4938,29 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
     }.getOrNull()
 
-    /** Keep what the provider now reports for [uri] as its known stamp, or forget it when it reports nothing. */
-    private fun rememberStamp(uri: String) {
+    /**
+     * The zip directory of the document at [uri], or null when it cannot be read as one.
+     *
+     * The stream built on the descriptor is never closed: closing it closes that descriptor, and the
+     * ParcelFileDescriptor would then close a number the system may already have handed to something
+     * else. Only the descriptor itself is closed, once.
+     */
+    private fun entriesOf(uri: String): com.xnotes.format.ZipTail.Directory? = runCatching {
+        appContext.contentResolver.openFileDescriptor(android.net.Uri.parse(uri), "r")?.use { pfd ->
+            com.xnotes.format.ZipTail.read(java.io.FileInputStream(pfd.fileDescriptor).channel)
+        }
+    }.getOrNull()
+
+    /**
+     * Keep what [uri] holds now as the file this editor knows: the stamp its provider reports, and
+     * its zip directory, which is [entries] when the caller has just written the file and is read
+     * back from it otherwise. Forgets both when the provider reports no stamp.
+     */
+    private fun rememberStamp(uri: String, entries: com.xnotes.format.ZipTail.Directory? = null) {
+        val dir = entries ?: entriesOf(uri)
         val stamp = stampOf(uri)
         if (stamp != null) knownStamps[uri] = stamp else knownStamps.remove(uri)
+        if (stamp != null && dir != null) knownEntries[uri] = dir else knownEntries.remove(uri)
     }
 
     /**
@@ -4949,11 +4972,19 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * An unreadable stamp is **not** evidence. A provider that won't report size or mtime must never
      * trigger a fork: a spurious duplicate file is a worse default than the plain write. Nor is an
      * mtime that drifted under two seconds at the same size, which SD cards do on their own.
+     *
+     * A stamp that did move is only a reason to look. Some storage reports a modified time that
+     * settles later with nobody writing, so the file counts as changed only when its zip directory
+     * no longer matches the one this editor knows, or cannot be compared with it.
      */
     private fun changedUnderneath(uri: String): Boolean {
         val known = knownStamps[uri] ?: return false
         val now = stampOf(uri) ?: return false
-        return !known.matches(now)
+        if (known.matches(now)) return false
+        val entries = knownEntries[uri] ?: return true
+        if (entriesOf(uri)?.let { entries.sameAs(it) } != true) return true
+        knownStamps[uri] = now // the same save under a new stamp; the stamp is what was wrong
+        return false
     }
 
     /** The parent folder's document id for the file at [uri], or null when it has none. */
@@ -5075,7 +5106,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 state.lastSaveDeflateMs = timing.deflateMs
                 state.lastSaveManifestBytes = timing.manifestBytes
                 state.lastSaveBytes = tmp.length() // live file size for the debug overlay
-                rememberStamp(uri) // read back what the provider reports, not what we wrote
+                // The stamp is read back from the provider; the directory is the temp's, whose bytes the file now is.
+                rememberStamp(uri, java.io.FileInputStream(tmp).use { com.xnotes.format.ZipTail.read(it.channel) })
                 true
             } finally {
                 tmp.delete()
@@ -5104,12 +5136,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (expected.isEmpty()) return@runCatching false
 
         val target = android.net.Uri.parse(uri)
-        // Streams built on a descriptor the provider owns are never closed here: closing one closes
-        // that descriptor, and the ParcelFileDescriptor would then close a number the system may
-        // already have handed to something else. Only the descriptor itself is closed, once.
-        val existing = appContext.contentResolver.openFileDescriptor(target, "r")?.use { pfd ->
-            com.xnotes.format.ZipTail.read(java.io.FileInputStream(pfd.fileDescriptor).channel)
-        } ?: return@runCatching false
+        val existing = entriesOf(uri) ?: return@runCatching false
 
         // Every asset has to still be the same file in the same place, or the manifest is not the
         // only thing that changed and the whole bundle has to be rebuilt.
@@ -5136,17 +5163,24 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 }
             }
             val spliceStart = System.nanoTime()
+            var entries: com.xnotes.format.ZipTail.Directory? = null
             val length = java.io.FileInputStream(tmp).use { tail ->
                 val tailDir = com.xnotes.format.ZipTail.read(tail.channel)
                     ?: return@runCatching false
+                // As in [entriesOf], the streams built on the provider's descriptor are never closed.
                 appContext.contentResolver.openFileDescriptor(target, "rw")?.use { pfd ->
-                    com.xnotes.format.ZipTail.splice(
+                    val written = com.xnotes.format.ZipTail.splice(
                         java.io.FileOutputStream(pfd.fileDescriptor).channel,
                         tailStart,
                         ordered.subList(0, expected.size),
                         tail.channel,
                         tailDir,
                     )
+                    // The directory the file now ends in, read while its descriptor is still open.
+                    if (written >= 0L) entries = runCatching {
+                        com.xnotes.format.ZipTail.read(java.io.FileInputStream(pfd.fileDescriptor).channel)
+                    }.getOrNull()
+                    written
                 } ?: -1L
             }
             if (length < 0L) return@runCatching false
@@ -5157,7 +5191,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             state.lastSaveDeflateMs = timing.deflateMs
             state.lastSaveManifestBytes = timing.manifestBytes
             state.lastSaveBytes = length
-            rememberStamp(uri) // read back what the provider reports, not what we wrote
+            rememberStamp(uri, entries) // the stamp is read back from the provider, not taken from what we wrote
             true
         } finally {
             tmp.delete()
