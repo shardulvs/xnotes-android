@@ -96,9 +96,20 @@ object ImageDecoder {
             inSampleSize = ss
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        val bmp = BitmapFactory.decodeFile(path, opts) ?: return null
+        val bmp = BitmapFactory.decodeFile(path, opts)?.let(::fitRasterCap) ?: return null
         bitmapCache.put(key, bmp)
         return bmp
+    }
+
+    // A whole 50 MP photo is past the hardware canvas's 100 MB draw limit, so the cap holds it to 64 MB.
+    private fun fitRasterCap(bmp: Bitmap): Bitmap {
+        if (bmp.width <= RASTER_CAP_PX && bmp.height <= RASTER_CAP_PX) return bmp
+        val s = RASTER_CAP_PX.toDouble() / max(bmp.width, bmp.height)
+        val w = (bmp.width * s).toInt().coerceAtLeast(1)
+        val h = (bmp.height * s).toInt().coerceAtLeast(1)
+        val scaled = Bitmap.createScaledBitmap(bmp, w, h, true)
+        if (scaled !== bmp) bmp.recycle()
+        return scaled
     }
 
     /** True when [path] holds a vector (SVG) source with no native pixel resolution.
@@ -397,6 +408,9 @@ object ImageDecoder {
     // Matches the raster decode caps used by the screen renderer and PDF export. On screen the
     // slice render keeps every bitmap viewport-bounded, so this only governs export/thumbnails.
     private const val VECTOR_RENDER_CAP_PX = 4096
+
+    // The screen renderer's decode cap; a cached raster is never larger on either side.
+    private const val RASTER_CAP_PX = 4096
 
     // Slices snap outward to this grid so panning re-uses one rasterization for a while.
     private const val SLICE_GRID = 128
