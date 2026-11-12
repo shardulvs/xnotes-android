@@ -49,15 +49,19 @@ class ToolbarDockComposeTest {
                     onChange = { geometry = it })
             }
         }
-        rule.onNodeWithText("Length: 430 dp").assertExists()
-        rule.onNodeWithText("Thickness: 70 dp").assertExists()
+        rule.onNodeWithText("Length").assertExists()
+        rule.onNodeWithText("430 dp").assertExists()
+        rule.onNodeWithText("Thickness").assertExists()
+        rule.onNodeWithText("70 dp").assertExists()
         rule.runOnIdle {
             geometry = geometry.movedTo(ToolbarAnchor.TOP_CENTER, floating = false)
             vertical = false
         }
         rule.waitForIdle()
-        rule.onNodeWithText("Length: 430 dp").assertExists()
-        rule.onNodeWithText("Thickness: 70 dp").assertExists()
+        rule.onNodeWithText("Length").assertExists()
+        rule.onNodeWithText("430 dp").assertExists()
+        rule.onNodeWithText("Thickness").assertExists()
+        rule.onNodeWithText("70 dp").assertExists()
     }
 
     @Test fun oversizedRightToTopDockRendersInsideStageInsteadOfDisappearing() {
@@ -134,7 +138,7 @@ class ToolbarDockComposeTest {
         }
     }
 
-    @Test fun secondaryDockEdgeChipsDoNotCreateLegacy200DpGaps() {
+    @Test fun secondaryDockGridDoesNotCreateLegacy200DpGaps() {
         var geometry by mutableStateOf(ToolbarGeometry(
             anchor = ToolbarAnchor.TOP_CENTER, dockEdge = ToolbarDockEdge.TOP,
             widthDp = 330, heightDp = 62,
@@ -150,7 +154,7 @@ class ToolbarDockComposeTest {
                 )
             }
         }
-        rule.onNodeWithText("Left", useUnmergedTree = true).performClick()
+        rule.onNodeWithContentDescription("center left").performClick()
         rule.runOnIdle {
             assertEquals(ToolbarDockEdge.LEFT, geometry.dockEdge)
             assertEquals(62, geometry.widthDp)

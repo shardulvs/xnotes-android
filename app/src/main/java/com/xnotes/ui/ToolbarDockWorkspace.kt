@@ -87,6 +87,19 @@ internal fun toolbarDockedGeometry(bar: ToolbarBar, index: Int, look: ToolbarLoo
 internal fun toolbarSafeDockDepth(acrossDp: Float): Float =
     (acrossDp.coerceAtLeast(0f) * 0.4f).coerceAtMost(256f)
 
+/** Resolve primary/list identity and user-selected visual order exactly once.
+ * The old comparator searched the bars list for every pair of requests. */
+private fun toolbarRequestsInVisualOrder(
+    workspace: ToolbarWorkspace,
+    requests: List<ToolbarDockRequest>,
+): List<ToolbarDockRequest> {
+    val indices = workspace.bars.withIndex().associate { it.value.id to it.index }
+    val priorities = workspace.bars.withIndex().associate {
+        it.value.id to (it.value.geometry.visualOrder ?: it.index)
+    }
+    return requests.sortedWith(compareBy({ priorities.getValue(it.id) }, { indices.getValue(it.id) }))
+}
+
 /** A null length is deliberately treated as a full-edge bar, not an optimistic guess. */
 internal fun toolbarDockPlan(
     workspace: ToolbarWorkspace,
@@ -116,10 +129,7 @@ internal fun toolbarDockPlan(
     // the original length. The real renderer is constrained by the same placement box.
     // Cap both axes before the reservation pass: an oversized top bar must not be
     // rejected here and then incorrectly leave its space available to a side bar.
-    val order = workspace.bars.withIndex().associate { it.value.id to
-        (it.value.geometry.visualOrder ?: it.index) }
-    val orderedRequests = requests.sortedWith(compareBy({ order.getValue(it.id) },
-        { workspace.bars.indexOfFirst { bar -> bar.id == it.id } }))
+    val orderedRequests = toolbarRequestsInVisualOrder(workspace, requests)
     val safeDepthRequests = orderedRequests.map { request ->
         val vertical = request.edge == ToolbarDockEdge.LEFT || request.edge == ToolbarDockEdge.RIGHT
         request.copy(depth = request.depth.coerceAtMost(toolbarSafeDockDepth(
@@ -247,10 +257,7 @@ internal fun toolbarFloatingPlan(
         ))
     }
     // Primary-bar identity is list-based; layout order is separate and configurable.
-    val order = workspace.bars.withIndex().associate { it.value.id to
-        (it.value.geometry.visualOrder ?: it.index) }
-    val orderedRequests = requests.sortedWith(compareBy({ order.getValue(it.id) },
-        { workspace.bars.indexOfFirst { bar -> bar.id == it.id } }))
+    val orderedRequests = toolbarRequestsInVisualOrder(workspace, requests)
     // Floating regions must also adapt BOTH dimensions when the viewport shrinks.
     // Their saved preferred sizes remain intact, but the allocated rectangles must fit
     // the current screen and other floating bars, just like docked placement does.

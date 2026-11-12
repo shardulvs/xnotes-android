@@ -21,7 +21,7 @@ class ToolbarPreviewReorderTest {
             dock("start", ToolbarDockAlignment.START)))
         val original = toolbarDockPlan(workspace, ToolbarLook(), 1200.dp, 700.dp)
         assertEquals(listOf("primary", "second", "third"),
-            toolbarPreviewReorderPeers(workspace, ToolbarLook(), "third", original,
+            toolbarPreviewReorderPeers(workspace, "third", original,
                 toolbarFloatingPlan(workspace, ToolbarLook(), 1200.dp, 700.dp, 5)))
         val updated = workspace.reorderVisualBar("third", "primary")
         assertEquals("primary", updated.bars.first().id)
@@ -40,7 +40,7 @@ class ToolbarPreviewReorderTest {
         val emptyDock = toolbarDockPlan(w, ToolbarLook(floating = true), 1200.dp, 700.dp)
         val before = toolbarFloatingPlan(w, ToolbarLook(floating = true), 1200.dp, 700.dp, 5)
         assertEquals(listOf("main", "one", "two"), toolbarPreviewReorderPeers(w,
-            ToolbarLook(floating = true), "two", emptyDock, before))
+            "two", emptyDock, before))
         val after = toolbarFloatingPlan(w.reorderVisualBar("two", "main"),
             ToolbarLook(floating = true), 1200.dp, 700.dp, 5)
         assertTrue(after.placement("two")!!.x < after.placement("main")!!.x)

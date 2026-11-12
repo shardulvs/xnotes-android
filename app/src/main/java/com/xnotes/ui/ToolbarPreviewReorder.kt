@@ -5,14 +5,12 @@ import androidx.compose.ui.geometry.Rect
 import com.xnotes.core.tools.ToolbarDockEdge
 import com.xnotes.core.tools.ToolbarDockPlan
 import com.xnotes.core.tools.ToolbarWorkspace
-import com.xnotes.settings.ToolbarLook
 import kotlin.math.abs
 
 /** Reorder only among bars occupying the same rendered dock/floating lane and cluster.
  * Using actual placements (instead of requested lanes) handles automatic lane fallback. */
 internal fun toolbarPreviewReorderPeers(
     workspace: ToolbarWorkspace,
-    look: ToolbarLook,
     sourceId: String,
     docked: ToolbarDockPlan,
     floating: ToolbarDockPlan,

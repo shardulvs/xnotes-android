@@ -30,6 +30,31 @@ import org.junit.Test
 class ToolbarTitleAndPreviewReorderComposeTest {
     @get:Rule val rule = createComposeRule()
 
+    @Test fun horizontalTitleIsBoundedAndPreservesNoteVersusCanvasClickBehavior() {
+        val name = "Long document name which must never consume a whole toolbar row"
+        var editable by mutableStateOf(true)
+        var clicks = 0
+        rule.setContent {
+            MaterialTheme {
+                HorizontalToolbarTitle(name, onClick = if (editable) ({ clicks++ }) else null)
+            }
+        }
+        val node = rule.onNodeWithTag("toolbar-horizontal-title", useUnmergedTree = true)
+        node.assertIsDisplayed()
+        fun assertBounded() {
+            val bounds = node.getUnclippedBoundsInRoot()
+            assertTrue("horizontal title overflows: $bounds", (bounds.right - bounds.left).value <= 161f)
+        }
+        assertBounded()
+        node.performClick()
+        rule.runOnIdle { assertEquals(1, clicks); editable = false }
+        rule.waitForIdle()
+        assertBounded()
+        val semantics = node.fetchSemanticsNode().config
+        assertFalse("read-only canvas title should not rename",
+            semantics.contains(androidx.compose.ui.semantics.SemanticsActions.OnClick))
+    }
+
     @Test fun verticalTitleIsVisibleReadableToAccessibilityAndClickable() {
         var clicked = 0
         val name = "Documento com nome longo — Pesquisa de geometria"
@@ -117,13 +142,19 @@ class ToolbarTitleAndPreviewReorderComposeTest {
             }
         }
         rule.waitForIdle()
-        val grip = rule.onNodeWithTag("preview-reorder-handle-second", useUnmergedTree = true)
-        grip.assertExists().assertIsDisplayed()
-        val a = grip.fetchSemanticsNode().boundsInRoot
+        val barSurface = rule.onNodeWithTag("preview-bar-second", useUnmergedTree = true)
+        barSurface.assertIsDisplayed()
+        rule.onNodeWithTag("preview-reorder-handle-second", useUnmergedTree = true).assertDoesNotExist()
+        val a = barSurface.fetchSemanticsNode().boundsInRoot
         val b = rule.onNodeWithTag("preview-bar-third", useUnmergedTree = true)
             .fetchSemanticsNode().boundsInRoot
-        grip.performTouchInput { down(center); advanceEventTime(750); moveBy(b.center - a.center);
-            advanceEventTime(64); up() }
+        barSurface.performTouchInput {
+            down(Offset(center.x, 4f))
+            advanceEventTime(750)
+            val delta = b.center - Offset(a.center.x, a.top + 4f)
+            repeat(12) { moveBy(delta / 12f); advanceEventTime(16) }
+            up()
+        }
         rule.waitForIdle()
         rule.runOnIdle {
             assertEquals("second" to "third", completed)
@@ -166,17 +197,18 @@ class ToolbarTitleAndPreviewReorderComposeTest {
             }
         }
         rule.waitForIdle()
-        val grip = rule.onNodeWithTag("preview-reorder-handle-second", useUnmergedTree = true)
-        grip.assertExists().assertIsDisplayed()
-        val gripRect = grip.fetchSemanticsNode().boundsInRoot
+        val barSurface = rule.onNodeWithTag("preview-bar-second", useUnmergedTree = true)
+        barSurface.assertIsDisplayed()
+        rule.onNodeWithTag("preview-reorder-handle-second", useUnmergedTree = true).assertDoesNotExist()
+        val gripRect = barSurface.fetchSemanticsNode().boundsInRoot
         val targetRect = rule.onNodeWithTag("preview-bar-third", useUnmergedTree = true)
             .fetchSemanticsNode().boundsInRoot
-        val delta = targetRect.center - gripRect.center
-        grip.performTouchInput {
-            down(center)
+        val start = Offset(gripRect.center.x, gripRect.top + 4f)
+        val delta = targetRect.center - start
+        barSurface.performTouchInput {
+            down(Offset(center.x, 4f))
             advanceEventTime(750)
-            moveBy(delta)
-            advanceEventTime(64)
+            repeat(12) { moveBy(delta / 12f); advanceEventTime(16) }
             up()
         }
         rule.waitForIdle()

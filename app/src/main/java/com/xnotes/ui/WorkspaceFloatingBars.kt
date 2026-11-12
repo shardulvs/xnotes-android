@@ -1,6 +1,9 @@
 package com.xnotes.ui
 
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -52,42 +55,73 @@ fun ToolbarDragSurface(
     movable: Boolean,
     paneBounds: Rect,
     onMoveBar: (String, ToolbarAnchor) -> Unit,
+    /** Optional preview callbacks: shared long-press move gesture handles lane reordering. */
+    onDragStart: ((Offset) -> Unit)? = null,
+    onDragPosition: ((Offset) -> Unit)? = null,
+    onDrop: ((Offset) -> Boolean)? = null,
+    onDragCancel: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     val moveBarNow by rememberUpdatedState(onMoveBar)
+    val paneBoundsNow by rememberUpdatedState(paneBounds)
+    val startCallback by rememberUpdatedState(onDragStart)
+    val moveCallback by rememberUpdatedState(onDragPosition)
+    val dropCallback by rememberUpdatedState(onDrop)
+    val cancelCallback by rememberUpdatedState(onDragCancel)
     var drag by remember(id) { mutableStateOf(Offset.Zero) }
     var dragging by remember(id) { mutableStateOf(false) }
     var barBounds by remember(id) { mutableStateOf(Rect.Zero) }
-    val gesture = if (!movable) Modifier else Modifier.pointerInput(id, anchor, paneBounds) {
-        detectDragGesturesAfterLongPress(
-            onDragStart = {
+    var dragStartInRoot by remember(id) { mutableStateOf(Offset.Zero) }
+    // Keep the active pointer stream alive while the preview recomposes and rescales.
+    // Pane bounds are read via updated state instead of restarting pointerInput on each
+    // layout measurement. Such restarts used to cancel the drag on its first frame.
+    val gesture = if (!movable) Modifier else Modifier.pointerInput(id) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            val held = awaitLongPressOrCancellation(down.id)
+            if (held != null) {
                 drag = Offset.Zero
                 dragging = true
-            },
-            onDrag = { change, distance ->
-                change.consume()
-                drag += distance
-            },
-            onDragEnd = {
-                val moved = drag
-                drag = Offset.Zero
-                dragging = false
-                if (moved.getDistance() >= 12f && barBounds != Rect.Zero && paneBounds != Rect.Zero) {
-                    val center = barBounds.center + moved - paneBounds.topLeft
-                    ToolbarAnchorResolver.nearest(
-                        center.x, center.y, paneBounds.width, paneBounds.height,
-                    )?.let { target ->
-                        // The saved anchor can differ from a primary bar's effective dock edge.
-                        // The caller owns the no-op check against the full placement state.
-                        moveBarNow(id, target)
+                dragStartInRoot = barBounds.topLeft + held.position
+                startCallback?.invoke(dragStartInRoot)
+                var canceled = false
+                while (true) {
+                    // A child toolbar element may consume Main-pass changes; observe
+                    // Initial so the long-pressed parent can keep the drag stream.
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    val change = event.changes.firstOrNull { it.id == held.id }
+                    if (change == null) {
+                        canceled = true
+                        break
+                    }
+                    if (!change.pressed) break
+                    val delta = change.position - change.previousPosition
+                    if (delta != Offset.Zero) {
+                        change.consume()
+                        drag += delta
+                        moveCallback?.invoke(dragStartInRoot + drag)
                     }
                 }
-            },
-            onDragCancel = {
-                drag = Offset.Zero
-                dragging = false
-            },
-        )
+                if (canceled) {
+                    drag = Offset.Zero
+                    dragging = false
+                    cancelCallback?.invoke()
+                } else {
+                    val moved = drag
+                    val droppedAt = dragStartInRoot + moved
+                    val handledByPreview = dropCallback?.invoke(droppedAt) == true
+                    val handled = moved.getDistance() >= 12f && handledByPreview
+                    drag = Offset.Zero
+                    dragging = false
+                    if (!handled && moved.getDistance() >= 12f && barBounds != Rect.Zero && paneBoundsNow != Rect.Zero) {
+                        val center = barBounds.center + moved - paneBoundsNow.topLeft
+                        ToolbarAnchorResolver.nearest(
+                            center.x, center.y, paneBoundsNow.width, paneBoundsNow.height,
+                        )?.let { target -> moveBarNow(id, target) }
+                    }
+                }
+            }
+        }
     }
     Box(
         Modifier
