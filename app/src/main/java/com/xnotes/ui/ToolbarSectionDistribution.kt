@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.Offset
@@ -79,7 +81,7 @@ internal fun ToolbarSections(
             val group = groups.getValue(region)
             if (vertical) {
                 Column(
-                    Modifier.verticalScroll(rememberScrollState()),
+                    Modifier.verticalScroll(rememberScrollState()).testTag("toolbar-region-content-${region.name.lowercase()}"),
                     horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
                 ) {
                     group.forEachIndexed { index, indexed ->
@@ -89,7 +91,7 @@ internal fun ToolbarSections(
                 }
             } else {
                 Row(
-                    Modifier.horizontalScroll(rememberScrollState()),
+                    Modifier.horizontalScroll(rememberScrollState()).testTag("toolbar-region-content-${region.name.lowercase()}"),
                     verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                 ) {
                     group.forEachIndexed { index, indexed ->
@@ -116,39 +118,51 @@ internal fun ToolbarSections(
         }
     } else if (vertical) {
         BoxWithConstraints(Modifier.fillMaxHeight()) {
-            val centerMaxHeight = maxHeight * 0.5f
-            Column(Modifier.fillMaxHeight()) {
-                Box(Modifier.weight(1f).clipToBounds(), contentAlignment = androidx.compose.ui.Alignment.TopCenter) {
-                    regionContent(ToolbarRegion.START)
+            // Only visible regions participate. A lone pinned/scrolling edge retains
+            // its natural size until it would leave less than a small center viewport.
+            val centerVisible = ToolbarRegion.CENTER in present
+            val bothEdges = ToolbarRegion.START in present && ToolbarRegion.END in present
+            val sideLimit = when {
+                !centerVisible -> maxHeight * 0.5f
+                bothEdges -> (maxHeight - 24.dp).coerceAtLeast(0.dp) * 0.5f
+                else -> (maxHeight - 24.dp).coerceAtLeast(0.dp)
+            }
+            Column(Modifier.fillMaxHeight(), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                if (ToolbarRegion.START in present) {
+                    Box(Modifier.heightIn(max = sideLimit).clipToBounds(),
+                        contentAlignment = androidx.compose.ui.Alignment.TopCenter) { regionContent(ToolbarRegion.START) }
                 }
-                if (ToolbarRegion.CENTER in present) {
-                    // The middle slot measures its content first, capped at half the bar.
-                    // Equal weighted edge slots then keep it at the physical midpoint.
-                    Box(Modifier.heightIn(max = centerMaxHeight).clipToBounds(),
-                        contentAlignment = androidx.compose.ui.Alignment.Center) {
-                        regionContent(ToolbarRegion.CENTER)
-                    }
-                }
-                Box(Modifier.weight(1f).clipToBounds(), contentAlignment = androidx.compose.ui.Alignment.BottomCenter) {
-                    regionContent(ToolbarRegion.END)
+                if (centerVisible) {
+                    Box(Modifier.weight(1f).clipToBounds(),
+                        contentAlignment = androidx.compose.ui.Alignment.Center) { regionContent(ToolbarRegion.CENTER) }
+                } else Spacer(Modifier.weight(1f))
+                if (ToolbarRegion.END in present) {
+                    Box(Modifier.heightIn(max = sideLimit).clipToBounds(),
+                        contentAlignment = androidx.compose.ui.Alignment.BottomCenter) { regionContent(ToolbarRegion.END) }
                 }
             }
         }
     } else {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val centerMaxWidth = maxWidth * 0.5f
-            Row(Modifier.fillMaxWidth()) {
-                Box(Modifier.weight(1f).clipToBounds(), contentAlignment = androidx.compose.ui.Alignment.CenterStart) {
-                    regionContent(ToolbarRegion.START)
+            val centerVisible = ToolbarRegion.CENTER in present
+            val bothEdges = ToolbarRegion.START in present && ToolbarRegion.END in present
+            val sideLimit = when {
+                !centerVisible -> maxWidth * 0.5f
+                bothEdges -> (maxWidth - 24.dp).coerceAtLeast(0.dp) * 0.5f
+                else -> (maxWidth - 24.dp).coerceAtLeast(0.dp)
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                if (ToolbarRegion.START in present) {
+                    Box(Modifier.widthIn(max = sideLimit).clipToBounds(),
+                        contentAlignment = androidx.compose.ui.Alignment.CenterStart) { regionContent(ToolbarRegion.START) }
                 }
-                if (ToolbarRegion.CENTER in present) {
-                    Box(Modifier.widthIn(max = centerMaxWidth).clipToBounds(),
-                        contentAlignment = androidx.compose.ui.Alignment.Center) {
-                        regionContent(ToolbarRegion.CENTER)
-                    }
-                }
-                Box(Modifier.weight(1f).clipToBounds(), contentAlignment = androidx.compose.ui.Alignment.CenterEnd) {
-                    regionContent(ToolbarRegion.END)
+                if (centerVisible) {
+                    Box(Modifier.weight(1f).clipToBounds(),
+                        contentAlignment = androidx.compose.ui.Alignment.Center) { regionContent(ToolbarRegion.CENTER) }
+                } else Spacer(Modifier.weight(1f))
+                if (ToolbarRegion.END in present) {
+                    Box(Modifier.widthIn(max = sideLimit).clipToBounds(),
+                        contentAlignment = androidx.compose.ui.Alignment.CenterEnd) { regionContent(ToolbarRegion.END) }
                 }
             }
         }
@@ -248,7 +262,7 @@ private fun PinnedToolbarSections(
             .background(panel)
             .border(1.dp, palette.border.toComposeColor().copy(alpha = 0.7f), capShape)
         else Modifier
-        Box(seam) {
+        Box(seam.testTag(if (start) "toolbar-pin-start" else "toolbar-pin-end")) {
             if (vertical) {
                 Column(capSurface, horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
                     drawSections(sections)
@@ -282,12 +296,12 @@ private fun PinnedToolbarSections(
         val middle = groups.scrolling.takeIf { it.isNotEmpty() }?.let { sections ->
             subcompose("middle") {
                 if (vertical) {
-                    Column(Modifier.verticalScroll(scroll),
+                    Column(Modifier.verticalScroll(scroll).testTag("toolbar-pin-scrolling"),
                         horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
                         drawSections(sections)
                     }
                 } else {
-                    Row(Modifier.horizontalScroll(scroll),
+                    Row(Modifier.horizontalScroll(scroll).testTag("toolbar-pin-scrolling"),
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         drawSections(sections)
                     }
