@@ -35,18 +35,35 @@ data class ToolbarGeometry(
     val dockLane: Int = 0,
     val dockAlignment: ToolbarDockAlignment = ToolbarDockAlignment.CENTER,
 ) {
-    /** Keep explicit dock placement in sync with the anchor selected by a drag. */
-    fun movedTo(anchor: ToolbarAnchor, floating: Boolean): ToolbarGeometry = copy(
-        anchor = anchor,
-        floating = floating,
-        dockEdge = if (!floating && dockEdge != null) when (anchor) {
+    /** Move an edge without leaking length from the previous axis into the new thickness.
+     * A 600×72 horizontal bar becomes 72×600 when moved to either vertical edge.
+     * Null dimensions (automatic sizing) rotate exactly like explicit values.
+     * [fromEdge] supplies the effective old dock for legacy primary bars whose saved anchor
+     * differs from the global ToolbarLook position.
+     */
+    fun movedTo(anchor: ToolbarAnchor, floating: Boolean, fromEdge: ToolbarDockEdge? = null): ToolbarGeometry {
+        fun ToolbarAnchor.cardinalEdge(): ToolbarDockEdge? = when (this) {
             ToolbarAnchor.TOP_CENTER -> ToolbarDockEdge.TOP
             ToolbarAnchor.BOTTOM_CENTER -> ToolbarDockEdge.BOTTOM
             ToolbarAnchor.CENTER_LEFT -> ToolbarDockEdge.LEFT
             ToolbarAnchor.CENTER_RIGHT -> ToolbarDockEdge.RIGHT
-            else -> dockEdge
-        } else dockEdge,
-    )
+            else -> null
+        }
+        fun ToolbarAnchor.isVertical() = this == ToolbarAnchor.CENTER_LEFT || this == ToolbarAnchor.CENTER_RIGHT
+        fun ToolbarDockEdge.isVertical() = this == ToolbarDockEdge.LEFT || this == ToolbarDockEdge.RIGHT
+        val oldVertical = (fromEdge ?: dockEdge)?.isVertical() ?: this.anchor.isVertical()
+        val newVertical = anchor.isVertical()
+        val changedAxis = oldVertical != newVertical
+        return copy(
+            anchor = anchor,
+            floating = floating,
+            widthDp = if (changedAxis) heightDp else widthDp,
+            heightDp = if (changedAxis) widthDp else heightDp,
+            dockEdge = if (floating) null
+                else if (dockEdge != null || fromEdge != null) anchor.cardinalEdge() ?: dockEdge
+                else null,
+        )
+    }
 
     /** Clamp untrusted persisted dimensions before rendering; do not force an exact size on auto bars. */
     fun constrained(): ToolbarGeometry = copy(

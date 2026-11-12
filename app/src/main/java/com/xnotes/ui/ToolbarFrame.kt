@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.TextUnit
@@ -299,7 +300,7 @@ internal fun ToolbarFrame(
         LocalTipSide provides tipSide) {
         if (bar.vertical) {
             Column(
-                stretch.width(toolbarWidth(bar, layout, geometry)).then(surface),
+                stretch.width(toolbarWidth(bar, layout, geometry)).then(surface).testTag("toolbar-frame"),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Column(
@@ -316,7 +317,7 @@ internal fun ToolbarFrame(
             }
         } else {
             Row(
-                stretch.height(toolbarHeight(bar, layout, geometry)).then(surface),
+                stretch.height(toolbarHeight(bar, layout, geometry)).then(surface).testTag("toolbar-frame"),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Row(

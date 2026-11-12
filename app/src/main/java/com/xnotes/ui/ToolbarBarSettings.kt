@@ -106,13 +106,7 @@ internal fun ToolbarBarSettings(
                     ToolbarDockEdge.LEFT to toolbarStrings.getString(R.string.toolbar_config_left), ToolbarDockEdge.RIGHT to toolbarStrings.getString(R.string.toolbar_config_right),
                 )) {
                     PreferenceChoiceChip(label, currentBar.geometry.dockEdge == edge) {
-                        val geo = currentBar.geometry
-                        val vertical = edge == ToolbarDockEdge.LEFT || edge == ToolbarDockEdge.RIGHT
-                        configureDock(geo.copy(
-                            dockEdge = edge,
-                            widthDp = if (vertical && geo.widthDp == 200) null else geo.widthDp ?: if (vertical) null else 200,
-                            heightDp = if (!vertical && geo.heightDp == 200) null else geo.heightDp ?: if (vertical) 200 else null,
-                        ))
+                        configureDock(toolbarGeometryForDockSelection(currentBar, barIndex, look, edge))
                     }
                 }
             }
@@ -156,9 +150,11 @@ internal fun ToolbarBarSettings(
                         ToolbarAnchor.CENTER_RIGHT -> ToolbarPosition.RIGHT
                         else -> look.position
                     }
-                    configureDock(currentBar.geometry.copy(anchor = anchor, floating = false), look.copy(floating = false, position = position))
+                    configureDock(toolbarGeometryForDockSelection(currentBar, barIndex, look,
+                        position.dockEdge()), look.copy(floating = false, position = position))
                 } else {
-                    configureDock(currentBar.geometry.copy(anchor = anchor, floating = true))
+                    configureDock(currentBar.geometry.movedTo(anchor, floating = true,
+                        fromEdge = toolbarDockEdge(currentBar, barIndex, look)))
                 }
             },
         )

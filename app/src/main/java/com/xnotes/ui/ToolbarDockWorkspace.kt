@@ -42,6 +42,23 @@ internal fun toolbarDockEdge(bar: ToolbarBar, index: Int, look: ToolbarLook): To
     else if (index == 0 && look.floating) null
     else bar.geometry.dockEdge ?: if (index == 0) look.position.dockEdge() else null
 
+/** One canonical edge selection for both primary and secondary bars. The stored primary
+ * anchor can be stale when its effective orientation comes from legacy preferences; always
+ * rotate dimensions from the *effective* previous edge and persist the selected dock edge.
+ */
+internal fun toolbarGeometryForDockSelection(
+    bar: ToolbarBar, index: Int, look: ToolbarLook, target: ToolbarDockEdge,
+): ToolbarGeometry {
+    val anchor = when (target) {
+        ToolbarDockEdge.TOP -> ToolbarAnchor.TOP_CENTER
+        ToolbarDockEdge.BOTTOM -> ToolbarAnchor.BOTTOM_CENTER
+        ToolbarDockEdge.LEFT -> ToolbarAnchor.CENTER_LEFT
+        ToolbarDockEdge.RIGHT -> ToolbarAnchor.CENTER_RIGHT
+    }
+    val previous = toolbarDockEdge(bar, index, look) ?: bar.geometry.anchor.floatingEdge()
+    return bar.geometry.movedTo(anchor, floating = false, fromEdge = previous)
+}
+
 /** Floating orientation must follow the current dock, not an older saved floating anchor. */
 internal fun toolbarFloatingGeometry(bar: ToolbarBar, index: Int, look: ToolbarLook): ToolbarGeometry {
     val edge = toolbarDockEdge(bar, index, look)
@@ -87,7 +104,20 @@ internal fun toolbarDockPlan(
             autoLength = if (vertical) bar.geometry.heightDp == null else bar.geometry.widthDp == null,
         )
     }
-    return packToolbarLanes(windowWidth.value, windowHeight.value, requests)
+    // A fixed length is a preference, not permission to run past a shorter window edge.
+    // First reserve top/bottom depth; side docks can then consume at most the remaining
+    // height. The persisted requested dimensions stay untouched, so moving back restores
+    // the original length. The real renderer is constrained by the same placement box.
+    val topBottom = packToolbarLanes(windowWidth.value, windowHeight.value,
+        requests.filter { it.edge == ToolbarDockEdge.TOP || it.edge == ToolbarDockEdge.BOTTOM })
+    val sideSpace = (windowHeight.value - topBottom.topInset - topBottom.bottomInset).coerceAtLeast(0f)
+    val capped = requests.map { request ->
+        if (request.autoLength) request else request.copy(length = request.length.coerceAtMost(
+            if (request.edge == ToolbarDockEdge.LEFT || request.edge == ToolbarDockEdge.RIGHT)
+                sideSpace else windowWidth.value,
+        ))
+    }
+    return packToolbarLanes(windowWidth.value, windowHeight.value, capped)
 }
 
 /** Preferred lanes are tried first, then other lanes on the same edge, for both dock modes. */
