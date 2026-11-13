@@ -19,6 +19,13 @@ The six dependent draft PRs in the contributor fork are review checkpoints, not 
 
 No persistence schema, migration, gesture transaction, primary toolbar identity or section layout semantics were modified in this pass.
 
+## Pass 2: compact expanded editor and command isolation
+
+- The earlier 640dp rule solved the half-width-slider bug with the left navigation rail **open**, but left excessively long slider tracks with the icon-only rail. The geometry card now uses a **460dp internal breakpoint** and groups five equal-width sliders by purpose: **Dimensions** (Length, Thickness, Buttons) and **Inner spacing** (Padding, Spacing). Columns cap at 300dp when side-by-side and take the card width when stacked. This avoids an oversized Length slider, an orphan final row and cross-row mismatches. Uniform header heights keep tracks aligned whether a value is numeric or automatic. The available width calculation reserves a few dp for pixel rounding. The Redmi Pad 2 editor was visually inspected in icon-only mode; both expanded and collapsed navigation states were covered by instrumentation.
+- Added an instrumented layout test for the icon-only rail, maximized inspector, expanded rail and narrow stacked layout. The new grid is measured through Compose layout bounds rather than assuming the screen always equals the usable editor width.
+- Extracted **immutable add and duplicate planners** into `ui/ToolbarWorkspaceCreationPlanner.kt`. ID assignment, new compact color-palette layout construction and placement rejection no longer live inside Compose menu callbacks; `ToolbarPreferencesPane` only translates planned success/failure to an editor update and user-visible error. Retained the distinct legacy behavior of new floating-bar placement vs full-workspace duplicate validation; this refactor is *not* a new placement policy.
+- Added JVM tests for ID collision, primary-bar preservation, context-specific palette visibility, duplicate visual-order normalization and missing-source handling. No storage schema, existing toolbar identity or gesture code was changed.
+
 ## Important code that must **not** be removed as apparent leftovers
 
 - `ToolbarPreviewReorderController` keeps the last valid hover target when a pointer crosses empty space, and holds a pending reorder until the workspace acknowledges it. Removing either behavior reintroduces observed flicker.
@@ -28,9 +35,9 @@ No persistence schema, migration, gesture transaction, primary toolbar identity 
 - Floating and docked placement, pinned Start/End regions and the legacy single-bar migration paths are distinct responsibilities, not redundant implementations.
 - The inspector's non-drag controls and the stacked PR boundaries remain useful for accessibility and review.
 
-## Pass 2: proposed, not yet performed
+## Further refactoring (not yet performed)
 
-1. Refactor `ToolbarPreferencesPane` (currently ~613 source lines) into a dedicated selection/command adapter, leaving composition independent of persistence and `Editor`. Preserve the exact workspace update path and primary identity.
+1. Continue extracting `ToolbarPreferencesPane` selection and editor mutations (now ~588 source lines) behind a dedicated adapter; only creation and duplication planning were isolated in pass 2. Preserve the exact workspace update path and primary identity.
 2. Separate toolbar section drag presentation from palette and section editing in `ToolbarCustomizer` (currently ~696 lines). Consolidate shared geometry/hit testing through existing pure helpers; avoid creating tiny files with circular dependencies.
 3. Review geometry layout planning under frequent slider changes with benchmarks before optimizing hot paths further. A cache is justified only when it avoids identical computations.
 4. Add tests for landscape/portrait, sidebar open/closed, 1–3 simultaneous bars, floating/docked transitions, accessibility, split view, and real stylus gestures. Keep manual QA independent from automated touch injection.
