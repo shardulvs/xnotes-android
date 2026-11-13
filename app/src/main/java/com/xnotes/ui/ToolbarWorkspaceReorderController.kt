@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import com.xnotes.core.tools.ToolbarWorkspace
+import com.xnotes.core.tools.ToolbarDropPosition
 
 /**
  * Shared preview/live-toolbar gesture and commit state. Separates hit testing
@@ -19,6 +20,8 @@ internal class ToolbarWorkspaceReorderController {
     var targetId by mutableStateOf<String?>(null)
         private set
     var lastReleasedId by mutableStateOf<String?>(null)
+        private set
+    var hoverPlacement by mutableStateOf<ToolbarDropPosition?>(null)
         private set
 
     /** Holds the destination through the asynchronous workspace acknowledgement. */
@@ -60,6 +63,7 @@ internal class ToolbarWorkspaceReorderController {
         lastReleasedId = null
         sourceId = id
         targetId = null
+        hoverPlacement = null
         initialBounds = currentBounds.toMap()
         peers = candidates
         vertical = verticalAxis
@@ -77,6 +81,10 @@ internal class ToolbarWorkspaceReorderController {
         }
         // Empty space does not mean "restore old order". Keep the previous target
         // stable while the pointer passes between bars or over the preview canvas.
+    }
+
+    fun previewPlacement(id: String, placement: ToolbarDropPosition?) {
+        if (sourceId == id && hoverPlacement != placement) hoverPlacement = placement
     }
 
     fun drop(id: String, rootPointer: Offset, commit: (String, String) -> Unit): Boolean {
@@ -110,6 +118,7 @@ internal class ToolbarWorkspaceReorderController {
     private fun clearGesture() {
         sourceId = null
         targetId = null
+        hoverPlacement = null
         peers = emptyList()
         initialBounds = emptyMap()
         gestureWorkspace = null

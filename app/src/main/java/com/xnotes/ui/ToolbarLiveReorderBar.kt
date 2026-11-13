@@ -12,8 +12,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -21,6 +23,7 @@ import com.xnotes.core.tools.ToolbarAnchor
 import com.xnotes.core.tools.ToolbarBar
 import com.xnotes.core.tools.ToolbarDockAlignment
 import com.xnotes.core.tools.ToolbarDockPlacement
+import com.xnotes.core.tools.ToolbarDropPosition
 import com.xnotes.core.tools.ToolbarWorkspace
 
 /** Mirrors the preview's optimistic gesture/reorder transaction on a real toolbar.
@@ -40,6 +43,7 @@ internal fun ToolbarLiveReorderBar(
     reorder: ToolbarWorkspaceReorderController,
     onMoveBar: ((String, ToolbarAnchor, ToolbarDockAlignment) -> Unit)?,
     onReorderBar: ((String, String) -> Unit)?,
+    projectedSlot: (ToolbarDropPosition) -> ToolbarDropSlot?,
     content: @Composable () -> Unit,
 ) {
     val isSource = reorder.sourceId == bar.id || reorder.lastReleasedId == bar.id
@@ -48,6 +52,7 @@ internal fun ToolbarLiveReorderBar(
     val animatedY by animateDpAsState(y.dp,
         animationSpec = if (isSource) snap() else spring(), label = "liveBarY-${bar.id}")
     val currentCommit by rememberUpdatedState(onReorderBar)
+    val density = LocalDensity.current
     Box(
         Modifier.offset(x = if (isSource) x.dp else animatedX,
                         y = if (isSource) y.dp else animatedY)
@@ -89,6 +94,12 @@ internal fun ToolbarLiveReorderBar(
                 onDragCancel = if (onReorderBar == null) null else ({
                     reorder.cancel(bar.id)
                 }),
+                snapTargetInRoot = { target ->
+                    projectedSlot(target)?.topLeftInRoot(paneBounds, density)
+                },
+                onPlacementPreview = { target ->
+                    reorder.previewPlacement(bar.id, target)
+                },
             ) { content() }
         }
     }

@@ -145,8 +145,9 @@ internal fun ToolbarWorkspacePreview(
         // Layout against the actual window width, then scale all dp/sp measurements together.
         // This preserves the bar-to-screen ratio even in a narrower settings pane.
         val scale = toolbarPreviewScale(maxWidth, screenWidth)
+        val previewDensity = Density(screenDensity.density * scale, screenDensity.fontScale)
         CompositionLocalProvider(
-            LocalDensity provides Density(screenDensity.density * scale, screenDensity.fontScale),
+            LocalDensity provides previewDensity,
         ) {
             Canvas(Modifier.fillMaxSize()) {
                 drawRect(palette.panel.toComposeColor())
@@ -172,6 +173,14 @@ internal fun ToolbarWorkspacePreview(
                         1.dp.toPx(),
                     )
                     y += rule
+                }
+            }
+            val hoveredId = reorder.sourceId
+            val hoveredTarget = reorder.hoverPlacement
+            if (hoveredId != null && hoveredTarget != null && reorder.targetId == null) {
+                toolbarPreviewDropSlot(workspace, look, hoveredId, hoveredTarget,
+                    screenWidth, screenHeight, colors.size)?.let { slot ->
+                    ToolbarDropIndicator(slot, hoveredId)
                 }
             }
             workspace.bars.forEachIndexed { index, bar ->
@@ -251,6 +260,14 @@ internal fun ToolbarWorkspacePreview(
                         onDragCancel = if (onReorderBar == null) null else ({
                             reorder.cancel(bar.id)
                         }),
+                        snapTargetInRoot = { target ->
+                            toolbarPreviewDropSlot(workspace, look, bar.id, target,
+                                screenWidth, screenHeight, colors.size)
+                                ?.topLeftInRoot(stageBounds, previewDensity)
+                        },
+                        onPlacementPreview = { target ->
+                            reorder.previewPlacement(bar.id, target)
+                        },
                     ) {
                         PreviewBar(
                             bar = bar,

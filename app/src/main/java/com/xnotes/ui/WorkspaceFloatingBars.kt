@@ -1,5 +1,8 @@
 package com.xnotes.ui
 
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
@@ -21,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.AbsoluteAlignment
@@ -46,7 +50,9 @@ import com.xnotes.settings.ToolbarLook
 import com.xnotes.settings.ToolbarPosition
 import com.xnotes.settings.ToolbarSize
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * Hold anywhere on a toolbar's container to pick it up. Ordinary taps still reach
@@ -66,6 +72,10 @@ fun ToolbarDragSurface(
     onDragPosition: ((Offset) -> Unit)? = null,
     onDrop: ((Offset) -> Boolean)? = null,
     onDragCancel: (() -> Unit)? = null,
+    /** Optional projected destination in root pixels, shared with the drop indicator. */
+    snapTargetInRoot: ((ToolbarDropPosition) -> Offset?)? = null,
+    /** Called during dragging only; never changes the saved workspace. */
+    onPlacementPreview: ((ToolbarDropPosition?) -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     val moveBarNow by rememberUpdatedState(onMoveBar)
@@ -74,6 +84,10 @@ fun ToolbarDragSurface(
     val moveCallback by rememberUpdatedState(onDragPosition)
     val dropCallback by rememberUpdatedState(onDrop)
     val cancelCallback by rememberUpdatedState(onDragCancel)
+    val snapTargetNow by rememberUpdatedState(snapTargetInRoot)
+    val previewPlacementNow by rememberUpdatedState(onPlacementPreview)
+    val settleScope = rememberCoroutineScope()
+    var settleJob by remember(id) { mutableStateOf<Job?>(null) }
     var drag by remember(id) { mutableStateOf(Offset.Zero) }
     var dragging by remember(id) { mutableStateOf(false) }
     var barBounds by remember(id) { mutableStateOf(Rect.Zero) }
@@ -83,6 +97,14 @@ fun ToolbarDragSurface(
     // briefly redraw at its previous slot, then snap forward (the visible flick).
     var pendingPlacement by remember(id) { mutableStateOf<ToolbarDropPosition?>(null) }
     val alignmentNow by rememberUpdatedState(currentAlignment)
+    fun resolvedPlacement(offset: Offset): ToolbarDropPosition? {
+        val pane = paneBoundsNow
+        if (barBounds == Rect.Zero || pane == Rect.Zero) return null
+        val center = barBounds.center + offset - pane.topLeft
+        return ToolbarAnchorResolver.nearestPlacement(
+            center.x, center.y, pane.width, pane.height, anchor,
+        )
+    }
     LaunchedEffect(anchor, currentAlignment, pendingPlacement) {
         val pending = pendingPlacement ?: return@LaunchedEffect
         if (anchor == pending.anchor && currentAlignment == pending.alignment) {
@@ -106,11 +128,14 @@ fun ToolbarDragSurface(
             val down = awaitFirstDown(requireUnconsumed = false)
             val held = awaitLongPressOrCancellation(down.id)
             if (held != null) {
+                settleJob?.cancel()
+                settleJob = null
                 pendingPlacement = null
                 drag = Offset.Zero
                 dragging = true
                 dragStartInRoot = barBounds.topLeft + held.position
                 startCallback?.invoke(dragStartInRoot)
+                previewPlacementNow?.invoke(resolvedPlacement(Offset.Zero))
                 var canceled = false
                 while (true) {
                     // A child toolbar element may consume Main-pass changes; observe
@@ -127,12 +152,14 @@ fun ToolbarDragSurface(
                         change.consume()
                         drag += delta
                         moveCallback?.invoke(dragStartInRoot + drag)
+                        previewPlacementNow?.invoke(resolvedPlacement(drag))
                     }
                 }
                 if (canceled) {
                     pendingPlacement = null
                     drag = Offset.Zero
                     dragging = false
+                    previewPlacementNow?.invoke(null)
                     cancelCallback?.invoke()
                 } else {
                     val moved = drag
@@ -140,20 +167,41 @@ fun ToolbarDragSurface(
                     val handledByPreview = dropCallback?.invoke(droppedAt) == true
                     val handled = moved.getDistance() >= 12f && handledByPreview
                     dragging = false
-                    if (!handled && moved.getDistance() >= 12f && barBounds != Rect.Zero && paneBoundsNow != Rect.Zero) {
-                        val center = barBounds.center + moved - paneBoundsNow.topLeft
-                        val target = ToolbarAnchorResolver.nearestPlacement(
-                            center.x, center.y, paneBoundsNow.width, paneBoundsNow.height, anchor,
-                        )
-                        if (target != null && (target.anchor != anchor || target.alignment != alignmentNow)) {
-                            // The new alignment may change while the edge anchor stays
-                            // identical (left/right start -> center). Wait for BOTH to
-                            // be acknowledged before dropping the visual offset.
-                            pendingPlacement = target
-                            moveBarNow(id, target.anchor, target.alignment)
+                    if (!handled && moved.getDistance() >= 12f &&
+                        barBounds != Rect.Zero && paneBoundsNow != Rect.Zero) {
+                        val target = resolvedPlacement(moved)
+                        if (target != null) {
+                            val changed = target.anchor != anchor || target.alignment != alignmentNow
+                            val projectedRoot = snapTargetNow?.invoke(target)
+                            if (projectedRoot != null) {
+                                // Slide while the parent still owns the OLD slot. Only after
+                                // reaching the ghost destination do we persist the move.
+                                // This avoids drawing one frame at the original slot or
+                                // animating the source *from* its old position after release.
+                                if (changed) pendingPlacement = target
+                                val destinationOffset = projectedRoot - barBounds.topLeft
+                                settleJob = settleScope.launch {
+                                    animate(0f, 1f,
+                                        animationSpec = tween(190, easing = FastOutSlowInEasing),
+                                    ) { fraction, _ ->
+                                        drag = moved + (destinationOffset - moved) * fraction
+                                    }
+                                    if (changed) {
+                                        moveBarNow(id, target.anchor, target.alignment)
+                                    } else {
+                                        drag = Offset.Zero
+                                    }
+                                }
+                            } else {
+                                if (changed) {
+                                    pendingPlacement = target
+                                    moveBarNow(id, target.anchor, target.alignment)
+                                } else {
+                                    drag = Offset.Zero
+                                }
+                            }
                         } else {
                             drag = Offset.Zero
-                            if (target != null) moveBarNow(id, target.anchor, target.alignment)
                         }
                     } else {
                         drag = Offset.Zero
@@ -206,6 +254,14 @@ fun BoxScope.WorkspaceFloatingBars(
                 bar.id to toolbarReorderPeersInPlan(workspace, bar.id, basePlan, floating = true)
             }
         }
+        val hoveredId = reorder.sourceId
+        val hoveredTarget = reorder.hoverPlacement
+        if (hoveredId != null && hoveredTarget != null && reorder.targetId == null) {
+            toolbarFloatingDropSlot(workspace, baseLook, hoveredId, hoveredTarget,
+                maxWidth, maxHeight, colorCount)?.let { slot ->
+                ToolbarDropIndicator(slot, hoveredId)
+            }
+        }
         for ((index, bar) in workspace.bars.withIndex()) {
             val placement = (if (reorder.sourceId == bar.id) basePlan else proposedPlan)
                 .placement(bar.id) ?: continue
@@ -234,6 +290,10 @@ fun BoxScope.WorkspaceFloatingBars(
                     reorder = reorder,
                     onMoveBar = onMoveBar,
                     onReorderBar = onReorderBar,
+                    projectedSlot = { target ->
+                        toolbarFloatingDropSlot(workspace, baseLook, bar.id, target,
+                            maxWidth, maxHeight, colorCount)
+                    },
                 ) {
                     CompositionLocalProvider(LocalToolbarLook provides look) {
                         if (index == 0) primaryContent() else content(bar)
