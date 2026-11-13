@@ -41,6 +41,14 @@ No persistence schema, migration, gesture transaction, primary toolbar identity 
 - An opt-in `-PtoolbarReviewBuild=true` Gradle property builds a signed review APK under **`com.xnotes.pr431review`**, with a review suffix in the version name. Normal releases still use their original Android package and signing behavior. This makes a reviewer build installable alongside the official XNotes and the debug app. The signing key and `keystore.properties` remain outside Git.
 - A short Redmi Pad 2 demo plan is maintained in [toolbar-workspaces-demo-guide.md](toolbar-workspaces-demo-guide.md); reviewers need to see the **continuous cross-edge drag**, not only the toolbar after release. The PR description must not imply the video exists until the new recording is actually uploaded.
 
+## Pass 5: bidirectional placement and side-alignment fix (2026-11-13)
+
+- Reproduced the report: LEFT/RIGHT edges only have `CENTER_LEFT`/`CENTER_RIGHT` anchors, while START/CENTER/END resides in `dockAlignment`. Old drags changed the anchor without resetting a stale alignment. Dragging a left-side bar back to the center could therefore leave it at START.
+- `ToolbarAnchorResolver.nearestPlacement` now computes **edge and alignment together**, using all twelve target positions; corner ties prefer the current edge. `ToolbarDragSurface` waits for both values to be acknowledged by the editor so an alignment-only move cannot flash back to the previous slot. The XNote/XCanvas runtime and preview propagate the same values.
+- Dragging a bar no longer implicitly flips Docked/Floating mode. Moving an existing docked bar to another edge preserves docking, while moving a floating bar preserves floating; the placement mode has its own explicit setting.
+- The old 8-arrow grid plus three separate alignment toggle chips have been replaced with one **12-stop position map** (four edges × Start/Center/End). Its stops have accessible descriptions and 44dp click areas. Lane 1–3 selection remains separate and is clearly labelled **Preferred lane**, since actual packing may redistribute a lane when it is occupied.
+- New JVM tests cover all twelve placements, left-side recentering, corner ties and invalid dimensions. Compose tests verify the selected stop follows its geometry and an actual LEFT/START → LEFT/CENTER preview gesture. Rechecked **2,650 JVM tests and 35 Compose tests** (Small_Tablet at 1920×1200, 240dpi), plus `lintVitalRelease`. Real stylus/OEM QA remains open.
+
 ## Important code that must **not** be removed as apparent leftovers
 
 - `ToolbarPreviewReorderController` keeps the last valid hover target when a pointer crosses empty space, and holds a pending reorder until the workspace acknowledges it. Removing either behavior reintroduces observed flicker.
