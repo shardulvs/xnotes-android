@@ -81,7 +81,7 @@ internal fun ToolbarLiveReorderBar(
                     reorder.start(bar.id, peers,
                         placement.edge == com.xnotes.core.tools.ToolbarDockEdge.LEFT ||
                             placement.edge == com.xnotes.core.tools.ToolbarDockEdge.RIGHT,
-                        workspace)
+                        workspace, anchor, alignment)
                 },
                 onDragPosition = if (onReorderBar == null) null else { finger ->
                     reorder.hover(bar.id, finger)

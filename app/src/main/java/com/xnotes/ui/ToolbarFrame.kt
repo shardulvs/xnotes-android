@@ -178,9 +178,18 @@ internal fun ColumnScope.ToolbarAround(
         var paneBounds by remember { mutableStateOf(Rect.Zero) }
         BoxWithConstraints(rest.onGloballyPositioned { paneBounds = it.boundsInRoot() }) {
             val basePlan = toolbarDockPlan(workspace, look, maxWidth, maxHeight)
-            val proposedWorkspace = reorder.displayedWorkspace(workspace)
-            val proposedPlan = if (proposedWorkspace == workspace) basePlan else
-                toolbarDockPlan(proposedWorkspace, look, maxWidth, maxHeight)
+            val reordered = reorder.displayedWorkspace(workspace)
+            val hoveredId = reorder.sourceId
+            val hoveredTarget = reorder.hoverPlacement
+            // Predict ALL peers' slots while dragging, not only the destination outline.
+            // The held source stays at its original slot and follows the pointer.
+            val previewMove = if (hoveredId != null && hoveredTarget != null &&
+                reorder.targetId == null) toolbarProjectedMove(workspace, look, hoveredId,
+                    hoveredTarget) else null
+            val proposedWorkspace = previewMove?.first ?: reordered
+            val proposedLook = previewMove?.second ?: look
+            val proposedPlan = if (proposedWorkspace == workspace && proposedLook == look) basePlan
+                else toolbarDockPlan(proposedWorkspace, proposedLook, maxWidth, maxHeight)
             val peers = remember(workspace, basePlan, onReorderBar != null) {
                 if (onReorderBar == null) emptyMap() else workspace.bars.associate { dockBar ->
                     dockBar.id to toolbarReorderPeersInPlan(workspace, dockBar.id, basePlan,
@@ -191,8 +200,6 @@ internal fun ColumnScope.ToolbarAround(
                 start = basePlan.leftInset.dp, top = basePlan.topInset.dp,
                 end = basePlan.rightInset.dp, bottom = basePlan.bottomInset.dp,
             )) { content({}) }
-            val hoveredId = reorder.sourceId
-            val hoveredTarget = reorder.hoverPlacement
             if (hoveredId != null && hoveredTarget != null && reorder.targetId == null) {
                 toolbarDockDropSlot(workspace, look, hoveredId, hoveredTarget,
                     maxWidth, maxHeight)?.let { slot ->

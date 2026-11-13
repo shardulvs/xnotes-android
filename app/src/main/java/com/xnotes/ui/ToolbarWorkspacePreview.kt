@@ -126,10 +126,17 @@ internal fun ToolbarWorkspacePreview(
     val peersByBar = remember(workspace, basePlan, onReorderBar != null) {
         if (onReorderBar == null) emptyMap() else toolbarPreviewPeers(workspace, basePlan)
     }
-    val displayedWorkspace = reorder.displayedWorkspace(workspace)
-    val previewPlan = if (displayedWorkspace == workspace) basePlan
-        else remember(displayedWorkspace, look, screenWidth, screenHeight, colors.size) {
-            toolbarPreviewLayoutPlan(displayedWorkspace, look, screenWidth, screenHeight, colors.size)
+    val hoveredId = reorder.sourceId
+    val hoveredTarget = reorder.hoverPlacement
+    val previewMove = if (hoveredId != null && hoveredTarget != null &&
+        reorder.targetId == null) toolbarProjectedMove(workspace, look, hoveredId,
+            hoveredTarget) else null
+    val displayedWorkspace = previewMove?.first ?: reorder.displayedWorkspace(workspace)
+    val previewLook = previewMove?.second ?: look
+    val previewPlan = if (displayedWorkspace == workspace && previewLook == look) basePlan
+        else remember(displayedWorkspace, previewLook, screenWidth, screenHeight, colors.size) {
+            toolbarPreviewLayoutPlan(displayedWorkspace, previewLook,
+                screenWidth, screenHeight, colors.size)
         }
     val dockPlan = previewPlan.docked
     BoxWithConstraints(
@@ -175,8 +182,6 @@ internal fun ToolbarWorkspacePreview(
                     y += rule
                 }
             }
-            val hoveredId = reorder.sourceId
-            val hoveredTarget = reorder.hoverPlacement
             if (hoveredId != null && hoveredTarget != null && reorder.targetId == null) {
                 toolbarPreviewDropSlot(workspace, look, hoveredId, hoveredTarget,
                     screenWidth, screenHeight, colors.size)?.let { slot ->
@@ -247,7 +252,8 @@ internal fun ToolbarWorkspacePreview(
                             onMoveBar(movedId, destination, alignment)
                         },
                         onDragStart = if (onReorderBar == null) null else { _ ->
-                            reorder.start(bar.id, peers, vertical, workspace)
+                            reorder.start(bar.id, peers, vertical, workspace, anchor,
+                                toolbarFloatingAlignment(bar))
                         },
                         onDragPosition = if (onReorderBar == null) null else { finger ->
                             reorder.hover(bar.id, finger)

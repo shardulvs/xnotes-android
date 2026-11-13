@@ -54,6 +54,65 @@ object ToolbarAnchorResolver {
         return ToolbarDropPosition(anchor, alignment)
     }
 
+    /** Stable destination preview: crossing an edge or thirds boundary must exceed a
+     * deadband before the highlighted slot changes. Release uses the same result.
+     * This only affects drag feedback, never the twelve explicit position buttons. */
+    fun stablePlacement(
+        centerX: Float, centerY: Float, paneWidth: Float, paneHeight: Float,
+        previous: ToolbarDropPosition,
+        edgeDeadbandPx: Float = 36f,
+        alignmentDeadbandFraction: Float = 0.055f,
+    ): ToolbarDropPosition? {
+        val raw = nearestPlacement(centerX, centerY, paneWidth, paneHeight, previous.anchor)
+            ?: return null
+        val oldEdge = previous.anchor.edge()
+        val newEdge = raw.anchor.edge()
+        val x = centerX.coerceIn(0f, paneWidth)
+        val y = centerY.coerceIn(0f, paneHeight)
+        fun distance(edge: ToolbarDockEdge): Float = when (edge) {
+            ToolbarDockEdge.TOP -> y
+            ToolbarDockEdge.BOTTOM -> paneHeight - y
+            ToolbarDockEdge.LEFT -> x
+            ToolbarDockEdge.RIGHT -> paneWidth - x
+        }
+        val edge = if (newEdge != oldEdge &&
+            distance(oldEdge) - distance(newEdge) < edgeDeadbandPx.coerceAtLeast(0f)) oldEdge else newEdge
+        val ratio = if (edge == ToolbarDockEdge.TOP || edge == ToolbarDockEdge.BOTTOM)
+            x / paneWidth else y / paneHeight
+        val margin = alignmentDeadbandFraction.coerceIn(0f, 0.15f)
+        val alignment = when (previous.alignment) {
+            ToolbarDockAlignment.START -> when {
+                ratio < 1f / 3f + margin -> ToolbarDockAlignment.START
+                ratio > 2f / 3f -> ToolbarDockAlignment.END
+                else -> ToolbarDockAlignment.CENTER
+            }
+            ToolbarDockAlignment.CENTER -> when {
+                ratio < 1f / 3f - margin -> ToolbarDockAlignment.START
+                ratio > 2f / 3f + margin -> ToolbarDockAlignment.END
+                else -> ToolbarDockAlignment.CENTER
+            }
+            ToolbarDockAlignment.END -> when {
+                ratio > 2f / 3f - margin -> ToolbarDockAlignment.END
+                ratio < 1f / 3f -> ToolbarDockAlignment.START
+                else -> ToolbarDockAlignment.CENTER
+            }
+        }
+        return ToolbarDropPosition(when (edge) {
+            ToolbarDockEdge.TOP -> when (alignment) {
+                ToolbarDockAlignment.START -> ToolbarAnchor.TOP_LEFT
+                ToolbarDockAlignment.CENTER -> ToolbarAnchor.TOP_CENTER
+                ToolbarDockAlignment.END -> ToolbarAnchor.TOP_RIGHT
+            }
+            ToolbarDockEdge.BOTTOM -> when (alignment) {
+                ToolbarDockAlignment.START -> ToolbarAnchor.BOTTOM_LEFT
+                ToolbarDockAlignment.CENTER -> ToolbarAnchor.BOTTOM_CENTER
+                ToolbarDockAlignment.END -> ToolbarAnchor.BOTTOM_RIGHT
+            }
+            ToolbarDockEdge.LEFT -> ToolbarAnchor.CENTER_LEFT
+            ToolbarDockEdge.RIGHT -> ToolbarAnchor.CENTER_RIGHT
+        }, alignment)
+    }
+
     fun nearest(
         centerX: Float,
         centerY: Float,

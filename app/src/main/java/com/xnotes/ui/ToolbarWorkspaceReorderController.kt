@@ -7,6 +7,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import com.xnotes.core.tools.ToolbarWorkspace
 import com.xnotes.core.tools.ToolbarDropPosition
+import com.xnotes.core.tools.ToolbarAnchor
+import com.xnotes.core.tools.ToolbarDockEdge
+import com.xnotes.core.tools.ToolbarDockAlignment
 
 /**
  * Shared preview/live-toolbar gesture and commit state. Separates hit testing
@@ -32,6 +35,7 @@ internal class ToolbarWorkspaceReorderController {
     private var initialBounds: Map<String, Rect> = emptyMap()
     private var peers: List<String> = emptyList()
     private var vertical = false
+    private var sourcePlacement: ToolbarDropPosition? = null
     private var gestureWorkspace: ToolbarWorkspace? = null
 
     private fun visualIds(workspace: ToolbarWorkspace): List<String> = workspace.bars
@@ -51,13 +55,22 @@ internal class ToolbarWorkspaceReorderController {
     /** Called from a workspace-keyed effect after the real change becomes observable. */
     fun acknowledge(workspace: ToolbarWorkspace) {
         if (pendingCommit?.order == visualIds(workspace)) pendingCommit = null
+        val target = hoverPlacement
+        val source = sourceId
+        if (source != null && target != null && lastReleasedId == source &&
+            workspace.bars.any { it.id == source && it.geometry.anchor == target.anchor &&
+                it.geometry.dockAlignment == target.alignment }) {
+            clearGesture()
+        }
     }
 
     fun updateBounds(id: String, bounds: Rect) {
         if (currentBounds[id] != bounds) currentBounds[id] = bounds
     }
 
-    fun start(id: String, candidates: List<String>, verticalAxis: Boolean, workspace: ToolbarWorkspace) {
+    fun start(id: String, candidates: List<String>, verticalAxis: Boolean,
+        workspace: ToolbarWorkspace, originalAnchor: ToolbarAnchor? = null,
+        originalAlignment: ToolbarDockAlignment = ToolbarDockAlignment.CENTER) {
         pendingCommit = null
         gestureWorkspace = workspace
         lastReleasedId = null
@@ -67,12 +80,13 @@ internal class ToolbarWorkspaceReorderController {
         initialBounds = currentBounds.toMap()
         peers = candidates
         vertical = verticalAxis
+        sourcePlacement = originalAnchor?.let { ToolbarDropPosition(it, originalAlignment) }
     }
 
     fun hover(id: String, rootPointer: Offset) {
         if (sourceId != id) return
         val candidate = toolbarPreviewReorderHit(id, peers, rootPointer, initialBounds, vertical)
-        if (candidate != null) {
+        if (candidate != null && !hasChangedPlacement()) {
             // Reaching another peer updates the prospective order.
             targetId = candidate
         } else if (initialBounds[id]?.contains(rootPointer) == true) {
@@ -83,14 +97,27 @@ internal class ToolbarWorkspaceReorderController {
         // stable while the pointer passes between bars or over the preview canvas.
     }
 
+    private fun hasChangedPlacement(): Boolean {
+        val origin = sourcePlacement ?: return false
+        val hover = hoverPlacement ?: return false
+        return hover.anchor.floatingEdge() != origin.anchor.floatingEdge() ||
+            hover.alignment != origin.alignment
+    }
+
     fun previewPlacement(id: String, placement: ToolbarDropPosition?) {
-        if (sourceId == id && hoverPlacement != placement) hoverPlacement = placement
+        if (sourceId != id) return
+        if (hoverPlacement != placement) hoverPlacement = placement
+        // The original peer target is intentionally sticky over gaps on the SAME
+        // edge. It must NOT stay sticky after crossing to a different edge: doing
+        // so hid the placement indicator and prevented the side transfer.
+        if (hasChangedPlacement()) targetId = null
     }
 
     fun drop(id: String, rootPointer: Offset, commit: (String, String) -> Unit): Boolean {
         if (sourceId != id) return false
         val destination = toolbarPreviewReorderHit(id, peers, rootPointer, initialBounds, vertical)
-        val accepted = destination != null && destination in peers && destination != id
+        val accepted = !hasChangedPlacement() && destination != null &&
+            destination in peers && destination != id
         if (accepted) {
             val expected = gestureWorkspace?.reorderVisualBar(id, destination!!)
             if (expected != null) {
@@ -99,7 +126,10 @@ internal class ToolbarWorkspaceReorderController {
             lastReleasedId = id
             commit(id, destination!!)
         }
-        clearGesture()
+        // Keep the projected peer positions and ghost visible while the source
+        // eases into its new slot. Clearing here makes every neighbour flash back
+        // for ~220 ms before the actual workspace commit repositions it again.
+        if (accepted || !hasChangedPlacement()) clearGesture()
         return accepted
     }
 
@@ -120,6 +150,7 @@ internal class ToolbarWorkspaceReorderController {
         targetId = null
         hoverPlacement = null
         peers = emptyList()
+        sourcePlacement = null
         initialBounds = emptyMap()
         gestureWorkspace = null
     }
