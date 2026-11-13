@@ -194,7 +194,8 @@ fun BoxScope.WorkspaceFloatingBars(
     LaunchedEffect(workspace) { reorder.acknowledge(workspace) }
     var paneBounds by remember { mutableStateOf(Rect.Zero) }
     val baseLook = LocalToolbarLook.current
-    val showPrimary = workspace.hasMultiDock(baseLook)
+    val showPrimary = workspace.hasMultiDock(baseLook) ||
+        workspace.usesSharedFloatingPrimary(baseLook)
     BoxWithConstraints(Modifier.fillMaxSize().zIndex(10f).onGloballyPositioned { paneBounds = it.boundsInRoot() }) {
         val basePlan = toolbarFloatingPlan(workspace, baseLook, maxWidth, maxHeight, colorCount)
         val proposedWorkspace = reorder.displayedWorkspace(workspace)

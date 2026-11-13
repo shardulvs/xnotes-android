@@ -187,6 +187,15 @@ internal fun ToolbarWorkspace.hasMultiDock(look: ToolbarLook): Boolean =
                 bar.geometry.dockAlignment != ToolbarDockAlignment.CENTER)
     }
 
+/** A legacy primary uses ToolbarLook.floating rather than geometry.floating. When
+ * another visible bar is present, both must be rendered in the SAME floating
+ * workspace so alignment and long-press reorder share one layout transaction. */
+internal fun ToolbarWorkspace.usesSharedFloatingPrimary(look: ToolbarLook): Boolean {
+    if (!look.floating || bars.count { it.visible } < 2) return false
+    val primary = bars.firstOrNull() ?: return false
+    return primary.visible && !primary.geometry.floating && toolbarDockEdge(primary, 0, look) == null
+}
+
 internal fun ToolbarAnchor.floatingEdge(): ToolbarDockEdge = when (this) {
     ToolbarAnchor.TOP_LEFT, ToolbarAnchor.TOP_CENTER, ToolbarAnchor.TOP_RIGHT, ToolbarAnchor.CENTER ->
         ToolbarDockEdge.TOP

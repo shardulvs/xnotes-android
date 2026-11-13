@@ -105,6 +105,7 @@ import com.xnotes.ui.ToolbarAround
 import com.xnotes.ui.ToolbarDragSurface
 import com.xnotes.ui.WorkspaceFloatingBars
 import com.xnotes.ui.hasMultiDock
+import com.xnotes.ui.usesSharedFloatingPrimary
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.XnotesTheme
@@ -1517,7 +1518,8 @@ private fun EditorPane(
                 val activeWorkspace = app.toolbarWorkspaces.forContext(ToolbarContext.CANVAS)
                 val bar: @Composable () -> Unit = {
                     if (primary != null && !primary.geometry.floating &&
-                        !activeWorkspace.hasMultiDock(app.toolbarLook)) {
+                        !activeWorkspace.hasMultiDock(app.toolbarLook) &&
+                        !activeWorkspace.usesSharedFloatingPrimary(app.toolbarLook)) {
                         ToolbarDragSurface(
                             primary.id, primary.geometry.anchor, primary.geometry.movable,
                             paneBounds, { id, anchor, alignment -> app.moveToolbarBar(ToolbarContext.CANVAS, id, anchor, alignment) },
@@ -1595,7 +1597,8 @@ private fun EditorPane(
                 val activeWorkspace = app.toolbarWorkspaces.forContext(ToolbarContext.NOTE)
                 val bar: @Composable () -> Unit = {
                     if (primary != null && !primary.geometry.floating &&
-                        !activeWorkspace.hasMultiDock(app.toolbarLook)) {
+                        !activeWorkspace.hasMultiDock(app.toolbarLook) &&
+                        !activeWorkspace.usesSharedFloatingPrimary(app.toolbarLook)) {
                         ToolbarDragSurface(
                             primary.id, primary.geometry.anchor, primary.geometry.movable,
                             paneBounds, { id, anchor, alignment -> app.moveToolbarBar(ToolbarContext.NOTE, id, anchor, alignment) },
