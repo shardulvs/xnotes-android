@@ -106,3 +106,9 @@ No persistence schema, migration, gesture transaction, primary toolbar identity 
 - During floating, docked, and editor-preview reordering, draw the existing drop outline at the moving bar's destination slot in the provisional reordered plan. The peer animation and visual target share the same planner; no new persistent state, special drag mode, or duplicate gesture implementation.
 - Remove whole-bar rotation and alpha transitions. Animate the bar's width and height instead when switching orientation so text and tool icons stay upright.
 - Test insertion-indicator visibility *before* releasing the pointer, no premature reorder commit, real dock/floating cases, the preview gesture, and equality between projected planner and indicator geometry.
+
+## Pass 10: synchronized move and resize (2026-11-13)
+
+- Begin the orientation width/height transition on pointer release together with the 220-ms position tween, rather than waiting for the committed anchor update. No rotation, scaling of icons, or alpha effect.
+- Preserve stable source hitboxes and wait to persist placement until translation and size settlement have completed; the preview changes its internal layout while retaining its outer drag coordinates.
+- Added instrumented timing regression to assert that width, height and horizontal position all progress while the committed workspace still has its old anchor.

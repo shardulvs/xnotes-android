@@ -188,6 +188,70 @@ class ToolbarLivePlacementComposeTest {
         }
     }
 
+    @Test fun orientationResizeAndMovementProgressTogetherBeforeCommit() {
+        val moving = bar("moving", false, true)
+        val peer = bar("peer", false, true).copy(geometry =
+            bar("peer", false, true).geometry.copy(anchor = ToolbarAnchor.TOP_CENTER))
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(moving, peer)))
+        var commits = 0
+        val look = ToolbarLook(floating = true)
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalToolbarLook provides look) {
+                    Box(Modifier.size(840.dp, 380.dp).testTag("sync-stage")) {
+                        WorkspaceFloatingBars(workspace, onMoveBar = { id, anchor, alignment ->
+                            commits++
+                            workspace = toolbarProjectedMove(workspace, look, id,
+                                com.xnotes.core.tools.ToolbarDropPosition(anchor, alignment))!!.first
+                        }, onReorderBar = { from, to ->
+                            workspace = workspace.reorderVisualBar(from, to)
+                        }, primaryContent = { Box(Modifier.size(52.dp)) },
+                            content = { Box(Modifier.size(52.dp)) })
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        val stage = rule.onNodeWithTag("sync-stage", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val source = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+        val slot = rule.onNodeWithTag("live-toolbar-slot-moving", useUnmergedTree = true)
+        val origin = slot.getUnclippedBoundsInRoot()
+        val center = source.fetchSemanticsNode().boundsInRoot.center
+        rule.mainClock.autoAdvance = false
+        rule.onNodeWithTag("sync-stage", useUnmergedTree = true).performTouchInput {
+            down(center - stage.topLeft)
+            advanceEventTime(780)
+            moveBy(Offset(stage.right - 25f - center.x, stage.center.y - center.y))
+            advanceEventTime(48)
+            up()
+        }
+        rule.mainClock.advanceTimeByFrame()
+        val initial = slot.getUnclippedBoundsInRoot()
+        val initialDragX = source.getUnclippedBoundsInRoot().left.value
+        rule.runOnIdle { assertEquals("The move must not commit before the shared animation", 0, commits) }
+        rule.mainClock.advanceTimeBy(105)
+        val mid = slot.getUnclippedBoundsInRoot()
+        val midDragX = source.getUnclippedBoundsInRoot().left.value
+        assertTrue("The horizontal toolbar must narrow DURING movement: $initial / $mid",
+            (mid.right - mid.left).value < (initial.right - initial.left).value - 10f)
+        assertTrue("The vertical toolbar must grow DURING movement: $initial / $mid",
+            (mid.bottom - mid.top).value > (initial.bottom - initial.top).value + 10f)
+        assertTrue("Movement must advance during the same frames: $initialDragX -> $midDragX",
+            kotlin.math.abs(midDragX - initialDragX) > 10f)
+        rule.runOnIdle { assertEquals("Size changed only after an early commit", 0, commits) }
+        rule.mainClock.advanceTimeBy(240)
+        rule.waitForIdle()
+        rule.runOnIdle {
+            assertEquals(1, commits)
+            assertEquals(ToolbarAnchor.CENTER_RIGHT, workspace.bars.first().geometry.anchor)
+        }
+        val landed = slot.getUnclippedBoundsInRoot()
+        assertTrue("The landing width must match the resized destination",
+            (landed.right - landed.left).value < (origin.right - origin.left).value - 40f)
+        rule.mainClock.autoAdvance = true
+    }
+
     @Test fun floatingMoveShowsProjectedTargetAndSettlesAfterRelease() {
         val moving = bar("moving", false, true)
         val peer = bar("peer", false, true).let { it.copy(geometry =
