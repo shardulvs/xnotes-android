@@ -86,3 +86,9 @@ No persistence schema, migration, gesture transaction, primary toolbar identity 
 - Tests cover real `ToolbarFrame` one-row/two-row layouts, explicit-height mismatched peers, floating/docked reorder gestures and the pre-existing preview drag regressions. Hardware stylus, split-screen and orientation still need manual visual QA.
 
 - Additional legacy-primary parity fix: when two floating toolbars are visible and the primary still uses `ToolbarLook.floating`, both now use the shared floating layer. This prevents the primary from being separately aligned/handled outside the lane and avoids nested drag handlers. A lone legacy primary retains the old rendering path.
+
+## Pass 7: guided drag/drop (2026-11-13)
+
+- Added a shared projected-slot function for preview, live docked bars and live floating bars. A translucent, accent-coloured outline previews the destination while dragging across edges/alignments; same-lane reordering continues to animate peer positions instead.
+- Release translation now eases to the projected root-space target **before** persisting the move, preserving the existing pending-placement acknowledgement and avoiding a flash through the original slot.
+- Tested target-plan equivalence, legacy floating-primary parity, one-vs-two-row bottom alignment, continued preview reorder, an actual live-gesture indicator and monotonic frame-by-frame movement without a reverse snapback.

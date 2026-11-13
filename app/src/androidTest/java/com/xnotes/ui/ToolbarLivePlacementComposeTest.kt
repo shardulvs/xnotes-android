@@ -130,6 +130,64 @@ class ToolbarLivePlacementComposeTest {
         assertTrue("Expected real two-row toolbar to be taller than one-row toolbar", tall.top < short.top)
     }
 
+    @Test fun floatingMoveShowsProjectedTargetAndSettlesAfterRelease() {
+        val moving = bar("moving", false, true)
+        val peer = bar("peer", false, true).let { it.copy(geometry =
+            it.geometry.copy(anchor = ToolbarAnchor.TOP_CENTER,
+                dockAlignment = ToolbarDockAlignment.CENTER)) }
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(moving, peer)))
+        var commits = 0
+        val look = ToolbarLook(floating = true)
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalToolbarLook provides look) {
+                    Box(Modifier.size(840.dp, 380.dp).testTag("drop-stage")) {
+                        WorkspaceFloatingBars(workspace = workspace,
+                            onMoveBar = { id, anchor, alignment ->
+                                commits++
+                                workspace = toolbarProjectedMove(workspace, look, id,
+                                    com.xnotes.core.tools.ToolbarDropPosition(anchor, alignment))!!.first
+                            },
+                            onReorderBar = { source, destination ->
+                                workspace = workspace.reorderVisualBar(source, destination)
+                            },
+                            primaryContent = { Box(Modifier.size(148.dp, 52.dp)) },
+                            content = { Box(Modifier.size(148.dp, 52.dp)) },
+                        )
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        val stage = rule.onNodeWithTag("drop-stage", useUnmergedTree = true)
+        val origin = stage.fetchSemanticsNode().boundsInRoot.topLeft
+        val barCenter = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot.center
+        // Drag to the top, but away from the other bar so reorder won't consume it.
+        stage.performTouchInput {
+            down(barCenter - origin)
+            advanceEventTime(780)
+            moveBy(Offset(-145f, origin.y + 25f - barCenter.y))
+            advanceEventTime(48)
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag("toolbar-drop-indicator-moving", useUnmergedTree = true).assertExists()
+        rule.runOnIdle { assertEquals("The bar must not persist while the finger is down", 0, commits) }
+        stage.performTouchInput { up() }
+        rule.waitForIdle()
+        rule.runOnIdle {
+            assertEquals("A single completed move must be persisted", 1, commits)
+            assertTrue("The released bar must move to the top edge",
+                workspace.bars.first().geometry.anchor in listOf(
+                    ToolbarAnchor.TOP_LEFT, ToolbarAnchor.TOP_CENTER, ToolbarAnchor.TOP_RIGHT))
+        }
+        val slot = rule.onNodeWithTag("live-toolbar-slot-moving", useUnmergedTree = true)
+            .getUnclippedBoundsInRoot()
+        val stageBox = stage.getUnclippedBoundsInRoot()
+        assertTrue("Bar should settle near the target top edge: $slot vs $stageBox",
+            slot.top < stageBox.top + 60.dp)
+    }
+
     @Test fun legacyPrimaryAndColorsUseSameFloatingLaneAndCanReorder() {
         // The primary uses legacy ToolbarLook.floating rather than geometry.floating.
         // The old runtime drew it separately from colors; unlike the preview, its

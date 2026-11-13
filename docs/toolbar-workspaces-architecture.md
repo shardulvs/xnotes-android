@@ -69,3 +69,9 @@ The twelve visible position-map stops represent four edges × three alignments; 
 The dock/floating packer allocates a lane's **maximum** thickness. `ToolbarDockEdge.toolbarContentAlignment()` anchors each shorter bar to the actual screen edge *within* that allocation, matching the editor preview and preventing one-row toolbars from appearing pushed inward beside two-row siblings. Compose regression coverage uses actual `ToolbarFrame`/`ToolbarSections` layouts as well as fixed-size two-row/one-row cases.
 
 When the primary toolbar still uses the legacy `ToolbarLook.floating` flag and a second visible bar is added, `ToolbarWorkspace.usesSharedFloatingPrimary()` routes the primary into the same live floating container as its peers. The old independent legacy overlay must be suppressed to avoid duplicates or nested drag surfaces; a solitary legacy primary keeps its original rendering and interactions.
+
+## Predicted drop targets and snap settlement
+
+`ToolbarDropIndicator.kt` projects a tentative move through the *same geometry update* used by `Editor.moveToolbarBar`, then runs the existing dock/floating/preview layout planners. It draws a lightweight, non-interactive target outline at the **actual bar footprint**, accounting for taller peers in a shared lane. The gesture owns no persistence during hover.
+
+`ToolbarDragSurface` shares the projected target with the overlay and, on release, animates its current translation **from the pen's release position to that target** (190 ms). Only after landing does it commit the anchor/alignment to the editor. Parent acknowledgement discards the translation atomically; peer reorder still takes precedence and retains its own animation. A missing projected slot uses the previous safe fallback and does not advertise an unavailable destination.
