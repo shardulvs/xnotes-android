@@ -1347,4 +1347,6 @@
     <string name="toolbar_config_reorder_handle">Drag to reorder toolbar in this lane</string>
     <string name="toolbar_config_behavior">Behavior</string>
     <string name="toolbar_config_lane_and_alignment">Lane &amp; alignment</string>
+    <string name="toolbar_config_position_and_alignment">Position and alignment</string>
+    <string name="toolbar_config_preferred_lane">Preferred lane</string>
 </resources>

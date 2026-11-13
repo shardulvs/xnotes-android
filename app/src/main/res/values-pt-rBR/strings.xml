@@ -141,4 +141,6 @@
     <string name="toolbar_config_reorder_handle">Arrastar para reordenar a barra nesta faixa</string>
     <string name="toolbar_config_behavior">Comportamento</string>
     <string name="toolbar_config_lane_and_alignment">Faixa e alinhamento</string>
+    <string name="toolbar_config_position_and_alignment">Posição e alinhamento</string>
+    <string name="toolbar_config_preferred_lane">Faixa preferida</string>
 </resources>
