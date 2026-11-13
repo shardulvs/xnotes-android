@@ -134,8 +134,12 @@ fun CanvasStylesPopup(editor: InfiniteEditor, onDismiss: () -> Unit) {
                 }
                 Spacer(Modifier.size(4.dp))
             }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                ModeChip(stringResource(R.string.reset), selected = false) { apply(CanvasBackground()) }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // A stock background hides the checkbox, so Reset is also how the saved default is forgotten.
+                ModeChip(stringResource(R.string.reset), selected = false) {
+                    apply(CanvasBackground())
+                    editor.saveNewCanvasBackground(null)
+                }
             }
         }
     }

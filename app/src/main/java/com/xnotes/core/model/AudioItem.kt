@@ -26,7 +26,9 @@ class AudioItem(
     override val kind = KIND
     override val resizable = true
     override val mirrorable = false
+    override val exported = false
     override var locked = false
+    override var group: Int? = null
 
     /** Where the open player stands on this recording, in ms, or -1 while none is open on it. Never saved. */
     @Volatile
@@ -93,9 +95,6 @@ class AudioItem(
         }
     }
 }
-
-/** [this] as an export draws it: recordings are left out of every export, so nothing of them shows. */
-fun List<CanvasItem>.withoutAudio(): List<CanvasItem> = if (none { it is AudioItem }) this else filterNot { it is AudioItem }
 
 /** Snapshot of a pill's geometry: only where it sits. */
 private data class AudioSnapshot(val rect: Rect) : GeometrySnapshot

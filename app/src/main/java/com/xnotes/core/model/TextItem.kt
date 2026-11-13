@@ -31,6 +31,7 @@ class TextItem(
     override val mirrorable = false
     override val resizable = true
     override var locked = false
+    override var group: Int? = null
     override var sync: SyncMark? = null
 
     val font get() = FontSpec(pointSize, face)

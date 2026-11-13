@@ -88,6 +88,9 @@ object FontCatalog {
         for (c in custom.values.sortedBy { it.face.id.lowercase() }) add(Choice(c.face, c.face.id, c.mono))
     }
 
+    /** The files of the user's imported fonts, for a settings export to carry. */
+    fun customFontFiles(): List<File> = custom.values.map { it.file }.filter { it.isFile }
+
     fun customFonts(): List<Choice> =
         custom.values.sortedBy { it.face.id.lowercase() }.map { Choice(it.face, it.face.id, it.mono) }
 

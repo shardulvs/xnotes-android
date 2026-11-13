@@ -2,6 +2,8 @@ package com.xnotes.platform
 
 import android.content.Context
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.cos.COSArray
+import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.multipdf.PDFMergerUtility
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -56,6 +58,40 @@ object PdfJoin {
             if (out.length() == base.length()) out.appendBytes(byteArrayOf('\n'.code.toByte()))
         }.isSuccess
         return written && !isCancelled() && readsAs(out, baseSizes + extraSizes)
+    }
+
+    /**
+     * Writes the pages of [source] at [indices], in that order, to [out], with the outline entries
+     * that open one of them. True when PDFium reads [out] back with that many pages. IO.
+     */
+    fun subset(context: Context, source: File, indices: List<Int>, out: File): Boolean {
+        PDFBoxResourceLoader.init(context.applicationContext)
+        val mem = MemoryUsageSetting.setupMixed(SCRATCH_MAIN_MEM_BYTES).setTempDir(context.cacheDir)
+        val written = runCatching {
+            PDDocument.load(source, mem).use { src ->
+                PDDocument(mem).use { dst ->
+                    val at = HashMap<Int, Int>()
+                    for (i in indices) {
+                        if (i !in 0 until src.numberOfPages) error("no page $i")
+                        val page = dst.importPage(src.getPage(i))
+                        // An imported page shares its source's /Annots array; give it its own.
+                        (page.cosObject.getDictionaryObject(COSName.ANNOTS) as? COSArray)?.let { annots ->
+                            page.cosObject.setItem(COSName.ANNOTS, COSArray().also { it.addAll(annots) })
+                        }
+                        at[i] = dst.numberOfPages - 1
+                    }
+                    PdfBookmarks.write(dst, PdfBookmarks.remapped(src) { i -> at[i]?.let { dst.getPage(it) } }, emptyList())
+                    FileOutputStream(out).use { dst.save(BufferedOutputStream(it, WRITE_BUFFER)) }
+                }
+            }
+        }.isSuccess
+        if (!written) return false
+        val read = PdfSource.open(out)
+        try {
+            return read.pageCount == indices.size
+        } finally {
+            read.close()
+        }
     }
 
     /** True when PDFium reads [file] as exactly the pages sized [sizes]. */

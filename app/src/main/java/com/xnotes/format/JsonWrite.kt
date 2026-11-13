@@ -15,7 +15,7 @@ internal class JsonWrite(private val out: Writer) {
     private var depth = 0
     private var afterName = false
 
-    /** Scratch for [samplePoint]; big enough for four numbers, their separators and the brackets. */
+    /** Scratch for [samplePoint]; big enough for five numbers, their separators and the brackets. */
     private val buf = CharArray(128)
 
     fun beginObject(): JsonWrite {
@@ -83,8 +83,8 @@ internal class JsonWrite(private val out: Writer) {
     }
 
     /**
-     * One stroke sample as `[x,y,p]`, or `[x,y,p,t]` when [time] is given, rounded on the way out:
-     * 0.01 content px and 0.001 pressure, both far below anything visible.
+     * One stroke sample as `[x,y,p]`, `[x,y,p,t]` when [time] is given, or `[x,y,p,t,w]` with the speed pen's [width]
+     * factor too, rounded on the way out: 0.01 content px, 0.001 pressure and width, all far below anything visible.
      *
      * Its own method because samples are ~97% of a dense manifest and the general path spends ~8
      * [Writer.write] calls and three [Double.toString]s on each one. A rounded coordinate is an
@@ -93,22 +93,25 @@ internal class JsonWrite(private val out: Writer) {
      * fixed-point form cannot reproduce: a magnitude where [Double.toString] turns to scientific
      * notation, or a fractional time.
      */
-    fun samplePoint(x: Double, y: Double, pressure: Double, time: Double?): JsonWrite {
+    fun samplePoint(x: Double, y: Double, pressure: Double, time: Double?, width: Double? = null): JsonWrite {
+        val w = if (time != null) width else null
         var n = 0
         n = fixed(n, x, 100L)
         if (n >= 0) n = fixed(n, y, 100L)
         if (n >= 0) n = fixed(n, pressure, 1000L)
         if (n >= 0 && time != null) n = whole(n, time)
-        if (n < 0) return samplePointSlow(x, y, pressure, time)
+        if (n >= 0 && w != null) n = fixed(n, w, 1000L)
+        if (n < 0) return samplePointSlow(x, y, pressure, time, w)
         element()
         buf[n++] = ']'
         out.write(buf, 0, n)
         return this
     }
 
-    private fun samplePointSlow(x: Double, y: Double, pressure: Double, time: Double?): JsonWrite {
+    private fun samplePointSlow(x: Double, y: Double, pressure: Double, time: Double?, width: Double?): JsonWrite {
         beginArray().value(round(x, 100.0)).value(round(y, 100.0)).value(round(pressure, 1000.0))
         if (time != null) value(time)
+        if (width != null) value(round(width, 1000.0))
         return endArray()
     }
 

@@ -37,6 +37,14 @@ interface CanvasItem {
         get() = null
         set(_) {}
 
+    /** The group it is in, an id shared by its fellow members on its page or canvas, or null for none. */
+    var group: Int?
+        get() = null
+        set(_) {}
+
+    /** Whether exports draw it: PDFs, page images and captures. Recordings and tape never print. */
+    val exported: Boolean get() = true
+
     /** Draw the item; [r] is already translated to the page origin and scaled. */
     fun paint(r: Renderer)
 
@@ -90,3 +98,6 @@ interface Resizable {
     fun geometry(): GeoHandle
     fun setGeometry(handle: GeoHandle)
 }
+
+/** [this] as an export draws it: without the items that never print (see [CanvasItem.exported]). */
+fun List<CanvasItem>.forExport(): List<CanvasItem> = if (all { it.exported }) this else filter { it.exported }

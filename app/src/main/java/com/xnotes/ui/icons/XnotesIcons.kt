@@ -60,6 +60,11 @@ object XnotesIcons {
         "m7 21-4.3-4.3a1.7 1.7 0 0 1 0-2.4l9.6-9.6a1.7 1.7 0 0 1 2.4 0l5.6 5.6a1.7 1.7 0 0 1 0 2.4L13 21Z",
         "M22 21H7",
     )
+    val eyedropper = icon(
+        "m2 22 1-1h3l9-9",
+        "M3 21v-3l9-9",
+        "M15 6l3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z",
+    )
     val pan = icon("M5 9 2 12l3 3", "M9 5l3-3 3 3", "M15 19l-3 3-3-3", "M19 9l3 3-3 3", "M2 12h20", "M12 2v20")
     val select = icon("M3 3l7.07 16.97 2.51-7.39 7.39-2.51Z", "M13 13l6 6")
     // Free selection, drawn as the marquee it leaves behind: a freehand loop in marching ants.
@@ -142,6 +147,8 @@ object XnotesIcons {
     val skipBack = icon("M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5")
     val skipForward = icon("M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8", "M21 3v5h-5")
     // The screenshot tool: plain scissors (Feather "scissors"), the same glyph as Cut.
+    // Insert space: the page opening across a bar, one arrow up from it and one down.
+    val insertSpace = icon("M4 12h16", "M12 9V3", "M8.5 6.5 12 3l3.5 3.5", "M12 15v6", "M8.5 17.5 12 21l3.5-3.5")
     val scissors = icon(circle(6.0, 6.0, 3.0), circle(6.0, 18.0, 3.0), "M20 4 8.12 15.88", "M14.47 14.48 20 20", "M8.12 8.12 12 12")
 
     // Shape-kind glyphs for the shape tool's kind picker (line / arrow / rect / ellipse / circle / triangle).
@@ -188,6 +195,15 @@ object XnotesIcons {
         "m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72Z",
         "M14 7 17 10", "M5 6v4", "M19 14v4", "M10 2v2", "M7 8H3", "M21 16h-4", "M11 3H9",
     )
+    // A 3D roll seen at a diagonal (turned 50 degrees, looked down on at 25), its torn tape lying out towards you.
+    val tape = icon(
+        "M13.48 14C13.48 10.31 10.95 6.43 7.84 5.33C4.72 4.22 2.2 6.31 2.2 10C2.2 13.68 4.72 17.56 7.84 18.67C10.95 19.77 13.48 17.68 13.48 14Z",
+        "M9.81 12.7C9.81 11.41 8.93 10.05 7.84 9.66C6.75 9.28 5.87 10.01 5.87 11.3C5.87 12.59 6.75 13.95 7.84 14.33C8.93 14.72 9.81 13.99 9.81 12.7Z",
+        "M16.51 15.87C19.03 14.6 19.59 10.63 17.77 7C15.94 3.37 12.41 1.45 9.89 2.72",
+        "M11.15 18.57L16.51 15.87",
+        "M4.53 5.42L9.89 2.72",
+        "M7.84 18.67L16.3 21.67L18.22 21.58L18.08 20.77L20.01 20.68L19.87 19.87L21.8 19.78L21.66 18.97L15.03 16.62",
+    )
     // Editing a table's structure, drawn as the mode itself looks: a grid with the width rail
     // under it and the height rail beside it, each running the whole side it resizes.
     val tableEdit = icon(rect(4.0, 4.0, 12.0, 12.0), "M4 10h12", "M10 4v12", "M20 4v12", "M4 20h12")
@@ -228,6 +244,31 @@ object XnotesIcons {
     val home = icon("M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z", "M9 22V12h6v10")
     val share = icon("M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8", "M16 6l-4-4-4 4", "M12 2v13")
     val check = icon("M20 6 9 17l-5-5")
+    /** A page with an arrow leaving it: pages taken out into a note of their own. */
+    val extract = icon(
+        "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h7", "M14 3v4a1 1 0 0 0 1 1h4", "M14 3l5 5v4",
+        "M15 18h7", "M19 15l3 3-3 3",
+    )
+    /** Two corner brackets crossing: cutting a picture down. */
+    val crop = icon("M6 2v14a2 2 0 0 0 2 2h14", "M18 22V8a2 2 0 0 0-2-2H2")
+    /** A sheet standing and the same sheet lying down: a page's size and which way round it is. */
+    val pageSize = icon(roundRect(6.0, 2.0, 12.0, 20.0, 2.0), roundRect(2.0, 6.0, 20.0, 12.0, 2.0))
+    /** A quarter turn clockwise. */
+    val rotateRight = icon("M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8", "M21 3v5h-5")
+    /** A quarter turn anticlockwise. */
+    val rotateLeft = icon("M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5")
+    /** A half turn: two arrows chasing each other round. */
+    val rotateHalf = icon(
+        "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8", "M21 3v5h-5",
+        "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16", "M8 16H3v5",
+    )
+    /** Six dots in two columns: a handle to drag a row by. */
+    val grip = icon(
+        circle(9.0, 5.0, 1.0), circle(9.0, 12.0, 1.0), circle(9.0, 19.0, 1.0),
+        circle(15.0, 5.0, 1.0), circle(15.0, 12.0, 1.0), circle(15.0, 19.0, 1.0),
+    )
+    /** Two ticks: select every one. */
+    val selectAll = icon("M18 6 7 17l-5-5", "M22 10l-7.5 7.5L13 16")
     val arrowUp = icon("M12 19V5", "M5 12l7-7 7 7")
     val arrowDown = icon("M12 5v14", "M19 12l-7 7-7-7")
     val newFolder = icon("M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2Z", "M12 11v6", "M9 14h6")
@@ -237,6 +278,10 @@ object XnotesIcons {
     )
     val paste = icon("M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2", "M9 2h6a1 1 0 0 1 1 1v1a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z")
     val more = icon(circle(12.0, 5.0, 1.0), circle(12.0, 12.0, 1.0), circle(12.0, 19.0, 1.0))
+    val camera = icon(
+        "M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3Z",
+        circle(12.0, 13.0, 3.0),
+    )
     val menu = icon("M4 6h16", "M4 12h16", "M4 18h16")
     val search = icon(circle(11.0, 11.0, 8.0), "M21 21l-4.35-4.35")
 

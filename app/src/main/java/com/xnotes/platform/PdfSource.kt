@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
 import com.xnotes.canvas.PdfPageFilter
+import com.xnotes.core.model.PdfKey
 import com.xnotes.core.model.TextMarkup
 import com.xnotes.core.pdf.MarkupPainter
 import com.xnotes.core.pdf.PdfPageGeometry
@@ -30,7 +31,8 @@ data class PdfLink(val rect: RectF, val url: String?, val destPage: Int?)
  * Reads and rasterizes a PDF through [PdfiumDocument] (PAL §14). Pages are
  * reported in PostScript points and rendered on demand into ARGB surfaces; a
  * [PdfPageFilter] applies the note's colour filters (invert/contrast/…) to the
- * rendered pixels.
+ * rendered pixels. A page is named by its [PdfKey], so a page shown turned is
+ * read, held and drawn apart from the page itself.
  *
  * When the filter inverts, [renderPage]/[renderRegion] can keep embedded images
  * in their original colours ([PdfPageFilter.stampImages]): the whole page is
@@ -100,12 +102,13 @@ class PdfSource private constructor(
 
     @Volatile private var closed = false
 
-    /** Page size in points (1 pt = 1/72 inch) as displayed, its /Rotate applied; 0x0 for a broken page. */
+    /** Page size in points (1 pt = 1/72 inch) as displayed, its /Rotate and its key's turn applied; 0x0 for a broken page. */
     fun pageSizePoints(index: Int): Pair<Float, Float>? {
         pageSizes[index]?.let { return it }
         if (closed) return null
-        val s = pdf.pageSizes(index, 1, priority())?.takeIf { it.size == 2 } ?: return null
-        return (s[0] to s[1]).also { pageSizes[index] = it }
+        val s = pdf.pageSizes(PdfKey.index(index), 1, priority())?.takeIf { it.size == 2 } ?: return null
+        val size = if (PdfKey.turn(index) % 2 == 1) s[1] to s[0] else s[0] to s[1]
+        return size.also { pageSizes[index] = it }
     }
 
     /** Every page's size in points, width then height, for importing a whole PDF. Read in slices, so

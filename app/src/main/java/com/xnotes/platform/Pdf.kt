@@ -1,6 +1,6 @@
 package com.xnotes.platform
 
-import com.xnotes.core.model.withoutAudio
+import com.xnotes.core.model.forExport
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -26,7 +26,10 @@ import com.xnotes.core.model.PageLayers
 import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.ShapeItem
+import com.xnotes.core.model.displayMarkup
 import com.xnotes.core.model.insets
+import com.xnotes.core.model.sourceHeight
+import com.xnotes.core.model.sourceWidth
 import com.xnotes.core.pal.Mark
 import com.xnotes.core.pal.Renderer
 import com.xnotes.core.pdf.FlowHeadings
@@ -239,9 +242,11 @@ object PdfExporter {
                 if (isCancelled()) return
                 val ins = page.insets(doc)
                 if (index < n) {
+                    turnAsShown(srcDoc.getPage(index), page)
                     // Flow text counts as content too: a typed-only page must still annotate, and so
-                    // must a margined one — its extra paper is written by growing the page's boxes.
-                    if (page.items.isNotEmpty() || flow.bounds(page) != null || !ins.isZero) {
+                    // must a margined one — its extra paper is written by growing the page's boxes —
+                    // and one with room in it, whose PDF is laid in bands round it.
+                    if (page.items.isNotEmpty() || flow.bounds(page) != null || !ins.isZero || page.rooms.isNotEmpty()) {
                         frames[index] = annotatePage(ctx, srcDoc.getPage(index), page, ins, s, paintRuling, flow)
                     } else if (page.markups.isNotEmpty()) {
                         srcDoc.getPage(index).let { pd -> PdfMarkups.write(ctx, pd, page.markups, sourceFrame(pd, s)) }
@@ -254,6 +259,7 @@ object PdfExporter {
             }
             if (isCancelled()) return
             ctx.finish()
+            PdfBands.moveDestinations(srcDoc, roomPages(doc, srcDoc, frames))
             PdfBookmarks.write(srcDoc, emptyList(), headingAnchors(doc, flow, ctx, frames, headingBookmarks))
             // Page work is near-instant on this path, so all the time is in writing the PDF — one
             // opaque PdfBox call. Report it as byte progress (output ≈ the source PDF's size) so the
@@ -294,11 +300,26 @@ object PdfExporter {
             } else {
                 emptyList()
             }
-            PdfBookmarks.write(outDoc, sources, headingAnchors(doc, flow, ctx, frames, headingBookmarks))
+            // The source's bookmarks open on its pages as they were, so room inserted since moves them;
+            // the headings' are placed where the page shows them already.
+            PdfBookmarks.write(outDoc, sources, emptyList())
+            PdfBands.moveDestinations(outDoc, roomPages(doc, outDoc, frames))
+            PdfBookmarks.write(outDoc, emptyList(), headingAnchors(doc, flow, ctx, frames, headingBookmarks))
             outDoc.save(out)
         } finally {
             outDoc.runCatching { close() }
         }
+    }
+
+    /** The pages of [out], [doc]'s in order, that show a PDF page with room in it, by their dictionary, with where each was drawn. */
+    private fun roomPages(doc: Document, out: PDDocument, frames: Array<PageFrame?>): Map<com.tom_roush.pdfbox.cos.COSDictionary, Pair<Page, PageFrame>> {
+        val map = HashMap<com.tom_roush.pdfbox.cos.COSDictionary, Pair<Page, PageFrame>>()
+        doc.pages.forEachIndexed { i, page ->
+            val frame = frames[i] ?: return@forEachIndexed
+            if (page.rooms.isEmpty() || page.pdfPage == null || i >= out.numberOfPages) return@forEachIndexed
+            map[out.getPage(i).cosObject] = page to frame
+        }
+        return map
     }
 
     /**
@@ -341,7 +362,13 @@ object PdfExporter {
     private fun vectorImportedPage(ctx: PdfExportContext, srcDoc: PDDocument, srcIdx: Int, page: Page, ins: PageInsets, s: Double, paintRuling: (Page, Renderer) -> Unit, flow: FlowExport): PageFrame {
         val pdfPage = ctx.doc.importPage(srcDoc.getPage(srcIdx))
         ownAnnotations(pdfPage)
+        turnAsShown(pdfPage, page)
         return annotatePage(ctx, pdfPage, page, ins, s, paintRuling, flow)
+    }
+
+    /** Turn [pdfPage], a source page in the export, as far past its own /Rotate as the note shows it. */
+    private fun turnAsShown(pdfPage: PDPage, page: Page) {
+        if (page.pdfTurn != 0) pdfPage.rotation = (pdfPage.rotation + 90 * page.pdfTurn).mod(360)
     }
 
     /**
@@ -361,11 +388,23 @@ object PdfExporter {
     private fun annotatePage(ctx: PdfExportContext, pdfPage: PDPage, page: Page, ins: PageInsets, s: Double, paintRuling: (Page, Renderer) -> Unit, flow: FlowExport): PageFrame {
         val frame = sourceFrame(pdfPage, s)
         val cover = footprintOf(page, ins)
-        growPageBox(pdfPage, frame, cover, ins)
+        // Room inserted into the page lays its PDF in bands round it, before the box grows to hold them.
+        val banded = page.rooms.isNotEmpty() && page.pdfPage != null
+        if (banded) PdfBands.band(ctx.doc, pdfPage, page, frame)
+        growPageBox(pdfPage, frame, cover, ins, banded)
         PDPageContentStream(ctx.doc, pdfPage, PDPageContentStream.AppendMode.APPEND, true, true).use { cs ->
             paintItems(cs, ctx, pdfPage, page, frame, cover, paintRuling, flow)
         }
-        PdfMarkups.write(ctx, pdfPage, page.markups, frame)
+        if (banded) {
+            val tiles = com.xnotes.core.model.Rooms.tiles(page.rooms, page.sourceWidth, page.sourceHeight).map { t ->
+                val o = frame.toUser(0.0, 0.0)
+                val d = frame.toUser(t.dx, t.dy)
+                PdfMarkups.Tile(frame.toUser(t.source), com.xnotes.core.geometry.Pt(d.x - o.x, d.y - o.y))
+            }
+            PdfMarkups.write(ctx, pdfPage, page.markups, frame, { page.displayMarkup(it, 1.0 / s) }, tiles)
+        } else {
+            PdfMarkups.write(ctx, pdfPage, page.markups, frame)
+        }
         return frame
     }
 
@@ -383,9 +422,9 @@ object PdfExporter {
         )
     }
 
-    /** Grow an imported page's boxes out to [cover], its paper with the note's margins, on the sides they show on. */
-    private fun growPageBox(pdfPage: PDPage, frame: PageFrame, cover: Rect, ins: PageInsets) {
-        if (ins.isZero) return
+    /** Grow an imported page's boxes out to [cover], its paper with the note's margins and the room inserted into it, on the sides they show on. */
+    private fun growPageBox(pdfPage: PDPage, frame: PageFrame, cover: Rect, ins: PageInsets, roomy: Boolean = false) {
+        if (ins.isZero && !roomy) return
         val box = frame.toUser(cover)
         val grown = PDRectangle(box.left.toFloat(), box.top.toFloat(), box.w.toFloat(), box.h.toFloat())
         pdfPage.mediaBox = grown
@@ -419,7 +458,7 @@ object PdfExporter {
         renderer.beginMark(Mark.Decoration)
         paintRuling(page, renderer) // page ruling sits behind the ink
         renderer.endMark()
-        PageLayers.paint(page.items.withoutAudio(), {
+        PageLayers.paint(page.items.forExport(), {
             flow.paint(page, renderer, cover, tagged = ctx.tags != null)
             for (link in flow.links(page)) renderer.addFlowLink(link)
         }) { item ->
@@ -498,16 +537,23 @@ object PdfExporter {
                 canvas.translate(-cover.left.toFloat(), -cover.top.toFloat())
 
                 val renderer = AndroidRenderer(canvas)
-                val src = page.pdfPage
-                val bg = if (src != null && source != null) source.renderPage(src, page.width.toInt(), page.height.toInt(), markups = page.markups) else null
+                val src = page.pdfKey
+                // The page as it was, before any room, laid in bands round the room inserted since.
+                val sw = page.sourceWidth
+                val sh = page.sourceHeight
+                val bg = if (src != null && source != null) source.renderPage(src, sw.toInt(), sh.toInt(), markups = page.markups) else null
                 if (bg != null) {
-                    canvas.drawBitmap(bg.bitmap, null, RectF(0f, 0f, page.width.toFloat(), page.height.toFloat()), bitmapPaint)
+                    if (page.rooms.isEmpty()) {
+                        canvas.drawBitmap(bg.bitmap, null, RectF(0f, 0f, page.width.toFloat(), page.height.toFloat()), bitmapPaint)
+                    } else {
+                        com.xnotes.core.model.Rooms.drawBanded(renderer, bg, Rect(0.0, 0.0, sw, sh), page.rooms, sw, sh)
+                    }
                     bg.recycle()
                 } else {
                     MarkupPainter.paint(renderer, page.markups, doc.dpi / 72.0) // on bare paper, beneath the ruling
                 }
                 paintRuling(page, renderer) // ruling behind ink
-                PageLayers.paint(page.items.withoutAudio(), { flow.paint(page, renderer, cover) }) { it.paint(renderer) }
+                PageLayers.paint(page.items.forExport(), { flow.paint(page, renderer, cover) }) { it.paint(renderer) }
                 pdf.finishPage(pdfPage)
                 PdfItemRaster.releaseInkGeometry(page.items)
                 onProgress(index + 1, total)

@@ -67,7 +67,7 @@ class EraseSession(private val doc: InfiniteDocument) {
                 dirty = dirty?.union(shape.paintBounds()) ?: shape.paintBounds()
                 continue
             }
-            val whole = item is ShapeItem && item.isFill
+            val whole = EraseRule.whole(item)
             val fragments: List<CanvasItem> = if (area && !whole) {
                 when (item) {
                     is Stroke -> item.erasedBy(cx, cy, radius) ?: continue
@@ -80,7 +80,10 @@ class EraseSession(private val doc: InfiniteDocument) {
                 if (!EraseRule.takes(item, cx, cy, radius)) continue
                 emptyList()
             }
-            for (f in fragments) f.sync = item.sync // pieces were written when the whole was
+            for (f in fragments) {
+                f.sync = item.sync // pieces were written when the whole was
+                f.group = item.group
+            }
             val touched = item.paintBounds()
             val at = doc.replaceItem(item, fragments)
             if (at < 0) continue

@@ -4,4 +4,6 @@
     <cache-path name="shared" path="share/" />
     <!-- Screenshot-tool captures are written here before going on the system clipboard. -->
     <cache-path name="clipboard" path="clipboard/" />
+    <!-- The camera app writes a photo taken for Insert here; it is read in and deleted. -->
+    <cache-path name="camera" path="camera/" />
 </paths>

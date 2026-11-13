@@ -21,6 +21,16 @@ class PageFrame(val turn: Affine, val ox: Double, val oy: Double, val s: Double)
     /** Point ([x], [y]) of the page as displayed, in points, in user space: where a markup's quads go. */
     fun pointToUser(x: Double, y: Double): Pt = turn.apply(Pt(ox + x, oy - y))
 
+    /** User point [p] as a page point: [toUser] undone. */
+    fun fromUser(p: Pt): Pt {
+        // The turn is a quarter turn and a shift, so its inverse is its transpose undoing the shift.
+        val dx = p.x - turn.e
+        val dy = p.y - turn.f
+        val ux = turn.a * dx + turn.b * dy
+        val uy = turn.c * dx + turn.d * dy
+        return Pt((ux - ox) / s, (oy - uy) / s)
+    }
+
     /** The user-space box around page rect [r]; its left and top hold the smaller x and y. */
     fun toUser(r: Rect): Rect = Rect.bounding(
         listOf(toUser(r.left, r.top), toUser(r.right, r.top), toUser(r.left, r.bottom), toUser(r.right, r.bottom)),

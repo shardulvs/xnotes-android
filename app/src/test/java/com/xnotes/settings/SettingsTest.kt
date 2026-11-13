@@ -3,6 +3,7 @@ package com.xnotes.settings
 import com.xnotes.core.model.Orientation
 import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.tools.InkPalette
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolbarLayout
 import org.json.JSONObject
@@ -16,7 +17,8 @@ class SettingsTest {
 
     @Test fun emptyJsonYieldsDefaults() {
         val s = Settings.fromJson(JSONObject())
-        assertEquals(15, s.toolbarColors.size)
+        assertEquals(InkPalette.dark, s.toolbarColorsDark)
+        assertEquals(InkPalette.light, s.toolbarColorsLight)
         assertEquals(5, s.toolbarColorCount)
         assertEquals(0, s.activeColor)
         assertEquals(1.0, s.renderScale, 1e-9)
@@ -58,7 +60,8 @@ class SettingsTest {
     @Test fun roundTripPreservesValues() {
         val original = Settings(
             tools = mapOf(Tool.PEN to com.xnotes.core.tools.ToolConfig(5.0, false, 0.2, 0.1, Rgba(1, 2, 3, 255))),
-            toolbarColors = listOf(Rgba(0, 230, 118), Rgba(1, 1, 1), Rgba(2, 2, 2), Rgba(3, 3, 3), Rgba(4, 4, 4)),
+            toolbarColorsDark = InkPalette.dark.reversed(),
+            toolbarColorsLight = InkPalette.light.map { it.copy(a = 128) },
             activeColor = 2,
             renderScale = 1.5,
             sidebarVisible = true,
@@ -74,6 +77,8 @@ class SettingsTest {
         assertEquals(5.0, back.configFor(Tool.PEN).baseWidth, 1e-9)
         assertFalse(back.configFor(Tool.PEN).pressureEnabled)
         assertEquals(2, back.activeColor)
+        assertEquals(original.toolbarColorsDark, back.toolbarColorsDark)
+        assertEquals(original.toolbarColorsLight, back.toolbarColorsLight)
         assertEquals(1.5, back.renderScale, 1e-9)
         assertTrue(back.sidebarVisible)
         assertEquals("light", back.prefs.uiAppearance)
@@ -81,6 +86,22 @@ class SettingsTest {
         assertEquals(Orientation.LANDSCAPE, back.prefs.defaultPageOrientation)
         assertEquals(Rgba(20, 20, 20, 255), back.prefs.pageColor)
         assertTrue(back.prefs.hidePageBorders)
+    }
+
+    @Test fun theSpeedPensSmoothingAndTopSpeedRoundTrip() {
+        val speed = com.xnotes.core.tools.ToolDefaults.configFor(Tool.SPEED).copy(speedSmoothing = 0.6, speedTop = 0.9)
+        val back = Settings.fromJson(Settings(tools = mapOf(Tool.SPEED to speed)).toJson()).configFor(Tool.SPEED)
+        assertEquals(0.6, back.speedSmoothing, 1e-9)
+        assertEquals(0.9, back.speedTop, 1e-9)
+    }
+
+    @Test fun stabilizationRoundTripsPerPen() {
+        val pen = com.xnotes.core.tools.ToolDefaults.configFor(Tool.PEN).copy(stabilize = true, stabilizeTrail = 7.2, stabilizeCrossover = 30.0)
+        val back = Settings.fromJson(Settings(tools = mapOf(Tool.PEN to pen)).toJson())
+        assertEquals(true, back.configFor(Tool.PEN).stabilize)
+        assertEquals(7.2, back.configFor(Tool.PEN).stabilizeTrail, 1e-9)
+        assertEquals(30.0, back.configFor(Tool.PEN).stabilizeCrossover, 1e-9)
+        assertEquals(false, back.configFor(Tool.HIGHLIGHTER).stabilize)
     }
 
     @Test fun theMarkupToolsModeAndIntensityRoundTrip() {
@@ -103,14 +124,26 @@ class SettingsTest {
         assertTrue(Settings.fromJson(json).configFor(Tool.ERASER).eraseMarkups)
     }
 
-    @Test fun scribbleToEraseIsOnUnlessSwitchedOff() {
-        assertTrue(Settings().configFor(Tool.ERASER).scribbleErase)
-        val off = Settings().configFor(Tool.ERASER).copy(scribbleErase = false)
-        val json = Settings(tools = mapOf(Tool.ERASER to off)).toJson()
-        assertFalse(Settings.fromJson(json).configFor(Tool.ERASER).scribbleErase)
-        // Settings saved before the switch existed read as on.
-        json.getJSONObject("tools").getJSONObject("eraser").remove("scribble_erase")
+    @Test fun theTapeToolsModeAndPatternRoundTrip() {
+        val d = Settings().configFor(Tool.TAPE)
+        assertEquals(com.xnotes.core.model.TapeItem.DEFAULT_WIDTH, d.baseWidth, 0.0)
+        assertEquals("new tape is striped", com.xnotes.core.model.TapePattern.STRIPES, d.tapePattern)
+        val tape = d.copy(tapeMode = com.xnotes.core.model.TapeMode.FREEHAND, tapePattern = com.xnotes.core.model.TapePattern.DOTS, baseWidth = 64.0)
+        val json = Settings(tools = mapOf(Tool.TAPE to tape)).toJson()
+        val back = Settings.fromJson(json).configFor(Tool.TAPE)
+        assertEquals(com.xnotes.core.model.TapeMode.FREEHAND, back.tapeMode)
+        assertEquals(com.xnotes.core.model.TapePattern.DOTS, back.tapePattern)
+        assertEquals(64.0, back.baseWidth, 0.0)
+    }
+
+    @Test fun scribbleToEraseIsOffUnlessSwitchedOn() {
+        assertFalse(Settings().configFor(Tool.ERASER).scribbleErase)
+        val on = Settings().configFor(Tool.ERASER).copy(scribbleErase = true)
+        val json = Settings(tools = mapOf(Tool.ERASER to on)).toJson()
         assertTrue(Settings.fromJson(json).configFor(Tool.ERASER).scribbleErase)
+        // Settings saved before the switch existed read as off.
+        json.getJSONObject("tools").getJSONObject("eraser").remove("scribble_erase")
+        assertFalse(Settings.fromJson(json).configFor(Tool.ERASER).scribbleErase)
     }
 
     @Test fun everyTapGestureMappingRoundTrips() {
@@ -188,7 +221,44 @@ class SettingsTest {
             "toolbar_colors",
             org.json.JSONArray().put(org.json.JSONArray().put(0).put(0).put(0).put(255)),
         )
-        assertEquals(15, Settings.fromJson(o).toolbarColors.size)
+        val s = Settings.fromJson(o)
+        assertEquals(15, s.toolbarColorsDark.size)
+        assertEquals(15, s.toolbarColorsLight.size)
+    }
+
+    // The single swatch set every version before the light and dark sets wrote.
+    private val oldSwatches = listOf(
+        Rgba(0, 230, 118), Rgba(236, 236, 236), Rgba(255, 92, 92), Rgba(255, 199, 64), Rgba(88, 196, 255),
+        Rgba(199, 134, 255), Rgba(128, 128, 128), Rgba(255, 145, 60), Rgba(255, 105, 180), Rgba(70, 120, 255),
+        Rgba(190, 240, 60), Rgba(0, 190, 180), Rgba(160, 110, 70), Rgba(40, 60, 140), Rgba(20, 20, 20),
+    )
+
+    private fun oldSettings(colors: List<Rgba>) = JSONObject().put("toolbar_colors", org.json.JSONArray().apply {
+        colors.forEach { put(org.json.JSONArray().put(it.r).put(it.g).put(it.b).put(it.a)) }
+    })
+
+    @Test fun untouchedSwatchesTakeTheNewLightAndDarkSets() {
+        for (saved in listOf(oldSwatches, oldSwatches.take(5))) {
+            val s = Settings.fromJson(oldSettings(saved))
+            assertEquals(InkPalette.dark, s.toolbarColorsDark)
+            assertEquals(InkPalette.light, s.toolbarColorsLight)
+        }
+    }
+
+    @Test fun editedSwatchesServeBothAppearancesUntilOneIsEdited() {
+        val edited = oldSwatches.toMutableList().also { it[3] = Rgba(1, 2, 3) }
+        val s = Settings.fromJson(oldSettings(edited))
+        assertEquals(edited, s.toolbarColorsDark)
+        assertEquals(edited, s.toolbarColorsLight)
+        val lightEdited = s.copy(toolbarColorsLight = edited.toMutableList().also { it[0] = Rgba(4, 5, 6) })
+        val back = Settings.fromJson(lightEdited.toJson())
+        assertEquals(edited, back.toolbarColorsDark)
+        assertEquals(Rgba(4, 5, 6), back.toolbarColorsLight[0])
+    }
+
+    @Test fun theLegacyPresetsAreTheOldSwatches() {
+        assertEquals(oldSwatches, InkPalette.legacyPresets)
+        assertEquals(InkPalette.dark.size, InkPalette.light.size)
     }
 
     @Test fun toolbarColorCountDefaultsToFive() {
@@ -351,8 +421,8 @@ class SettingsTest {
         val defaults = Preferences.fromJson(JSONObject())
         assertEquals(MaterialColourMode.SYSTEM, defaults.materialMode)
         assertEquals(Rgba(244, 67, 54), defaults.materialSingleSeed)
-        assertEquals(Rgba(154, 124, 66), defaults.materialDualSeed)
-        assertEquals(Rgba(61, 117, 230), defaults.materialSurfaceSeed)
+        assertEquals(Rgba(255, 107, 154), defaults.materialDualSeed)
+        assertEquals(Rgba(122, 92, 255), defaults.materialSurfaceSeed)
         for (key in listOf("material_mode", "material_seed", "material_single_seed", "material_dual_seed", "material_surface_seed")) {
             assertFalse(defaults.toJson().has(key))
         }
@@ -381,11 +451,31 @@ class SettingsTest {
     @Test fun legacyDualToneRetainsOldFallbackColours() {
         val json = JSONObject().put("material_dual_tone", true)
         val loaded = Preferences.fromJson(json)
-        assertEquals(Preferences.DEFAULT_ACCENT, loaded.materialDualSeed)
+        assertEquals(Preferences.LEGACY_ACCENT, loaded.materialDualSeed)
         assertEquals(Rgba(33, 150, 243), loaded.materialSurfaceSeed)
         val classicAccent = Preferences.fromJson(json.put("accent_color", "#123456"))
         assertEquals(Rgba(18, 52, 86), classicAccent.materialDualSeed)
         assertEquals(classicAccent, Preferences.fromJson(classicAccent.toJson()))
+    }
+
+    @Test fun untouchedMorningMovesToBubblegum() {
+        // What a two-tone install that never changed its colours saved while Morning was the default.
+        val loaded = Preferences.fromJson(JSONObject().put("material_mode", "dual")
+            .put("material_seed", "#9a7c42").put("material_dual_tone", true).put("material_surface_seed", "#3d75e6"))
+        assertEquals(MaterialColourMode.DUAL, loaded.materialMode)
+        assertEquals(Preferences.DEFAULT_MATERIAL_DUAL, loaded.materialDualSeed)
+        assertEquals(Preferences.DEFAULT_MATERIAL_SURFACE, loaded.materialSurfaceSeed)
+        assertEquals(loaded, Preferences.fromJson(loaded.toJson()))
+    }
+
+    @Test fun morningChosenSinceBubblegumStays() {
+        val morning = Preferences(materialMode = MaterialColourMode.DUAL,
+            materialDualSeed = Rgba(154, 124, 66), materialSurfaceSeed = Rgba(61, 117, 230))
+        assertEquals(morning, Preferences.fromJson(morning.toJson()))
+        val ownSurface = Preferences.fromJson(JSONObject().put("material_mode", "dual")
+            .put("material_seed", "#9a7c42").put("material_dual_tone", true).put("material_surface_seed", "#000080"))
+        assertEquals(Rgba(154, 124, 66), ownSurface.materialDualSeed)
+        assertEquals(Rgba(0, 0, 128), ownSurface.materialSurfaceSeed)
     }
 
     @Test fun customMaterialOptionsDefaultForgivingly() {

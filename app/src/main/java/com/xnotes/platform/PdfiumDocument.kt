@@ -2,6 +2,7 @@ package com.xnotes.platform
 
 import android.graphics.Bitmap
 import android.graphics.RectF
+import com.xnotes.core.model.PdfKey
 import com.xnotes.core.pdf.PageText
 import com.xnotes.core.pdf.PdfPageGeometry
 import com.xnotes.core.search.SearchText
@@ -66,18 +67,19 @@ class PdfiumDocument private constructor(
     ): FloatArray? = withHandle(priority) { PdfiumNative.nativePageSizes(it, from, count) }
 
     /**
-     * The boxes of the images on page [index], those inside form XObjects included: left, top,
-     * right, bottom in points as displayed (top-left origin, /Rotate applied); null when not open.
+     * The boxes of the images on the page [key] names (see [PdfKey]), those inside form XObjects
+     * included: left, top, right, bottom in points as displayed (top-left origin, /Rotate and the
+     * key's turn applied); null when not open.
      */
-    fun imageRects(index: Int, priority: PdfPriority): FloatArray? =
-        withHandle(priority) { PdfiumNative.nativeImageRects(it, index) }
+    fun imageRects(key: Int, priority: PdfPriority): FloatArray? =
+        withHandle(priority) { PdfiumNative.nativeImageRects(it, PdfKey.index(key), PdfKey.turn(key)) }
 
     /**
-     * The link areas on page [index], one per line of a link that spans several, with where each
-     * goes: another page of this PDF, or a URI. Null when not open.
+     * The link areas on the page [key] names, one per line of a link that spans several, with where
+     * each goes: another page of this PDF, or a URI. Null when not open.
      */
-    fun links(index: Int, priority: PdfPriority): List<PdfLink>? = withHandle(priority) { handle ->
-        val parts = PdfiumNative.nativeLinks(handle, index) ?: return@withHandle null
+    fun links(key: Int, priority: PdfPriority): List<PdfLink>? = withHandle(priority) { handle ->
+        val parts = PdfiumNative.nativeLinks(handle, PdfKey.index(key), PdfKey.turn(key)) ?: return@withHandle null
         val boxes = parts[0] as FloatArray
         val dests = parts[1] as IntArray
         val uris = parts[2] as Array<*>
@@ -88,23 +90,23 @@ class PdfiumDocument private constructor(
         }
     }
 
-    /** Page [index]'s text with a box for each character; null when not open or the page does not load. */
-    fun pageText(index: Int, priority: PdfPriority): PageText? = withHandle(priority) { handle ->
+    /** The text of the page [key] names, with a box for each character; null when not open or the page does not load. */
+    fun pageText(key: Int, priority: PdfPriority): PageText? = withHandle(priority) { handle ->
         val t0 = System.nanoTime()
-        val parts = PdfiumNative.nativePageText(handle, index) ?: return@withHandle null
+        val parts = PdfiumNative.nativePageText(handle, PdfKey.index(key), PdfKey.turn(key)) ?: return@withHandle null
         lastTextMs = (System.nanoTime() - t0) / 1_000_000
         PageText(parts[0] as IntArray, parts[1] as FloatArray, parts[2] as ByteArray, parts[3] as FloatArray?)
     }
 
-    /** How page [index]'s user space maps to its points as displayed; null when not open or the page does not load. */
-    fun pageGeometry(index: Int, priority: PdfPriority): PdfPageGeometry? {
-        val m = withHandle(priority) { PdfiumNative.nativePageGeometry(it, index) } ?: return null
+    /** How the user space of the page [key] names maps to its points as displayed; null when not open or the page does not load. */
+    fun pageGeometry(key: Int, priority: PdfPriority): PdfPageGeometry? {
+        val m = withHandle(priority) { PdfiumNative.nativePageGeometry(it, PdfKey.index(key), PdfKey.turn(key)) } ?: return null
         return PdfPageGeometry(m[0], m[1], m[2], m[3], m[4], m[5])
     }
 
-    /** Page [index]'s text to search, read without boxes or keeping the page loaded; null when not open or it does not load. */
-    fun searchText(index: Int, priority: PdfPriority): SearchText? {
-        val parts = withHandle(priority) { PdfiumNative.nativePageChars(it, index) } ?: return null
+    /** The text of the page [key] names, to search, read without boxes or keeping the page loaded; null when not open or it does not load. */
+    fun searchText(key: Int, priority: PdfPriority): SearchText? {
+        val parts = withHandle(priority) { PdfiumNative.nativePageChars(it, PdfKey.index(key)) } ?: return null
         return SearchText.ofPdf(parts[0] as IntArray, parts[1] as ByteArray)
     }
 
@@ -133,14 +135,14 @@ class PdfiumDocument private constructor(
     }
 
     /**
-     * Renders the part of page [index] at ([left], [top]) of a [fullW] x [fullH] raster of the
-     * whole page into [bitmap] (ARGB_8888), on white. False when cancelled, failed or not open.
+     * Renders the part of the page [key] names at ([left], [top]) of a [fullW] x [fullH] raster of
+     * the whole page into [bitmap] (ARGB_8888), on white. False when cancelled, failed or not open.
      */
     fun render(
-        index: Int, bitmap: Bitmap, fullW: Int, fullH: Int, left: Int, top: Int,
+        key: Int, bitmap: Bitmap, fullW: Int, fullH: Int, left: Int, top: Int,
         priority: PdfPriority, token: CancelToken? = null,
     ): Boolean = withHandle(priority, token) {
-        PdfiumNative.nativeRender(it, index, bitmap, fullW, fullH, left, top, lifetime, token)
+        PdfiumNative.nativeRender(it, PdfKey.index(key), PdfKey.turn(key), bitmap, fullW, fullH, left, top, lifetime, token)
     } ?: false
 
     /** Runs [body] with the native document on the PDFium thread; null when it is not open. */

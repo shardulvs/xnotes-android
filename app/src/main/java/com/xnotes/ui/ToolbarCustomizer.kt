@@ -446,8 +446,10 @@ private fun itemIcon(item: ToolbarItem): ImageVector = when (item) {
     ToolbarItem.PAN -> XnotesIcons.pan
     ToolbarItem.SELECT -> XnotesIcons.select
     ToolbarItem.LASSO -> XnotesIcons.lasso
+    ToolbarItem.INSERT_SPACE -> XnotesIcons.insertSpace
     ToolbarItem.SCREENSHOT -> XnotesIcons.scissors
     ToolbarItem.WAND -> XnotesIcons.magicWand
+    ToolbarItem.TAPE -> XnotesIcons.tape
     ToolbarItem.SHAPE -> XnotesIcons.shape
     ToolbarItem.RULER -> XnotesIcons.ruler
     ToolbarItem.TEXT -> XnotesIcons.text

@@ -69,4 +69,22 @@ data class PageSizeChoice(
         } else {
             size.pixels(orientation, dpi)
         }
+
+    companion object {
+        /** How near, in millimetres, a page's sides must be to a named size's to count as that size. */
+        private const val MATCH_MM = 0.5
+
+        /** What a [w] by [h] page at [dpi] is: a named size either way round when its sides match one, else Custom with its sides. */
+        fun of(w: Double, h: Double, dpi: Int): PageSizeChoice {
+            val wMm = PageSize.pxToMm(w, dpi)
+            val hMm = PageSize.pxToMm(h, dpi)
+            val orientation = if (wMm > hMm) Orientation.LANDSCAPE else Orientation.PORTRAIT
+            val short = minOf(wMm, hMm)
+            val long = maxOf(wMm, hMm)
+            val named = PageSize.entries.firstOrNull {
+                it != PageSize.CUSTOM && kotlin.math.abs(it.shortMm - short) <= MATCH_MM && kotlin.math.abs(it.longMm - long) <= MATCH_MM
+            }
+            return named?.let { PageSizeChoice(it, orientation) } ?: PageSizeChoice(PageSize.CUSTOM, orientation, wMm, hMm)
+        }
+    }
 }

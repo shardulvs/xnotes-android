@@ -74,6 +74,7 @@ class ShapeItem(
     override val kind = KIND
     override val resizable = true
     override var locked = false
+    override var group: Int? = null
     override var sync: SyncMark? = null
 
     /** Drawn text is words, which a mirror would turn backwards. */

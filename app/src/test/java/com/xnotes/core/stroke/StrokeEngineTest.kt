@@ -242,6 +242,40 @@ class StrokeEngineTest {
         assertEquals(3, g.pointCount)
     }
 
+    private fun pen(vararg pts: Pair<Double, Double>): StrokeGeometry =
+        StrokeEngine.build(pts.map { Sample(it.first, it.second, 1.0) }, 3.0, true, 0.35, 0.0, holdEnds = true)
+
+    @Test fun theOutlineIsTheLeftRailThenTheRightReversed() {
+        val g = pen(*Array(5) { (it * 4.0) to 0.0 })
+        val n = g.pointCount
+        for (i in 0 until n) {
+            assertEquals(g.outline[2 * i].toDouble(), g.leftX(i), 0.0)
+            assertEquals(g.outline[2 * i + 1].toDouble(), g.leftY(i), 0.0)
+            assertEquals(g.outline[2 * (2 * n - 1 - i)].toDouble(), g.rightX(i), 0.0)
+        }
+    }
+
+    @Test fun theRailsStraddleTheCentrelineByTheHalfWidth() {
+        val g = pen(*Array(6) { (it * 4.0) to 0.0 })
+        for (i in 0 until g.pointCount) {
+            assertEquals("left rail off the centreline", g.hw(i), hypot(g.leftX(i) - g.cx(i), g.leftY(i) - g.cy(i)), 1e-4)
+            assertEquals("right rail off the centreline", g.hw(i), hypot(g.rightX(i) - g.cx(i), g.rightY(i) - g.cy(i)), 1e-4)
+            assertEquals(g.cx(i), (g.leftX(i) + g.rightX(i)) / 2.0, 1e-4)
+            assertEquals(g.cy(i), (g.leftY(i) + g.rightY(i)) / 2.0, 1e-4)
+        }
+    }
+
+    @Test fun theRailsAreOnOppositeSidesEverywhere() {
+        val g = pen(0.0 to 0.0, 10.0 to 3.0, 18.0 to 14.0, 22.0 to 30.0)
+        for (i in 0 until g.pointCount) {
+            val lx = g.leftX(i) - g.cx(i)
+            val ly = g.leftY(i) - g.cy(i)
+            val rx = g.rightX(i) - g.cx(i)
+            val ry = g.rightY(i) - g.cy(i)
+            assertTrue("rails on the same side at $i", lx * rx + ly * ry < 0.0)
+        }
+    }
+
     @Test fun emptyInput() {
         val g = StrokeEngine.build(emptyList(), 3.0, true, 0.35, 0.0)
         assertTrue(g.outline.isEmpty())
@@ -340,6 +374,187 @@ class StrokeEngineTest {
         val minHw = g.halfWidths.min().toDouble()
         assertTrue("partially thinned, not saturated", maxHw < 1.9 && minHw > 0.5)
         assertEquals("even width through the corner", maxHw, minHw, 1e-5)
+    }
+
+    private val pxPerMm = 249.0 / 25.4
+    private val handScale = 160.0 / 280.0
+
+    private fun minJerk(u: Double): Double {
+        val t = u.coerceIn(0.0, 1.0)
+        return t * t * t * (10 - 15 * t + 6 * t * t)
+    }
+
+    /** A hand's 'V': two 10 mm min-jerk legs of 150 ms, through a 240 Hz pen, whole-ms times and a 1 px gate. */
+    private fun handV(pauseMs: Double = 0.0, restMs: Double = 0.0): List<Sample> {
+        val leg = 150.0
+        val dx = 5.0 * pxPerMm
+        val dy = 8.66 * pxPerMm
+        val total = restMs + leg + pauseMs + leg
+        fun at(t: Double): Pair<Double, Double> {
+            val u = t - restMs
+            return when {
+                u <= 0.0 -> 0.0 to 0.0
+                u < leg -> minJerk(u / leg).let { dx * it to dy * it }
+                u < leg + pauseMs -> dx to dy
+                else -> minJerk((u - leg - pauseMs) / leg).let { dx + dx * it to dy - dy * it }
+            }
+        }
+        val out = ArrayList<Sample>()
+        var k = 0
+        while (k * 1000.0 / 240.0 <= total) {
+            val t = k * 1000.0 / 240.0
+            val (x, y) = at(t)
+            val last = out.lastOrNull()
+            if (last == null || abs(last.x - x) + abs(last.y - y) >= 1.0) out.add(Sample(x, y, 1.0, kotlin.math.floor(t)))
+            k++
+        }
+        val (ex, ey) = at(total)
+        out.add(Sample(ex, ey, 1.0, kotlin.math.floor(total)))
+        return out
+    }
+
+    /** The steepest half-width change per px of centreline; 1 or more means a disc swallows its neighbour. */
+    private fun steepest(g: StrokeGeometry): Double {
+        var worst = 0.0
+        for (i in 0 until g.pointCount - 1) {
+            val d = hypot(g.cx(i + 1) - g.cx(i), g.cy(i + 1) - g.cy(i))
+            val dr = abs(g.hw(i + 1) - g.hw(i))
+            worst = maxOf(worst, if (d > 1e-9) dr / d else if (dr > 1e-9) Double.MAX_VALUE else 0.0)
+        }
+        return worst
+    }
+
+    private fun speedV(w: Double, pauseMs: Double = 0.0, restMs: Double = 0.0) =
+        StrokeEngine.build(handV(pauseMs, restMs), w, false, 1.0, 0.0, speedStrength = 0.8, speedScale = handScale)
+
+    @Test fun speedEdgesStayGentleAtEveryWidth() {
+        for (w in listOf(4.0, 10.0, 20.0, 40.0)) for (pause in listOf(0.0, 80.0)) {
+            val edge = steepest(speedV(w, pause))
+            assertTrue("width $w, pause $pause: steepest edge $edge", edge < 0.5)
+        }
+    }
+
+    @Test fun holdingStillNeitherWidensNorThins() {
+        val plain = speedV(20.0)
+        val corner = plain.halfWidths.max().toDouble()
+        val paused = speedV(20.0, pauseMs = 300.0).halfWidths.max().toDouble()
+        assertEquals("a paused corner", corner, paused, 0.05 * corner)
+        assertEquals("a rest at pen-down", plain.hw(0), speedV(20.0, restMs = 300.0).hw(0), 0.05 * plain.hw(0))
+    }
+
+    @Test fun storedSpeedWidthsAreWhatTheEngineApplies() {
+        val s = handV()
+        val xs = DoubleArray(s.size) { s[it].x }
+        val ys = DoubleArray(s.size) { s[it].y }
+        val ts = DoubleArray(s.size) { s[it].t }
+        val f = StrokeEngine.speedWidths(
+            xs, ys, ts, 20.0, 0.8, StrokeEngine.SPEED_HI, StrokeEngine.DEFAULT_SPEED_SMOOTHING, handScale, true, 1.0,
+        )
+        val kept = s.mapIndexed { i, it -> it.copy(widthFactor = f[i]) }
+        val stored = StrokeEngine.build(kept, 20.0, false, 1.0, 0.0, speedStrength = 0.8, speedScale = handScale)
+        assertArrayEquals(speedV(20.0).halfWidths, stored.halfWidths, 0f)
+    }
+
+    @Test fun aWideNibSwellsNoSteeperThanTheDefault() {
+        // A zigzag turns the nib between its faces as fast as the rate allows, so the swell's slope is the rate's.
+        val pts = ArrayList<Sample>()
+        for (leg in 0 until 6) for (i in 0 until 30) {
+            val x = leg * 45.0 + i * 1.5
+            pts.add(Sample(x, if (leg % 2 == 0) i * 1.5 else 45.0 - i * 1.5, 1.0))
+        }
+        val default = steepest(StrokeEngine.build(pts, 6.0, false, 0.4, 0.6))
+        for (w in listOf(12.0, 24.0)) {
+            val edge = steepest(StrokeEngine.build(pts, w, false, 0.4, 0.6))
+            assertTrue("width $w: $edge against $default", edge <= default * 1.1)
+        }
+    }
+
+    /** Calligraphy at the default ratio, pressure off, along legs walked in steps of about 1.5 px from (0, 0). */
+    private fun nib(width: Double, vararg legs: Pair<Double, Double>): StrokeGeometry {
+        val pts = arrayListOf(Sample(0.0, 0.0, 1.0))
+        var x = 0.0
+        var y = 0.0
+        for ((dx, dy) in legs) {
+            val n = maxOf(1, kotlin.math.round(hypot(dx, dy) / 1.5).toInt())
+            repeat(n) {
+                x += dx / n
+                y += dy / n
+                pts.add(Sample(x, y, 1.0))
+            }
+        }
+        return StrokeEngine.build(pts, width, false, 0.4, 0.6)
+    }
+
+    /** The sample [nib] puts at the end of [leg], where the pen turns. */
+    private fun cornerAfter(leg: Pair<Double, Double>) = maxOf(1, kotlin.math.round(hypot(leg.first, leg.second) / 1.5).toInt())
+
+    @Test fun aCursiveITopTurnsThickRightAtTheTurn() {
+        val up = 12.0 to -36.0
+        val g = nib(6.0, up, -6.0 to 36.0)
+        val corner = cornerAfter(up)
+        val hairline = g.hw(corner - 8)
+        val thick = g.hw(corner + 14)
+        assertEquals("the upstroke stays a hairline into the turn", hairline, g.hw(corner - 1), 0.05)
+        assertTrue("thick from the turn: ${g.hw(corner)} of $thick", g.hw(corner) > 0.9 * thick)
+    }
+
+    @Test fun aReversalSurvivesPenUpSampleReduction() {
+        val up = 12.0 to -36.0
+        val pts = ArrayList<Sample>()
+        var x = 0.0
+        var y = 0.0
+        pts.add(Sample(x, y, 1.0))
+        for ((dx, dy) in listOf(up, -6.0 to 36.0)) {
+            val n = maxOf(1, kotlin.math.round(hypot(dx, dy) / 1.5).toInt())
+            repeat(n) {
+                x += dx / n
+                y += dy / n
+                pts.add(Sample(x, y, 1.0))
+            }
+        }
+        val g = StrokeEngine.build(pts, 6.0, false, 0.4, 0.6)
+        val slim = StrokeSimplify.simplify(pts, g.halfWidths, 0.2)
+        val corner = slim.indexOfFirst { it == pts[cornerAfter(up)] }
+        assertTrue("the turn's own sample is kept", corner > 0)
+        val after = StrokeEngine.build(slim, 6.0, false, 0.4, 0.6)
+        assertEquals("still thick from the turn", g.hw(cornerAfter(up)).toDouble(), after.hw(corner).toDouble(), 0.05)
+    }
+
+    @Test fun aBackwardsWobbleShorterThanTheWaitStaysAHairline() {
+        val g = nib(6.0, 0.0 to -40.0, 0.0 to 2.0, 0.0 to -40.0)
+        assertTrue("widest ${g.halfWidths.max()}", g.halfWidths.max() < 0.5 * 3.0 * 1.6)
+    }
+
+    @Test fun aWiderNibWaitsLongerBeforeAReversalCounts() {
+        // A 6 px backwards hook holds past a default nib's 3 px wait, but not past a 20 px nib's 10.
+        val hook = arrayOf(0.0 to -40.0, 0.0 to 6.0, 0.0 to -40.0)
+        assertTrue("the default nib takes it as a stroke", nib(6.0, *hook).halfWidths.max() > 0.8 * 3.0 * 1.6)
+        assertTrue("the wide nib does not", nib(20.0, *hook).halfWidths.max() < 0.5 * 10.0 * 1.6)
+    }
+
+    @Test fun aReversalBetween120And160StartsPartWayThick() {
+        fun startShare(turnDeg: Double): Double {
+            val a = Math.toRadians(turnDeg)
+            val up = 0.0 to -40.0
+            val g = nib(6.0, up, 40.0 * sin(a) to -40.0 * cos(a))
+            val corner = cornerAfter(up)
+            val hairline = g.hw(corner - 8)
+            return (g.hw(corner) - hairline) / (g.hw(g.pointCount - 7) - hairline)
+        }
+        val gentle = startShare(110.0)
+        val between = startShare(140.0)
+        val sharp = startShare(175.0)
+        assertTrue("110: $gentle, 140: $between, 175: $sharp", gentle < between && between < sharp)
+        assertTrue("a near retrace starts at full width: $sharp", sharp > 0.9)
+        assertTrue("110 degrees only swells: $gentle", gentle < 0.35)
+    }
+
+    @Test fun topSpeedSetsWhereTheLineIsThinnest() {
+        val pts = (0..40).map { Sample(it * 2.0, 0.0, 1.0, it * 4.0) } // a steady 0.5 dp/ms
+        val partial = StrokeEngine.build(pts, 4.0, false, 1.0, 0.0, speedStrength = 0.8, speedTop = 0.6)
+        val full = StrokeEngine.build(pts, 4.0, false, 1.0, 0.0, speedStrength = 0.8, speedTop = 0.4)
+        assertEquals(0.4, full.hw(20).toDouble(), 1e-6)
+        assertTrue("short of the top speed it is only part thinned", partial.hw(20) > 0.5)
     }
 
     // --- Direction smoothing & end-width hold ---

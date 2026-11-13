@@ -313,6 +313,38 @@ class FlowPaginationTest {
         assertEquals(1, layout.layout(flow, pages(1), 150).extraPagesNeeded)
     }
 
+    @Test
+    fun aBreakToAPageSkipsThePagesBetween() {
+        val flow = flowOf("a", "b")
+        flow.paragraphs[1].breakBefore = true
+        flow.paragraphs[1].breakToPage = 3
+        assertEquals(listOf(1, 0, 0, 1), layout.layout(flow, pages(4), 150).pages.map { it.lines.size })
+    }
+
+    @Test
+    fun textRunningPastABreaksPageCarriesItOn() {
+        val flow = flowOf("1", "2", "3", "4", "b")
+        flow.paragraphs[4].breakBefore = true
+        flow.paragraphs[4].breakToPage = 1
+        assertEquals(listOf(3, 1, 1), layout.layout(flow, pages(3), 150).pages.map { it.lines.size })
+    }
+
+    @Test
+    fun aBreakToAPageOpeningTheFlowStartsThere() {
+        val flow = flowOf("b")
+        flow.paragraphs[0].breakBefore = true
+        flow.paragraphs[0].breakToPage = 2
+        assertEquals(listOf(0, 0, 1), layout.layout(flow, pages(3), 150).pages.map { it.lines.size })
+    }
+
+    @Test
+    fun aBreakToAPageNoLongerThereIsAPlainBreak() {
+        val flow = flowOf("a", "b")
+        flow.paragraphs[1].breakBefore = true
+        flow.paragraphs[1].breakToPage = 9
+        assertEquals(listOf(1, 1), layout.layout(flow, pages(2), 150).pages.map { it.lines.size })
+    }
+
     // --- list numbering ---
 
     private fun item(text: String, indent: Int = 0, kind: ListKind = ListKind.ORDERED, start: Int? = null) =

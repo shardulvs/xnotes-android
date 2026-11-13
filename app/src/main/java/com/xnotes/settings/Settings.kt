@@ -5,6 +5,8 @@ import com.xnotes.core.model.PagePattern
 import com.xnotes.core.model.PageTemplates
 import com.xnotes.core.model.PageStyle
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.model.TapeMode
+import com.xnotes.core.model.TapePattern
 import com.xnotes.core.pal.FontFace
 import com.xnotes.core.text.FlowDefaults
 import com.xnotes.core.text.FlowMargins
@@ -47,7 +49,9 @@ data class Settings(
     val viewDefaults: com.xnotes.canvas.ViewSettings = com.xnotes.canvas.ViewSettings(),
     val tools: Map<Tool, ToolConfig> = emptyMap(),
     val shapeConfig: ShapeConfig = ShapeConfig(),
-    val toolbarColors: List<Rgba> = InkPalette.presets,
+    /** The toolbar swatches while the app is dark, and while it is light; slot for slot partners. */
+    val toolbarColorsDark: List<Rgba> = InkPalette.dark,
+    val toolbarColorsLight: List<Rgba> = InkPalette.light,
     val toolbarColorCount: Int = 5,
     val toolbarLayout: ToolbarLayout = ToolbarLayout.DEFAULT,
     /** The infinite canvas's own bar. A separate layout because the two hold different items. */
@@ -90,6 +94,8 @@ data class Settings(
 ) {
     fun configFor(tool: Tool): ToolConfig = tools[tool] ?: ToolDefaults.configFor(tool)
 
+    fun toolbarColors(dark: Boolean): List<Rgba> = if (dark) toolbarColorsDark else toolbarColorsLight
+
     /** Push a colour to the front of recent colours, de-duped, capped at 24. */
     fun rememberColor(c: Rgba): Settings =
         copy(recentColors = (listOf(c) + recentColors.filter { it != c }).take(24))
@@ -110,7 +116,8 @@ data class Settings(
         toolsObj.put("shape", shapeConfigJson(shapeConfig))
         return JSONObject()
             .put("tools", toolsObj)
-            .put("toolbar_colors", JSONArray().apply { toolbarColors.forEach { put(rgbaArr(it)) } })
+            .put("toolbar_colors", JSONArray().apply { toolbarColorsDark.forEach { put(rgbaArr(it)) } })
+            .put("toolbar_colors_light", JSONArray().apply { toolbarColorsLight.forEach { put(rgbaArr(it)) } })
             .put("toolbar_color_count", toolbarColorCount)
             .put("toolbar_layout", toolbarLayoutJson(toolbarLayout))
             .put("canvas_toolbar_layout", toolbarLayoutJson(canvasToolbarLayout))
@@ -152,8 +159,7 @@ data class Settings(
             }
             val shape = toolsObj?.optJSONObject("shape")?.let { shapeConfig(it) } ?: ShapeConfig()
 
-            val colors = rgbaList(o.optJSONArray("toolbar_colors")).toMutableList()
-            while (colors.size < InkPalette.MAX_SWATCHES) colors.add(InkPalette.presets[colors.size])
+            val (darkColors, lightColors) = toolbarColors(o)
 
             return Settings(
                 viewDefaults = o.optJSONObject("view_defaults")
@@ -161,7 +167,8 @@ data class Settings(
                     ?: legacyViewDefaults(o.optJSONObject("prefs")),
                 tools = tools,
                 shapeConfig = shape,
-                toolbarColors = colors.take(InkPalette.MAX_SWATCHES),
+                toolbarColorsDark = darkColors,
+                toolbarColorsLight = lightColors,
                 toolbarColorCount = o.optInt("toolbar_color_count", 5).coerceIn(1, InkPalette.MAX_SWATCHES),
                 toolbarLayout = toolbarLayout(o.optJSONObject("toolbar_layout")),
                 canvasToolbarLayout = toolbarLayout(
@@ -343,6 +350,16 @@ data class Settings(
             )
         }
 
+        /** The dark and light swatches, each filled out to a full set from its presets. */
+        private fun toolbarColors(o: JSONObject): Pair<List<Rgba>, List<Rgba>> {
+            fun filled(colors: List<Rgba>, presets: List<Rgba>) = (colors + presets.drop(colors.size)).take(InkPalette.MAX_SWATCHES)
+            val saved = rgbaList(o.optJSONArray("toolbar_colors"))
+            o.optJSONArray("toolbar_colors_light")?.let { return filled(saved, InkPalette.dark) to filled(rgbaList(it), InkPalette.light) }
+            // One set from before the split: never touched, it gives way to both new sets; edited, it serves both.
+            val legacy = filled(saved, InkPalette.legacyPresets)
+            return if (legacy == InkPalette.legacyPresets) InkPalette.dark to InkPalette.light else legacy to legacy
+        }
+
         private fun rgbaList(arr: JSONArray?): List<Rgba> {
             if (arr == null) return emptyList()
             return (0 until arr.length()).mapNotNull { i ->
@@ -357,6 +374,11 @@ data class Settings(
             .put("pressure_min_factor", c.pressureMinFactor)
             .put("direction_strength", c.directionStrength)
             .put("speed_strength", c.speedStrength)
+            .put("speed_smoothing", c.speedSmoothing)
+            .put("speed_top", c.speedTop)
+            .put("stabilize", c.stabilize)
+            .put("stabilize_trail", c.stabilizeTrail)
+            .put("stabilize_crossover", c.stabilizeCrossover)
             .put("taper_enabled", c.taperEnabled)
             .put("taper_min_factor", c.taperMinFactor)
             .put("neon", c.neon)
@@ -374,6 +396,8 @@ data class Settings(
             .put("highlighter_inverse", c.highlighterInverse)
             .put("markup_mode", c.markupMode.id)
             .put("markup_intensity", c.markupIntensity)
+            .put("tape_mode", c.tapeMode.id)
+            .put("tape_pattern", c.tapePattern.id)
             .put("rgba", rgbaArr(c.rgba))
             .apply { c.colorOverride?.let { put("color_override", rgbaArr(it)) } }
 
@@ -386,6 +410,11 @@ data class Settings(
                 directionStrength = o.optDouble("direction_strength", d.directionStrength),
                 rgba = Rgba.fromList(o.optJSONArray("rgba")?.let { a -> (0 until a.length()).map { a.optInt(it, 0) } }) ?: d.rgba,
                 speedStrength = o.optDouble("speed_strength", d.speedStrength),
+                speedSmoothing = o.optDouble("speed_smoothing", d.speedSmoothing),
+                speedTop = o.optDouble("speed_top", d.speedTop),
+                stabilize = o.optBoolean("stabilize", d.stabilize),
+                stabilizeTrail = o.optDouble("stabilize_trail", d.stabilizeTrail),
+                stabilizeCrossover = o.optDouble("stabilize_crossover", d.stabilizeCrossover),
                 taperEnabled = o.optBoolean("taper_enabled", d.taperEnabled),
                 taperMinFactor = o.optDouble("taper_min_factor", d.taperMinFactor),
                 neon = o.optBoolean("neon", d.neon),
@@ -404,6 +433,8 @@ data class Settings(
                 markupMode = if (o.has("markup_mode")) MarkupMode.fromId(o.optString("markup_mode")) else d.markupMode,
                 markupIntensity = o.optDouble("markup_intensity", d.markupIntensity)
                     .coerceIn(ToolConfig.MARKUP_INTENSITY_MIN, 1.0),
+                tapeMode = if (o.has("tape_mode")) TapeMode.fromId(o.optString("tape_mode")) else d.tapeMode,
+                tapePattern = if (o.has("tape_pattern")) TapePattern.fromId(o.optString("tape_pattern")) else d.tapePattern,
                 colorOverride = o.optJSONArray("color_override")
                     ?.let { a -> Rgba.fromList((0 until a.length()).map { i -> a.optInt(i, 0) }) }
                     ?: d.colorOverride,

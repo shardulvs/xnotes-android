@@ -93,7 +93,14 @@ class FakeRenderer : Renderer {
         ops += "drawRaster"
         rasterDests += dest
     }
-    override fun drawImage(image: ImageData, dest: Rect, orientation: Int, angle: Double, flip: Flip) { ops += "drawImage"; images += dest }
+    override fun drawImage(image: ImageData, dest: Rect, orientation: Int, angle: Double, flip: Flip, part: Rect?) { ops += "drawImage"; images += dest; parts += part }
+
+    /** The part each [drawImage] showed, in call order. */
+    val parts = mutableListOf<Rect?>()
+
+    /** Each [clipPolygon], in call order. */
+    val polygonClips = mutableListOf<List<Pt>>()
+    override fun clipPolygon(points: List<Pt>) { ops += "clipPolygon"; polygonClips += points }
     override fun drawText(text: String, rect: Rect, font: FontSpec, color: Rgba, flags: TextFlags) { ops += "drawText" }
     override fun drawTextTurned(text: String, rect: Rect, font: FontSpec, color: Rgba, flags: TextFlags, angle: Double) {
         ops += "drawTextTurned:$text@$angle"

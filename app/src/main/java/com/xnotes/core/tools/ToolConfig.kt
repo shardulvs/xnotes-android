@@ -1,6 +1,14 @@
 package com.xnotes.core.tools
 
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.model.TapeItem
+import com.xnotes.core.model.TapeMode
+import com.xnotes.core.model.TapePattern
+import com.xnotes.core.stroke.Stabilizer
+import com.xnotes.core.stroke.StrokeEngine
+import kotlin.math.ln
+import kotlin.math.pow
+import kotlin.math.roundToInt
 
 /**
  * Eraser behaviour (spec 04 §2): STROKE removes a whole stroke on contact; AREA removes only the
@@ -70,8 +78,8 @@ data class ToolConfig(
      *  thickness whatever zoom you draw at. The eraser uses it to size its radius. */
     val scale: Boolean = true,
     /** Highlighter translucency: render-time alpha scale, default 0.35 (the historical value, so
-     *  legacy strokes that lack the field reload unchanged). Capped to [0.10, 0.90] by the UI so it
-     *  stays a MULTIPLY-blended marker. Only used by [Tool.HIGHLIGHTER]. */
+     *  legacy strokes that lack the field reload unchanged). Kept to [0.10, 1.0] by the UI; it stays
+     *  a MULTIPLY-blended marker at any alpha. Only used by [Tool.HIGHLIGHTER]. */
     val highlighterAlpha: Double = 0.35,
     /** Per-tool colour override: when set, new strokes from this tool use this colour instead of
      *  the toolbar's active ink colour. null = follow the toolbar (the default for every tool). */
@@ -91,10 +99,24 @@ data class ToolConfig(
     /** Eraser: also take off the PDF text markups it touches. Only used by [Tool.ERASER]. */
     val eraseMarkups: Boolean = true,
     /** Eraser: a pen scribbled over ink erases what it touches. Only used by [Tool.ERASER]. */
-    val scribbleErase: Boolean = true,
+    val scribbleErase: Boolean = false,
+    /** Tape: what a drag lays, a straight strip, a rectangle or a freehand band. Only used by [Tool.TAPE]. */
+    val tapeMode: TapeMode = TapeMode.STRAIGHT,
+    /** Tape: what is printed on it. Only used by [Tool.TAPE]. */
+    val tapePattern: TapePattern = TapePattern.SOLID,
+    /** Speed pen: how far along the path its width changes are blurred, in pen widths. Only used by [Tool.SPEED]. */
+    val speedSmoothing: Double = StrokeEngine.DEFAULT_SPEED_SMOOTHING,
+    /** Speed pen: the speed in dp/ms at which the line reaches its thinnest. Only used by [Tool.SPEED]. */
+    val speedTop: Double = StrokeEngine.SPEED_HI,
+    /** Stabilization: steady the nib's path while drawing (see [Stabilizer]). Any ink pen; never written to a file. */
+    val stabilize: Boolean = false,
+    /** Stabilization: the most the steadied line trails a fast nib, in dp. */
+    val stabilizeTrail: Double = Stabilizer.DEFAULT_TRAIL,
+    /** Stabilization: the speed in dp/s below which movement counts as slow and is steadied hardest. */
+    val stabilizeCrossover: Double = Stabilizer.DEFAULT_CROSSOVER,
 ) {
     companion object {
-        const val DEFAULT_MARKUP_INTENSITY = 0.5
+        const val DEFAULT_MARKUP_INTENSITY = 0.9
         const val MARKUP_INTENSITY_MIN = 0.1
     }
 }
@@ -115,14 +137,18 @@ object ToolDefaults {
         Tool.CALLIGRAPHY -> ToolConfig(baseWidth = 6.0, pressureEnabled = true, pressureMinFactor = 0.40, directionStrength = 0.60)
         Tool.SPEED -> ToolConfig(baseWidth = 4.0, pressureEnabled = true, pressureMinFactor = 0.35, directionStrength = 0.0, speedStrength = 0.8)
         Tool.TAPER -> ToolConfig(baseWidth = 4.0, pressureEnabled = true, pressureMinFactor = 0.45, directionStrength = 0.0, taperEnabled = true, taperMinFactor = DEFAULT_TAPER_TIP)
-        Tool.HIGHLIGHTER -> ToolConfig(baseWidth = 16.0, pressureEnabled = false, pressureMinFactor = 1.0, directionStrength = 0.0, highlighterAlpha = 0.50)
+        Tool.HIGHLIGHTER -> ToolConfig(baseWidth = 16.0, pressureEnabled = false, pressureMinFactor = 1.0, directionStrength = 0.0, highlighterAlpha = 0.90)
         Tool.ERASER -> ToolConfig(baseWidth = 24.0, pressureEnabled = false, pressureMinFactor = 1.0, directionStrength = 0.0)
         Tool.LASSO -> ToolConfig(baseWidth = 2.0, pressureEnabled = false, pressureMinFactor = 1.0, directionStrength = 0.0)
+        Tool.TAPE -> ToolConfig(
+            baseWidth = TapeItem.DEFAULT_WIDTH, pressureEnabled = false, pressureMinFactor = 1.0, directionStrength = 0.0,
+            tapePattern = TapePattern.STRIPES,
+        )
         else -> ToolConfig()
     }
 
     /** Tools whose config is persisted in settings (spec 09 §2). */
-    val persistedTools = listOf(Tool.PEN, Tool.DASHED, Tool.CALLIGRAPHY, Tool.SPEED, Tool.TAPER, Tool.HIGHLIGHTER, Tool.ERASER, Tool.SELECT, Tool.LASSO, Tool.MARKUP)
+    val persistedTools = listOf(Tool.PEN, Tool.DASHED, Tool.CALLIGRAPHY, Tool.SPEED, Tool.TAPER, Tool.HIGHLIGHTER, Tool.ERASER, Tool.SELECT, Tool.LASSO, Tool.MARKUP, Tool.TAPE)
 }
 
 /**
@@ -147,22 +173,56 @@ object ToolConversions {
 
     fun strengthToSpeed(s: Double): Double = (s / 0.92) * 100.0
 
+    /** SMOOTHING (0..100) -> `speedSmoothing`, the blur along the path in pen widths, in [0, 1]. */
+    fun smoothingToBlur(smoothing: Double): Double = smoothing.coerceIn(0.0, 100.0) / 100.0
+
+    fun blurToSmoothing(b: Double): Double = (b * 100.0).coerceIn(0.0, 100.0)
+
+    /** TOP SPEED (0..100) -> `speedTop` in dp/ms, log-scaled from a third of the default to three times it. */
+    fun topSpeedToDpPerMs(top: Double): Double = StrokeEngine.SPEED_HI * 3.0.pow((top.coerceIn(0.0, 100.0) - 50.0) / 50.0)
+
+    fun dpPerMsToTopSpeed(v: Double): Double =
+        if (v > 0.0) (50.0 + 50.0 * ln(v / StrokeEngine.SPEED_HI) / ln(3.0)).coerceIn(0.0, 100.0) else 0.0
+
+    /** STRENGTH (0..100) -> `stabilizeTrail` in dp, linear: 100 trails a fast nib by at most 24 dp, about 4 mm. */
+    fun strengthToTrail(strength: Double): Double = strength.coerceIn(0.0, 100.0) * TRAIL_PER_STRENGTH
+
+    fun trailToStrength(trail: Double): Double = (trail / TRAIL_PER_STRENGTH).coerceIn(0.0, 100.0)
+
+    /** CROSSOVER (0..100) -> `stabilizeCrossover` in dp/s, log-scaled from a third of the default to three times it. */
+    fun crossoverToDpPerS(crossover: Double): Double =
+        Stabilizer.DEFAULT_CROSSOVER * 3.0.pow((crossover.coerceIn(0.0, 100.0) - 50.0) / 50.0)
+
+    fun dpPerSToCrossover(v: Double): Double =
+        if (v > 0.0) (50.0 + 50.0 * ln(v / Stabilizer.DEFAULT_CROSSOVER) / ln(3.0)).coerceIn(0.0, 100.0) else 0.0
+
+    private const val TRAIL_PER_STRENGTH = 0.24
+
     /** INTENSITY (0..100, higher = brighter/wider halo) -> `neonStrength` in [0, 1]. */
     fun intensityToNeonStrength(intensity: Double): Double = intensity.coerceIn(0.0, 100.0) / 100.0
 
     fun neonStrengthToIntensity(s: Double): Double = s * 100.0
 
-    /** Highlighter INTENSITY (10..90 percent opacity) -> alpha in [0.10, 0.90]. Capped below
-     *  1.0 so the highlighter stays translucent (its MULTIPLY blend is preserved). */
-    fun intensityToHighlighterAlpha(intensity: Double): Double = intensity.coerceIn(10.0, 90.0) / 100.0
+    /** Highlighter INTENSITY (10..100 percent opacity) -> alpha in [0.10, 1.0]. */
+    fun intensityToHighlighterAlpha(intensity: Double): Double = intensity.coerceIn(10.0, 100.0) / 100.0
 
     fun highlighterAlphaToIntensity(a: Double): Double = a * 100.0
 
-    /** WIDTH slider range per tool (spec 04 §5): 4..40 for the highlighter, 1..80 for the eraser
-     *  (its radius, default 24), else 1..20. */
+    /** WIDTH slider range per tool (spec 04 §5): 4..120 for the highlighter, 1..80 for the eraser
+     *  (its radius, default 24), tape's own range, else 1..20. */
     fun widthRange(tool: Tool): ClosedFloatingPointRange<Double> = when (tool) {
-        Tool.HIGHLIGHTER -> 4.0..40.0
+        Tool.HIGHLIGHTER -> 4.0..120.0
         Tool.ERASER -> 1.0..80.0
+        Tool.TAPE -> TapeItem.MIN_WIDTH..TapeItem.MAX_WIDTH
         else -> 1.0..20.0
+    }
+
+    /** Every ink width slider moves in these steps, so the width its label shows is the width drawn. */
+    const val WIDTH_STEP = 0.5
+
+    /** [value] on the [WIDTH_STEP] grid, held inside the tool's own range. */
+    fun snapWidth(tool: Tool, value: Double): Double {
+        val range = widthRange(tool)
+        return ((value / WIDTH_STEP).roundToInt() * WIDTH_STEP).coerceIn(range.start, range.endInclusive)
     }
 }

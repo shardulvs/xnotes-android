@@ -115,6 +115,11 @@ interface Renderer {
     /** Intersect the clip region with an axis-aligned rectangle (content space). */
     fun clipRect(rect: Rect)
 
+    /** Intersect the clip region with a convex polygon (content space): what room left of an item it cut. */
+    fun clipPolygon(points: List<Pt>) {
+        if (points.size >= 3) clipRect(Rect.bounding(points))
+    }
+
     /**
      * Clear the current clip region to fully transparent (replace, not composite).
      * Lets a cached surface be repaired in place: clip to a dirty rect, [clear] it,
@@ -146,14 +151,10 @@ interface Renderer {
         fillCircle(center, radius, color)
 
     /**
-     * Fill an ink ribbon as a circular brush disc swept along [centers] (packed interleaved x,y)
-     * with per-point [radii]: a disc at every centre, plus the [Geometry.ribbonQuad] bridging each
-     * consecutive pair, all in [color]. Because the nib is a disc, round caps and joins fall out
-     * for free on every pen, and because every piece is convex and merely filled (never one
-     * self-overlapping outline) a sharp turn can't leave a winding-cancelled gap. The default
-     * fills each piece on its own — correct for an opaque single-colour ribbon since the overlaps
-     * just repaint the same colour; an anti-aliasing backend should override to union them into
-     * one path so shared edges don't seam.
+     * Fill an ink ribbon as a circular brush disc swept along [centers] (packed interleaved x,y) with per-point [radii],
+     * in [color]: the union of the [Geometry.capsule] hulls of consecutive discs, so caps and joins round on every pen
+     * and a sharp turn can't hole. The default fills each disc and each band between tangents on its own, fine for an
+     * opaque single colour; an anti-aliasing backend should fill whole capsules as one path so shared edges don't seam.
      */
     fun fillDiskRibbon(centers: FloatArray, radii: FloatArray, color: Rgba) =
         fillDiskRibbon(centers, radii, 0, minOf(centers.size / 2, radii.size), color)
@@ -166,13 +167,26 @@ interface Renderer {
      */
     fun fillDiskRibbon(centers: FloatArray, radii: FloatArray, from: Int, count: Int, color: Rgba) {
         if (count <= 0) return
-        fun pt(i: Int) = Pt(centers[2 * i].toDouble(), centers[2 * i + 1].toDouble())
-        val end = from + count
-        for (i in from until end - 1) {
-            val q = Geometry.ribbonQuad(pt(i), radii[i].toDouble(), pt(i + 1), radii[i + 1].toDouble())
-            if (q.size >= 3) fillPolygon(q, color, FillRule.NONZERO)
+        val n = DoubleArray(4)
+        for (i in from until from + count - 1) {
+            val x0 = centers[2 * i].toDouble()
+            val y0 = centers[2 * i + 1].toDouble()
+            val x1 = centers[2 * i + 2].toDouble()
+            val y1 = centers[2 * i + 3].toDouble()
+            val r0 = radii[i].toDouble()
+            val r1 = radii[i + 1].toDouble()
+            if (Geometry.capsule(x0, y0, r0, x1, y1, r1, n) == Geometry.SWALLOWED) continue
+            val band = listOf(
+                Pt(x0 + r0 * n[0], y0 + r0 * n[1]),
+                Pt(x1 + r1 * n[0], y1 + r1 * n[1]),
+                Pt(x1 + r1 * n[2], y1 + r1 * n[3]),
+                Pt(x0 + r0 * n[2], y0 + r0 * n[3]),
+            )
+            fillPolygon(band, color, FillRule.NONZERO)
         }
-        for (i in from until end) if (radii[i] > 0f) fillCircle(pt(i), radii[i].toDouble(), color)
+        for (i in from until from + count) {
+            if (radii[i] > 0f) fillCircle(Pt(centers[2 * i].toDouble(), centers[2 * i + 1].toDouble()), radii[i].toDouble(), color)
+        }
     }
 
     // --- outlines (cosmetic for chrome, page-space for shapes) ---
@@ -225,10 +239,11 @@ interface Renderer {
      * (0/90/180/270), mirrored by [flip] inside [dest], and then turned [angle] radians clockwise
      * about [dest]'s centre. The backend decodes only as large as [dest] needs, so a big photo is
      * never fully decoded into memory. A placed bitmap is the one thing that cannot rotate by moving
-     * its own points, which is why this is the single primitive that takes a free angle. Default is
-     * a no-op for backends that don't place images.
+     * its own points, which is why this is the single primitive that takes a free angle. [part] is
+     * the share of the image that fills [dest] (fractions of the image as stored, left top right
+     * bottom), null for all of it. Default is a no-op for backends that don't place images.
      */
-    fun drawImage(image: ImageData, dest: Rect, orientation: Int = 0, angle: Double = 0.0, flip: Flip = Flip.NONE) {}
+    fun drawImage(image: ImageData, dest: Rect, orientation: Int = 0, angle: Double = 0.0, flip: Flip = Flip.NONE, part: Rect? = null) {}
 
     fun drawText(text: String, rect: Rect, font: FontSpec, color: Rgba, flags: TextFlags = TextFlags())
 

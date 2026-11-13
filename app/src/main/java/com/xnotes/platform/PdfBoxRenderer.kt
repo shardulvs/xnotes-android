@@ -142,6 +142,13 @@ internal class PdfBoxRenderer(
         // Export draws unclipped: the PDF page already bounds its content and no vectorized item clips.
     }
 
+    /** Clip to what room left of an item it cut; scoped by the q/Q of the [save] round it. */
+    override fun clipPolygon(points: List<Pt>) {
+        if (points.size < 3) return
+        polyPath(points, close = true)
+        cs.clip()
+    }
+
     override fun clear() {
         // No meaningful "clear to transparent" on an append stream; unused by export.
     }
@@ -255,17 +262,28 @@ internal class PdfBoxRenderer(
     // (SVG) source has no native pixels, so it rasterizes at the placed size supersampled for print
     // instead of at the cap; the decode box is pre-swapped for quarter turns (dest already carries
     // the turned box).
-    override fun drawImage(image: ImageData, dest: Rect, orientation: Int, angle: Double, flip: Flip) {
+    override fun drawImage(image: ImageData, dest: Rect, orientation: Int, angle: Double, flip: Flip, part: Rect?) {
         if (dest.w <= 0.0 || dest.h <= 0.0) return
         val turned = orientation % 180 != 0
+        val p = part?.takeIf { it.w > 0.0 && it.h > 0.0 && !com.xnotes.core.model.ImageCrop.isWhole(it) }
         val (reqW, reqH) = if (ImageDecoder.isVector(image.file.path)) {
             val w = (dest.w * abs(sx) * VECTOR_EXPORT_SCALE).toInt().coerceIn(1, EXPORT_CAP_PX)
             val h = (dest.h * abs(sy) * VECTOR_EXPORT_SCALE).toInt().coerceIn(1, EXPORT_CAP_PX)
-            if (turned) h to w else w to h
+            val (iw, ih) = if (turned) h to w else w to h
+            // A part is a slice of the picture: rasterize the whole that much larger, so the slice keeps its detail.
+            (iw / (p?.w ?: 1.0)).toInt().coerceIn(1, EXPORT_CAP_PX) to (ih / (p?.h ?: 1.0)).toInt().coerceIn(1, EXPORT_CAP_PX)
         } else {
             EXPORT_CAP_PX to EXPORT_CAP_PX
         }
         var bmp = ImageDecoder.decodeSampledFile(image.file.path, reqW, reqH) ?: return
+        if (p != null) {
+            // Only the part goes into the file: the pixels of it, before the picture turns or mirrors.
+            val l = (p.left * bmp.width).toInt().coerceIn(0, bmp.width - 1)
+            val t = (p.top * bmp.height).toInt().coerceIn(0, bmp.height - 1)
+            val r = kotlin.math.ceil(p.right * bmp.width).toInt().coerceIn(l + 1, bmp.width)
+            val b = kotlin.math.ceil(p.bottom * bmp.height).toInt().coerceIn(t + 1, bmp.height)
+            bmp = Bitmap.createBitmap(bmp, l, t, r - l, b - t)
+        }
         val o = ((orientation % 360) + 360) % 360
         if (o != 0 || flip != Flip.NONE) {
             val m = android.graphics.Matrix().apply {

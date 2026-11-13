@@ -127,6 +127,22 @@ object ResizeMath {
     }
 
     /**
+     * As [obbResize] for a corner, but free: each axis scales on its own about the opposite corner,
+     * so a corner sets width and height apart. A rectangle of tape resizes this way.
+     */
+    fun obbResizeFree(obb: Obb, handle: HandleId, pointer: Pt): ObbResize {
+        val local = obb.worldToLocal(pointer)
+        val box = Rect(-obb.halfW, -obb.halfH, obb.halfW * 2.0, obb.halfH * 2.0)
+        val anchor = cornerAnchor(box, handle)
+        val grab = grabbedCorner(box, handle)
+        val sx = axisScale(local.x, anchor.x, grab.x)
+        val sy = axisScale(local.y, anchor.y, grab.y)
+        val transform = Affine.scaleAlongAxes(obb.localToWorld(anchor), obb.angle, sx, sy)
+        val newCenterLocal = Pt(anchor.x * (1.0 - sx), anchor.y * (1.0 - sy))
+        return ObbResize(transform, Obb(obb.localToWorld(newCenterLocal), obb.halfW * sx, obb.halfH * sy, obb.angle))
+    }
+
+    /**
      * As [obbResize], for handles drawn [margin] outside the box that scales: a lone shape's frame,
      * whose chrome sits past its outline. The pointer is read as if pulled back by the margin, so
      * the box edge stays exactly the margin behind the finger rather than scaling the gap.

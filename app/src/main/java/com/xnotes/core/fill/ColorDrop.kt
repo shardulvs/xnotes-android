@@ -2,6 +2,7 @@ package com.xnotes.core.fill
 
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.history.RefillShapes
+import com.xnotes.core.infinite.MeshClip
 import com.xnotes.core.infinite.ShapeTessellator
 import com.xnotes.core.infinite.StrokeTessellator
 import com.xnotes.core.model.AudioItem
@@ -11,13 +12,14 @@ import com.xnotes.core.model.ImageItem
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.Stroke
+import com.xnotes.core.model.TapeItem
 import com.xnotes.core.model.TextItem
 import com.xnotes.core.shapes.ShapeKind
 import com.xnotes.core.tools.Tool
 
 /** What a colour dropped at a point does, as [ColorDrop.decide] finds it. */
 sealed interface DropAction {
-    /** Recolour [item]: ink, a shape's outline, a connector, a text box's words or drawn text. */
+    /** Recolour [item]: ink, a shape's outline, a connector, a text box's words, drawn text or a covered tape. */
     class Recolour(val item: CanvasItem) : DropAction
 
     /** Give [shape] the colour as its own fill, keeping the opacity of any fill it has. */
@@ -74,7 +76,7 @@ object ColorDrop {
                     val g = item.geometry()
                     var half = 0.0
                     for (k in 0 until g.pointCount) half = maxOf(half, g.hw(k))
-                    m.addLine(StrokeTessellator.tessellate(g, tol), half)
+                    m.addLine(MeshClip.clip(StrokeTessellator.tessellate(g, tol), item.cuts), half)
                 }
                 is ShapeItem -> m.addLine(ShapeTessellator.outlineMesh(item, tol), item.strokeWidth / 2.0)
                 is ConnectorItem -> for (part in ShapeTessellator.tessellate(item, tol)) m.addLine(part.mesh, item.strokeWidth / 2.0)
@@ -166,6 +168,8 @@ object ColorDrop {
         is Stroke -> item.tool != Tool.HIGHLIGHTER && !item.isEmpty
         is ShapeItem -> !item.isFill
         is ConnectorItem, is TextItem -> true
+        // A peeled tape shows what is under it, so the drop goes through it.
+        is TapeItem -> !item.peeled
         else -> false
     }
 
@@ -173,7 +177,7 @@ object ColorDrop {
         is Stroke -> item.contains(at) || item.intersectsCircle(at.x, at.y, reach)
         is ShapeItem -> if (item.shape == ShapeKind.GLYPHS) item.contains(at) else item.onOutline(at, reach)
         is ConnectorItem -> item.touches(at, reach)
-        is TextItem -> item.contains(at)
+        is TextItem, is TapeItem -> item.contains(at)
         else -> false
     }
 

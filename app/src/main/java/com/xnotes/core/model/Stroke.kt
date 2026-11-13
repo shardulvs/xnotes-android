@@ -14,6 +14,8 @@ import com.xnotes.core.stroke.StrokeGeometry
 import com.xnotes.core.stroke.WetRibbon
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
+import kotlin.math.hypot
+import kotlin.math.max
 
 /**
  * The unit of inking (spec 02 §5.1). Holds the raw samples plus a snapshot of
@@ -37,24 +39,31 @@ class Stroke(
      *  copy); otherwise the immutable style snapshot captured at pen-down. */
     var config: ToolConfig,
     samples: List<Sample> = emptyList(),
-    /** Content-px → dp scale captured at pen-down (zoom ÷ display density), so the speed
-     *  pen judges gesture speed in zoom- and device-independent units. 1.0 = unscaled. */
-    val speedScale: Double = 1.0,
+    speedScale: Double = 1.0,
     /** Straight-line mode: render as a raw segment (no position smoothing) so the line reaches
      *  exactly from the first sample to the last — the EMA low-pass otherwise pulls a 2-point
      *  stroke's far end to the midpoint, lagging it behind the stylus. */
     val straight: Boolean = false,
+    smoothScale: Double = 1.0,
+) : CanvasItem {
+
+    /** Content-px → dp scale captured at pen-down (zoom ÷ display density), so the speed
+     *  pen judges gesture speed in zoom- and device-independent units. 1.0 = unscaled. */
+    var speedScale = speedScale
+        private set
+
     /** Scale on every arc-length constant the engine measures the hand against: the low-pass
      *  lengths, the nib's head window and its widen/thin rates. Captured at pen-down
      *  as 1 ÷ zoom and capped at 1, so they are lengths of *gesture* rather than of page, and
      *  writing small at high zoom behaves as writing at 100% does. 1.0 = drawn at 100% zoom, and
-     *  the default for anything built without a pen. */
-    val smoothScale: Double = 1.0,
-) : CanvasItem {
+     *  the default for anything built without a pen. A resize scales it with the stroke. */
+    var smoothScale = smoothScale
+        private set
 
     override val kind = KIND
     override val resizable = false
     override var locked = false
+    override var group: Int? = null
     override var sync: SyncMark? = null
 
     /**
@@ -73,6 +82,18 @@ class Stroke(
     private var cachedGeometry: StrokeGeometry? = null
     private var cachedRawBounds: Rect? = null
     private var cachedBounds: Rect? = null
+    private var cachedClipped: Rect? = null
+
+    /**
+     * The edges room cut this stroke along. It keeps every sample, so the ribbon is built exactly as
+     * it was drawn, and paints, bounds and hits only what lies inside them. Replaced whole.
+     */
+    @Volatile
+    var cuts: List<CutEdge> = emptyList()
+        set(value) {
+            field = value
+            cachedClipped = null
+        }
 
     /**
      * The ribbon while the pen is still down, grown a sample at a time rather than rebuilt (see
@@ -86,6 +107,14 @@ class Stroke(
     /** The live ribbon, for renderers that want to draw only the part of it still moving. */
     val wetRibbon: WetRibbon? get() = wet
 
+    /**
+     * The nib, while a steadied stroke's samples trail behind it: drawn as one more point, as if the
+     * pen lifted there, but never a sample. The next [addSample] takes it off.
+     */
+    @Volatile
+    var tip: Sample? = null
+        private set
+
     init {
         if (samples.isNotEmpty()) setSamples(samples)
     }
@@ -93,6 +122,7 @@ class Stroke(
     /** Copy constructor: duplicates the sample arrays without materializing a single [Sample]. */
     constructor(src: Stroke) : this(src.tool, src.config, emptyList(), src.speedScale, src.straight, src.smoothScale) {
         pts = src.pts.detached()
+        cuts = src.cuts
     }
 
     // --- sample access ---
@@ -133,18 +163,21 @@ class Stroke(
         val oy = first.y
         var timed = false
         for (i in 0 until m) if (list[i].t != 0.0) { timed = true; break }
+        val widths = list.all { it.widthFactor > 0.0 }
         val xa = FloatArray(m)
         val ya = FloatArray(m)
         val pa = FloatArray(m)
         val ta = if (timed) FloatArray(m) else null
+        val fa = if (widths) FloatArray(m) else null
         for (i in 0 until m) {
             val s = list[i]
             xa[i] = (s.x - ox).toFloat()
             ya[i] = (s.y - oy).toFloat()
             pa[i] = s.pressure.toFloat()
             ta?.set(i, s.t.toFloat())
+            fa?.set(i, s.widthFactor.toFloat())
         }
-        pts = Samples(ox, oy, xa, ya, pa, ta, m)
+        pts = Samples(ox, oy, xa, ya, pa, ta, fa, m)
         invalidate()
     }
 
@@ -153,7 +186,7 @@ class Stroke(
      * over: a dense note otherwise materializes one boxed [Sample] per point on the way in and then
      * walks the whole list again to pack it. Same result as [setSamples], one copy earlier.
      */
-    fun setSamples(xs: DoubleArray, ys: DoubleArray, ps: DoubleArray, ts: DoubleArray?, count: Int) {
+    fun setSamples(xs: DoubleArray, ys: DoubleArray, ps: DoubleArray, ts: DoubleArray?, count: Int, ws: DoubleArray? = null) {
         if (count == 0) {
             pts = Samples.EMPTY
             invalidate()
@@ -167,13 +200,14 @@ class Stroke(
         val ya = FloatArray(count)
         val pa = FloatArray(count)
         val ta = if (timed) FloatArray(count) else null
+        val fa = if (ws != null && (0 until count).all { ws[it] > 0.0 }) FloatArray(count) { ws[it].toFloat() } else null
         for (i in 0 until count) {
             xa[i] = (xs[i] - ox).toFloat()
             ya[i] = (ys[i] - oy).toFloat()
             pa[i] = ps[i].toFloat()
             ta?.set(i, ts!![i].toFloat())
         }
-        pts = Samples(ox, oy, xa, ya, pa, ta, count)
+        pts = Samples(ox, oy, xa, ya, pa, ta, fa, count)
         invalidate()
     }
 
@@ -196,6 +230,7 @@ class Stroke(
         set(value) {
             if (field == value) return
             field = value
+            if (value) tip = null
             invalidate()
         }
 
@@ -223,15 +258,27 @@ class Stroke(
         // reading the float storage here costs nothing over passing a list of boxed samples.
         val s = pts
         val n = s.n
-        val rx = DoubleArray(n)
-        val ry = DoubleArray(n)
-        val rp = DoubleArray(n)
+        val tip = tip
+        val m = if (tip == null) n else n + 1
+        val rx = DoubleArray(m)
+        val ry = DoubleArray(m)
+        val rp = DoubleArray(m)
         for (i in 0 until n) {
             rx[i] = s.ox + s.xa[i]
             ry[i] = s.oy + s.ya[i]
             rp[i] = s.pa[i].toDouble()
         }
-        val rt = s.ta?.let { src -> DoubleArray(n) { src[it].toDouble() } }
+        if (tip != null) {
+            rx[n] = tip.x
+            ry[n] = tip.y
+            rp[n] = tip.pressure
+        }
+        val rt = when {
+            tip == null -> s.ta?.let { src -> DoubleArray(n) { src[it].toDouble() } }
+            s.ta != null || tip.t != 0.0 -> DoubleArray(m) { if (it < n) s.t(it) else tip.t }
+            else -> null
+        }
+        val rf = if (tip == null) s.fa?.let { src -> DoubleArray(n) { src[it].toDouble() } } else null
         return StrokeEngine.build(
             rx, ry, rp, rt,
             config.baseWidth,
@@ -246,14 +293,50 @@ class Stroke(
             holdEnds = tool == Tool.PEN || tool == Tool.HIGHLIGHTER,
             finished = finished,
             smoothScale = smoothScale,
+            speedTop = config.speedTop,
+            speedSmoothing = config.speedSmoothing,
+            rawF = rf,
         ).also { cachedGeometry = it }
     }
+
+    /** Speed pen: work the widths out from the timing once and keep them, so nothing done to the stroke later reshapes it. */
+    fun freezeSpeedWidths() {
+        val s = pts
+        if (s.fa != null || s.ta == null || s.n == 0 || config.speedStrength <= 0.0) return
+        val n = s.n
+        keepSpeedWidths(
+            StrokeEngine.speedWidths(
+                DoubleArray(n) { s.ox + s.xa[it] },
+                DoubleArray(n) { s.oy + s.ya[it] },
+                DoubleArray(n) { s.ta[it].toDouble() },
+                config.baseWidth,
+                config.speedStrength,
+                config.speedTop,
+                config.speedSmoothing,
+                speedScale,
+                !straight,
+                smoothScale,
+            ),
+        )
+    }
+
+    /** Keep [widths], one per sample, as this stroke's speed-pen width factors. */
+    fun keepSpeedWidths(widths: DoubleArray) {
+        val s = pts
+        if (widths.size != s.n) return
+        pts = Samples(s.ox, s.oy, s.xa, s.ya, s.pa, s.ta, FloatArray(s.n) { widths[it].toFloat() }, s.n)
+        cachedGeometry = null
+    }
+
+    /** Whether this stroke keeps its own speed-pen widths rather than reading them off its timing. */
+    val keepsSpeedWidths: Boolean get() = pts.fa != null
 
     fun invalidate() {
         wet = null
         cachedGeometry = null
         cachedRawBounds = null
         cachedBounds = null
+        cachedClipped = null
     }
 
     /**
@@ -276,6 +359,7 @@ class Stroke(
     val hasGeometry get() = wet != null || cachedGeometry != null
 
     fun addSample(s: Sample) {
+        tip = null
         val cur = pts
         val n = cur.n
         val ox = if (n == 0) s.x else cur.ox
@@ -299,7 +383,7 @@ class Stroke(
         ya[n] = (s.y - oy).toFloat()
         pa[n] = s.pressure.toFloat()
         ta?.set(n, s.t.toFloat())
-        pts = Samples(ox, oy, xa, ya, pa, ta, n + 1)
+        pts = Samples(ox, oy, xa, ya, pa, ta, null, n + 1)
         val ribbon = wetOrStart()
         if (ribbon == null) {
             invalidate()
@@ -312,6 +396,38 @@ class Stroke(
         cachedGeometry = null
         cachedRawBounds = null
         cachedBounds = null
+    }
+
+    /** Draw [s] as the [tip], rounded as a stored sample would be, so committing it draws exactly what was shown. */
+    fun setTip(s: Sample) {
+        val cur = pts
+        if (cur.n == 0 || finished) return
+        val at = Sample(cur.ox + (s.x - cur.ox).toFloat(), cur.oy + (s.y - cur.oy).toFloat(), s.pressure.toFloat().toDouble(), s.t.toFloat().toDouble())
+        tip = at
+        cachedGeometry = null
+        cachedBounds = null
+        cachedClipped = null
+        liveRibbon()?.setTip(at.x, at.y, at.pressure, at.t)
+    }
+
+    /** Take the [tip] off, leaving the samples as they are. */
+    fun clearTip() {
+        if (tip == null) return
+        tip = null
+        wet?.clearTip()
+        cachedGeometry = null
+        cachedBounds = null
+        cachedClipped = null
+    }
+
+    /** The live ribbon holding every sample so far, started if need be; null where the pen has none. */
+    private fun liveRibbon(): WetRibbon? {
+        wet?.let { return it }
+        val w = wetOrStart() ?: return null
+        val s = pts
+        val i = s.n - 1
+        w.append(s.ox + s.xa[i], s.oy + s.ya[i], s.pa[i].toDouble(), s.t(i))
+        return w
     }
 
     /**
@@ -333,6 +449,8 @@ class Stroke(
             smooth = !straight,
             holdEnds = tool == Tool.PEN || tool == Tool.HIGHLIGHTER,
             smoothScale = smoothScale,
+            speedTop = config.speedTop,
+            speedSmoothing = config.speedSmoothing,
         )
         // Everything before the sample being added; the caller appends that one itself.
         val s = pts
@@ -349,11 +467,26 @@ class Stroke(
         val cur = pts
         // Dropping back to one sample means the next [addSample] rewrites index 1, which a reader
         // holding the two-sample tuple would be reading; hand it its own arrays instead.
-        if (cur.n > 1) pts = Samples(cur.ox, cur.oy, cur.xa.copyOf(2), cur.ya.copyOf(2), cur.pa.copyOf(2), cur.ta?.copyOf(2), 1)
+        if (cur.n > 1) pts = Samples(cur.ox, cur.oy, cur.xa.copyOf(2), cur.ya.copyOf(2), cur.pa.copyOf(2), cur.ta?.copyOf(2), null, 1)
         addSample(end)
     }
 
     override fun paint(r: Renderer) {
+        if (cuts.isEmpty()) return paintInk(r)
+        val region = clipRegion() ?: return
+        r.save()
+        r.clipPolygon(region)
+        paintInk(r)
+        r.restore()
+    }
+
+    /** What a cut stroke may paint into: its whole paint area cut down by its edges, or null when none of it shows. */
+    private fun clipRegion(): List<Pt>? {
+        val area = if (config.neon && tool != Tool.HIGHLIGHTER) ribbonBounds().outset(neonGlowRadius() * 2 + 4) else ribbonBounds()
+        return CutEdges.clip(area.outset(2.0), cuts).takeIf { it.size >= 3 }
+    }
+
+    private fun paintInk(r: Renderer) {
         val g = geometry()
         val color = renderColor
         when {
@@ -393,7 +526,12 @@ class Stroke(
      * MULTIPLY, so a self-overlapping highlight isn't re-tessellated every frame.
      */
     fun paintHighlighterRibbon(r: Renderer) {
+        if (cuts.isEmpty()) return paintFills(r, geometry(), renderColor.withAlpha(255))
+        val region = clipRegion() ?: return
+        r.save()
+        r.clipPolygon(region)
         paintFills(r, geometry(), renderColor.withAlpha(255))
+        r.restore()
     }
 
     /**
@@ -517,6 +655,34 @@ class Stroke(
 
 
     override fun bounds(): Rect {
+        val c = cuts
+        if (c.isEmpty()) return ribbonBounds()
+        cachedClipped?.let { return it }
+        return clippedBounds(c).also { cachedClipped = it }
+    }
+
+    /**
+     * The box of what shows once [c] cuts the ribbon: each stretch between two samples boxed with
+     * both their discs and cut down, so a stroke cut across its widest part is not boxed by it.
+     */
+    private fun clippedBounds(c: List<CutEdge>): Rect {
+        val g = geometry()
+        val n = g.pointCount
+        if (n == 0) return CutEdges.clipBox(ribbonBounds(), c) ?: Rect(xAt(0), yAt(0), 0.0, 0.0)
+        var out: Rect? = null
+        fun add(i: Int, j: Int) {
+            val l = minOf(g.cx(i) - g.hw(i), g.cx(j) - g.hw(j))
+            val t = minOf(g.cy(i) - g.hw(i), g.cy(j) - g.hw(j))
+            val r = maxOf(g.cx(i) + g.hw(i), g.cx(j) + g.hw(j))
+            val b = maxOf(g.cy(i) + g.hw(i), g.cy(j) + g.hw(j))
+            CutEdges.clipBox(Rect.ltrb(l, t, r, b), c)?.let { box -> out = out?.union(box) ?: box }
+        }
+        if (n == 1) add(0, 0) else for (i in 0 until n - 1) add(i, i + 1)
+        return out ?: Rect(g.cx(0), g.cy(0), 0.0, 0.0)
+    }
+
+    /** The ribbon's box as if no room had cut it. */
+    private fun ribbonBounds(): Rect {
         // A live ribbon keeps a running box over its settled points, so a growing stroke's bounds
         // cost what its moving tail costs rather than a walk of every point it has laid down.
         wet?.let { return it.bounds() }
@@ -548,25 +714,36 @@ class Stroke(
     /** O(1): the samples are offsets, so moving the stroke only moves the origin they hang off. */
     override fun translate(dx: Double, dy: Double) {
         val s = pts
-        pts = Samples(s.ox + dx, s.oy + dy, s.xa, s.ya, s.pa, s.ta, s.n)
+        pts = Samples(s.ox + dx, s.oy + dy, s.xa, s.ya, s.pa, s.ta, s.fa, s.n)
         wet = null
         cachedGeometry = null
         cachedRawBounds = cachedRawBounds?.translate(dx, dy)
         cachedBounds = cachedBounds?.translate(dx, dy)
+        if (cuts.isNotEmpty()) {
+            val box = cachedClipped
+            cuts = cuts.map { it.moved(dx, dy) }
+            cachedClipped = box?.translate(dx, dy)
+        }
     }
 
     override fun snapshotGeometry(): GeometrySnapshot = pts.let {
-        StrokeSnapshot(it.ox, it.oy, it.xa.copyOf(it.n), it.ya.copyOf(it.n), it.pa.copyOf(it.n), it.ta?.copyOf(it.n), config)
+        StrokeSnapshot(
+            it.ox, it.oy, it.xa.copyOf(it.n), it.ya.copyOf(it.n), it.pa.copyOf(it.n), it.ta?.copyOf(it.n), it.fa?.copyOf(it.n),
+            config, cuts, smoothScale, speedScale,
+        )
     }
 
     override fun restoreGeometry(snap: GeometrySnapshot) {
         if (snap !is StrokeSnapshot) return
         pts = Samples(
             snap.ox, snap.oy,
-            snap.xs.copyOf(), snap.ys.copyOf(), snap.ps.copyOf(), snap.ts?.copyOf(),
+            snap.xs.copyOf(), snap.ys.copyOf(), snap.ps.copyOf(), snap.ts?.copyOf(), snap.fs?.copyOf(),
             snap.xs.size,
         )
         config = snap.config
+        cuts = snap.cuts
+        smoothScale = snap.smoothScale
+        speedScale = snap.speedScale
         invalidate()
     }
 
@@ -587,7 +764,7 @@ class Stroke(
                 xa[i] = (p.x - first.x).toFloat()
                 ya[i] = (p.y - first.y).toFloat()
             }
-            pts = Samples(first.x, first.y, xa, ya, s.pa, s.ta, s.n)
+            pts = Samples(first.x, first.y, xa, ya, s.pa, s.ta, s.fa, s.n)
         }
         val k = t.linearScale
         if (k != 1.0) {
@@ -596,13 +773,20 @@ class Stroke(
                 dashLength = config.dashLength * k,
                 dashGap = config.dashGap * k,
             )
+            // Every length the engine measures along the stroke grows with it, so it rebuilds as itself, zoomed.
+            if (k > 0.0) {
+                smoothScale *= k
+                speedScale /= k
+            }
         }
+        if (cuts.isNotEmpty()) cuts = cuts.map { it.mapped(t) }
         invalidate()
     }
 
     /** `p` within the swept disc: inside any sample's disc (catching the dot, ends and joins) or
      *  inside the ribbon body. */
     override fun contains(p: Pt): Boolean {
+        if (cuts.isNotEmpty() && !CutEdges.keeps(cuts, p.x, p.y)) return false
         val g = geometry()
         for (i in 0 until g.pointCount) {
             val h = g.hw(i)
@@ -655,15 +839,16 @@ class Stroke(
         if (s.n == 0) return false
         // Reject against the *raw* sample box (the smoothed geometry lags inward).
         if (rawBounds().distanceTo(Pt(cx, cy)) > radius) return false
+        val c = cuts
+        if (c.isNotEmpty() && !CutEdges.keeps(c, cx, cy, radius)) return false
         // A straight stroke carries only its two endpoints, so a mid-line tap falls between
         // samples; test the segments they span (point-to-line) instead of the sample points.
         if (straight) {
-            val c = Pt(cx, cy)
-            if (s.n == 1) return c.distanceTo(Pt(s.ox + s.xa[0], s.oy + s.ya[0])) <= radius
-            for (i in 1 until s.n) {
-                val a = Pt(s.ox + s.xa[i - 1], s.oy + s.ya[i - 1])
-                val b = Pt(s.ox + s.xa[i], s.oy + s.ya[i])
-                if (Geometry.distancePointToSegment(c, a, b) <= radius) return true
+            val p = Pt(cx, cy)
+            val line = List(s.n) { Pt(s.ox + s.xa[it], s.oy + s.ya[it]) }
+            for (run in CutEdges.clipLine(line, c)) {
+                if (run.size == 1 && p.distanceTo(run[0]) <= radius) return true
+                for (i in 1 until run.size) if (Geometry.distancePointToSegment(p, run[i - 1], run[i]) <= radius) return true
             }
             return false
         }
@@ -671,12 +856,30 @@ class Stroke(
         val lx = cx - s.ox
         val ly = cy - s.oy
         val r2 = radius * radius
+        val reach = config.baseWidth
         for (i in 0 until s.n) {
             val dx = s.xa[i] - lx
             val dy = s.ya[i] - ly
-            if (dx * dx + dy * dy <= r2) return true
+            if (dx * dx + dy * dy <= r2 && (c.isEmpty() || CutEdges.keeps(c, s.ox + s.xa[i], s.oy + s.ya[i], reach))) return true
         }
         return false
+    }
+
+    /** True when some of the ink shows through [cuts]: a sample lies inside them, or near enough that its disc reaches in. */
+    fun showsInk(): Boolean {
+        val c = cuts
+        val s = pts
+        if (c.isEmpty()) return s.n > 0
+        val reach = config.baseWidth / 2.0
+        for (i in 0 until s.n) if (CutEdges.keeps(c, s.ox + s.xa[i], s.oy + s.ya[i], reach)) return true
+        return false
+    }
+
+    /** The sample path cut into the runs that show through [cuts], for the rings that select by what an item draws. */
+    fun visibleRuns(): List<List<Pt>> {
+        val s = pts
+        val line = List(s.n) { Pt(s.ox + s.xa[it], s.oy + s.ya[it]) }
+        return CutEdges.clipLine(line, cuts)
     }
 
     /**
@@ -694,6 +897,7 @@ class Stroke(
         val s = pts
         if (s.n == 0) return null
         if (rawBounds().distanceTo(Pt(cx, cy)) > radius) return null
+        if (cuts.isNotEmpty() && !CutEdges.keeps(cuts, cx, cy, radius)) return null
         // A straight stroke is just two endpoints — it has no mid-line samples to split on, so any
         // contact erases the whole segment (consistent with how the eraser hit-tests it).
         if (straight) return if (intersectsCircle(cx, cy, radius)) emptyList() else null
@@ -717,7 +921,9 @@ class Stroke(
             }
         }
         if (runStart >= 0) fragments.add(fragment(s, runStart, s.n))
-        return if (anyErased) fragments else null
+        if (!anyErased) return null
+        // A cut stroke's pieces keep its edges; one that lies wholly past them would paint nothing.
+        return if (cuts.isEmpty()) fragments else fragments.filter { it.showsInk() }
     }
 
     /** A new stroke from [src]'s samples `[from, to)`, copied so it shares no backing storage. */
@@ -733,8 +939,10 @@ class Stroke(
             FloatArray(m) { src.ya[from + it] - src.ya[from] },
             src.pa.copyOfRange(from, to),
             src.ta?.copyOfRange(from, to),
+            src.fa?.copyOfRange(from, to),
             m,
         )
+        s.cuts = cuts
         return s
     }
 
@@ -743,6 +951,47 @@ class Stroke(
 
         /** First allocation for a live stroke; grows by doubling from here. */
         private const val INITIAL_CAPACITY = 32
+
+        /** Speed pen: one gesture cut at page edges, each later piece opening on a bridge to the last, widths worked out as one. */
+        fun stitchSpeedWidths(pieces: List<Stroke>) {
+            val first = pieces.firstOrNull() ?: return
+            val cfg = first.config
+            if (cfg.speedStrength <= 0.0 || pieces.any { it.pts.n == 0 }) return
+            val total = pieces.sumOf { it.pts.n } - (pieces.size - 1)
+            val times = DoubleArray(total)
+            val steps = DoubleArray(total)
+            val path = DoubleArray(total)
+            var at = 0
+            for ((k, piece) in pieces.withIndex()) {
+                val s = piece.pts
+                val n = s.n
+                val rx = DoubleArray(n) { s.ox + s.xa[it] }
+                val ry = DoubleArray(n) { s.oy + s.ya[it] }
+                val raw = DoubleArray(n)
+                for (i in 1 until n) raw[i] = hypot(rx[i] - rx[i - 1], ry[i] - ry[i - 1])
+                val len = StrokeEngine.SMOOTH_LEN * max(piece.smoothScale, 0.0)
+                val sx = if (piece.straight) rx else StrokeEngine.emaByArc(rx, raw, len)
+                val sy = if (piece.straight) ry else StrokeEngine.emaByArc(ry, raw, len)
+                for (i in (if (k == 0) 0 else 1) until n) {
+                    times[at] = s.t(i)
+                    if (at > 0) {
+                        steps[at] = raw[i]
+                        path[at] = path[at - 1] + hypot(sx[i] - sx[i - 1], sy[i] - sy[i - 1])
+                    }
+                    at++
+                }
+            }
+            val f = StrokeEngine.speedFactorsOver(
+                times, steps, path, total, cfg.speedStrength, cfg.speedTop, cfg.speedSmoothing * cfg.baseWidth, first.speedScale,
+            )
+            at = 0
+            for ((k, piece) in pieces.withIndex()) {
+                val n = piece.pts.n
+                val bridge = if (k == 0) 0 else 1
+                piece.keepSpeedWidths(DoubleArray(n) { i -> f[at + i - bridge] })
+                at += n - bridge
+            }
+        }
 
         /** [c] lerped a fraction [t] toward white (alpha preserved). */
         internal fun lighten(c: Rgba, t: Double): Rgba {
@@ -798,17 +1047,19 @@ private class Samples(
     /** Milliseconds since the first sample, allocated only once a sample carries a non-zero time
      *  (only the speed pen records any), so ordinary ink pays nothing for the channel. */
     val ta: FloatArray?,
+    /** The speed pen's width factors, kept once the pen lifts; null while it draws and for every other pen. */
+    val fa: FloatArray?,
     val n: Int,
 ) {
     fun t(i: Int): Double = ta?.get(i)?.toDouble() ?: 0.0
 
-    fun sample(i: Int): Sample = Sample(ox + xa[i], oy + ya[i], pa[i].toDouble(), t(i))
+    fun sample(i: Int): Sample = Sample(ox + xa[i], oy + ya[i], pa[i].toDouble(), t(i), fa?.get(i)?.toDouble() ?: 0.0)
 
     /** The same samples over arrays of exactly [n], shared with nothing. */
-    fun detached(): Samples = Samples(ox, oy, xa.copyOf(n), ya.copyOf(n), pa.copyOf(n), ta?.copyOf(n), n)
+    fun detached(): Samples = Samples(ox, oy, xa.copyOf(n), ya.copyOf(n), pa.copyOf(n), ta?.copyOf(n), fa?.copyOf(n), n)
 
     companion object {
-        val EMPTY = Samples(0.0, 0.0, FloatArray(0), FloatArray(0), FloatArray(0), null, 0)
+        val EMPTY = Samples(0.0, 0.0, FloatArray(0), FloatArray(0), FloatArray(0), null, null, 0)
     }
 }
 
@@ -822,5 +1073,9 @@ private class StrokeSnapshot(
     val ys: FloatArray,
     val ps: FloatArray,
     val ts: FloatArray?,
+    val fs: FloatArray?,
     val config: ToolConfig,
+    val cuts: List<CutEdge>,
+    val smoothScale: Double,
+    val speedScale: Double,
 ) : GeometrySnapshot

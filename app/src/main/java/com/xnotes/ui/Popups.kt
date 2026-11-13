@@ -17,16 +17,19 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,7 +63,11 @@ import com.xnotes.core.model.PageSizeChoice
 import com.xnotes.core.model.PagePattern
 import com.xnotes.core.model.PageTemplates
 import com.xnotes.core.model.PageStyle
+import com.xnotes.core.model.TapeMode
+import com.xnotes.core.model.TapePattern
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.model.TemplateMemory
+import com.xnotes.core.model.TemplateSettings
 import com.xnotes.core.pal.FontFace
 import com.xnotes.core.tools.EraseMode
 import com.xnotes.core.tools.MarkupMode
@@ -70,6 +77,7 @@ import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
 import com.xnotes.core.tools.ToolConversions
 import com.xnotes.platform.FontCatalog
+import com.xnotes.platform.TemplateLibrary
 import com.xnotes.settings.Preferences
 import com.xnotes.settings.SwatchRole
 import com.xnotes.ui.icons.XnotesIcons
@@ -79,9 +87,9 @@ import kotlin.math.roundToInt
 
 /**
  * Stroke-tool configuration popup (spec 10 §3): PRESSURE / SENSITIVITY, then the
- * tool's signature control: MULTIPLIER (calligraphy), SPEED (speed pen) or
- * TIP WIDTH PERCENTAGE (taper pen), then WIDTH, and a NEON toggle (with INTENSITY) on
- * any stroke tool but the highlighter.
+ * tool's signature control: MULTIPLIER (calligraphy), THINNING / SMOOTHING / TOP SPEED (speed pen) or
+ * TIP WIDTH PERCENTAGE (taper pen), then WIDTH, a STABILIZATION toggle (with STRENGTH and
+ * CROSSOVER), and a NEON toggle (with INTENSITY) on any stroke tool but the highlighter.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -91,8 +99,10 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
     var sensitivity by remember { mutableStateOf(ToolConversions.minFactorToSensitivity(base.pressureMinFactor).toFloat()) }
     var multiplier by remember { mutableStateOf(ToolConversions.directionStrengthToMultiplier(base.directionStrength).toFloat()) }
     var speed by remember { mutableStateOf(ToolConversions.strengthToSpeed(base.speedStrength).toFloat()) }
+    var smoothing by remember { mutableStateOf(ToolConversions.blurToSmoothing(base.speedSmoothing).toFloat()) }
+    var topSpeed by remember { mutableStateOf(ToolConversions.dpPerMsToTopSpeed(base.speedTop).toFloat()) }
     var taperTip by remember { mutableStateOf((base.taperMinFactor * 100).toFloat()) }
-    var width by remember { mutableStateOf(base.baseWidth.toFloat()) }
+    var width by remember { mutableStateOf(ToolConversions.snapWidth(tool, base.baseWidth).toFloat()) }
     var glow by remember { mutableStateOf(base.neon) }
     var glowIntensity by remember { mutableStateOf(ToolConversions.neonStrengthToIntensity(base.neonStrength).toFloat()) }
     var dashLen by remember { mutableStateOf(base.dashLength.toFloat()) }
@@ -102,21 +112,28 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
     var intensity by remember { mutableStateOf(ToolConversions.highlighterAlphaToIntensity(base.highlighterAlpha).toFloat()) }
     var inverse by remember { mutableStateOf(base.highlighterInverse) }
     var colorOverride by remember { mutableStateOf(base.colorOverride) }
+    var steady by remember { mutableStateOf(base.stabilize) }
+    var steadyStrength by remember { mutableStateOf(ToolConversions.trailToStrength(base.stabilizeTrail).toFloat()) }
+    var crossover by remember { mutableStateOf(ToolConversions.dpPerSToCrossover(base.stabilizeCrossover).toFloat()) }
 
     fun emit() {
         val m = ToolConversions.sensitivityToMinFactor(sensitivity.toDouble())
         val ds = if (tool == Tool.CALLIGRAPHY) ToolConversions.multiplierToDirectionStrength(multiplier.toDouble()) else 0.0
         val sp = if (tool == Tool.SPEED) ToolConversions.speedToStrength(speed.toDouble()) else 0.0
+        val blur = if (tool == Tool.SPEED) ToolConversions.smoothingToBlur(smoothing.toDouble()) else base.speedSmoothing
+        val top = if (tool == Tool.SPEED) ToolConversions.topSpeedToDpPerMs(topSpeed.toDouble()) else base.speedTop
         val tmf = if (tool == Tool.TAPER) taperTip.toDouble() / 100.0 else base.taperMinFactor
         val ha = if (tool == Tool.HIGHLIGHTER) ToolConversions.intensityToHighlighterAlpha(intensity.toDouble()) else base.highlighterAlpha
         editor.updateToolConfig(
             tool,
             base.copy(
-                baseWidth = width.toDouble(),
+                baseWidth = ToolConversions.snapWidth(tool, width.toDouble()),
                 pressureEnabled = pressure,
                 pressureMinFactor = m,
                 directionStrength = ds,
                 speedStrength = sp,
+                speedSmoothing = blur,
+                speedTop = top,
                 taperMinFactor = tmf,
                 neon = glow,
                 neonStrength = ToolConversions.intensityToNeonStrength(glowIntensity.toDouble()),
@@ -127,6 +144,9 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
                 highlighterAlpha = ha,
                 highlighterInverse = inverse,
                 colorOverride = colorOverride,
+                stabilize = steady,
+                stabilizeTrail = ToolConversions.strengthToTrail(steadyStrength.toDouble()),
+                stabilizeCrossover = ToolConversions.crossoverToDpPerS(crossover.toDouble()),
             ),
         )
     }
@@ -137,7 +157,7 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
             // COLOUR override: "Default" follows the toolbar's active ink colour; pick a hue to pin
             // this tool to it regardless of the toolbar selection.
             StyleCaption(stringResource(R.string.caption_colour))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ModeChip(stringResource(R.string.default_choice), colorOverride == null) { colorOverride = null; emit() }
                 ColorPickerDot(
                     colorOverride,
@@ -163,13 +183,18 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
                 SliderRow(stringResource(R.string.caption_multiplier), multiplier, 1f..5f) { multiplier = it; emit() }
             }
             if (tool == Tool.SPEED) {
-                SliderRow(stringResource(R.string.caption_speed), speed, 0f..100f) { speed = it; emit() }
+                SliderRow(stringResource(R.string.caption_thinning), speed, 0f..100f) { speed = it; emit() }
+                SliderRow(stringResource(R.string.caption_smoothing), smoothing, 0f..100f) { smoothing = it; emit() }
+                SliderRow(stringResource(R.string.caption_top_speed), topSpeed, 0f..100f) { topSpeed = it; emit() }
             }
             if (tool == Tool.TAPER) {
                 SliderRow(stringResource(R.string.caption_tip_width), taperTip, 0f..100f) { taperTip = it; emit() }
             }
             val range = ToolConversions.widthRange(tool)
-            SliderRow(stringResource(R.string.caption_width), width, range.start.toFloat()..range.endInclusive.toFloat()) { width = it; emit() }
+            SliderRow(
+                stringResource(R.string.caption_width), width,
+                range.start.toFloat()..range.endInclusive.toFloat(), step = ToolConversions.WIDTH_STEP.toFloat(),
+            ) { width = it; emit() }
             // SCALE off: ink keeps a constant on-screen thickness whatever zoom you draw at.
             ToggleRow(stringResource(R.string.caption_scale), scale) { scale = it; emit() }
             if (tool == Tool.DASHED) {
@@ -179,11 +204,19 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
             // The highlighter's strength (translucency) and an optional straight-segment lock
             // (for ruling/underlining).
             if (tool == Tool.HIGHLIGHTER) {
-                SliderRow(stringResource(R.string.caption_intensity), intensity, 10f..90f) { intensity = it; emit() }
+                SliderRow(stringResource(R.string.caption_intensity), intensity, 10f..100f) { intensity = it; emit() }
                 ToggleRow(stringResource(R.string.caption_straight_line), straight) { straight = it; emit() }
                 // INVERSE swaps the multiply blend for a screen one, so the marker lightens the
                 // page instead of darkening it. A multiply has nothing to darken on a dark page.
                 ToggleRow(stringResource(R.string.caption_inverse), inverse) { inverse = it; emit() }
+            }
+            // STABILIZATION steadies the path while drawing; a straight line has nothing to steady.
+            if (tool.isStroke && !(tool == Tool.HIGHLIGHTER && straight)) {
+                ToggleRow(stringResource(R.string.caption_stabilization), steady) { steady = it; emit() }
+                if (steady) {
+                    SliderRow(stringResource(R.string.caption_strength), steadyStrength, 0f..100f) { steadyStrength = it; emit() }
+                    SliderRow(stringResource(R.string.caption_crossover), crossover, 0f..100f) { crossover = it; emit() }
+                }
             }
             // Glow is offered on every stroke tool except the highlighter (translucent) and the
             // dashed pen (it draws a line, not a fillable ribbon, so a halo has nothing to hug).
@@ -202,11 +235,14 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
  * Page", each editing the paper colour and the template. Controls are tri-state: "Default"
  * leaves the field unset so it inherits the level below (page, document, then the global
  * page-colour preference or a built-in default). The All Pages template has no "Default", since
- * nothing sits below it but None. Customize opens the shown template on a page of its
- * own, with its colours and parameters. Like [ToolConfigPopup], the popup holds the edited style
- * locally and pushes each change to the [Editor] (which persists, but never undoes). The All Pages
- * tab also offers making its style the default stamped onto new notes, plus a Reset back to
- * all-Default. Below both tabs sits the note's new page size, which neither tab nor Reset touches.
+ * nothing sits below it but None. Customize opens the shown template on a page of its own, with
+ * its colours and parameters, which belong to that template alone; while the popup is open each
+ * level keeps them for every template it showed ([TemplateMemory]), so trying another loses
+ * nothing. Like [ToolConfigPopup], the popup holds the edited style locally and pushes each
+ * change to the [Editor] (which persists, but never undoes). The All Pages tab also offers making
+ * its style the default stamped onto new notes, plus a Reset back to all-Default, which forgets
+ * that memory too. Below both tabs sits the note's new page size, which neither tab nor Reset
+ * touches.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -220,27 +256,42 @@ fun StylesPopup(editor: Editor, onImportTemplate: () -> Unit = {}, onDismiss: ()
     // default, and stays for the rest of the popup session (so it doesn't vanish when checked).
     // An all-Default style hides it regardless (e.g. after Reset): there is nothing to save.
     var showNewNoteRow by remember { mutableStateOf(editor.documentStyle != editor.newNoteStyle) }
+    // What each level had for the templates it showed during this visit.
+    val memory = remember { TemplateMemory() }
+    // Both levels are read back: a template picked for All Pages also changes the pages following it.
+    fun synced() {
+        docStyle = editor.documentStyle
+        pageStyle = editor.currentPageStyle
+        if (docStyle != editor.newNoteStyle) showNewNoteRow = true
+    }
     fun apply(next: PageStyle) {
-        if (tab == 0) {
-            docStyle = next; editor.setDocumentStyle(next)
-            if (next != editor.newNoteStyle) showNewNoteRow = true
-        } else { pageStyle = next; editor.setCurrentPageStyle(next) }
+        if (tab == 0) editor.setDocumentStyle(next) else editor.setCurrentPageStyle(next)
+        synced()
+    }
+    fun pick(key: String?) {
+        if (tab == 0) editor.setDocumentTemplate(key ?: PageTemplates.NONE, memory) else editor.setCurrentPageTemplate(key, memory)
+        synced()
     }
 
     // What this level shows with no template of its own: the document's, on the page tab.
     val inherited = if (tab == 0) PageTemplates.NONE else docStyle.template ?: PageTemplates.NONE
     val shownKey = style.template ?: inherited
     val shown = if (shownKey == PageTemplates.NONE) null else editor.templateFor(shownKey)
-    // The level below whose parameters show through, when they belong to the shown template.
-    val lower = docStyle.takeIf { tab == 1 && (it.template == null || PageTemplates.compatible(it.template, shownKey)) }
-    val look = TemplateLook.of(style, if (tab == 1) docStyle else null, LocalPalette.current.paper)
+    // The level below whose settings show through, when it shows the same template.
+    val lower = docStyle.takeIf { tab == 1 && (it.template ?: PageTemplates.NONE) == shownKey }
+    val look = TemplateLook.of(style, lower, LocalPalette.current.paper, below = if (tab == 1) docStyle else null)
+    // A strip tile draws its template as this tab shows it, as last set during this visit, or as it comes.
+    fun drawing(e: TemplateLibrary.Entry): TemplateDrawing {
+        val kept = if (tab == 0) memory.recall(null, e.key) else editor.currentPage?.let { memory.recall(it, e.key) }
+        return TemplateDrawing.inStrip(e, style, shownKey, kept, docStyle.takeIf { tab == 1 }, look.paper, editor.documentDpi)
+    }
 
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
         if (customizing && shown != null) {
             TemplateCustomizer(editor, shown, shownKey, tab, style, lower, look, ::apply) { customizing = false }
         } else Column(Modifier.width(286.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
             PopupTitle(stringResource(R.string.title_styles))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ModeChip(stringResource(R.string.all_pages), tab == 0) { tab = 0 }
                 ModeChip(stringResource(R.string.current_page), tab == 1) { tab = 1 }
             }
@@ -262,9 +313,9 @@ fun StylesPopup(editor: Editor, onImportTemplate: () -> Unit = {}, onDismiss: ()
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 // With nothing below All Pages, an unset template there already means None.
-                if (tab == 1) ModeChip(stringResource(R.string.default_choice), style.template == null) { apply(style.withTemplate(null, inherited)) }
+                if (tab == 1) ModeChip(stringResource(R.string.default_choice), style.template == null) { pick(null) }
                 val none = style.template == PageTemplates.NONE || (tab == 0 && style.template == null)
-                ModeChip(stringResource(R.string.none), none) { apply(style.withTemplate(PageTemplates.NONE, inherited)) }
+                ModeChip(stringResource(R.string.none), none) { pick(PageTemplates.NONE) }
             }
             Spacer(Modifier.size(6.dp))
             val libraryVersion = TemplateLibraryUi.version
@@ -277,10 +328,8 @@ fun StylesPopup(editor: Editor, onImportTemplate: () -> Unit = {}, onDismiss: ()
                 entries = choices,
                 selected = style.template,
                 pageMm = editor.currentPageMm,
-                ink = look.ink,
-                accent = look.accent,
-                paper = look.paper,
-                onSelect = { apply(style.withTemplate(it, inherited)) },
+                drawing = ::drawing,
+                onSelect = { pick(it) },
                 onImport = onImportTemplate,
                 onRemove = { editor.removeTemplate(it) },
                 onKeep = { editor.keepNoteTemplate(it) },
@@ -321,7 +370,10 @@ fun StylesPopup(editor: Editor, onImportTemplate: () -> Unit = {}, onDismiss: ()
                     Spacer(Modifier.size(4.dp))
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    ModeChip(stringResource(R.string.reset), false) { apply(PageStyle()) }
+                    ModeChip(stringResource(R.string.reset), false) {
+                        editor.resetDocumentStyle(memory)
+                        synced()
+                    }
                 }
             }
 
@@ -361,7 +413,7 @@ private fun NewPageSizeControls(editor: Editor) {
                 }
             }
         } else {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ModeChip(stringResource(R.string.orientation_portrait), c.orientation == Orientation.PORTRAIT) {
                     apply(c.copy(orientation = Orientation.PORTRAIT))
                 }
@@ -375,7 +427,7 @@ private fun NewPageSizeControls(editor: Editor) {
 
 /** One side of a custom page in millimetres; only a value inside the settable range reaches [onChange]. */
 @Composable
-private fun SideField(label: String, mm: Double, modifier: Modifier, onChange: (Double) -> Unit) {
+internal fun SideField(label: String, mm: Double, modifier: Modifier, onChange: (Double) -> Unit) {
     Column(modifier) {
         StyleCaption(label)
         Spacer(Modifier.size(4.dp))
@@ -413,13 +465,7 @@ private fun TemplateCustomizer(
     val palette = LocalPalette.current
     val dpi = editor.documentDpi
     Column(Modifier.width(286.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
-        Text(
-            stringResource(R.string.back_customize),
-            color = palette.accent.toComposeColor(),
-            fontWeight = FontWeight.Medium,
-            fontSize = 12.sp,
-            modifier = Modifier.clip(MaterialTheme.shapes.extraSmall).clickable(onClick = onBack).padding(vertical = 4.dp),
-        )
+        PopupBackLink(stringResource(R.string.back_customize), onBack)
         Text(
             t.name,
             color = palette.text.toComposeColor(),
@@ -434,24 +480,16 @@ private fun TemplateCustomizer(
         }
 
         Spacer(Modifier.size(12.dp))
-        val numbers = HashMap<String, Double>()
-        lower?.params?.let(numbers::putAll)
-        style.params?.let(numbers::putAll)
-        val spacing = t.spacingParam
-        (style.spacing ?: lower?.spacing)?.let { px -> if (spacing != null) numbers[spacing.name] = px * 25.4 / dpi }
-        val colors = (lower?.colors ?: emptyMap()) + (style.colors ?: emptyMap())
+        val drawn = TemplateDrawing.of(t, style.settings, lower?.settings, look.paper, dpi)
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            TemplatePreview(
-                t, key, editor.currentPageMm, look.ink, look.accent, look.paper,
-                com.xnotes.core.template.TemplateValues(numbers, colors), 112.dp,
-            )
+            TemplatePreview(t, key, editor.currentPageMm, drawn.look.ink, drawn.look.accent, drawn.look.paper, drawn.values, 112.dp)
         }
 
         if (t.usesInk) {
             Spacer(Modifier.size(12.dp))
             StyleCaption(stringResource(R.string.caption_pattern_colour))
             Spacer(Modifier.size(4.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 ModeChip(stringResource(R.string.default_choice), style.patternColor == null) { apply(style.copy(patternColor = null)) }
                 // Circles hold the hue at full strength; OPACITY sets the alpha, so a pick keeps it.
                 SwatchCircles(editor, SwatchRole.LINES, style.patternColor?.copy(a = 255)) {
@@ -473,7 +511,7 @@ private fun TemplateCustomizer(
             Spacer(Modifier.size(4.dp))
             StyleCaption(stringResource(R.string.caption_accent_colour))
             Spacer(Modifier.size(4.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 ModeChip(stringResource(R.string.default_choice), style.accentColor == null) { apply(style.copy(accentColor = null)) }
                 SwatchCircles(editor, SwatchRole.ACCENT, style.accentColor?.copy(a = 255)) {
                     apply(style.copy(accentColor = it.copy(a = look.accent.a)))
@@ -486,7 +524,7 @@ private fun TemplateCustomizer(
         Spacer(Modifier.size(12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             ModeChip(stringResource(R.string.reset), false) {
-                apply(style.copy(patternColor = null, accentColor = null, spacing = null, params = null, colors = null))
+                apply(style.withSettings(TemplateSettings()))
             }
         }
     }
@@ -524,7 +562,7 @@ fun MarginsPopup(editor: Editor, onDismiss: () -> Unit) {
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
         Column(Modifier.width(286.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
             PopupTitle(stringResource(R.string.title_margins))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ModeChip(stringResource(R.string.all_pages), tab == 0) { tab = 0 }
                 ModeChip(stringResource(R.string.current_page), tab == 1) { tab = 1 }
             }
@@ -653,7 +691,8 @@ internal fun StyleCaption(text: String) {
  * (resolved) view settings; a change writes that field's per-note override — stored
  * app-side like zoom/scroll, never in the file itself. Like [StylesPopup], the current
  * values can be saved as the global defaults every note without overrides follows
- * ("Default for all notes"), and Reset drops the note's overrides back onto them.
+ * ("Default for all notes"), and Reset drops the note's overrides back onto them. The PDF colour
+ * filters only show their values here; Adjust opens them on a page of their own.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -665,6 +704,7 @@ fun ViewMenuPopup(editor: Editor, onDismiss: () -> Unit) {
     var showDefaultRow by remember { mutableStateOf(editor.viewSettings != editor.viewDefaults) }
     // Unchecking "Default for all notes" goes back to the defaults this popup opened with.
     val openedDefaults = remember { editor.viewDefaults }
+    var filtering by remember { mutableStateOf(false) }
 
     fun apply(new: ViewOverrides) {
         editor.updateViewOverrides(new)
@@ -684,10 +724,21 @@ fun ViewMenuPopup(editor: Editor, onDismiss: () -> Unit) {
     fun setScrollbar(v: Boolean) = apply(overrides.copy(scrollbar = v))
 
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
-        Column(Modifier.width(300.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
+        if (filtering) Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
+            PopupBackLink("\u2039  " + stringResource(R.string.caption_pdf_filters)) { filtering = false }
+            Spacer(Modifier.size(8.dp))
+            FilterSlider(stringResource(R.string.filter_contrast), vs.contrast, 200, ::setContrast)
+            FilterSlider(stringResource(R.string.filter_invert), vs.invert, 100, ::setInvert)
+            FilterSlider(stringResource(R.string.filter_brightness), vs.brightness, 200, ::setBrightness)
+            FilterSlider(stringResource(R.string.filter_sepia), vs.sepia, 200, ::setSepia)
+            Spacer(Modifier.size(4.dp))
+            FilterColorRow(stringResource(R.string.filter_multiply), vs.multiply, PdfColorFilter.MULTIPLY_OFF) { setMultiply(it) }
+            FilterColorRow(stringResource(R.string.filter_screen), vs.screen, PdfColorFilter.SCREEN_OFF) { setScreen(it) }
+            ToggleRow(stringResource(R.string.caption_keep_images), vs.keepImages) { setKeepImages(it) }
+        } else Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
             PopupTitle(stringResource(R.string.title_view))
             StyleCaption(stringResource(R.string.caption_viewing_mode))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ModeChip(stringResource(R.string.view_single), vs.mode == ViewingMode.SINGLE) { setMode(ViewingMode.SINGLE) }
                 ModeChip(stringResource(R.string.view_double), vs.mode == ViewingMode.DOUBLE) { setMode(ViewingMode.DOUBLE) }
                 ModeChip(stringResource(R.string.view_cover), vs.mode == ViewingMode.COVER) { setMode(ViewingMode.COVER) }
@@ -700,14 +751,18 @@ fun ViewMenuPopup(editor: Editor, onDismiss: () -> Unit) {
             }
 
             Spacer(Modifier.size(10.dp))
-            StyleCaption(stringResource(R.string.caption_pdf_filters))
-            FilterSpinRow(stringResource(R.string.filter_contrast), vs.contrast, 0, 200) { setContrast(it) }
-            FilterSpinRow(stringResource(R.string.filter_invert), vs.invert, 0, 100) { setInvert(it) }
-            FilterSpinRow(stringResource(R.string.filter_brightness), vs.brightness, 0, 200) { setBrightness(it) }
-            FilterSpinRow(stringResource(R.string.filter_sepia), vs.sepia, 0, 200) { setSepia(it) }
-            FilterColorRow(stringResource(R.string.filter_multiply), vs.multiply, PdfColorFilter.MULTIPLY_OFF) { setMultiply(it) }
-            FilterColorRow(stringResource(R.string.filter_screen), vs.screen, PdfColorFilter.SCREEN_OFF) { setScreen(it) }
-            ToggleRow(stringResource(R.string.caption_keep_images), vs.keepImages) { setKeepImages(it) }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { StyleCaption(stringResource(R.string.caption_pdf_filters)) }
+                ModeChip(stringResource(R.string.adjust), false) { filtering = true }
+            }
+            Spacer(Modifier.size(4.dp))
+            val off = stringResource(R.string.off)
+            FilterValueRow(stringResource(R.string.filter_contrast), "${vs.contrast}%")
+            FilterValueRow(stringResource(R.string.filter_invert), "${vs.invert}%")
+            FilterValueRow(stringResource(R.string.filter_brightness), "${vs.brightness}%")
+            FilterValueRow(stringResource(R.string.filter_sepia), "${vs.sepia}%")
+            FilterValueRow(stringResource(R.string.filter_multiply), off, vs.multiply.takeIf { it != PdfColorFilter.MULTIPLY_OFF })
+            FilterValueRow(stringResource(R.string.filter_screen), off, vs.screen.takeIf { it != PdfColorFilter.SCREEN_OFF })
 
             Spacer(Modifier.size(10.dp))
             StyleCaption(stringResource(R.string.caption_rotate_degrees, vs.rotation))
@@ -745,26 +800,33 @@ fun ViewMenuPopup(editor: Editor, onDismiss: () -> Unit) {
     }
 }
 
-/** A labelled percentage spinfield (minus / value / plus, stepping by 5) for the PDF filters. */
+/** A PDF filter's value as the View menu shows it: [text], or a dot of [color] when it has one. */
 @Composable
-private fun FilterSpinRow(label: String, value: Int, min: Int, max: Int, onChange: (Int) -> Unit) {
+private fun FilterValueRow(label: String, text: String, color: Rgba? = null) {
     val palette = LocalPalette.current
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = palette.textDim.toComposeColor(), fontSize = 13.sp, modifier = Modifier.width(84.dp))
-        Box(Modifier.size(34.dp).clickable { onChange((value - 5).coerceIn(min, max)) }, contentAlignment = Alignment.Center) {
-            Text("−", color = palette.text.toComposeColor(), fontSize = 18.sp)
-        }
-        Text(
-            "$value%",
-            color = palette.text.toComposeColor(),
-            fontSize = 13.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.width(46.dp),
-        )
-        Box(Modifier.size(34.dp).clickable { onChange((value + 5).coerceIn(min, max)) }, contentAlignment = Alignment.Center) {
-            Text("+", color = palette.text.toComposeColor(), fontSize = 18.sp)
+        Box(Modifier.width(44.dp), contentAlignment = Alignment.CenterEnd) {
+            if (color != null) {
+                Box(
+                    Modifier.size(14.dp).clip(CircleShape).background(color.toComposeColor())
+                        .border(1.dp, palette.border.toComposeColor(), CircleShape),
+                )
+            } else {
+                Text(text, color = palette.text.toComposeColor(), fontSize = 13.sp)
+            }
         }
     }
+}
+
+/** A PDF filter's percentage slider. It applies on release, since every change re-renders the PDF. */
+@Composable
+private fun FilterSlider(label: String, value: Int, max: Int, onSet: (Int) -> Unit) {
+    var held by remember { mutableStateOf<Int?>(null) }
+    SliderRow(
+        label, (held ?: value).toFloat(), 0f..max.toFloat(), step = 1f, suffix = "%",
+        onChangeFinished = { held?.let(onSet); held = null },
+    ) { held = it.roundToInt() }
 }
 
 /**
@@ -963,6 +1025,77 @@ fun SelectConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
 }
 
 /**
+ * Tape popup: what a drag lays (a straight strip, a rectangle or a freehand band), its colour and
+ * pattern, the width of a strip or band, and Reveal all / Cover all for every tape in the note or
+ * canvas. Like the pens, tape follows the toolbar's ink colour unless a colour is picked here.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun TapeConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
+    val base = remember { editor.toolConfig(Tool.TAPE) }
+    var mode by remember { mutableStateOf(base.tapeMode) }
+    var pattern by remember { mutableStateOf(base.tapePattern) }
+    var width by remember { mutableStateOf(ToolConversions.snapWidth(Tool.TAPE, base.baseWidth).toFloat()) }
+    var scale by remember { mutableStateOf(base.scale) }
+    var colorOverride by remember { mutableStateOf(base.colorOverride) }
+
+    fun emit() = editor.updateToolConfig(
+        Tool.TAPE,
+        base.copy(
+            tapeMode = mode, tapePattern = pattern, baseWidth = ToolConversions.snapWidth(Tool.TAPE, width.toDouble()),
+            scale = scale, colorOverride = colorOverride,
+        ),
+    )
+
+    DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
+        Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
+            PopupTitle(stringResource(R.string.tool_tape))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (m in TapeMode.entries) ModeChip(stringResource(m.labelRes), selected = mode == m) { mode = m; emit() }
+            }
+            Spacer(Modifier.size(8.dp))
+            StyleCaption(stringResource(R.string.caption_colour))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                ModeChip(stringResource(R.string.default_choice), colorOverride == null) { colorOverride = null; emit() }
+                ColorPickerDot(
+                    colorOverride,
+                    custom = colorOverride != null,
+                    onPick = { colorOverride = it; emit() },
+                    dismissOnPick = false,
+                ) { d, p ->
+                    ColorPickerPopup(
+                        initial = colorOverride ?: editor.hostToolbarColors.getOrNull(editor.hostActiveColorIndex),
+                        recents = editor.hostRecentColors,
+                        onDismiss = d,
+                        onPick = p,
+                    )
+                }
+            }
+            Spacer(Modifier.size(8.dp))
+            StyleCaption(stringResource(R.string.caption_pattern))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (p in TapePattern.entries) ModeChip(stringResource(p.labelRes), selected = pattern == p) { pattern = p; emit() }
+            }
+            // A rectangle is as tall as it is dragged, so only a strip and a band take a width.
+            if (mode != TapeMode.RECTANGLE) {
+                Spacer(Modifier.size(4.dp))
+                val range = ToolConversions.widthRange(Tool.TAPE)
+                SliderRow(
+                    stringResource(R.string.caption_width), width,
+                    range.start.toFloat()..range.endInclusive.toFloat(), step = ToolConversions.WIDTH_STEP.toFloat(),
+                ) { width = it; emit() }
+                ToggleRow(stringResource(R.string.caption_scale), scale) { scale = it; emit() }
+            }
+            Spacer(Modifier.size(8.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                ModeChip(stringResource(R.string.tape_reveal_all), selected = false) { editor.setAllTapePeeled(true) }
+                ModeChip(stringResource(R.string.tape_cover_all), selected = false) { editor.setAllTapePeeled(false) }
+            }
+        }
+    }
+}
+
+/**
  * Text markup tool popup: what a drag over PDF text does (select it, or one of the four marks) and,
  * in Highlight mode, how deep it goes. A mark takes the toolbar's active ink colour.
  */
@@ -1022,6 +1155,18 @@ internal fun PopupTitle(text: String) {
     )
 }
 
+/** The link at the top of a popup's nested page that leads back out of it. */
+@Composable
+private fun PopupBackLink(text: String, onBack: () -> Unit) {
+    Text(
+        text,
+        color = LocalPalette.current.accent.toComposeColor(),
+        fontWeight = FontWeight.Medium,
+        fontSize = 12.sp,
+        modifier = Modifier.clip(MaterialTheme.shapes.extraSmall).clickable(onClick = onBack).padding(vertical = 4.dp),
+    )
+}
+
 @Composable
 internal fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.width(220.dp)) {
@@ -1035,24 +1180,50 @@ internal fun SliderRow(
     label: String,
     value: Float,
     range: ClosedFloatingPointRange<Float>,
+    step: Float = 0f,
+    suffix: String = "",
     enabled: Boolean = true,
     onChangeFinished: (() -> Unit)? = null,
     onChange: (Float) -> Unit,
 ) {
+    // A stepped row lands on its stops, so its label is the value given, not a rounding of it.
+    val shown = if (step > 0f) snapTo(value, range, step) else value
+    val number = if (step % 1f != 0f) "%.1f".format(shown).trimEnd('0').trimEnd('.', ',') else "%.0f".format(shown)
     Column {
         Text(
-            "$label  ${"%.0f".format(value)}",
+            "$label  $number$suffix",
             color = (if (enabled) LocalPalette.current.text else LocalPalette.current.textDim).toComposeColor(),
             fontSize = 12.sp,
         )
         Slider(
-            value = value,
-            onValueChange = onChange,
+            value = shown,
+            onValueChange = { if (step > 0f) onChange(snapTo(it, range, step)) else onChange(it) },
             onValueChangeFinished = onChangeFinished,
             valueRange = range,
+            steps = if (step > 0f) {
+                (((range.endInclusive - range.start) / step).roundToInt() - 1).coerceAtLeast(0)
+            } else {
+                0
+            },
             enabled = enabled,
+            // Stops this fine would draw as a speckled track; the label already names each one.
+            colors = if (step > 0f) NoTicks else SliderDefaults.colors(),
         )
     }
+}
+
+private val NoTicks
+    @Composable get() = SliderDefaults.colors(
+        activeTickColor = Color.Transparent,
+        inactiveTickColor = Color.Transparent,
+        disabledActiveTickColor = Color.Transparent,
+        disabledInactiveTickColor = Color.Transparent,
+    )
+
+/** [value] moved to the nearest [step] from the start of [range], held at its ends. */
+private fun snapTo(value: Float, range: ClosedFloatingPointRange<Float>, step: Float): Float {
+    return (range.start + ((value - range.start) / step).roundToInt() * step)
+        .coerceIn(range.start, range.endInclusive)
 }
 
 
@@ -1093,8 +1264,11 @@ internal fun DropdownMenu(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val palette = LocalPalette.current
+    val opened = remember(expanded) { Eyedropper.ended }
+    val ended = expanded && Eyedropper.ended != opened
+    LaunchedEffect(ended) { if (ended) onDismissRequest() }
     androidx.compose.material3.DropdownMenu(
-        expanded = expanded,
+        expanded = expanded && Eyedropper.target == null && !ended,
         onDismissRequest = onDismissRequest,
         modifier = modifier,
         offset = LocalMenuOffset.current,
@@ -1124,6 +1298,7 @@ internal fun AlertDialog(
     shape: Shape = MaterialTheme.shapes.large,
     containerColor: Color = LocalPalette.current.menuBg.toComposeColor(),
 ) {
+    if (Eyedropper.target != null) return
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismissRequest,
         confirmButton = confirmButton,

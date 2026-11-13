@@ -3,12 +3,14 @@ xnotes is a handwriting notebook for Android, built for the stylus. Take notes, 
 * Ink that feels like a pen: pressure-sensitive and low latency, with pens and highlighters.
 * Neon glow: make any pen glow.
 * Disappearing ink: ink that fades away on its own, great for teaching and presenting.
+* Tape: cover answers with tape and tap to peel it back, for testing yourself.
 * Shape snapping: draw a rough shape, hold, and it snaps clean.
 * Sharp at any zoom: ink and PDFs stay crisp however far you zoom in.
 * Notebooks and an infinite canvas: pages when you want structure, endless space when you don't.
 * Book layouts: single, double or cover pages, scrolling or page flips.
 * PDF import: bring in any PDF and write all over it.
 * Room for side notes: widen a PDF's margins on any edge and take notes on the side.
+* Insert space: drag anywhere on a page to open up room there, even in the middle of a PDF.
 * PDF text markups: highlight, underline and strike out text, add comments, search it.
 * PDF colour filters: invert, sepia, contrast, brightness, multiply and screen.
 * Images stay untouched: filter a PDF and its photos and images keep their true colours.

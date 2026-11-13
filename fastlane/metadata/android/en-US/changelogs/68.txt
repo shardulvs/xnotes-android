@@ -1,0 +1,2 @@
+- Insert space tool: drag down to open room anywhere on a page, even mid-PDF
+- Exported PDFs keep the room you inserted

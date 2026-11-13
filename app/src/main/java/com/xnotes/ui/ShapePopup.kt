@@ -73,7 +73,7 @@ fun ShapeConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
             if (!connecting && !config.placesCorners) {
                 ToggleRow(stringResource(R.string.caption_perfect), config.perfect) { emit(config.copy(perfect = it)) }
             }
-            SliderRow(stringResource(R.string.caption_width), config.strokeWidth.toFloat(), 1f..20f) {
+            SliderRow(stringResource(R.string.caption_width), config.strokeWidth.toFloat(), 1f..20f, step = ToolConversions.WIDTH_STEP.toFloat()) {
                 emit(config.copy(strokeWidth = it.toDouble()))
             }
             if (!connecting && chip.kind.isClosed) {

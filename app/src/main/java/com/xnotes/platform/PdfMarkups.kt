@@ -24,12 +24,29 @@ import java.util.TimeZone
  */
 internal object PdfMarkups {
 
-    /** Put [markups] on [pd], bottom first, where [frame] puts its page as displayed. */
-    fun write(ctx: PdfExportContext, pd: PDPage, markups: List<TextMarkup>, frame: PageFrame) {
+    /**
+     * One tile of a page room was inserted into, in user space: the page as it was shows through
+     * [clip] moved by [shift], the clip itself where it was before the move.
+     */
+    class Tile(val clip: com.xnotes.core.geometry.Rect, val shift: com.xnotes.core.geometry.Pt)
+
+    /**
+     * Put [markups] on [pd], bottom first, where [frame] puts its page as displayed. On a page room
+     * was inserted into, [shown] gives each markup as it shows there and [tiles] the bands it is drawn
+     * through, so it is cut exactly as the PDF under it is.
+     */
+    fun write(
+        ctx: PdfExportContext,
+        pd: PDPage,
+        markups: List<TextMarkup>,
+        frame: PageFrame,
+        shown: (TextMarkup) -> TextMarkup = { it },
+        tiles: List<Tile> = emptyList(),
+    ) {
         if (markups.isEmpty()) return
         val annots = pd.annotations
         for (m in markups) {
-            val a = MarkupAnnotation.of(m, frame::pointToUser) ?: continue
+            val a = (if (tiles.isEmpty()) MarkupAnnotation.of(m, frame::pointToUser) else banded(m, shown(m), frame, tiles)) ?: continue
             val rect = PDRectangle(a.rect.left.toFloat(), a.rect.top.toFloat(), a.rect.w.toFloat(), a.rect.h.toFloat())
             val annot = PDAnnotationTextMarkup(subtypeOf(m.type))
             annot.rectangle = rect
@@ -47,6 +64,32 @@ internal object PdfMarkups {
             ctx.tags?.markup(pd, annot.cosObject, m.note ?: m.text)
         }
         pd.annotations = annots
+    }
+
+    /**
+     * [m] on a page with room: the quads it shows at ([shown]) for viewers to read, and an appearance
+     * that draws it on the page as it was through each tile, so its lines land where the app shows them.
+     */
+    private fun banded(m: TextMarkup, shown: TextMarkup, frame: PageFrame, tiles: List<Tile>): MarkupAnnotation? {
+        val whole = MarkupAnnotation.of(m, frame::pointToUser) ?: return null
+        val quads = MarkupAnnotation.of(shown, frame::pointToUser) ?: return null
+        val sb = StringBuilder()
+        var rect: com.xnotes.core.geometry.Rect? = null
+        for (t in tiles) {
+            val l = maxOf(whole.rect.left, t.clip.left)
+            val b = maxOf(whole.rect.top, t.clip.top)
+            val r = minOf(whole.rect.right, t.clip.right)
+            val tp = minOf(whole.rect.bottom, t.clip.bottom)
+            if (r <= l || tp <= b) continue
+            val piece = com.xnotes.core.geometry.Rect(l + t.shift.x, b + t.shift.y, r - l, tp - b)
+            rect = rect?.union(piece) ?: piece
+            sb.append("q ")
+            for (v in doubleArrayOf(piece.left, piece.top, piece.w, piece.h)) sb.append(com.xnotes.core.pdf.PdfNumbers.format(v)).append(' ')
+            sb.append("re W n 1 0 0 1 ")
+            sb.append(com.xnotes.core.pdf.PdfNumbers.format(t.shift.x)).append(' ').append(com.xnotes.core.pdf.PdfNumbers.format(t.shift.y))
+            sb.append(" cm\n").append(whole.content).append("Q\n")
+        }
+        return MarkupAnnotation(quads.quadPoints, rect ?: return null, sb.toString())
     }
 
     /** [a]'s appearance stream, in user space over [rect]. */
