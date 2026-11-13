@@ -1108,6 +1108,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** Marks [sel] as [type] in the active ink colour, a markup on each page it covers, as one undo step. */
     fun markSelection(sel: com.xnotes.core.pdf.TextSelection, type: MarkupType) {
+        if (readerMode) return
         val intensity = controller.configFor(Tool.MARKUP).markupIntensity
         val color = controller.inkColor
         readPdfTexts(sel.start.page..sel.end.page) { texts ->
