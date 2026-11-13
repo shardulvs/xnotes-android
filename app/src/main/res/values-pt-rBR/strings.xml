@@ -16,6 +16,8 @@
     <string name="toolbar_config_collapse">Reduzir</string>
     <string name="toolbar_config_expand">Ampliar</string>
     <string name="toolbar_config_size_and_spacing">Tamanho e espaçamento</string>
+    <string name="toolbar_config_dimensions_group">Dimensões</string>
+    <string name="toolbar_config_inner_spacing_group">Espaços internos</string>
     <string name="toolbar_config_length">Comprimento</string>
     <string name="toolbar_config_thickness">Espessura</string>
     <string name="toolbar_config_current_screen_limit">Limitado a %1$d dp nesta tela</string>

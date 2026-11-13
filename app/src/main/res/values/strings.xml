@@ -1221,6 +1221,8 @@
     <string name="toolbar_config_collapse">Collapse</string>
     <string name="toolbar_config_expand">Expand</string>
     <string name="toolbar_config_size_and_spacing">Size and spacing</string>
+    <string name="toolbar_config_dimensions_group">Dimensions</string>
+    <string name="toolbar_config_inner_spacing_group">Inner spacing</string>
     <string name="toolbar_config_length">Length</string>
     <string name="toolbar_config_thickness">Thickness</string>
     <string name="toolbar_config_current_screen_limit">Limited to %1$d dp on this screen</string>

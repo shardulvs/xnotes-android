@@ -4,10 +4,9 @@ import com.xnotes.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -28,7 +27,6 @@ import kotlin.math.roundToInt
  * Size controls for the selected bar only. Null leaves the bar at its natural
  * size. Sliding any control creates an explicit override; Reset returns to auto.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ToolbarGeometryControls(
     geometry: ToolbarGeometry,
@@ -42,32 +40,58 @@ internal fun ToolbarGeometryControls(
     val maxLength = axisDp.coerceIn(48, 2048)
     val maxThickness = toolbarSafeDockDepth(acrossDp.toFloat()).roundToInt().coerceAtLeast(48)
     BoxWithConstraints(Modifier.fillMaxWidth().testTag("toolbar-dimensions")) {
-        // The inspector itself can be one of two cards beside an open navigation rail.
-        // A 350dp threshold nested two short sliders inside that already half-width
-        // card, leaving the rest apparently empty. Only split when *this card* has
-        // enough width to give both sliders a useful touch target (>=315dp each).
-        val controlWidth = if (maxWidth >= 640.dp) (maxWidth - 10.dp) / 2 else maxWidth
-        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            ToolbarMeasure(toolbarStrings.getString(R.string.toolbar_config_length), geometry.lengthDp(vertical),
-                maxLength, 48, maxLength, Modifier.width(controlWidth)) {
-                onChange(geometry.withLengthDp(it, vertical))
+        // Group controls by purpose rather than giving Length an arbitrary larger
+        // slider. Both groups use equally wide tracks on expanded tablet panes;
+        // narrow panes stack the groups, keeping all controls full-width.
+        val sideBySide = maxWidth >= 460.dp
+        val groupWidth = if (sideBySide) ((maxWidth - 16.dp) / 2).coerceAtMost(300.dp) else maxWidth
+        val groupModifier = Modifier.width(groupWidth)
+        val dimensions: @Composable () -> Unit = {
+            Column(groupModifier.testTag("toolbar-measure-group-dimensions"),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.toolbar_config_dimensions_group),
+                    style = MaterialTheme.typography.labelMedium)
+                ToolbarMeasure(toolbarStrings.getString(R.string.toolbar_config_length),
+                    geometry.lengthDp(vertical), maxLength, 48, maxLength, Modifier.fillMaxWidth()) {
+                    onChange(geometry.withLengthDp(it, vertical))
+                }
+                ToolbarMeasure(toolbarStrings.getString(R.string.toolbar_config_thickness),
+                    geometry.thicknessDp(vertical), minOf(56, maxThickness), 48, maxThickness,
+                    Modifier.fillMaxWidth()) {
+                    onChange(geometry.withThicknessDp(it, vertical))
+                }
+                ToolbarMeasure(toolbarStrings.getString(R.string.toolbar_config_buttons),
+                    geometry.elementSizeDp, 42, 28, 72, Modifier.fillMaxWidth()) {
+                    onChange(geometry.copy(elementSizeDp = it))
+                }
             }
-            ToolbarMeasure(toolbarStrings.getString(R.string.toolbar_config_thickness), geometry.thicknessDp(vertical),
-                minOf(56, maxThickness), 48, maxThickness, Modifier.width(controlWidth)) {
-                onChange(geometry.withThicknessDp(it, vertical))
+        }
+        val spacing: @Composable () -> Unit = {
+            Column(groupModifier.testTag("toolbar-measure-group-spacing"),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.toolbar_config_inner_spacing_group),
+                    style = MaterialTheme.typography.labelMedium)
+                ToolbarMeasure(toolbarStrings.getString(R.string.toolbar_config_padding),
+                    geometry.paddingDp, 4, 0, 32, Modifier.fillMaxWidth()) {
+                    onChange(geometry.copy(paddingDp = it))
+                }
+                ToolbarMeasure(toolbarStrings.getString(R.string.toolbar_config_spacing),
+                    geometry.spacingDp, 2, 0, 32, Modifier.fillMaxWidth()) {
+                    onChange(geometry.copy(spacingDp = it))
+                }
             }
-            ToolbarMeasure(toolbarStrings.getString(R.string.toolbar_config_padding), geometry.paddingDp,
-                4, 0, 32, Modifier.width(controlWidth)) {
-                onChange(geometry.copy(paddingDp = it))
+        }
+        if (sideBySide) {
+            Row(Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top) {
+                dimensions()
+                spacing()
             }
-            ToolbarMeasure(toolbarStrings.getString(R.string.toolbar_config_spacing), geometry.spacingDp,
-                2, 0, 32, Modifier.width(controlWidth)) {
-                onChange(geometry.copy(spacingDp = it))
-            }
-            ToolbarMeasure(toolbarStrings.getString(R.string.toolbar_config_buttons), geometry.elementSizeDp,
-                42, 28, 72, Modifier.width(controlWidth)) {
-                onChange(geometry.copy(elementSizeDp = it))
+        } else {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                dimensions()
+                spacing()
             }
         }
     }
@@ -85,7 +109,8 @@ private fun ToolbarMeasure(
 ) {
     val toolbarStrings = androidx.compose.ui.platform.LocalContext.current
     Column(modifier.testTag("toolbar-measure")) {
-        Row(verticalAlignment = Alignment.CenterVertically,
+        Row(Modifier.heightIn(min = 48.dp).testTag("toolbar-measure-header"),
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f), maxLines = 1,
@@ -105,7 +130,7 @@ private fun ToolbarMeasure(
             value = (value ?: defaultValue).coerceIn(minimum, maximum).toFloat(),
             onValueChange = { onChange(it.roundToInt()) },
             valueRange = minimum.toFloat()..maximum.toFloat(),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag("toolbar-measure-slider"),
         )
         if (value != null && value > maximum) {
             Text(

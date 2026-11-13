@@ -69,9 +69,49 @@ class ToolbarBarsBalancedComposeTest {
         }
         inspect()
         // Also check the inspector in its single-card stacked mode.
-        rule.runOnIdle { availableWidth = 520.dp }
+        rule.runOnIdle { availableWidth = 420.dp }
         rule.waitForIdle()
         inspect()
+    }
+
+    @Test fun expandedInspectorGroupsEqualWidthSlidersByPurpose() {
+        val bar = ToolbarBar("colors", "Colors", ToolbarLayout.DEFAULT,
+            geometry = ToolbarGeometry(anchor = ToolbarAnchor.TOP_CENTER, floating = true))
+        var availableWidth by mutableStateOf(1057.dp)
+        rule.setContent {
+            MaterialTheme {
+                Box(Modifier.width(availableWidth)) {
+                    ToolbarBarsInspector(
+                        workspace = ToolbarWorkspace(listOf(bar)), selectedBar = bar,
+                        look = ToolbarLook(floating = true), screenWidth = 1137.dp,
+                        screenHeight = 710.dp, colorCount = 5,
+                        onUpdateBar = {}, onConfigureDock = { _, _ -> },
+                    )
+                }
+            }
+        }
+        rule.waitForIdle()
+        fun assertGroupsAligned() {
+            val measures = rule.onAllNodesWithTag("toolbar-measure", useUnmergedTree = true)
+            assertTrue("Expected five controls", measures.fetchSemanticsNodes().size == 5)
+            val bounds = (0..4).map { measures[it].getUnclippedBoundsInRoot() }
+            val widths = bounds.map { (it.right - it.left).value }
+            assertTrue("All controls must have the same width: $widths",
+                widths.all { kotlin.math.abs(it - widths[0]) <= 2f })
+            assertTrue("Left group sliders should share a column: $bounds",
+                (1..2).all { kotlin.math.abs((bounds[it].left - bounds[0].left).value) <= 2f })
+            assertTrue("Right group sliders should share a column: $bounds",
+                kotlin.math.abs((bounds[3].left - bounds[4].left).value) <= 2f)
+            assertTrue("Groups must be side-by-side and not overlap: $bounds",
+                bounds[0].right < bounds[3].left)
+            assertTrue("Rows inside each group must descend: $bounds",
+                bounds[0].bottom <= bounds[1].top && bounds[1].bottom <= bounds[2].top &&
+                    bounds[3].bottom <= bounds[4].top)
+        }
+        assertGroupsAligned() // collapsed icon-only navigation rail
+        rule.runOnIdle { availableWidth = 1137.dp }
+        rule.waitForIdle()
+        assertGroupsAligned() // maximum landscape editor width
     }
 
     @Test fun widePaneGroupsAreAdjacentAndNarrowPaneStacksThem() {
