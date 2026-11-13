@@ -179,8 +179,25 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             is ShapeItem -> writeShape(j, item, ids[item])
             is ConnectorItem -> writeConnector(j, item, ids)
             is TapeItem -> writeTape(j, item)
-            else -> {} // text and any unrecognized kind: not written, the canvas has none
+            is TextItem -> writeText(j, item)
+            else -> {} // unrecognized kinds are not written
         }
+    }
+
+    private fun writeText(j: JsonWrite, item: TextItem) {
+        j.beginObject()
+        j.name("kind").value(TextItem.KIND)
+        j.name("pos").beginArray().value(item.pos.x).value(item.pos.y).endArray()
+        j.name("width").value(item.width)
+        j.name("text").value(item.text)
+        j.name("rgba")
+        writeRgba(j, item.rgba)
+        j.name("point_size").value(item.pointSize)
+        if (item.height > 0.0) j.name("height").value(item.height)
+        if (item.face != TextItem.DEFAULT_FACE) j.name("font_face").value(item.face.id)
+        if (item.locked) j.name("locked").value(true)
+        item.group?.let { j.name("group").value(it) }
+        j.endObject()
     }
 
     /**
@@ -741,6 +758,12 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         var locked = false
         var group: Int? = null
         var kind: String? = null
+        var pos: Pt? = null
+        var width = TextItem.DEFAULT_WIDTH
+        var height = 0.0
+        var text = ""
+        var pointSize = TextItem.DEFAULT_POINT_SIZE
+        var fontFace = TextItem.DEFAULT_FACE.id
         var id: Int? = null
         var connector: ConnectorScratch? = null
         var tool: String? = null
@@ -817,6 +840,11 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         while (p.hasNext()) {
             when (p.nextName()) {
                 "kind" -> s.kind = stringOr(p, "")
+                "pos" -> s.pos = ptOrNull(p)
+                "height" -> s.height = doubleOr(p, 0.0)
+                "text" -> s.text = stringOr(p, "")
+                "point_size" -> s.pointSize = doubleOr(p, TextItem.DEFAULT_POINT_SIZE)
+                "font_face" -> s.fontFace = stringOr(p, TextItem.DEFAULT_FACE.id)
                 "id" -> s.id = intOrNull(p)
                 "connector" -> s.connector = parseConnector(p)
                 "tool" -> s.tool = stringOr(p, "")
@@ -862,7 +890,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                 "rec_ms" -> s.recMs = intOr(p, 0)
                 "mode" -> s.mode = stringOrNull(p)
                 "pattern" -> s.pattern = stringOrNull(p)
-                "width" -> s.tapeWidth = doubleOrNull(p)
+                "width" -> doubleOrNull(p)?.let { s.width = it; s.tapeWidth = it }
                 "rgba" -> s.rgba = rgbaOrNull(p)
                 "cuts" -> s.cuts = parseCuts(p)
                 "part" -> s.part = rectOrNull(p)?.let { partWithin(it) }
@@ -896,7 +924,15 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                 items.add(if (c != null && s.kind == ShapeItem.KIND) buildConnector(s, c, glue) else buildShape(s))
             }
             TapeItem.KIND -> buildTape(s)?.let { items.add(it) }
-            else -> {} // text and any unrecognized kind: skipped (forgiving)
+            TextItem.KIND -> {
+                val pos = s.pos
+                if (pos != null && s.height.isFinite() && s.width.isFinite() && s.width > 0.0 && s.pointSize.isFinite() && s.pointSize > 0.0) {
+                    items.add(TextItem(pos, s.width, s.height.coerceAtLeast(0.0), s.text,
+                        s.rgba ?: TextItem.DEFAULT_COLOR, s.pointSize,
+                        FontFace.fromId(s.fontFace) ?: TextItem.DEFAULT_FACE, textMeasurer))
+                }
+            }
+            else -> {} // unrecognized kinds are skipped (forgiving)
         }
         if (items.size > before) glue.named(items[before], s.id)
         // Absent on every canvas written before locking existed, which reads back as unlocked.

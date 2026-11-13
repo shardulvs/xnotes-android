@@ -29,6 +29,7 @@ import com.xnotes.core.model.ImageItem
 import com.xnotes.core.model.Labelled
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.ShapeItem
+import com.xnotes.core.model.TextItem
 import com.xnotes.core.model.Stroke
 import com.xnotes.core.model.TapeItem
 import com.xnotes.core.model.TapeMode
@@ -106,6 +107,9 @@ class InfiniteInteraction(
     private val onCommitSelection: (com.xnotes.core.history.Command?) -> Unit = {},
     /** Draw [items] displaced by the drag so far, rather than moving them. An empty list ends it. */
     private val onLiftSelection: (List<CanvasItem>, LiftTransform) -> Unit = { _, _ -> },
+    /** Keep TextItem and selection on one surface during movement and text reflow. */
+    private val onTextGestureStart: (TextItem) -> Unit = {},
+    private val onTextGestureEnd: (TextItem) -> Unit = {},
     /** Content pixels per dp, so the speed pen judges gesture speed independently of zoom. */
     private val devicePxPerDp: () -> Double = { 1.0 },
     /** Whether strokes are measured for [steadyReadout]; true only while the debug HUD is up. */
@@ -127,6 +131,8 @@ class InfiniteInteraction(
     private val isEditingText: () -> Boolean = { false },
     /** End that edit, keeping what was typed. */
     private val onCommitText: () -> Unit = {},
+    /** A tap with the text-box tool creates a new editable canvas text item. */
+    private val onCreateText: (Pt) -> Unit = {},
     /** A pan that ended as a tap, at this content point, which an audio pill there may take. */
     private val onAudioTap: (Pt) -> Boolean = { false },
     /** Peel this tape back, or cover it again: a look, never an edit. */
@@ -234,6 +240,9 @@ class InfiniteInteraction(
     // A photo or a text box is rebuilt by the model rather than mapped, so a selection holding one is
     // transformed the slow way and stays honest.
     private var transformPointer = Pt.ZERO
+    /** Edge handles reflow text instead of stretching its glyph mesh. */
+    private var liveTextReflow = false
+    private var lastTextReflowNanos = 0L
     private var liftedTransform = false
 
     // A lifted resize leaves shapes out and bakes them every frame: they keep their outline width
@@ -483,7 +492,7 @@ class InfiniteInteraction(
         // A press off an open label: a finger's tap ends the edit and its drag scrolls with it kept
         // open, as on a note; anything else ends it and goes on as usual.
         if (isEditingText()) {
-            if (e.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
+            if (e.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER && tool != Tool.TEXT_BOX) {
                 drawingPointerId = e.getPointerId(0)
                 drawingIsStylus = false
                 panMayCommit = true
@@ -503,6 +512,12 @@ class InfiniteInteraction(
         val toolType = e.getToolType(0)
         val buttonHeld = stylusButtons.heldFor(e)
         val at = viewport.viewportToContent(Pt(vx, vy))
+        if (tool == Tool.TEXT_BOX && toolType != MotionEvent.TOOL_TYPE_ERASER && !buttonHeld) {
+            tapCandidate = false
+            mode = CanvasPointerMode.IDLE
+            onCreateText(at)
+            return
+        }
         val drawing = (tool.isStroke || tool == Tool.SHAPE || tool == Tool.TAPE) && toolType != MotionEvent.TOOL_TYPE_FINGER
         // Taken before a draft is finished below, since that selects its polygon.
         val selected = hasSelection()
@@ -759,9 +774,18 @@ class InfiniteInteraction(
         // A cancelled drag never happened: the model was never touched, so putting the box back and
         // dropping the lift is the whole undo.
         if (mode == CanvasPointerMode.MOVE) {
+            val movingText = selection()?.items?.singleOrNull() as? TextItem
             selection()?.previewMove(0.0, 0.0)
             selection()?.unfollow()
             onLiftSelection(emptyList(), LiftTransform.NONE)
+            movingText?.let(onTextGestureEnd)
+            onSelectionChanged()
+        }
+        if (mode == CanvasPointerMode.RESIZE && liveTextReflow) {
+            selection()?.restoreLiveGeometry()
+            (selection()?.items?.singleOrNull() as? TextItem)?.let(onTextGestureEnd)
+            liveTextReflow = false
+            grabHandle = null
             onSelectionChanged()
         }
         if (mode == CanvasPointerMode.VERTEX) abandonVertex()
@@ -1132,6 +1156,7 @@ class InfiniteInteraction(
         moveAnchor = at
         movedBy = Pt.ZERO
         mode = CanvasPointerMode.MOVE
+        (sel.items.singleOrNull() as? TextItem)?.let(onTextGestureStart)
         onLiftSelection(liftedOf(sel), LiftTransform.NONE)
     }
 
@@ -1224,9 +1249,11 @@ class InfiniteInteraction(
     /** Finger up: apply the whole move to the model once, then hand the drawing back to it. */
     private fun endMove() {
         val sel = selection() ?: return
+        val movingText = sel.items.singleOrNull() as? TextItem
         sel.moveLive(movedBy.x, movedBy.y)
         if (movedBy != Pt.ZERO) sel.loneConnector?.letGo()
         onLiftSelection(emptyList(), LiftTransform.NONE)
+        movingText?.let(onTextGestureEnd)
         onCommitSelection(sel.buildCommand(movedOnly = true, dx = movedBy.x, dy = movedBy.y))
         onSelectionChanged()
         requestRender()
@@ -1242,7 +1269,16 @@ class InfiniteInteraction(
      */
     private fun beginLiftedTransform(sel: CanvasSelection, at: Pt, resize: Boolean) {
         transformPointer = at
-        liftedTransform = sel.items.all { it is Stroke || it is ShapeItem || isVectorImage(it) }
+        // Use native text layout for every handle, including corner font scaling. The GL lift
+        // otherwise briefly redraws the original glyph size while the new mesh is generated.
+        liveTextReflow = resize && sel.items.singleOrNull() is TextItem
+        lastTextReflowNanos = 0L
+        if (liveTextReflow) {
+            liftedTransform = false
+            (sel.items.singleOrNull() as? TextItem)?.let(onTextGestureStart)
+            return
+        }
+        liftedTransform = sel.items.all { it is Stroke || it is ShapeItem || it is TextItem || isVectorImage(it) }
         if (!liftedTransform) return
         bakedInLift = if (resize) sel.items.filterTo(HashSet()) { it is ShapeItem } else emptySet()
         liftItems = if (bakedInLift.isEmpty()) sel.items else sel.items.filter { it !in bakedInLift }
@@ -1250,6 +1286,8 @@ class InfiniteInteraction(
     }
 
     private fun endLift() {
+        if (liveTextReflow) (selection()?.items?.singleOrNull() as? TextItem)?.let(onTextGestureEnd)
+        liveTextReflow = false
         liftedTransform = false
         bakedInLift = emptySet()
         liftItems = emptyList()
@@ -1272,6 +1310,11 @@ class InfiniteInteraction(
             if (bakedInLift.isNotEmpty()) sel.applyLiveTo(bakedInLift, map)
             onLiftSelection(liftItems, LiftTransform.of(map, sel.transformPivot ?: Pt.ZERO))
         } else {
+            if (liveTextReflow) {
+                val now = System.nanoTime()
+                if (now - lastTextReflowNanos < 40_000_000L) return
+                lastTextReflowNanos = now
+            }
             sel.resizeLive(handle, at, transformMargin)
         }
         onSelectionChanged()
@@ -1300,6 +1343,12 @@ class InfiniteInteraction(
         val handle = grabHandle
         val wasResize = handle != null
         grabHandle = null
+        val resizedText = if (liveTextReflow) sel.items.singleOrNull() as? TextItem else null
+        if (liveTextReflow && handle != null) {
+            sel.resizeLive(handle, transformPointer, transformMargin)
+        }
+        liveTextReflow = false
+        resizedText?.let(onTextGestureEnd)
         // Finger up on a lifted drag: apply the whole thing to the model once, then hand the drawing
         // back to it.
         if (liftedTransform) {

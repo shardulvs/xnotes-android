@@ -1501,7 +1501,12 @@ private fun EditorPane(
                             update = { canvas.view.publish() },
                         )
                         canvas.editingField?.let { field ->
-                            com.xnotes.ui.TextEditorOverlay(canvas, field)
+                            val session = canvas.textEditSession
+                            androidx.compose.runtime.key(session) {
+                                com.xnotes.ui.TextEditorOverlay(canvas, field, onTextChanged = { text ->
+                                    canvas.updateEditingTextIfSession(session, text)
+                                })
+                            }
                         }
                         floatingBar()
                         com.xnotes.ui.SelectionMenu(

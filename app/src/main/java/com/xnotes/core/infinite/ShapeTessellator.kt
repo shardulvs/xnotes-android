@@ -72,10 +72,18 @@ object ShapeTessellator {
         textPart(l.outline(frame.w), l.style.rgba) { toPage(Pt(frame.left + it.x, frame.top + it.y)) }
 
     /** Glyph outlines as filled triangles in [color], each point put in place by [place]; null for none. */
-    fun textPart(glyphs: List<VectorContour>, color: Rgba, place: (Pt) -> Pt): MeshPart? {
+    fun textPart(
+        glyphs: List<VectorContour>, color: Rgba,
+        fastLongText: Boolean = false, place: (Pt) -> Pt,
+    ): MeshPart? {
         if (glyphs.isEmpty()) return null
         val rings = glyphs.map { c -> PathFlattener.flatten(c, GLYPH_FLATTEN).map(place) }.filter { it.size >= 3 }
         if (rings.isEmpty()) return null
+        // Only native TextItem opts into this fast path. Large paragraphs would otherwise
+        // pay quadratic contour-containment checks. Other labels retain their old fill.
+        // The parity stencil is also the existing fallback for complex vector paths.
+        if (fastLongText && rings.size >= MAX_TRIANGULATED_GLYPH_RINGS)
+            return stencilPart(rings, color, localPivots = true)
         Triangulator.triangulate(rings, FillRule.NONZERO)?.let { mesh ->
             val b = MeshBuilder(mesh.points.size, mesh.indices.size)
             into(b, mesh)
@@ -149,19 +157,25 @@ object ShapeTessellator {
         return stencilPart(rings, color)
     }
 
-    /** A fan from one point over every edge covers by parity, which is exact for any outline. */
-    private fun stencilPart(rings: List<List<Pt>>, color: Rgba): MeshPart? {
+    /** Parity stencil of the supplied rings; text uses local fans to avoid huge overdraw. */
+    private fun stencilPart(rings: List<List<Pt>>, color: Rgba, localPivots: Boolean = false): MeshPart? {
         val b = MeshBuilder(64, 96)
-        val pivot = b.vertex(rings[0][0].x, rings[0][0].y)
-        for (ring in rings) {
-            val first = b.vertex(ring[0].x, ring[0].y)
-            var prev = first
-            for (k in 1 until ring.size) {
-                val v = b.vertex(ring[k].x, ring[k].y)
-                b.triangle(pivot, prev, v)
-                prev = v
+        if (localPivots) {
+            // Text has thousands of separate rings. Per-ring fans have the same parity
+            // fill as one global fan but do not cover the space between distant letters.
+            for (ring in rings) fan(b, ring)
+        } else {
+            val pivot = b.vertex(rings[0][0].x, rings[0][0].y)
+            for (ring in rings) {
+                val first = b.vertex(ring[0].x, ring[0].y)
+                var prev = first
+                for (k in 1 until ring.size) {
+                    val v = b.vertex(ring[k].x, ring[k].y)
+                    b.triangle(pivot, prev, v)
+                    prev = v
+                }
+                b.triangle(pivot, prev, first)
             }
-            b.triangle(pivot, prev, first)
         }
         return if (b.isEmpty) null else MeshPart(b.build(), color, InkPass.EVEN_ODD)
     }
@@ -208,6 +222,9 @@ object ShapeTessellator {
 
     /** Past this many vertices a curved fill takes the stencil rather than a quadratic ear clip. */
     private const val MAX_CLIPPED_VERTICES = 512
+
+    /** Text beyond this size is cheaper to render through the existing parity stencil. */
+    private const val MAX_TRIANGULATED_GLYPH_RINGS = 64
 
     /** Glyph outlines arrive as polylines already; this only guards a host that hands back curves. */
     private const val GLYPH_FLATTEN = 0.05
