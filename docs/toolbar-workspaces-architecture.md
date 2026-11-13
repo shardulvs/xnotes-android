@@ -55,3 +55,9 @@ The integration review branch merges upstream `master` at `0e73e160`. Keep the A
 - `ToolbarWorkspaceCreationPlanner.kt`: immutable add/duplicate planning; no UI state or persistent file mutations.
 
 Reviewer builds are opt-in (`./gradlew :app:assembleRelease -PtoolbarReviewBuild=true`), use Android package `com.xnotes.pr431review` and require a local signing configuration. Normal upstream builds are not changed by the flag's absence. See [the demo guide](toolbar-workspaces-demo-guide.md) for the new real-stylus demonstration requested before review.
+
+## One placement contract across editor, preview, and runtime
+
+A toolbar placement is now defined by the **edge**, **alignment** (START/CENTER/END) and **preferred lane**. `ToolbarAnchor` alone cannot encode alignment on a vertical edge. `ToolbarAnchorResolver.nearestPlacement` resolves an edge + alignment from drag coordinates and preserves the prior edge when corners are ambiguous. The `ToolbarDragSurface` optimistic commit waits for *both* `anchor` and `dockAlignment`, including moves from vertical START to CENTER that do not change the anchor value. `Editor.moveToolbarBar` persists both values while retaining Docked/Floating mode; that mode is changed only in the inspector.
+
+The twelve visible position-map stops represent four edges × three alignments; they control the same fields as a completed drag. `dockLane` remains a separate preferred lane, not a fourth positional axis inferred from the pointer. The layout planner can redistribute to a free lane if the preferred lane has insufficient capacity. Test the re-centering scenario from LEFT/START to LEFT/CENTER on both the preview and the actual toolbar before accepting the PR.
