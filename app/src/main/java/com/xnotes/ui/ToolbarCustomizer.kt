@@ -1,5 +1,7 @@
 package com.xnotes.ui
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoStories
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -444,6 +446,7 @@ private fun itemIcon(item: ToolbarItem): ImageVector = when (item) {
     ToolbarItem.HIGHLIGHTER -> ImageVector.vectorResource(R.drawable.ic_stroke_highlighter)
     ToolbarItem.ERASER -> XnotesIcons.eraser
     ToolbarItem.PAN -> XnotesIcons.pan
+    ToolbarItem.READER -> Icons.Outlined.AutoStories
     ToolbarItem.SELECT -> XnotesIcons.select
     ToolbarItem.LASSO -> XnotesIcons.lasso
     ToolbarItem.INSERT_SPACE -> XnotesIcons.insertSpace

@@ -242,6 +242,22 @@ private val FIELD_CTRL_KEYS = setOf(
     android.view.KeyEvent.KEYCODE_DEL, android.view.KeyEvent.KEYCODE_FORWARD_DEL,
 )
 
+/** Keys reader mode lets through: page turns and fullscreen. Everything else may edit, so it stops. */
+private val READER_KEYS = setOf(
+    android.view.KeyEvent.KEYCODE_PAGE_UP, android.view.KeyEvent.KEYCODE_PAGE_DOWN,
+    android.view.KeyEvent.KEYCODE_DPAD_LEFT, android.view.KeyEvent.KEYCODE_DPAD_RIGHT,
+    android.view.KeyEvent.KEYCODE_DPAD_UP, android.view.KeyEvent.KEYCODE_DPAD_DOWN,
+    android.view.KeyEvent.KEYCODE_SPACE, android.view.KeyEvent.KEYCODE_F11,
+)
+
+/** Ctrl shortcuts reader mode lets through: copy, sidebar, search, zoom and fit, opening notes, preferences. */
+private val READER_CTRL_KEYS = setOf(
+    android.view.KeyEvent.KEYCODE_C, android.view.KeyEvent.KEYCODE_B, android.view.KeyEvent.KEYCODE_F,
+    android.view.KeyEvent.KEYCODE_PLUS, android.view.KeyEvent.KEYCODE_EQUALS, android.view.KeyEvent.KEYCODE_MINUS,
+    android.view.KeyEvent.KEYCODE_0, android.view.KeyEvent.KEYCODE_9, android.view.KeyEvent.KEYCODE_8,
+    android.view.KeyEvent.KEYCODE_N, android.view.KeyEvent.KEYCODE_O, android.view.KeyEvent.KEYCODE_COMMA,
+)
+
 /** How far off an address written in a PDF's text a tap may land and still open it. */
 private const val AUTO_LINK_SLOP_DP = 4.0
 
@@ -530,6 +546,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     var tool by mutableStateOf(Tool.DEFAULT)
         private set
+
+    /** Reader mode: the note can be read and followed through links, but not changed. */
+    var readerMode by mutableStateOf(false)
+        private set
+    private var toolBeforeReader: Tool? = null
     var palette by mutableStateOf(state.palette)
         private set
     /** How round the chrome is, [Preferences.cornerStyle]. */
@@ -966,7 +987,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         onSelectionMenu = { rect -> selectionMenu = rect },
         onScreenshotMenu = { rect -> screenshotMenu = rect },
         onContextMenu = { vp, content, locked -> contextMenu = ContextMenuTarget(vp.x, vp.y, content, locked) },
-        onAddPageAtEnd = { addPageAtEnd() },
+        onAddPageAtEnd = { if (!readerMode) addPageAtEnd() },
         onHaptic = { runCatching { view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS) } },
     )
 
@@ -1103,6 +1124,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** Marks [sel] as [type] in the active ink colour, a markup on each page it covers, as one undo step. */
     fun markSelection(sel: com.xnotes.core.pdf.TextSelection, type: MarkupType) {
+        if (readerMode) return
         val intensity = controller.configFor(Tool.MARKUP).markupIntensity
         val color = controller.inkColor
         readPdfTexts(sel.start.page..sel.end.page) { texts ->
@@ -1155,6 +1177,16 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private fun tapMarkup(at: Pt, withLink: Boolean): Boolean {
         val hit = markupHit(at) ?: return false
         val anchor = markupAnchor(hit.page, hit.markup) ?: return false
+        // Reading never opens a markup's menu: the first tap shows its note, the next goes on to the PDF and its links.
+        if (readerMode) {
+            if (hit.markup.note == null || notePeek?.markup === hit.markup) {
+                notePeek = null
+                return false
+            }
+            notePeekSize = null
+            notePeek = NotePeek(hit.page, hit.markup, anchor, state.viewportW, state.viewportH)
+            return true
+        }
         if (hit.markup.note != null && notePeek?.markup !== hit.markup) {
             markupMenu = null
             notePeekSize = null
@@ -2935,7 +2967,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 toolbarColorsLight = if (swatchesDark) otherSwatches else toolbarColors,
                 toolbarColorCount = toolbarColorCount,
                 activeColor = activeColorIndex,
-                lastTool = tool,
+                lastTool = toolBeforeReader ?: tool, // reader's forced Pan is not the user's tool
                 sidebarVisible = sidebarVisible,
                 renderScale = renderScale,
             )
@@ -6299,6 +6331,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     private fun replaceDocument(doc: Document) {
+        exitReader() // reading locks one note, not the pane
         AudioRecording.stopFor(this) // closing the note places its recording
         AudioPlayback.closeFor(this)
         saveViewState() // remember the outgoing folder note's view before switching away
@@ -6327,6 +6360,36 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     // --- tools & colour ---
 
+    fun enterReader() {
+        if (readerMode) return
+        // Every edit in progress ends and every menu that could edit closes, so nothing outlives the switch.
+        pdfText.clear()
+        endTableEdit()
+        flowText.endSession()
+        controller.commitTextEdit(restoreTool = true)
+        controller.clearSelection()
+        clearPageSelection()
+        selectionMenu = null
+        contextMenu = null
+        markupMenu = null
+        markupNote = null
+        flowContextMenu = null
+        tableMenu = null
+        toolBeforeReader = tool
+        selectTool(Tool.PAN)
+        controller.readOnly = true
+        readerMode = true
+    }
+
+    fun exitReader() {
+        if (!readerMode) return
+        readerMode = false
+        controller.readOnly = false
+        notePeek = null
+        toolBeforeReader?.let { selectTool(it) }
+        toolBeforeReader = null
+    }
+
     fun selectTool(t: Tool) {
         // The markup tool marks a PDF's text: a note without one gets Pan, and the next with one gets it back.
         markupResting = t == Tool.MARKUP && !hasPdf
@@ -6340,6 +6403,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private fun dispatchTapGesture(action: String) = when {
         // The pen's taps arrive here whichever surface is up; a canvas on top must not edit the note under it.
         canvasOpen -> infinite.dispatchTapGesture(action)
+        readerMode -> Unit
         action == "undo" -> undo()
         action == "redo" -> redo()
         action == "toggle_pan" -> toggleTool(Tool.PAN)
@@ -7491,6 +7555,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         // A canvas is on top: it owns the keyboard, and understands only its own shortcuts.
         if (canvasOpen) return infinite.handleKeyDown(e)
         if (panelFieldFocused && (!e.isCtrlPressed || e.keyCode in FIELD_CTRL_KEYS)) return false
+        // Reader mode lets through only the keys that read; Escape clears a text selection, then leaves it.
+        if (readerMode) {
+            if (e.keyCode == android.view.KeyEvent.KEYCODE_ESCAPE) {
+                if (pdfText.selection != null) pdfText.clear() else exitReader()
+                return true
+            }
+            if (e.keyCode !in (if (e.isCtrlPressed) READER_CTRL_KEYS else READER_KEYS)) return false
+        }
         // A live flow caret session owns the keyboard first (Ctrl+B means bold here).
         if (flowText.active && handleFlowKey(e)) return true
         // While editing a text box, let the field consume keys (only Escape commits).
@@ -9195,6 +9267,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      *  [noteOpen] so the editor is removed from the stack. The document stays as an inert buffer. */
     fun goHome() {
         if (!noteOpen) return
+        exitReader()
         // Closing the note places a recording still going, before the note is saved.
         AudioRecording.stopFor(this)
         infiniteOrNull?.let { AudioRecording.stopFor(it) }

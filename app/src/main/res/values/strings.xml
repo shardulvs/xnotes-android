@@ -11,6 +11,9 @@
     <string name="tool_highlighter">Highlighter</string>
     <string name="tool_eraser">Eraser</string>
     <string name="tool_pan">Pan</string>
+    <string name="tool_reader">Reader</string>
+    <string name="reader_exit">Exit reader</string>
+    <string name="reader_read_only">Read only</string>
     <string name="tool_select">Select</string>
     <string name="tool_lasso">Lasso</string>
     <string name="tool_screenshot">Screenshot</string>
