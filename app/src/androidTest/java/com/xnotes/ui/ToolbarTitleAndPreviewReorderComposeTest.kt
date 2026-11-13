@@ -1,6 +1,7 @@
 package com.xnotes.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
@@ -45,7 +46,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
         ))
         rule.setContent {
             MaterialTheme {
-                Box(Modifier.width(850.dp)) {
+                Box(Modifier.fillMaxWidth()) {
                     ToolbarWorkspacePreview(workspace = bars, look = ToolbarLook(floating = true),
                         selectedId = "two", colors = emptyList(), activeColorIndex = 0,
                         pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
@@ -63,6 +64,62 @@ class ToolbarTitleAndPreviewReorderComposeTest {
             kotlin.math.abs(tallTop - shortTop) <= 2f)
     }
 
+    @Test fun crossEdgePreviewDragTracksPointerWhileStillPressedOnRealScreen() {
+        val layout = ToolbarLayout(listOf(ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN)))))
+        val first = ToolbarBar("moving", "Move", layout, geometry = ToolbarGeometry(
+            floating = true, anchor = ToolbarAnchor.TOP_LEFT, widthDp = 160, heightDp = 56))
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(first)))
+        var movedTo: ToolbarAnchor? = null
+        rule.setContent {
+            MaterialTheme {
+                Box(Modifier.fillMaxWidth().testTag("cross-edge-preview-stage")) {
+                    ToolbarWorkspacePreview(workspace = workspace, look = ToolbarLook(floating = true),
+                        selectedId = "moving", colors = emptyList(), activeColorIndex = 0,
+                        pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
+                        selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
+                        onMoveBar = { _, anchor ->
+                            movedTo = anchor
+                            workspace = workspace.replaceBar(first.copy(geometry = first.geometry.movedTo(anchor, true)))
+                        }, onReorderBar = { _, _ -> })
+                }
+            }
+        }
+        rule.waitForIdle()
+        val source = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+        val stage = rule.onNodeWithTag("cross-edge-preview-stage", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val start = source.fetchSemanticsNode().boundsInRoot.center
+        val delta = Offset(stage.right - stage.width * 0.06f - start.x, stage.center.y - start.y)
+        val step = delta / 12f
+        source.performTouchInput {
+            down(center)
+            advanceEventTime(780)
+            moveBy(step)
+            advanceEventTime(32)
+        }
+        rule.waitForIdle()
+        var previous = source.fetchSemanticsNode().boundsInRoot.center
+        repeat(11) { index ->
+            source.performTouchInput { moveBy(step); advanceEventTime(32) }
+            rule.waitForIdle()
+            val now = source.fetchSemanticsNode().boundsInRoot.center
+            assertTrue("Cross-edge preview x went backward on step $index: $previous -> $now",
+                now.x >= previous.x - 8f)
+            assertTrue("Cross-edge preview y went backward on step $index: $previous -> $now",
+                now.y >= previous.y - 8f)
+            assertTrue("Cross-edge preview lost pointer during step $index: $now",
+                kotlin.math.abs(now.x - start.x - step.x * (index + 2)) < 36f &&
+                kotlin.math.abs(now.y - start.y - step.y * (index + 2)) < 36f)
+            previous = now
+        }
+        source.performTouchInput { up() }
+        rule.waitForIdle()
+        rule.runOnIdle { assertEquals(ToolbarAnchor.CENTER_RIGHT, movedTo) }
+        val settled = source.fetchSemanticsNode().boundsInRoot.center
+        assertTrue("Dropped bar did not settle on the right edge: $settled vs $stage",
+            settled.x > stage.center.x)
+    }
+
     @Test fun movingFloatingBarFromTopToRightSnapsWithoutReturningToPreviousSlot() {
         val layout = ToolbarLayout(listOf(ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN)))))
         val initial = ToolbarBar("moving", "Move", layout, geometry = ToolbarGeometry(
@@ -71,7 +128,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
         var droppedAnchor: ToolbarAnchor? = null
         rule.setContent {
             MaterialTheme {
-                Box(Modifier.width(850.dp).testTag("move-preview-stage")) {
+                Box(Modifier.fillMaxWidth().testTag("move-preview-stage")) {
                     ToolbarWorkspacePreview(workspace = workspace, look = ToolbarLook(floating = true),
                         selectedId = "moving", colors = emptyList(), activeColorIndex = 0,
                         pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
@@ -173,7 +230,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
         ))
         rule.setContent {
             MaterialTheme {
-                Box(Modifier.width(800.dp)) {
+                Box(Modifier.fillMaxWidth()) {
                     ToolbarWorkspacePreview(
                         workspace = ToolbarWorkspace(listOf(bar)), look = ToolbarLook(),
                         selectedId = "main", colors = emptyList(), activeColorIndex = 0,
@@ -207,7 +264,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
         var workspace by mutableStateOf(ToolbarWorkspace(listOf(bar("main"), bar("moving"), bar("target"))))
         rule.setContent {
             MaterialTheme {
-                Box(Modifier.width(850.dp)) {
+                Box(Modifier.fillMaxWidth()) {
                     ToolbarWorkspacePreview(workspace = workspace, look = ToolbarLook(),
                         selectedId = "moving", colors = emptyList(), activeColorIndex = 0,
                         pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
@@ -261,7 +318,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
         var workspace by mutableStateOf(ToolbarWorkspace(listOf(bar("main"), bar("moving"), bar("target"))))
         rule.setContent {
             MaterialTheme {
-                Box(Modifier.width(850.dp)) {
+                Box(Modifier.fillMaxWidth()) {
                     ToolbarWorkspacePreview(workspace = workspace, look = ToolbarLook(),
                         selectedId = "moving", colors = emptyList(), activeColorIndex = 0,
                         pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Example",
@@ -307,7 +364,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
         var workspace by mutableStateOf(ToolbarWorkspace(listOf(bar("main"), bar("moving"), bar("target"))))
         rule.setContent {
             MaterialTheme {
-                Box(Modifier.width(850.dp)) {
+                Box(Modifier.fillMaxWidth()) {
                     ToolbarWorkspacePreview(workspace = workspace, look = ToolbarLook(),
                         selectedId = "moving", colors = emptyList(), activeColorIndex = 0,
                         pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Example",
@@ -351,7 +408,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
         var pending: Pair<String, String>? = null
         rule.setContent {
             MaterialTheme {
-                Box(Modifier.width(850.dp)) {
+                Box(Modifier.fillMaxWidth()) {
                     ToolbarWorkspacePreview(workspace = workspace, look = ToolbarLook(),
                         selectedId = "moving", colors = emptyList(), activeColorIndex = 0,
                         pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
@@ -400,7 +457,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
         var workspace by mutableStateOf(ToolbarWorkspace(listOf(bar("main"), bar("moving"), bar("target"))))
         rule.setContent {
             MaterialTheme {
-                Box(Modifier.width(850.dp)) {
+                Box(Modifier.fillMaxWidth()) {
                     ToolbarWorkspacePreview(workspace = workspace, look = ToolbarLook(),
                         selectedId = "moving", colors = emptyList(), activeColorIndex = 0,
                         pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
@@ -458,7 +515,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
         var completed: Pair<String, String>? = null
         rule.setContent {
             MaterialTheme {
-                Box(Modifier.width(800.dp)) {
+                Box(Modifier.fillMaxWidth()) {
                     ToolbarWorkspacePreview(workspace = current, look = ToolbarLook(floating = true),
                         selectedId = "second", colors = emptyList(), activeColorIndex = 0,
                         pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Example",
@@ -520,7 +577,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
         var callback: Pair<String, String>? = null
         rule.setContent {
             MaterialTheme {
-                Box(Modifier.width(850.dp)) {
+                Box(Modifier.fillMaxWidth()) {
                     ToolbarWorkspacePreview(
                         workspace = current,
                         look = ToolbarLook(),
