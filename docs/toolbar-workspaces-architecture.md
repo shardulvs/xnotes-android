@@ -41,3 +41,7 @@ Domain → Persistence → Runtime → Editor core → Dock/region polish → Pr
 ## Maintenance
 
 See [toolbar-workspaces-cleanup-audit.md](toolbar-workspaces-cleanup-audit.md) for verified dead-code removal, responsive sizing rationale, and the next safe modularization tasks. Preserve the optimistic drag transaction and the direct source placement until dedicated regression tests demonstrate a replacement is equivalent.
+
+## Current upstream compatibility (0.9.9)
+
+The integration review branch merges upstream `master` at `0e73e160`. Keep the Android test runner while accepting upstream version code 70. The upstream editor-retirement save lifecycle, ZIP stamp/check logic and current menu/tool-width behavior remain upstream-owned; toolbar customization must not replace those implementation paths. Section picker availability is memoized per immutable toolbar layout and available-item set; repeatable Colors and Spacer entries are intentionally exempt from one-instance restrictions.
