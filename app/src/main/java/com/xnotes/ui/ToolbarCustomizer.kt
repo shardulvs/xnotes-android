@@ -102,6 +102,11 @@ fun ToolbarCustomizerBody(
     val palette = LocalPalette.current
     val dragging = dragItem != null
     val draggingSection = dragSection != null
+    // All section pickers share the same eligibility rules. Calculate once when
+    // entries change rather than re-scanning the entire layout per row/drag frame.
+    val addableItems = remember(layout, availableItems) {
+        toolbarAddableItems(layout, availableItems)
+    }
     val groups: List<ToolbarRegion?> = if (layout.distribution == ToolbarDistribution.REGIONS)
         ToolbarRegion.entries else listOf(null)
     BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -203,11 +208,7 @@ fun ToolbarCustomizerBody(
                             }
                             if (dragging && dropTarget == Triple(sec, lane, cells.lastOrNull()?.index?.plus(1) ?: section.entries.size)) InsertionCaret()
                             AddItemPicker(
-                                items = availableItems.filter { item ->
-                                    item == ToolbarItem.COLORS || item == ToolbarItem.SPACER || layout.sections.none { sec ->
-                                        sec.entries.any { it.item == item && it.visible }
-                                    }
-                                },
+                                items = addableItems,
                                 onChoose = { item -> onAddItem(sec, lane, item) },
                             )
                         }
