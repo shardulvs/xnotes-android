@@ -242,6 +242,22 @@ private val FIELD_CTRL_KEYS = setOf(
     android.view.KeyEvent.KEYCODE_DEL, android.view.KeyEvent.KEYCODE_FORWARD_DEL,
 )
 
+/** Keys reader mode lets through: page turns and fullscreen. Everything else may edit, so it stops. */
+private val READER_KEYS = setOf(
+    android.view.KeyEvent.KEYCODE_PAGE_UP, android.view.KeyEvent.KEYCODE_PAGE_DOWN,
+    android.view.KeyEvent.KEYCODE_DPAD_LEFT, android.view.KeyEvent.KEYCODE_DPAD_RIGHT,
+    android.view.KeyEvent.KEYCODE_DPAD_UP, android.view.KeyEvent.KEYCODE_DPAD_DOWN,
+    android.view.KeyEvent.KEYCODE_SPACE, android.view.KeyEvent.KEYCODE_F11,
+)
+
+/** Ctrl shortcuts reader mode lets through: copy, sidebar, search, zoom and fit, opening notes, preferences. */
+private val READER_CTRL_KEYS = setOf(
+    android.view.KeyEvent.KEYCODE_C, android.view.KeyEvent.KEYCODE_B, android.view.KeyEvent.KEYCODE_F,
+    android.view.KeyEvent.KEYCODE_PLUS, android.view.KeyEvent.KEYCODE_EQUALS, android.view.KeyEvent.KEYCODE_MINUS,
+    android.view.KeyEvent.KEYCODE_0, android.view.KeyEvent.KEYCODE_9, android.view.KeyEvent.KEYCODE_8,
+    android.view.KeyEvent.KEYCODE_N, android.view.KeyEvent.KEYCODE_O, android.view.KeyEvent.KEYCODE_COMMA,
+)
+
 /** How far off an address written in a PDF's text a tap may land and still open it. */
 private const val AUTO_LINK_SLOP_DP = 4.0
 
@@ -971,7 +987,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         onSelectionMenu = { rect -> selectionMenu = rect },
         onScreenshotMenu = { rect -> screenshotMenu = rect },
         onContextMenu = { vp, content, locked -> contextMenu = ContextMenuTarget(vp.x, vp.y, content, locked) },
-        onAddPageAtEnd = { addPageAtEnd() },
+        onAddPageAtEnd = { if (!readerMode) addPageAtEnd() },
         onHaptic = { runCatching { view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS) } },
     )
 
@@ -1161,11 +1177,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private fun tapMarkup(at: Pt, withLink: Boolean): Boolean {
         val hit = markupHit(at) ?: return false
         val anchor = markupAnchor(hit.page, hit.markup) ?: return false
-        // Reading toggles a markup's note and never opens its menu; a markup without one lets the tap reach the PDF.
+        // Reading never opens a markup's menu: the first tap shows its note, the next goes on to the PDF and its links.
         if (readerMode) {
-            if (hit.markup.note == null) return false
+            if (hit.markup.note == null || notePeek?.markup === hit.markup) {
+                notePeek = null
+                return false
+            }
             notePeekSize = null
-            notePeek = if (notePeek?.markup === hit.markup) null else NotePeek(hit.page, hit.markup, anchor, state.viewportW, state.viewportH)
+            notePeek = NotePeek(hit.page, hit.markup, anchor, state.viewportW, state.viewportH)
             return true
         }
         if (hit.markup.note != null && notePeek?.markup !== hit.markup) {
@@ -2948,7 +2967,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 toolbarColorsLight = if (swatchesDark) otherSwatches else toolbarColors,
                 toolbarColorCount = toolbarColorCount,
                 activeColor = activeColorIndex,
-                lastTool = tool,
+                lastTool = toolBeforeReader ?: tool, // reader's forced Pan is not the user's tool
                 sidebarVisible = sidebarVisible,
                 renderScale = renderScale,
             )
@@ -6312,6 +6331,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     private fun replaceDocument(doc: Document) {
+        exitReader() // reading locks one note, not the pane
         AudioRecording.stopFor(this) // closing the note places its recording
         AudioPlayback.closeFor(this)
         saveViewState() // remember the outgoing folder note's view before switching away
@@ -6342,8 +6362,19 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     fun enterReader() {
         if (readerMode) return
-        escape()
+        // Every edit in progress ends and every menu that could edit closes, so nothing outlives the switch.
+        pdfText.clear()
+        endTableEdit()
+        flowText.endSession()
+        controller.commitTextEdit(restoreTool = true)
         controller.clearSelection()
+        clearPageSelection()
+        selectionMenu = null
+        contextMenu = null
+        markupMenu = null
+        markupNote = null
+        flowContextMenu = null
+        tableMenu = null
         toolBeforeReader = tool
         selectTool(Tool.PAN)
         controller.readOnly = true
@@ -7524,6 +7555,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         // A canvas is on top: it owns the keyboard, and understands only its own shortcuts.
         if (canvasOpen) return infinite.handleKeyDown(e)
         if (panelFieldFocused && (!e.isCtrlPressed || e.keyCode in FIELD_CTRL_KEYS)) return false
+        // Reader mode lets through only the keys that read; Escape clears a text selection, then leaves it.
+        if (readerMode) {
+            if (e.keyCode == android.view.KeyEvent.KEYCODE_ESCAPE) {
+                if (pdfText.selection != null) pdfText.clear() else exitReader()
+                return true
+            }
+            if (e.keyCode !in (if (e.isCtrlPressed) READER_CTRL_KEYS else READER_KEYS)) return false
+        }
         // A live flow caret session owns the keyboard first (Ctrl+B means bold here).
         if (flowText.active && handleFlowKey(e)) return true
         // While editing a text box, let the field consume keys (only Escape commits).
@@ -7533,17 +7572,6 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
         val ctrl = e.isCtrlPressed
         val shift = e.isShiftPressed
-        // Reader mode passes on every key that edits or picks a tool; Escape clears a text selection, then leaves it.
-        if (readerMode) {
-            val key = e.keyCode
-            if (key == android.view.KeyEvent.KEYCODE_ESCAPE) {
-                if (pdfText.selection != null) pdfText.clear() else exitReader()
-                return true
-            }
-            val edits = if (ctrl) key == android.view.KeyEvent.KEYCODE_Z || key == android.view.KeyEvent.KEYCODE_A
-            else key != android.view.KeyEvent.KEYCODE_PAGE_UP && key != android.view.KeyEvent.KEYCODE_PAGE_DOWN && key != android.view.KeyEvent.KEYCODE_F11
-            if (edits) return false
-        }
         when {
             ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_Z && shift -> redo()
             ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_Z -> undo()
@@ -9239,6 +9267,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      *  [noteOpen] so the editor is removed from the stack. The document stays as an inert buffer. */
     fun goHome() {
         if (!noteOpen) return
+        exitReader()
         // Closing the note places a recording still going, before the note is saved.
         AudioRecording.stopFor(this)
         infiniteOrNull?.let { AudioRecording.stopFor(it) }
@@ -9255,7 +9284,6 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             }
             return
         }
-        exitReader()
         commitText() // commit an open text box before leaving (also hides its keyboard)
         flowText.endSession() // end any live flow caret (flushes typing, hides the keyboard)
         saveViewState() // remember this folder note's view before leaving
