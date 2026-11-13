@@ -21,6 +21,7 @@ enum class ToolbarItem(val id: String) {
     HIGHLIGHTER("highlighter"),
     ERASER("eraser"),
     PAN("pan"),
+    READER("reader"),
     SELECT("select"),
     LASSO("lasso"),
     SCREENSHOT("screenshot"),
@@ -159,6 +160,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
             ToolbarItem.TAPE to ToolbarItem.WAND,
             ToolbarItem.INSERT_SPACE to ToolbarItem.LASSO,
             ToolbarItem.MARKUP to ToolbarItem.TEXT_BOX,
+            ToolbarItem.READER to ToolbarItem.PAN,
         )
 
         /**
@@ -190,7 +192,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
                 ToolbarItem.PEN, ToolbarItem.DASHED, ToolbarItem.CALLIGRAPHY, ToolbarItem.SPEED,
                 ToolbarItem.TAPER, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER,
             ),
-            listOf(ToolbarItem.PAN, ToolbarItem.SELECT, ToolbarItem.LASSO, ToolbarItem.INSERT_SPACE, ToolbarItem.SCREENSHOT),
+            listOf(ToolbarItem.PAN, ToolbarItem.READER, ToolbarItem.SELECT, ToolbarItem.LASSO, ToolbarItem.INSERT_SPACE, ToolbarItem.SCREENSHOT),
             listOf(ToolbarItem.WAND, ToolbarItem.TAPE, ToolbarItem.SHAPE, ToolbarItem.RULER, ToolbarItem.TEXT, ToolbarItem.TEXT_BOX, ToolbarItem.MARKUP),
             listOf(ToolbarItem.IMAGE),
             listOf(ToolbarItem.COLORS),
