@@ -104,6 +104,7 @@ import com.xnotes.ui.Toolbar
 import com.xnotes.ui.ToolbarAround
 import com.xnotes.ui.ToolbarDragSurface
 import com.xnotes.ui.WorkspaceFloatingBars
+import com.xnotes.ui.hasMultiDock
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.XnotesTheme
@@ -1513,8 +1514,10 @@ private fun EditorPane(
                         geometry = primary?.geometry,
                     )
                 }
+                val activeWorkspace = app.toolbarWorkspaces.forContext(ToolbarContext.CANVAS)
                 val bar: @Composable () -> Unit = {
-                    if (primary != null && !primary.geometry.floating) {
+                    if (primary != null && !primary.geometry.floating &&
+                        !activeWorkspace.hasMultiDock(app.toolbarLook)) {
                         ToolbarDragSurface(
                             primary.id, primary.geometry.anchor, primary.geometry.movable,
                             paneBounds, { id, anchor, alignment -> app.moveToolbarBar(ToolbarContext.CANVAS, id, anchor, alignment) },
@@ -1522,7 +1525,6 @@ private fun EditorPane(
                         ) { bareBar() }
                     } else bareBar()
                 }
-                val activeWorkspace = app.toolbarWorkspaces.forContext(ToolbarContext.CANVAS)
                 val secondaryBar: @Composable (com.xnotes.core.tools.ToolbarBar) -> Unit = { extraBar ->
                     com.xnotes.ui.InfiniteToolbar(
                         canvas,
@@ -1536,7 +1538,9 @@ private fun EditorPane(
                         geometry = extraBar.geometry,
                     )
                 }
-                ToolbarAround(bar, onCover = canvas::setToolbarCover, suppressBar = primary?.geometry?.floating == true, barLayout = primary?.layout, barGeometry = primary?.geometry, workspace = activeWorkspace, dockedContent = secondaryBar) { floatingBar ->
+                ToolbarAround(bar, onCover = canvas::setToolbarCover, suppressBar = primary?.geometry?.floating == true, barLayout = primary?.layout, barGeometry = primary?.geometry, workspace = activeWorkspace, dockedContent = secondaryBar,
+                    onMoveBar = { id, anchor, alignment -> app.moveToolbarBar(ToolbarContext.CANVAS, id, anchor, alignment) },
+                    onReorderBar = { id, target -> app.reorderToolbarBar(ToolbarContext.CANVAS, id, target) }) { floatingBar ->
                     Box(modifier = Modifier.fillMaxSize().clipToBounds()) {
                         AndroidView(
                             factory = { detached(canvas.surfaces) },
@@ -1550,6 +1554,7 @@ private fun EditorPane(
                         WorkspaceFloatingBars(
                             workspace = activeWorkspace,
                             onMoveBar = { id, anchor, alignment -> app.moveToolbarBar(ToolbarContext.CANVAS, id, anchor, alignment) },
+                            onReorderBar = { id, target -> app.reorderToolbarBar(ToolbarContext.CANVAS, id, target) },
                             primaryContent = { bar() },
                             content = secondaryBar,
                             colorCount = editor.toolbarColorCount,
@@ -1587,8 +1592,10 @@ private fun EditorPane(
                         geometry = primary?.geometry,
                     ) }
                 }
+                val activeWorkspace = app.toolbarWorkspaces.forContext(ToolbarContext.NOTE)
                 val bar: @Composable () -> Unit = {
-                    if (primary != null && !primary.geometry.floating) {
+                    if (primary != null && !primary.geometry.floating &&
+                        !activeWorkspace.hasMultiDock(app.toolbarLook)) {
                         ToolbarDragSurface(
                             primary.id, primary.geometry.anchor, primary.geometry.movable,
                             paneBounds, { id, anchor, alignment -> app.moveToolbarBar(ToolbarContext.NOTE, id, anchor, alignment) },
@@ -1596,7 +1603,6 @@ private fun EditorPane(
                         ) { bareBar() }
                     } else bareBar()
                 }
-                val activeWorkspace = app.toolbarWorkspaces.forContext(ToolbarContext.NOTE)
                 val secondaryBar: @Composable (com.xnotes.core.tools.ToolbarBar) -> Unit = { extraBar ->
                     Toolbar(
                         editor,
@@ -1613,7 +1619,9 @@ private fun EditorPane(
                         geometry = extraBar.geometry,
                     )
                 }
-                ToolbarAround(bar, onCover = editor::setToolbarCover, suppressBar = primary?.geometry?.floating == true, barLayout = primary?.layout, barGeometry = primary?.geometry, workspace = activeWorkspace, dockedContent = secondaryBar) { floatingBar ->
+                ToolbarAround(bar, onCover = editor::setToolbarCover, suppressBar = primary?.geometry?.floating == true, barLayout = primary?.layout, barGeometry = primary?.geometry, workspace = activeWorkspace, dockedContent = secondaryBar,
+                    onMoveBar = { id, anchor, alignment -> app.moveToolbarBar(ToolbarContext.NOTE, id, anchor, alignment) },
+                    onReorderBar = { id, target -> app.reorderToolbarBar(ToolbarContext.NOTE, id, target) }) { floatingBar ->
                     Row(modifier = Modifier.fillMaxSize()) {
                         if (editor.sidebarVisible) {
                             com.xnotes.ui.SidePanel(
@@ -1639,6 +1647,7 @@ private fun EditorPane(
                             WorkspaceFloatingBars(
                                 workspace = activeWorkspace,
                                 onMoveBar = { id, anchor, alignment -> app.moveToolbarBar(ToolbarContext.NOTE, id, anchor, alignment) },
+                            onReorderBar = { id, target -> app.reorderToolbarBar(ToolbarContext.NOTE, id, target) },
                                 primaryContent = { bar() },
                                 content = secondaryBar,
                             colorCount = editor.toolbarColorCount,

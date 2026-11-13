@@ -8,12 +8,12 @@ import androidx.compose.ui.geometry.Rect
 import com.xnotes.core.tools.ToolbarWorkspace
 
 /**
- * One gesture's preview and commit state. Separates hit testing/transactions from
- * Compose rendering; neither the persistent workspace nor bar identity changes while
+ * Shared preview/live-toolbar gesture and commit state. Separates hit testing
+ * and transactions from Compose rendering; neither the persistent workspace nor bar identity changes while
  * the pointer is down. The last released bar bypasses slot animations until another
  * drag begins, eliminating the old-slot flash after an otherwise valid reorder.
  */
-internal class ToolbarPreviewReorderController {
+internal class ToolbarWorkspaceReorderController {
     var sourceId by mutableStateOf<String?>(null)
         private set
     var targetId by mutableStateOf<String?>(null)

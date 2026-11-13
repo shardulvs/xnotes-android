@@ -23,6 +23,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import com.xnotes.core.tools.ToolbarAnchor
+import com.xnotes.core.tools.ToolbarDockAlignment
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
@@ -153,6 +163,8 @@ internal fun ColumnScope.ToolbarAround(
     barGeometry: ToolbarGeometry? = null,
     workspace: ToolbarWorkspace? = null,
     dockedContent: (@Composable (ToolbarBar) -> Unit)? = null,
+    onMoveBar: ((String, ToolbarAnchor, ToolbarDockAlignment) -> Unit)? = null,
+    onReorderBar: ((String, String) -> Unit)? = null,
     content: @Composable (floatingBar: @Composable BoxScope.() -> Unit) -> Unit,
 ) {
     val look = LocalToolbarLook.current
@@ -161,23 +173,48 @@ internal fun ColumnScope.ToolbarAround(
     // the miniature preview; floating bars remain in the content's overlay layer.
     if (workspace != null && dockedContent != null && workspace.hasMultiDock(look)) {
         SideEffect { onCover(0.0, 0.0, 0.0, 0.0) }
-        BoxWithConstraints(rest) {
-            val plan = toolbarDockPlan(workspace, look, maxWidth, maxHeight)
+        val reorder = remember { ToolbarWorkspaceReorderController() }
+        LaunchedEffect(workspace) { reorder.acknowledge(workspace) }
+        var paneBounds by remember { mutableStateOf(Rect.Zero) }
+        BoxWithConstraints(rest.onGloballyPositioned { paneBounds = it.boundsInRoot() }) {
+            val basePlan = toolbarDockPlan(workspace, look, maxWidth, maxHeight)
+            val proposedWorkspace = reorder.displayedWorkspace(workspace)
+            val proposedPlan = if (proposedWorkspace == workspace) basePlan else
+                toolbarDockPlan(proposedWorkspace, look, maxWidth, maxHeight)
+            val peers = remember(workspace, basePlan, onReorderBar != null) {
+                if (onReorderBar == null) emptyMap() else workspace.bars.associate { dockBar ->
+                    dockBar.id to toolbarReorderPeersInPlan(workspace, dockBar.id, basePlan,
+                        floating = false)
+                }
+            }
             Box(Modifier.fillMaxSize().padding(
-                start = plan.leftInset.dp, top = plan.topInset.dp,
-                end = plan.rightInset.dp, bottom = plan.bottomInset.dp,
+                start = basePlan.leftInset.dp, top = basePlan.topInset.dp,
+                end = basePlan.rightInset.dp, bottom = basePlan.bottomInset.dp,
             )) { content({}) }
             for ((index, dockBar) in workspace.bars.withIndex()) {
-                val placement = plan.placement(dockBar.id) ?: continue
+                val placement = (if (reorder.sourceId == dockBar.id) basePlan else proposedPlan)
+                    .placement(dockBar.id) ?: continue
                 val barLook = look.copy(
                     position = placement.edge.toolbarPosition(),
                     size = toolbarBarSize(dockBar, index, look),
                     floating = false,
                 )
-                Box(Modifier.offset(x = placement.x.dp, y = placement.y.dp)
-                    .width(placement.width.dp).height(placement.height.dp)) {
-                    CompositionLocalProvider(LocalToolbarLook provides barLook) {
-                        if (index == 0) bar() else dockedContent(dockBar)
+                key(dockBar.id) {
+                    ToolbarLiveReorderBar(
+                        bar = dockBar, placement = placement,
+                        x = placement.x, y = placement.y,
+                        anchor = toolbarAnchorForAlignment(placement.edge, dockBar.geometry.dockAlignment),
+                        alignment = dockBar.geometry.dockAlignment,
+                        paneBounds = paneBounds,
+                        workspace = workspace,
+                        peers = peers[dockBar.id].orEmpty(),
+                        reorder = reorder,
+                        onMoveBar = onMoveBar,
+                        onReorderBar = onReorderBar,
+                    ) {
+                        CompositionLocalProvider(LocalToolbarLook provides barLook) {
+                            if (index == 0) bar() else dockedContent(dockBar)
+                        }
                     }
                 }
             }

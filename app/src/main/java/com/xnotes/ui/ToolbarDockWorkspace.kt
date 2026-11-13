@@ -1,6 +1,8 @@
 package com.xnotes.ui
 
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.AbsoluteAlignment
 import com.xnotes.core.tools.ToolbarAnchor
 import com.xnotes.core.tools.ToolbarBar
 import com.xnotes.core.tools.ToolbarDockAlignment
@@ -27,6 +29,15 @@ internal fun ToolbarDockEdge.toolbarPosition(): ToolbarPosition = when (this) {
     ToolbarDockEdge.BOTTOM -> ToolbarPosition.BOTTOM
     ToolbarDockEdge.LEFT -> ToolbarPosition.LEFT
     ToolbarDockEdge.RIGHT -> ToolbarPosition.RIGHT
+}
+
+/** The packer reserves the tallest bar's depth for its whole lane. A shorter
+ * sibling must still touch the physical edge, not the top-left of that lane. */
+internal fun ToolbarDockEdge.toolbarContentAlignment(): Alignment = when (this) {
+    ToolbarDockEdge.TOP -> Alignment.TopCenter
+    ToolbarDockEdge.BOTTOM -> Alignment.BottomCenter
+    ToolbarDockEdge.LEFT -> AbsoluteAlignment.CenterLeft
+    ToolbarDockEdge.RIGHT -> AbsoluteAlignment.CenterRight
 }
 
 internal fun toolbarBarSize(bar: ToolbarBar, index: Int, look: ToolbarLook): ToolbarSize =

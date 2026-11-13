@@ -2990,6 +2990,19 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         settingsRepo.save(settings)
     }
 
+    /** Persist the visual sequence for a completed same-lane long-press reorder.
+     * The primary bar retains its identity and the storage/preset model is unchanged. */
+    fun reorderToolbarBar(context: ToolbarContext, id: String, targetId: String) {
+        val profiles = toolbarWorkspaces
+        val activeContext = if (profiles.shared) ToolbarContext.NOTE else context
+        val workspace = profiles.forContext(activeContext)
+        if (workspace.bars.none { it.id == id && it.geometry.movable }) return
+        val updated = workspace.reorderVisualBar(id, targetId)
+        if (updated != workspace) {
+            applyToolbarWorkspaces(profiles.updateWorkspace(activeContext) { updated })
+        }
+    }
+
     /** Hold-drag any toolbar, including the docked primary, to a persisted floating anchor. */
     fun moveToolbarBar(context: ToolbarContext, id: String, anchor: ToolbarAnchor,
         alignment: com.xnotes.core.tools.ToolbarDockAlignment = com.xnotes.core.tools.ToolbarDockAlignment.CENTER) {

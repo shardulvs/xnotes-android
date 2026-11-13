@@ -188,14 +188,26 @@ fun BoxScope.WorkspaceFloatingBars(
     primaryContent: @Composable () -> Unit,
     content: @Composable (ToolbarBar) -> Unit,
     colorCount: Int = 5,
+    onReorderBar: ((String, String) -> Unit)? = null,
 ) {
+    val reorder = remember { ToolbarWorkspaceReorderController() }
+    LaunchedEffect(workspace) { reorder.acknowledge(workspace) }
     var paneBounds by remember { mutableStateOf(Rect.Zero) }
     val baseLook = LocalToolbarLook.current
     val showPrimary = workspace.hasMultiDock(baseLook)
     BoxWithConstraints(Modifier.fillMaxSize().zIndex(10f).onGloballyPositioned { paneBounds = it.boundsInRoot() }) {
-        val plan = toolbarFloatingPlan(workspace, baseLook, maxWidth, maxHeight, colorCount)
+        val basePlan = toolbarFloatingPlan(workspace, baseLook, maxWidth, maxHeight, colorCount)
+        val proposedWorkspace = reorder.displayedWorkspace(workspace)
+        val proposedPlan = if (proposedWorkspace == workspace) basePlan else
+            toolbarFloatingPlan(proposedWorkspace, baseLook, maxWidth, maxHeight, colorCount)
+        val peers = remember(workspace, basePlan, onReorderBar != null) {
+            if (onReorderBar == null) emptyMap() else workspace.bars.associate { bar ->
+                bar.id to toolbarReorderPeersInPlan(workspace, bar.id, basePlan, floating = true)
+            }
+        }
         for ((index, bar) in workspace.bars.withIndex()) {
-            val placement = plan.placement(bar.id) ?: continue
+            val placement = (if (reorder.sourceId == bar.id) basePlan else proposedPlan)
+                .placement(bar.id) ?: continue
             // Legacy floating primary is already rendered by ToolbarAround.
             if (index == 0 && !bar.geometry.floating && !showPrimary) continue
             key(bar.id) {
@@ -204,19 +216,26 @@ fun BoxScope.WorkspaceFloatingBars(
                     size = toolbarBarSize(bar, index, baseLook),
                     floating = true,
                 )
-                Box(Modifier.offset(x = placement.x.dp, y = placement.y.dp)
-                    .width(placement.width.dp).height(placement.height.dp)) {
-                    ToolbarDragSurface(
-                        id = bar.id,
-                        anchor = bar.geometry.anchor,
-                        movable = bar.geometry.movable,
-                        paneBounds = paneBounds,
-                        onMoveBar = onMoveBar,
-                        currentAlignment = toolbarFloatingAlignment(bar),
-                    ) {
-                        CompositionLocalProvider(LocalToolbarLook provides look) {
-                            if (index == 0) primaryContent() else content(bar)
-                        }
+                ToolbarLiveReorderBar(
+                    bar = bar, placement = placement,
+                    x = placement.x, y = placement.y,
+                    anchor = if (index == 0 && !bar.geometry.floating && baseLook.floating)
+                        when (baseLook.position) {
+                            ToolbarPosition.TOP -> ToolbarAnchor.TOP_CENTER
+                            ToolbarPosition.BOTTOM -> ToolbarAnchor.BOTTOM_CENTER
+                            ToolbarPosition.LEFT -> ToolbarAnchor.CENTER_LEFT
+                            ToolbarPosition.RIGHT -> ToolbarAnchor.CENTER_RIGHT
+                        } else bar.geometry.anchor,
+                    alignment = toolbarFloatingAlignment(bar),
+                    paneBounds = paneBounds,
+                    workspace = workspace,
+                    peers = peers[bar.id].orEmpty(),
+                    reorder = reorder,
+                    onMoveBar = onMoveBar,
+                    onReorderBar = onReorderBar,
+                ) {
+                    CompositionLocalProvider(LocalToolbarLook provides look) {
+                        if (index == 0) primaryContent() else content(bar)
                     }
                 }
             }

@@ -116,7 +116,7 @@ internal fun ToolbarWorkspacePreview(
     val screenHeight = configuration.screenHeightDp.dp
     val screenDensity = LocalDensity.current
     var stageBounds by remember { mutableStateOf(Rect.Zero) }
-    val reorder = remember { ToolbarPreviewReorderController() }
+    val reorder = remember { ToolbarWorkspaceReorderController() }
     LaunchedEffect(workspace) { reorder.acknowledge(workspace) }
     val commitReorder by rememberUpdatedState(onReorderBar)
     // Pure layout resolver remains independent from Compose state and gesture lifecycle.
@@ -211,12 +211,7 @@ internal fun ToolbarWorkspacePreview(
                 // The lane uses its tallest/widest peer as its depth. Align each actual
                 // bar against the occupied screen edge, rather than centering a short
                 // one-row floating bar in a two-row peer's taller allocation.
-                val edgeAlignment = when (placement.edge) {
-                    com.xnotes.core.tools.ToolbarDockEdge.TOP -> Alignment.TopCenter
-                    com.xnotes.core.tools.ToolbarDockEdge.BOTTOM -> Alignment.BottomCenter
-                    com.xnotes.core.tools.ToolbarDockEdge.LEFT -> androidx.compose.ui.AbsoluteAlignment.CenterLeft
-                    com.xnotes.core.tools.ToolbarDockEdge.RIGHT -> androidx.compose.ui.AbsoluteAlignment.CenterRight
-                }
+                val edgeAlignment = placement.edge.toolbarContentAlignment()
                 val positionModifier = Modifier.offset(x = visibleX, y = visibleY)
                     .width(placement.width.dp).height(placement.height.dp)
                     .testTag("preview-bar-${bar.id}")

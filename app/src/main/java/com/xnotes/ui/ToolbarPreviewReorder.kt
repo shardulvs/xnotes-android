@@ -15,14 +15,24 @@ internal fun toolbarPreviewReorderPeers(
     docked: ToolbarDockPlan,
     floating: ToolbarDockPlan,
 ): List<String> {
+    val dockedSource = docked.placement(sourceId) != null
+    return toolbarReorderPeersInPlan(workspace, sourceId,
+        if (dockedSource) docked else floating, floating = !dockedSource)
+}
+
+/** Reuse the exact preview peer rules in the live XNote/XCanvas renderer. */
+internal fun toolbarReorderPeersInPlan(
+    workspace: ToolbarWorkspace,
+    sourceId: String,
+    plan: ToolbarDockPlan,
+    floating: Boolean,
+): List<String> {
     val sourceBar = workspace.bars.firstOrNull { it.id == sourceId } ?: return emptyList()
-    val isDocked = docked.placement(sourceId) != null
-    val plan = if (isDocked) docked else floating
     val source = plan.placement(sourceId) ?: return emptyList()
-    val alignment = if (isDocked) sourceBar.geometry.dockAlignment else toolbarFloatingAlignment(sourceBar)
+    val alignment = if (floating) toolbarFloatingAlignment(sourceBar) else sourceBar.geometry.dockAlignment
     return workspace.bars.filter { bar ->
         val placement = plan.placement(bar.id)
-        val barAlignment = if (isDocked) bar.geometry.dockAlignment else toolbarFloatingAlignment(bar)
+        val barAlignment = if (floating) toolbarFloatingAlignment(bar) else bar.geometry.dockAlignment
         placement != null && placement.edge == source.edge && placement.lane == source.lane &&
             barAlignment == alignment
     }.map { it.id }
