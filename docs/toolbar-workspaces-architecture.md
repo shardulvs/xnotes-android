@@ -27,12 +27,17 @@
 
 ## Verification and performance
 
-- Run `:app:testDebugUnitTest`, `:app:assembleDebugAndroidTest` and `:app:lintVitalRelease` using Java 17 and Android SDK.
+- Run `:app:testDebugUnitTest`, `:app:assembleDebugAndroidTest` and `:app:lintVitalRelease` using the project Gradle toolchain and Android SDK (recent Redmi QA used Java 21).
 - Run `ToolbarTitleAndPreviewReorderComposeTest`, `ToolbarMultiBarComposeTest`, `ToolbarDockComposeTest`, `ToolbarEmptyRegionComposeTest`, `ToolbarBarsBalancedComposeTest` on `Small_Tablet` at 1920×1200, 1400×1000, 1600×720.
 - Drag regression must check the bar's **visible bounds during movement and on multiple post-drop frames**; testing final `visual_order` alone misses one-frame flicker.
+- For incremental instrumented pointer tests, inject gestures against the **stationary preview stage**, not the dragged bar. A moving injection target can shift the local pointer origin between successive test calls.
 - Keep the dock/floating plans memoized while workspace and viewport are unchanged. `onGloballyPositioned` for hit boxes must not write Compose state for every animation frame.
 - Before requesting upstream merge: manually confirm with a stylus on Xiaomi and, if available, the reporting OnePlus device. Automated green is not proof of vendor-ROM drag animation correctness.
 
 ## Proposed review order
 
 Domain → Persistence → Runtime → Editor core → Dock/region polish → Preview interactions/UX. The sequence is maintained as draft stacked PRs in the fork; the upstream PR remains a draft integration reference until maintainers agree on an upstream submission sequence.
+
+## Maintenance
+
+See [toolbar-workspaces-cleanup-audit.md](toolbar-workspaces-cleanup-audit.md) for verified dead-code removal, responsive sizing rationale, and the next safe modularization tasks. Preserve the optimistic drag transaction and the direct source placement until dedicated regression tests demonstrate a replacement is equivalent.

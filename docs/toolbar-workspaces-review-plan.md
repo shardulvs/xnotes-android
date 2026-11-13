@@ -13,6 +13,8 @@
 
 These are **stacked review diffs**. Each PR must have exactly the preceding stage as its base. Never compare all stages to upstream `master` simultaneously and describe them as independent. Only the first stage has no feature dependency. The integration PR (#431) remains open for full-workspace testing.
 
+For the concrete first-pass cleanup, regression coverage and retained legacy behaviors, see [toolbar-workspaces-cleanup-audit.md](toolbar-workspaces-cleanup-audit.md).
+
 ## Refactoring priorities
 
 1. **Stability first:** no release/merge until a frame-based drag test and a manual stylus run verify there is no snapback.
