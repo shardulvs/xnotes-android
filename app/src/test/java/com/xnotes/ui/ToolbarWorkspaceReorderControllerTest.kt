@@ -5,6 +5,9 @@ import androidx.compose.ui.geometry.Rect
 import com.xnotes.core.tools.ToolbarBar
 import com.xnotes.core.tools.ToolbarLayout
 import com.xnotes.core.tools.ToolbarWorkspace
+import com.xnotes.core.tools.ToolbarAnchor
+import com.xnotes.core.tools.ToolbarDockAlignment
+import com.xnotes.core.tools.ToolbarDropPosition
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -57,6 +60,48 @@ class ToolbarWorkspaceReorderControllerTest {
         // Returning over the original source deliberately cancels the preview.
         state.hover("middle", Offset(160f, 20f))
         assertNull(state.targetId)
+    }
+
+    @Test fun crossingToAnotherEdgeAbandonsReorderButHoldsPeerPreviewUntilAck() {
+        val state = ToolbarWorkspaceReorderController()
+        initial.forEach { (id, bounds) -> state.updateBounds(id, bounds) }
+        state.start("middle", initial.keys.toList(), verticalAxis = false,
+            workspace = workspace, originalAnchor = ToolbarAnchor.TOP_CENTER)
+        state.hover("middle", Offset(260f, 20f))
+        assertEquals("right", state.targetId)
+        val rightEdge = ToolbarDropPosition(ToolbarAnchor.CENTER_RIGHT,
+            ToolbarDockAlignment.CENTER)
+        state.previewPlacement("middle", rightEdge)
+        assertNull("A different edge must release the previous peer target", state.targetId)
+        assertEquals(rightEdge, state.hoverPlacement)
+        assertFalse("Cross-edge must not commit a stale reorder",
+            state.drop("middle", Offset(260f, 20f)) { _, _ -> fail("reorder") })
+        assertEquals("middle", state.sourceId)
+        assertEquals(rightEdge, state.hoverPlacement)
+        state.markAnchorMoveReleased("middle")
+        state.acknowledge(workspace)
+        assertEquals("Preview must persist before workspace acknowledgment", "middle", state.sourceId)
+        val moved = workspace.replaceBar(workspace.bars[1].copy(geometry =
+            workspace.bars[1].geometry.copy(anchor = rightEdge.anchor)))
+        state.acknowledge(moved)
+        assertNull("Preview should clear when the new position is saved", state.sourceId)
+        assertNull(state.hoverPlacement)
+    }
+
+    @Test fun changingAlignmentAbandonsReorderWithoutAffectingGapStability() {
+        val state = ToolbarWorkspaceReorderController()
+        initial.forEach { (id, bounds) -> state.updateBounds(id, bounds) }
+        state.start("middle", initial.keys.toList(), verticalAxis = false,
+            workspace = workspace, originalAnchor = ToolbarAnchor.TOP_CENTER,
+            originalAlignment = ToolbarDockAlignment.CENTER)
+        state.hover("middle", Offset(260f, 20f))
+        assertEquals("right", state.targetId)
+        val start = ToolbarDropPosition(ToolbarAnchor.TOP_LEFT,
+            ToolbarDockAlignment.START)
+        state.previewPlacement("middle", start)
+        assertNull("Changing alignment must switch to placement preview", state.targetId)
+        state.cancel("middle")
+        assertNull(state.sourceId)
     }
 
     @Test fun invalidDropAndCancellationDoNotCommit() {

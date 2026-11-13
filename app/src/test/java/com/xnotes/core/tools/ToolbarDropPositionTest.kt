@@ -46,6 +46,40 @@ class ToolbarDropPositionTest {
         assertEquals(ToolbarDropPosition(ToolbarAnchor.CENTER_LEFT, ToolbarDockAlignment.END), end)
     }
 
+    @Test fun hysteresisPreventsEdgeFlickerNearCorner() {
+        val bottom = ToolbarDropPosition(ToolbarAnchor.BOTTOM_CENTER,
+            ToolbarDockAlignment.CENTER)
+        // Right edge becomes 12 px closer but must not steal the selection.
+        assertEquals(ToolbarAnchor.BOTTOM_RIGHT,
+            ToolbarAnchorResolver.stablePlacement(940f, 568f, 960f, 600f,
+                bottom)!!.anchor)
+        val switched = ToolbarAnchorResolver.stablePlacement(957f, 530f,
+            960f, 600f, bottom)!!
+        assertEquals(ToolbarAnchor.CENTER_RIGHT, switched.anchor)
+        // Returning near the corner must keep RIGHT until BOTTOM clearly wins.
+        assertEquals(ToolbarAnchor.CENTER_RIGHT,
+            ToolbarAnchorResolver.stablePlacement(940f, 568f, 960f, 600f,
+                switched)!!.anchor)
+        assertEquals(ToolbarAnchor.BOTTOM_RIGHT,
+            ToolbarAnchorResolver.stablePlacement(910f, 594f, 960f, 600f,
+                switched)!!.anchor)
+    }
+
+    @Test fun hysteresisKeepsAlignmentStableAroundOneThirdBoundary() {
+        val center = ToolbarDropPosition(ToolbarAnchor.BOTTOM_CENTER,
+            ToolbarDockAlignment.CENTER)
+        assertEquals(center,
+            ToolbarAnchorResolver.stablePlacement(300f, 598f, 960f, 600f,
+                center))
+        val start = ToolbarAnchorResolver.stablePlacement(255f, 598f, 960f, 600f,
+            center)!!
+        assertEquals(ToolbarDockAlignment.START, start.alignment)
+        assertEquals(start, ToolbarAnchorResolver.stablePlacement(350f, 598f,
+            960f, 600f, start))
+        assertEquals(center, ToolbarAnchorResolver.stablePlacement(390f, 598f,
+            960f, 600f, start))
+    }
+
     @Test fun cornerTieStaysOnPreviouslySelectedEdge() {
         assertEquals(ToolbarDropPosition(ToolbarAnchor.CENTER_LEFT, ToolbarDockAlignment.START),
             ToolbarAnchorResolver.nearestPlacement(0f, 0f, 960f, 600f, ToolbarAnchor.CENTER_LEFT))

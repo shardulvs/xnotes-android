@@ -92,3 +92,11 @@ No persistence schema, migration, gesture transaction, primary toolbar identity 
 - Added a shared projected-slot function for preview, live docked bars and live floating bars. A translucent, accent-coloured outline previews the destination while dragging across edges/alignments; same-lane reordering continues to animate peer positions instead.
 - Release translation now eases to the projected root-space target **before** persisting the move, preserving the existing pending-placement acknowledgement and avoiding a flash through the original slot.
 - Tested target-plan equivalence, legacy floating-primary parity, one-vs-two-row bottom alignment, continued preview reorder, an actual live-gesture indicator and monotonic frame-by-frame movement without a reverse snapback.
+
+## Pass 8: stable cross-edge docking and peer pre-layout (2026-11-13)
+
+- Gesture target hysteresis (36 px edge, 5.5% alignment) reduces indicator jitter near boundaries. Snap and indicator use the identical stable target.
+- Project complete docked, floating and preview layouts while dragging. Peers animate away from, or into, the planned insertion slot before release; the dragged source stays tied to its pointer and stable ID.
+- Crossing to a new edge or alignment cancels a sticky reorder target, revealing the drop indicator even if the gesture first hovered over a sibling. Empty gaps on the *same* edge/alignment still preserve the existing reorder preview.
+- Keep peer projection alive during snap settlement and clear only after workspace acknowledgment to avoid a second old/new flash. Added a short orientation rotation/fade transition alongside the morphing indicator footprint.
+- Test coverage includes hysteresis thresholds, preview-state persistence, accidental-reorder cross-edge recovery and live peer movement before the persisted commit.

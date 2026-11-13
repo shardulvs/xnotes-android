@@ -130,6 +130,64 @@ class ToolbarLivePlacementComposeTest {
         assertTrue("Expected real two-row toolbar to be taller than one-row toolbar", tall.top < short.top)
     }
 
+    @Test fun crossEdgeAfterReorderHoverShowsIndicatorAndPrepositionsPeers() {
+        val initial = ToolbarWorkspace(listOf(
+            bar("moving", false, true), bar("peer", false, true)))
+        var workspace by mutableStateOf(initial)
+        var moveCommits = 0
+        val look = ToolbarLook(floating = true)
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalToolbarLook provides look) {
+                    Box(Modifier.size(840.dp, 380.dp).testTag("cross-edge-stage")) {
+                        WorkspaceFloatingBars(workspace, onMoveBar = { id, anchor, alignment ->
+                            moveCommits++
+                            workspace = toolbarProjectedMove(workspace, look, id,
+                                com.xnotes.core.tools.ToolbarDropPosition(anchor, alignment))!!.first
+                        }, onReorderBar = { from, to ->
+                            workspace = workspace.reorderVisualBar(from, to)
+                        }, primaryContent = { Box(Modifier.size(148.dp, 52.dp)) },
+                            content = { Box(Modifier.size(148.dp, 52.dp)) })
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        val stage = rule.onNodeWithTag("cross-edge-stage", useUnmergedTree = true)
+        val stageTopLeft = stage.fetchSemanticsNode().boundsInRoot.topLeft
+        val first = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot.center
+        val neighbor = rule.onNodeWithTag("live-toolbar-slot-peer", useUnmergedTree = true)
+        val peerBefore = neighbor.fetchSemanticsNode().boundsInRoot.center
+        stage.performTouchInput {
+            down(first - stageTopLeft)
+            advanceEventTime(790)
+            moveBy(peerBefore - first)
+            advanceEventTime(48)
+        }
+        rule.waitForIdle()
+        // The same long-press gesture now crosses from reorder into edge placement.
+        // The peer's original hitbox remains frozen, but it must stop blocking the ghost.
+        stage.performTouchInput {
+            moveBy(Offset(0f, stageTopLeft.y + 25f - peerBefore.y))
+            advanceEventTime(48)
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag("toolbar-drop-indicator-moving", useUnmergedTree = true).assertExists()
+        rule.runOnIdle { assertEquals("Pre-layout must not persist a move", 0, moveCommits) }
+        val peerDuring = neighbor.fetchSemanticsNode().boundsInRoot.center
+        assertTrue("Neighbour must prepare its new position before the drop",
+            kotlin.math.abs(peerBefore.x - peerDuring.x) > 5f ||
+                kotlin.math.abs(peerBefore.y - peerDuring.y) > 5f)
+        stage.performTouchInput { up() }
+        rule.waitForIdle()
+        rule.runOnIdle {
+            assertEquals(1, moveCommits)
+            assertTrue(workspace.bars.first().geometry.anchor in listOf(
+                ToolbarAnchor.TOP_LEFT, ToolbarAnchor.TOP_CENTER, ToolbarAnchor.TOP_RIGHT))
+        }
+    }
+
     @Test fun floatingMoveShowsProjectedTargetAndSettlesAfterRelease() {
         val moving = bar("moving", false, true)
         val peer = bar("peer", false, true).let { it.copy(geometry =
