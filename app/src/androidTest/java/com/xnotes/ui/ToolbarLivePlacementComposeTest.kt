@@ -18,6 +18,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.down
 import androidx.compose.ui.test.moveBy
@@ -34,6 +35,7 @@ import com.xnotes.core.tools.ToolbarSection
 import com.xnotes.core.tools.ToolbarLayout
 import com.xnotes.core.tools.ToolbarWorkspace
 import com.xnotes.settings.ToolbarLook
+import com.xnotes.settings.ToolbarPosition
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -126,6 +128,73 @@ class ToolbarLivePlacementComposeTest {
         assertTrue("Natural 1-row float bar does not meet 2-row bottom edge: $short / $tall",
             kotlin.math.abs((tall.bottom - short.bottom).value) <= 2f)
         assertTrue("Expected real two-row toolbar to be taller than one-row toolbar", tall.top < short.top)
+    }
+
+    @Test fun legacyPrimaryAndColorsUseSameFloatingLaneAndCanReorder() {
+        // The primary uses legacy ToolbarLook.floating rather than geometry.floating.
+        // The old runtime drew it separately from colors; unlike the preview, its
+        // lower edge could drift and it was excluded from same-lane gesture reorder.
+        val primary = naturalBar("main", 2, true).let { bar ->
+            bar.copy(geometry = bar.geometry.copy(floating = false))
+        }
+        val colors = naturalBar("colors", 1, true)
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(primary, colors)))
+        val look = ToolbarLook(floating = true, position = ToolbarPosition.BOTTOM)
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalToolbarLook provides look) {
+                    Column(Modifier.size(840.dp, 380.dp)) {
+                        ToolbarAround(
+                            bar = { RealToolbar(workspace.bars.first()) },
+                            onCover = { _, _, _, _ -> },
+                            workspace = workspace,
+                            dockedContent = { RealToolbar(it) },
+                            onMoveBar = { _, _, _ -> },
+                            onReorderBar = { from, to ->
+                                workspace = workspace.reorderVisualBar(from, to)
+                            },
+                        ) { oldFloating ->
+                            Box(Modifier.fillMaxSize()) {
+                                oldFloating()
+                                WorkspaceFloatingBars(workspace, onMoveBar = { _, _, _ -> },
+                                    onReorderBar = { from, to ->
+                                        workspace = workspace.reorderVisualBar(from, to)
+                                    },
+                                    primaryContent = { RealToolbar(workspace.bars.first()) },
+                                    content = { RealToolbar(it) },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        assertEquals("Legacy primary must not be rendered twice", 1,
+            rule.onAllNodesWithTag("natural-main", useUnmergedTree = true)
+                .fetchSemanticsNodes().size)
+        val main = rule.onNodeWithTag("natural-main", useUnmergedTree = true)
+            .getUnclippedBoundsInRoot()
+        val colorBar = rule.onNodeWithTag("natural-colors", useUnmergedTree = true)
+            .getUnclippedBoundsInRoot()
+        assertTrue("Legacy floating main and colors do not share bottom edge: $main / $colorBar",
+            kotlin.math.abs((main.bottom - colorBar.bottom).value) <= 2f)
+        val source = rule.onNodeWithTag("toolbar-drag-surface-main", useUnmergedTree = true)
+        val start = source.fetchSemanticsNode().boundsInRoot.center
+        val end = rule.onNodeWithTag("live-toolbar-slot-colors", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot.center
+        source.performTouchInput {
+            down(center)
+            advanceEventTime(780)
+            moveBy(Offset(end.x - start.x, end.y - start.y))
+            advanceEventTime(40)
+            up()
+        }
+        rule.waitForIdle()
+        rule.runOnIdle {
+            assertEquals(listOf("colors", "main"),
+                workspace.bars.sortedBy { it.geometry.visualOrder }.map { it.id })
+        }
     }
 
     @Test fun shortDockedBottomBarSharesScreenEdgeWithTwoRowPeer() {
