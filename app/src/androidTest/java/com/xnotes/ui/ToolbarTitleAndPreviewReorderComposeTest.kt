@@ -8,6 +8,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
@@ -29,6 +30,85 @@ import org.junit.Test
 
 class ToolbarTitleAndPreviewReorderComposeTest {
     @get:Rule val rule = createComposeRule()
+
+    @Test fun singleRowTopFloatingBarSharesTheTopEdgeWithTwoRowPeer() {
+        val tall = ToolbarLayout(listOf(ToolbarSection(listOf(
+            ToolbarEntry(ToolbarItem.PEN, lane = 0),
+            ToolbarEntry(ToolbarItem.ERASER, lane = 1),
+        ), lanes = 2)))
+        val short = ToolbarLayout(listOf(ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN)))))
+        val bars = ToolbarWorkspace(listOf(
+            ToolbarBar("two", "Two rows", tall, geometry = ToolbarGeometry(
+                floating = true, anchor = ToolbarAnchor.TOP_LEFT, widthDp = 150)),
+            ToolbarBar("one", "One row", short, geometry = ToolbarGeometry(
+                floating = true, anchor = ToolbarAnchor.TOP_RIGHT, widthDp = 150)),
+        ))
+        rule.setContent {
+            MaterialTheme {
+                Box(Modifier.width(850.dp)) {
+                    ToolbarWorkspacePreview(workspace = bars, look = ToolbarLook(floating = true),
+                        selectedId = "two", colors = emptyList(), activeColorIndex = 0,
+                        pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
+                        selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
+                        onMoveBar = { _, _ -> })
+                }
+            }
+        }
+        rule.waitForIdle()
+        val tallTop = rule.onNodeWithTag("preview-content-two", useUnmergedTree = true)
+            .getUnclippedBoundsInRoot().top.value
+        val shortTop = rule.onNodeWithTag("preview-content-one", useUnmergedTree = true)
+            .getUnclippedBoundsInRoot().top.value
+        assertTrue("One-row floating bar drifts below its top-aligned peer: $tallTop vs $shortTop",
+            kotlin.math.abs(tallTop - shortTop) <= 2f)
+    }
+
+    @Test fun movingFloatingBarFromTopToRightSnapsWithoutReturningToPreviousSlot() {
+        val layout = ToolbarLayout(listOf(ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN)))))
+        val initial = ToolbarBar("moving", "Move", layout, geometry = ToolbarGeometry(
+            floating = true, anchor = ToolbarAnchor.TOP_LEFT, widthDp = 160, heightDp = 56))
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(initial)))
+        var droppedAnchor: ToolbarAnchor? = null
+        rule.setContent {
+            MaterialTheme {
+                Box(Modifier.width(850.dp).testTag("move-preview-stage")) {
+                    ToolbarWorkspacePreview(workspace = workspace, look = ToolbarLook(floating = true),
+                        selectedId = "moving", colors = emptyList(), activeColorIndex = 0,
+                        pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
+                        selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
+                        onMoveBar = { _, anchor -> droppedAnchor = anchor },
+                        onReorderBar = { _, _ -> })
+                }
+            }
+        }
+        rule.waitForIdle()
+        val source = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+        val stage = rule.onNodeWithTag("move-preview-stage", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val start = source.fetchSemanticsNode().boundsInRoot.center
+        val delta = Offset(stage.right - stage.width * 0.06f - start.x, stage.center.y - start.y)
+        source.performTouchInput {
+            down(center)
+            advanceEventTime(780)
+            moveBy(delta)
+            advanceEventTime(48)
+            up()
+        }
+        rule.waitForIdle()
+        rule.runOnIdle { assertEquals(ToolbarAnchor.CENTER_RIGHT, droppedAnchor) }
+        rule.mainClock.autoAdvance = false
+        rule.runOnIdle {
+            workspace = workspace.replaceBar(initial.copy(geometry =
+                initial.geometry.movedTo(droppedAnchor!!, floating = true)))
+        }
+        repeat(4) { frame ->
+            rule.mainClock.advanceTimeByFrame()
+            val x = source.fetchSemanticsNode().boundsInRoot.center.x
+            assertTrue("Cross-edge preview move flickered toward the old top slot at frame $frame: x=$x, center=${stage.center.x}",
+                x > stage.center.x + stage.width * 0.1f)
+        }
+        rule.mainClock.autoAdvance = true
+    }
 
     @Test fun horizontalTitleIsBoundedAndPreservesNoteVersusCanvasClickBehavior() {
         val name = "Long document name which must never consume a whole toolbar row"
