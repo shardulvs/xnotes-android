@@ -611,6 +611,8 @@ class ToolbarTitleAndPreviewReorderComposeTest {
         rule.waitForIdle()
         val candidate = rule.onNodeWithTag("preview-reorder-target-third", useUnmergedTree = true)
         candidate.assertExists()
+        rule.onNodeWithTag("toolbar-drop-indicator-second", useUnmergedTree = true)
+            .assertExists()
         // The previous implementation reset the temporary order in empty space.
         // That made the floating peers bounce back and forward during a gesture.
         val peer = rule.onNodeWithTag("preview-bar-third", useUnmergedTree = true)

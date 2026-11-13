@@ -356,6 +356,51 @@ class ToolbarLivePlacementComposeTest {
         assertTrue("Regression scenario must use different row heights", tall.top < short.top)
     }
 
+    @Test fun dockedBarOrientationChangesByResizingTheSlot() {
+        val horizontal = bar("resizing", false, false).copy(geometry =
+            bar("resizing", false, false).geometry.copy(
+                anchor = ToolbarAnchor.BOTTOM_CENTER, dockEdge = ToolbarDockEdge.BOTTOM,
+                widthDp = 240, heightDp = 55))
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(horizontal)))
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalToolbarLook provides ToolbarLook()) {
+                    Column(Modifier.size(840.dp, 380.dp)) {
+                        ToolbarAround(bar = { Box(Modifier.size(55.dp)) },
+                            onCover = { _, _, _, _ -> }, workspace = workspace,
+                            dockedContent = { Box(Modifier.size(55.dp)) },
+                        ) { _ -> Box(Modifier.fillMaxSize()) }
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        val node = rule.onNodeWithTag("live-toolbar-slot-resizing", useUnmergedTree = true)
+        val original = node.getUnclippedBoundsInRoot()
+        rule.mainClock.autoAdvance = false
+        rule.runOnIdle {
+            val bar = workspace.bars.first()
+            workspace = workspace.replaceBar(bar.copy(geometry = bar.geometry.copy(
+                anchor = ToolbarAnchor.CENTER_RIGHT, dockEdge = ToolbarDockEdge.RIGHT,
+                widthDp = 55, heightDp = 240)))
+        }
+        rule.mainClock.advanceTimeByFrame()
+        val first = node.getUnclippedBoundsInRoot()
+        rule.mainClock.advanceTimeBy(96)
+        val middle = node.getUnclippedBoundsInRoot()
+        rule.mainClock.advanceTimeBy(360)
+        val completed = node.getUnclippedBoundsInRoot()
+        assertTrue("Initial horizontal slot must be wide", (original.right - original.left).value > 200f)
+        assertTrue("Final vertical slot must be narrow", (completed.right - completed.left).value < 90f)
+        assertTrue("Width should interpolate, not jump to final size: $first / $middle / $completed",
+            (middle.right - middle.left).value < (first.right - first.left).value - 8f &&
+                (middle.right - middle.left).value > (completed.right - completed.left).value + 8f)
+        assertTrue("Height should interpolate towards vertical: $first / $middle / $completed",
+            (middle.bottom - middle.top).value > (first.bottom - first.top).value + 8f &&
+                (middle.bottom - middle.top).value < (completed.bottom - completed.top).value - 8f)
+        rule.mainClock.autoAdvance = true
+    }
+
     @Test fun liveFloatingBarsCanReorderWithSameLongPressGestureAsPreview() {
         var workspace by mutableStateOf(ToolbarWorkspace(listOf(
             bar("moving", false, true), bar("target", false, true))))
@@ -382,8 +427,16 @@ class ToolbarLivePlacementComposeTest {
             advanceEventTime(790)
             moveBy(Offset(end.x - start.x, end.y - start.y))
             advanceEventTime(48)
-            up()
         }
+        rule.waitForIdle()
+        rule.onNodeWithTag("toolbar-drop-indicator-moving", useUnmergedTree = true)
+            .assertExists()
+        rule.runOnIdle {
+            assertEquals("The reorder preview must not persist until release",
+                listOf("moving", "target"),
+                workspace.bars.sortedBy { it.geometry.visualOrder }.map { it.id })
+        }
+        from.performTouchInput { up() }
         rule.waitForIdle()
         rule.runOnIdle {
             assertEquals(listOf("target", "moving"),
@@ -419,8 +472,16 @@ class ToolbarLivePlacementComposeTest {
             advanceEventTime(790)
             moveBy(Offset(end.x - start.x, end.y - start.y))
             advanceEventTime(48)
-            up()
         }
+        rule.waitForIdle()
+        rule.onNodeWithTag("toolbar-drop-indicator-moving", useUnmergedTree = true)
+            .assertExists()
+        rule.runOnIdle {
+            assertEquals("The reorder preview must not persist until release",
+                listOf("moving", "target"),
+                workspace.bars.sortedBy { it.geometry.visualOrder }.map { it.id })
+        }
+        from.performTouchInput { up() }
         rule.waitForIdle()
         rule.runOnIdle {
             assertEquals(listOf("target", "moving"),

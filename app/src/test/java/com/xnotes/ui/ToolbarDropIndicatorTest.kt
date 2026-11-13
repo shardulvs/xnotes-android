@@ -71,6 +71,30 @@ class ToolbarDropIndicatorTest {
         assertEquals(52f, targetSlot.height, .01f)
     }
 
+    @Test fun reorderingIndicatorUsesProjectedSlotRatherThanTheOldSourceLocation() {
+        fun bar(id: String) = ToolbarBar(id, id, ToolbarLayout.DEFAULT,
+            geometry = ToolbarGeometry(dockEdge = ToolbarDockEdge.TOP,
+                anchor = ToolbarAnchor.TOP_CENTER, dockAlignment = ToolbarDockAlignment.CENTER,
+                widthDp = 130, heightDp = 55))
+        val workspace = ToolbarWorkspace(listOf(bar("main"), bar("moving"), bar("target")))
+        val look = ToolbarLook()
+        val base = toolbarDockPlan(workspace, look, 960.dp, 600.dp)
+        val proposedWorkspace = workspace.reorderVisualBar("moving", "target")
+        val projected = toolbarDockPlan(proposedWorkspace, look, 960.dp, 600.dp)
+        val actual = toolbarReorderDockSlot(workspace, look, "moving", projected)!!
+        val original = toolbarReorderDockSlot(workspace, look, "moving", base)!!
+        assertEquals(projected.placement("moving")!!.x, actual.x, .01f)
+        assertEquals(projected.placement("moving")!!.y, actual.y, .01f)
+        assertEquals(130f, actual.width, .01f)
+        assertEquals(55f, actual.height, .01f)
+        assertNotEquals("Indicator should point at the future insertion slot",
+            original.x, actual.x)
+        val preview = toolbarPreviewLayoutPlan(proposedWorkspace, look, 960.dp, 600.dp, 5)
+        val previewSlot = toolbarReorderPreviewSlot(workspace, look, "moving", preview)!!
+        assertEquals(actual.x, previewSlot.x, .01f)
+        assertEquals(actual.y, previewSlot.y, .01f)
+    }
+
     @Test fun legacyFloatingPrimaryKeepsFloatingWhenProjected() {
         val primary = ToolbarBar("main", "Main", ToolbarLayout.DEFAULT,
             geometry = ToolbarGeometry(anchor = ToolbarAnchor.TOP_CENTER,

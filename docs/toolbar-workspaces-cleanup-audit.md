@@ -89,7 +89,7 @@ No persistence schema, migration, gesture transaction, primary toolbar identity 
 
 ## Pass 7: guided drag/drop (2026-11-13)
 
-- Added a shared projected-slot function for preview, live docked bars and live floating bars. A translucent, accent-coloured outline previews the destination while dragging across edges/alignments; same-lane reordering continues to animate peer positions instead.
+- Added a shared projected-slot function for preview, live docked bars and live floating bars. A translucent, accent-coloured outline previews the destination while dragging across edges/alignments; subsequent iterations also show the source insertion slot during same-lane reorder while peers animate.
 - Release translation now eases to the projected root-space target **before** persisting the move, preserving the existing pending-placement acknowledgement and avoiding a flash through the original slot.
 - Tested target-plan equivalence, legacy floating-primary parity, one-vs-two-row bottom alignment, continued preview reorder, an actual live-gesture indicator and monotonic frame-by-frame movement without a reverse snapback.
 
@@ -98,5 +98,11 @@ No persistence schema, migration, gesture transaction, primary toolbar identity 
 - Gesture target hysteresis (36 px edge, 5.5% alignment) reduces indicator jitter near boundaries. Snap and indicator use the identical stable target.
 - Project complete docked, floating and preview layouts while dragging. Peers animate away from, or into, the planned insertion slot before release; the dragged source stays tied to its pointer and stable ID.
 - Crossing to a new edge or alignment cancels a sticky reorder target, revealing the drop indicator even if the gesture first hovered over a sibling. Empty gaps on the *same* edge/alignment still preserve the existing reorder preview.
-- Keep peer projection alive during snap settlement and clear only after workspace acknowledgment to avoid a second old/new flash. Added a short orientation rotation/fade transition alongside the morphing indicator footprint.
+- Keep peer projection alive during snap settlement and clear only after workspace acknowledgment to avoid a second old/new flash. Orientation changes animate only width/height of the toolbar's container and indicator, without rotating or fading its contents.
 - Test coverage includes hysteresis thresholds, preview-state persistence, accidental-reorder cross-edge recovery and live peer movement before the persisted commit.
+
+## Pass 9: consistent insertion indicators and resize-only orientation (2026-11-13)
+
+- During floating, docked, and editor-preview reordering, draw the existing drop outline at the moving bar's destination slot in the provisional reordered plan. The peer animation and visual target share the same planner; no new persistent state, special drag mode, or duplicate gesture implementation.
+- Remove whole-bar rotation and alpha transitions. Animate the bar's width and height instead when switching orientation so text and tool icons stay upright.
+- Test insertion-indicator visibility *before* releasing the pointer, no premature reorder commit, real dock/floating cases, the preview gesture, and equality between projected planner and indicator geometry.
