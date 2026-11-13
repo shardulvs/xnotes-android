@@ -89,7 +89,7 @@ class ToolbarMultiBarComposeTest {
                                     legacyFloating()
                                     WorkspaceFloatingBars(
                                         workspace = workspace,
-                                        onMoveBar = { _, _ -> },
+                                        onMoveBar = { _, _, _ -> },
                                         primaryContent = { TaggedToolbar(primary) },
                                         content = { TaggedToolbar(it) },
                                     )

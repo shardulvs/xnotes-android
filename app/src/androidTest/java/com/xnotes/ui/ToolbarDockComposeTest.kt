@@ -127,14 +127,14 @@ class ToolbarDockComposeTest {
                 )
             }
         }
-        rule.onNodeWithContentDescription("center left").performClick()
+        rule.onNodeWithTag("toolbar-position-LEFT-CENTER", useUnmergedTree = true).performClick()
         rule.runOnIdle {
             assertEquals(ToolbarDockEdge.LEFT, geometry.dockEdge)
             assertEquals(70, geometry.widthDp)
             assertEquals(430, geometry.heightDp)
             assertEquals(ToolbarPosition.LEFT, look.position)
         }
-        rule.onNodeWithContentDescription("bottom center").performClick()
+        rule.onNodeWithTag("toolbar-position-BOTTOM-CENTER", useUnmergedTree = true).performClick()
         rule.runOnIdle {
             assertEquals(ToolbarDockEdge.BOTTOM, geometry.dockEdge)
             assertEquals(430, geometry.widthDp)
@@ -159,7 +159,7 @@ class ToolbarDockComposeTest {
                 )
             }
         }
-        rule.onNodeWithContentDescription("center left").performClick()
+        rule.onNodeWithTag("toolbar-position-LEFT-CENTER", useUnmergedTree = true).performClick()
         rule.runOnIdle {
             assertEquals(ToolbarDockEdge.LEFT, geometry.dockEdge)
             assertEquals(62, geometry.widthDp)

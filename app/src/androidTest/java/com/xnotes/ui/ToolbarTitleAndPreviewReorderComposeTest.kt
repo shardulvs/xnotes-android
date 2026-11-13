@@ -1,6 +1,7 @@
 package com.xnotes.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
@@ -11,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -51,7 +53,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
                         selectedId = "two", colors = emptyList(), activeColorIndex = 0,
                         pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
                         selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
-                        onMoveBar = { _, _ -> })
+                        onMoveBar = { _, _, _ -> })
                 }
             }
         }
@@ -62,6 +64,56 @@ class ToolbarTitleAndPreviewReorderComposeTest {
             .getUnclippedBoundsInRoot().top.value
         assertTrue("One-row floating bar drifts below its top-aligned peer: $tallTop vs $shortTop",
             kotlin.math.abs(tallTop - shortTop) <= 2f)
+    }
+
+    @Test fun movingLeftFloatingBarFromStartToCenterUpdatesAlignmentAndPreview() {
+        val layout = ToolbarLayout(listOf(ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN)))))
+        val initial = ToolbarBar("moving", "Move", layout, geometry = ToolbarGeometry(
+            floating = true, anchor = ToolbarAnchor.CENTER_LEFT,
+            dockAlignment = ToolbarDockAlignment.START, widthDp = 72, heightDp = 140))
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(initial)))
+        rule.setContent {
+            MaterialTheme {
+                Column(Modifier.fillMaxWidth()) {
+                    val current = workspace.bars.first()
+                    ToolbarPositionMap(current.geometry.anchor.floatingEdge(),
+                        toolbarFloatingAlignment(current), onSelect = { _, _ -> })
+                    ToolbarWorkspacePreview(
+                        workspace = workspace, look = ToolbarLook(floating = true),
+                        selectedId = "moving", colors = emptyList(), activeColorIndex = 0,
+                        pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
+                        selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
+                        onMoveBar = { id, anchor, alignment ->
+                            val bar = workspace.bars.first { it.id == id }
+                            workspace = workspace.replaceBar(bar.copy(geometry = bar.geometry
+                                .movedTo(anchor, true).copy(dockAlignment = alignment)))
+                        }, onReorderBar = { _, _ -> },
+                    )
+                }
+            }
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag("toolbar-position-LEFT-START", useUnmergedTree = true).assertIsSelected()
+        val stage = rule.onNodeWithTag("toolbar-preview-stage", useUnmergedTree = true)
+        val stageBounds = stage.fetchSemanticsNode().boundsInRoot
+        val source = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+        val start = source.fetchSemanticsNode().boundsInRoot.center
+        val target = Offset(stageBounds.left + stageBounds.width * 0.04f, stageBounds.center.y)
+        // Inject from the stationary preview root: the dragged bar's own bounds
+        // move during a gesture, which changes a source-relative pointer origin.
+        stage.performTouchInput {
+            down(start - stageBounds.topLeft)
+            advanceEventTime(780)
+            moveBy(target - start)
+            advanceEventTime(32)
+            up()
+        }
+        rule.waitForIdle()
+        rule.runOnIdle {
+            assertEquals(ToolbarAnchor.CENTER_LEFT, workspace.bars.first().geometry.anchor)
+            assertEquals(ToolbarDockAlignment.CENTER, workspace.bars.first().geometry.dockAlignment)
+        }
+        rule.onNodeWithTag("toolbar-position-LEFT-CENTER", useUnmergedTree = true).assertIsSelected()
     }
 
     @Test fun crossEdgePreviewDragTracksPointerWhileStillPressedOnRealScreen() {
@@ -77,7 +129,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
                         selectedId = "moving", colors = emptyList(), activeColorIndex = 0,
                         pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
                         selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
-                        onMoveBar = { _, anchor ->
+                        onMoveBar = { _, anchor, _ ->
                             movedTo = anchor
                             workspace = workspace.replaceBar(first.copy(geometry = first.geometry.movedTo(anchor, true)))
                         }, onReorderBar = { _, _ -> })
@@ -133,7 +185,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
                         selectedId = "moving", colors = emptyList(), activeColorIndex = 0,
                         pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
                         selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
-                        onMoveBar = { _, anchor -> droppedAnchor = anchor },
+                        onMoveBar = { _, anchor, _ -> droppedAnchor = anchor },
                         onReorderBar = { _, _ -> })
                 }
             }
@@ -237,7 +289,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
                         pageNumber = 1, pageCount = 1, zoomLabel = "100%",
                         titleLabel = if (canvas) "XCanvas title" else "XNote title",
                         selectedEntry = null,
-                        onSelectBar = {}, onSelectEntry = { _, _, _ -> }, onMoveBar = { _, _ -> },
+                        onSelectBar = {}, onSelectEntry = { _, _, _ -> }, onMoveBar = { _, _, _ -> },
                     )
                 }
             }
@@ -279,7 +331,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
                         selectedId = "moving", colors = emptyList(), activeColorIndex = 0,
                         pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
                         selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
-                        onMoveBar = { _, _ -> }, onReorderBar = { id, other ->
+                        onMoveBar = { _, _, _ -> }, onReorderBar = { id, other ->
                             workspace = workspace.reorderVisualBar(id, other)
                         })
                 }
@@ -333,7 +385,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
                         selectedId = "moving", colors = emptyList(), activeColorIndex = 0,
                         pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Example",
                         selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
-                        onMoveBar = { _, _ -> }, onReorderBar = { from, to ->
+                        onMoveBar = { _, _, _ -> }, onReorderBar = { from, to ->
                             workspace = workspace.reorderVisualBar(from, to)
                         })
                 }
@@ -384,7 +436,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
                         selectedId = "moving", colors = emptyList(), activeColorIndex = 0,
                         pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Example",
                         selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
-                        onMoveBar = { _, _ -> }, onReorderBar = { from, to ->
+                        onMoveBar = { _, _, _ -> }, onReorderBar = { from, to ->
                             workspace = workspace.reorderVisualBar(from, to)
                         })
                 }
@@ -428,7 +480,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
                         selectedId = "moving", colors = emptyList(), activeColorIndex = 0,
                         pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
                         selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
-                        onMoveBar = { _, _ -> }, onReorderBar = { from, to -> pending = from to to })
+                        onMoveBar = { _, _, _ -> }, onReorderBar = { from, to -> pending = from to to })
                 }
             }
         }
@@ -477,7 +529,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
                         selectedId = "moving", colors = emptyList(), activeColorIndex = 0,
                         pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
                         selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
-                        onMoveBar = { _, _ -> }, onReorderBar = { id, other ->
+                        onMoveBar = { _, _, _ -> }, onReorderBar = { id, other ->
                             workspace = workspace.reorderVisualBar(id, other)
                         })
                 }
@@ -535,7 +587,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
                         selectedId = "second", colors = emptyList(), activeColorIndex = 0,
                         pageNumber = 1, pageCount = 1, zoomLabel = "100%", titleLabel = "Example",
                         selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
-                        onMoveBar = { _, _ -> },
+                        onMoveBar = { _, _, _ -> },
                         onReorderBar = { id, target ->
                             completed = id to target
                             current = current.reorderVisualBar(id, target)
@@ -606,7 +658,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
                         selectedEntry = null,
                         onSelectBar = {},
                         onSelectEntry = { _, _, _ -> },
-                        onMoveBar = { _, _ -> },
+                        onMoveBar = { _, _, _ -> },
                         onReorderBar = { source, target ->
                             callback = source to target
                             current = current.reorderVisualBar(source, target)

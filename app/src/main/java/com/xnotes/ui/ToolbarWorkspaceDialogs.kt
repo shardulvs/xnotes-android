@@ -73,7 +73,7 @@ internal fun ToolbarCopyDialog(
                     titleLabel = targetLabel,
                     onSelectBar = {},
                     onSelectEntry = { _, _, _ -> },
-                    onMoveBar = { _, _ -> },
+                    onMoveBar = { _, _, _ -> },
                 )
                 if (draft.omitted.isNotEmpty()) {
                     Text(toolbarStrings.getString(R.string.toolbar_config_omitted_tools, draft.omitted.size) +
@@ -293,7 +293,7 @@ internal fun ToolbarPresetPreviewDialog(
                     titleLabel = if (canvasPreview) "Canvas" else "Note",
                     onSelectBar = {},
                     onSelectEntry = { _, _, _ -> },
-                    onMoveBar = { _, _ -> },
+                    onMoveBar = { _, _, _ -> },
                 )
                 FilterChip(
                     selected = applyBoth,

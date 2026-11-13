@@ -42,7 +42,7 @@ class ToolbarDragSurfaceSettlementTest {
                         ToolbarDragSurface(
                             id = "moving", anchor = anchor, movable = true,
                             paneBounds = Rect(0f, 0f, 1800f, 900f),
-                            onMoveBar = { _, target -> pendingAnchor = target },
+                            onMoveBar = { _, target, _ -> pendingAnchor = target },
                         ) { Box(Modifier.size(150.dp, 65.dp)) }
                     }
                 }
