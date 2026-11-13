@@ -1517,7 +1517,8 @@ private fun EditorPane(
                     if (primary != null && !primary.geometry.floating) {
                         ToolbarDragSurface(
                             primary.id, primary.geometry.anchor, primary.geometry.movable,
-                            paneBounds, { id, anchor -> app.moveToolbarBar(ToolbarContext.CANVAS, id, anchor) },
+                            paneBounds, { id, anchor, alignment -> app.moveToolbarBar(ToolbarContext.CANVAS, id, anchor, alignment) },
+                            currentAlignment = primary.geometry.dockAlignment,
                         ) { bareBar() }
                     } else bareBar()
                 }
@@ -1548,7 +1549,7 @@ private fun EditorPane(
                         floatingBar()
                         WorkspaceFloatingBars(
                             workspace = activeWorkspace,
-                            onMoveBar = { id, anchor -> app.moveToolbarBar(ToolbarContext.CANVAS, id, anchor) },
+                            onMoveBar = { id, anchor, alignment -> app.moveToolbarBar(ToolbarContext.CANVAS, id, anchor, alignment) },
                             primaryContent = { bar() },
                             content = secondaryBar,
                             colorCount = editor.toolbarColorCount,
@@ -1590,7 +1591,8 @@ private fun EditorPane(
                     if (primary != null && !primary.geometry.floating) {
                         ToolbarDragSurface(
                             primary.id, primary.geometry.anchor, primary.geometry.movable,
-                            paneBounds, { id, anchor -> app.moveToolbarBar(ToolbarContext.NOTE, id, anchor) },
+                            paneBounds, { id, anchor, alignment -> app.moveToolbarBar(ToolbarContext.NOTE, id, anchor, alignment) },
+                            currentAlignment = primary.geometry.dockAlignment,
                         ) { bareBar() }
                     } else bareBar()
                 }
@@ -1636,7 +1638,7 @@ private fun EditorPane(
                             floatingBar()
                             WorkspaceFloatingBars(
                                 workspace = activeWorkspace,
-                                onMoveBar = { id, anchor -> app.moveToolbarBar(ToolbarContext.NOTE, id, anchor) },
+                                onMoveBar = { id, anchor, alignment -> app.moveToolbarBar(ToolbarContext.NOTE, id, anchor, alignment) },
                                 primaryContent = { bar() },
                                 content = secondaryBar,
                             colorCount = editor.toolbarColorCount,

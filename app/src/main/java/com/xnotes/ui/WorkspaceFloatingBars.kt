@@ -36,6 +36,8 @@ import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.xnotes.core.tools.ToolbarAnchor
+import com.xnotes.core.tools.ToolbarDockAlignment
+import com.xnotes.core.tools.ToolbarDropPosition
 import com.xnotes.core.tools.ToolbarAnchorResolver
 import com.xnotes.core.tools.ToolbarBar
 import com.xnotes.core.tools.ToolbarScale
@@ -57,7 +59,8 @@ fun ToolbarDragSurface(
     anchor: ToolbarAnchor,
     movable: Boolean,
     paneBounds: Rect,
-    onMoveBar: (String, ToolbarAnchor) -> Unit,
+    onMoveBar: (String, ToolbarAnchor, ToolbarDockAlignment) -> Unit,
+    currentAlignment: ToolbarDockAlignment = ToolbarDockAlignment.CENTER,
     /** Optional preview callbacks: shared long-press move gesture handles lane reordering. */
     onDragStart: ((Offset) -> Unit)? = null,
     onDragPosition: ((Offset) -> Unit)? = null,
@@ -78,19 +81,20 @@ fun ToolbarDragSurface(
     // Preserve the released position until the parent acknowledges a new anchor.
     // Resetting drag *before* onMoveBar published its workspace caused the bar to
     // briefly redraw at its previous slot, then snap forward (the visible flick).
-    var pendingAnchor by remember(id) { mutableStateOf<ToolbarAnchor?>(null) }
-    LaunchedEffect(anchor, pendingAnchor) {
-        val pending = pendingAnchor ?: return@LaunchedEffect
-        if (anchor == pending) {
+    var pendingPlacement by remember(id) { mutableStateOf<ToolbarDropPosition?>(null) }
+    val alignmentNow by rememberUpdatedState(currentAlignment)
+    LaunchedEffect(anchor, currentAlignment, pendingPlacement) {
+        val pending = pendingPlacement ?: return@LaunchedEffect
+        if (anchor == pending.anchor && currentAlignment == pending.alignment) {
             // Modifier.offset already renders zero for the acknowledged anchor.
             drag = Offset.Zero
-            pendingAnchor = null
+            pendingPlacement = null
         } else {
             // An invalid/rejected move must not leave a stranded toolbar forever.
             delay(1000)
-            if (pendingAnchor == pending) {
+            if (pendingPlacement == pending) {
                 drag = Offset.Zero
-                pendingAnchor = null
+                pendingPlacement = null
             }
         }
     }
@@ -102,7 +106,7 @@ fun ToolbarDragSurface(
             val down = awaitFirstDown(requireUnconsumed = false)
             val held = awaitLongPressOrCancellation(down.id)
             if (held != null) {
-                pendingAnchor = null
+                pendingPlacement = null
                 drag = Offset.Zero
                 dragging = true
                 dragStartInRoot = barBounds.topLeft + held.position
@@ -126,7 +130,7 @@ fun ToolbarDragSurface(
                     }
                 }
                 if (canceled) {
-                    pendingAnchor = null
+                    pendingPlacement = null
                     drag = Offset.Zero
                     dragging = false
                     cancelCallback?.invoke()
@@ -138,17 +142,18 @@ fun ToolbarDragSurface(
                     dragging = false
                     if (!handled && moved.getDistance() >= 12f && barBounds != Rect.Zero && paneBoundsNow != Rect.Zero) {
                         val center = barBounds.center + moved - paneBoundsNow.topLeft
-                        val target = ToolbarAnchorResolver.nearest(
-                            center.x, center.y, paneBoundsNow.width, paneBoundsNow.height,
+                        val target = ToolbarAnchorResolver.nearestPlacement(
+                            center.x, center.y, paneBoundsNow.width, paneBoundsNow.height, anchor,
                         )
-                        if (target != null && target != anchor) {
-                            // Stay under the cursor until the new anchor is rendered.
-                            // Reordering uses a different optimistic preview transaction.
-                            pendingAnchor = target
-                            moveBarNow(id, target)
+                        if (target != null && (target.anchor != anchor || target.alignment != alignmentNow)) {
+                            // The new alignment may change while the edge anchor stays
+                            // identical (left/right start -> center). Wait for BOTH to
+                            // be acknowledged before dropping the visual offset.
+                            pendingPlacement = target
+                            moveBarNow(id, target.anchor, target.alignment)
                         } else {
                             drag = Offset.Zero
-                            if (target != null) moveBarNow(id, target)
+                            if (target != null) moveBarNow(id, target.anchor, target.alignment)
                         }
                     } else {
                         drag = Offset.Zero
@@ -159,14 +164,15 @@ fun ToolbarDragSurface(
     }
     // Acknowledgement changes the anchor and parent placement together; discard
     // the old drag offset in that SAME composition to avoid a second overshoot.
-    val visualDrag = if (pendingAnchor != null && anchor == pendingAnchor) Offset.Zero else drag
+    val visualDrag = if (pendingPlacement != null && anchor == pendingPlacement?.anchor &&
+        currentAlignment == pendingPlacement?.alignment) Offset.Zero else drag
     Box(
         Modifier
             .offset { IntOffset(visualDrag.x.roundToInt(), visualDrag.y.roundToInt()) }
             .testTag("toolbar-drag-surface-$id")
             // A docked bar is an earlier sibling of the canvas. Lift it while moving so the
             // canvas (and adjacent split panes) cannot paint over the dragged toolbar.
-            .zIndex(if (dragging || (pendingAnchor != null && anchor != pendingAnchor)) 10f else 0f)
+            .zIndex(if (dragging || pendingPlacement != null) 10f else 0f)
             .onGloballyPositioned { if (drag == Offset.Zero) barBounds = it.boundsInRoot() }
             .then(gesture),
     ) {
@@ -178,7 +184,7 @@ fun ToolbarDragSurface(
 @Composable
 fun BoxScope.WorkspaceFloatingBars(
     workspace: ToolbarWorkspace,
-    onMoveBar: (id: String, anchor: ToolbarAnchor) -> Unit,
+    onMoveBar: (id: String, anchor: ToolbarAnchor, alignment: ToolbarDockAlignment) -> Unit,
     primaryContent: @Composable () -> Unit,
     content: @Composable (ToolbarBar) -> Unit,
     colorCount: Int = 5,
@@ -206,6 +212,7 @@ fun BoxScope.WorkspaceFloatingBars(
                         movable = bar.geometry.movable,
                         paneBounds = paneBounds,
                         onMoveBar = onMoveBar,
+                        currentAlignment = toolbarFloatingAlignment(bar),
                     ) {
                         CompositionLocalProvider(LocalToolbarLook provides look) {
                             if (index == 0) primaryContent() else content(bar)

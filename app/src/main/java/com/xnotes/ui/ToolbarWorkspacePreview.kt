@@ -57,6 +57,7 @@ import com.xnotes.R
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.tools.ToolbarAnchor
+import com.xnotes.core.tools.ToolbarDockAlignment
 import com.xnotes.core.tools.ToolbarBar
 import com.xnotes.core.tools.ToolbarDistribution
 import com.xnotes.core.tools.ToolbarItem
@@ -105,7 +106,7 @@ internal fun ToolbarWorkspacePreview(
     onSelectBar: (String) -> Unit,
     onSelectEntry: (String, Int, Int) -> Unit,
     selectedEntry: Pair<Int, Int>?,
-    onMoveBar: (String, ToolbarAnchor) -> Unit,
+    onMoveBar: (String, ToolbarAnchor, ToolbarDockAlignment) -> Unit,
     /** Optional only in the editor, never in read-only workspace thumbnails. */
     onReorderBar: ((String, String) -> Unit)? = null,
 ) {
@@ -184,7 +185,13 @@ internal fun ToolbarWorkspacePreview(
                 val barPosition = barPlan.position(bar.id) ?: return@forEachIndexed
                 val placement = barPosition.placement
                 val floating = barPosition.floating
-                val anchor = bar.geometry.anchor
+                val anchor = if (index == 0 && !bar.geometry.floating && look.floating)
+                    when (look.position) {
+                        com.xnotes.settings.ToolbarPosition.TOP -> com.xnotes.core.tools.ToolbarAnchor.TOP_CENTER
+                        com.xnotes.settings.ToolbarPosition.BOTTOM -> com.xnotes.core.tools.ToolbarAnchor.BOTTOM_CENTER
+                        com.xnotes.settings.ToolbarPosition.LEFT -> com.xnotes.core.tools.ToolbarAnchor.CENTER_LEFT
+                        com.xnotes.settings.ToolbarPosition.RIGHT -> com.xnotes.core.tools.ToolbarAnchor.CENTER_RIGHT
+                    } else bar.geometry.anchor
                 val vertical = placement.edge == com.xnotes.core.tools.ToolbarDockEdge.LEFT ||
                     placement.edge == com.xnotes.core.tools.ToolbarDockEdge.RIGHT
                 val x = barPosition.x
@@ -228,11 +235,12 @@ internal fun ToolbarWorkspacePreview(
                         anchor = anchor,
                         movable = bar.geometry.movable,
                         paneBounds = stageBounds,
-                        onMoveBar = { movedId, destination ->
+                        currentAlignment = toolbarFloatingAlignment(bar),
+                        onMoveBar = { movedId, destination, alignment ->
                             // Parent placement and drag offset must change atomically;
                             // do not spring the moved source back through its old edge.
                             reorder.markAnchorMoveReleased(movedId)
-                            onMoveBar(movedId, destination)
+                            onMoveBar(movedId, destination, alignment)
                         },
                         onDragStart = if (onReorderBar == null) null else { _ ->
                             reorder.start(bar.id, peers, vertical, workspace)

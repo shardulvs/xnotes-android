@@ -2991,22 +2991,28 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** Hold-drag any toolbar, including the docked primary, to a persisted floating anchor. */
-    fun moveToolbarBar(context: ToolbarContext, id: String, anchor: ToolbarAnchor) {
+    fun moveToolbarBar(context: ToolbarContext, id: String, anchor: ToolbarAnchor,
+        alignment: com.xnotes.core.tools.ToolbarDockAlignment = com.xnotes.core.tools.ToolbarDockAlignment.CENTER) {
         val profiles = toolbarWorkspaces
         val workspace = if (context == ToolbarContext.NOTE || profiles.shared) profiles.note else profiles.canvas
         val bar = workspace.bars.firstOrNull { it.id == id && it.geometry.movable } ?: return
-        val isPrimary = workspace.bars.firstOrNull()?.id == id
-        // An edge drop keeps a docked primary docked. Center/corner drops float it.
-        val dockPosition = if (isPrimary && !bar.geometry.floating) when (anchor) {
-            ToolbarAnchor.TOP_CENTER -> com.xnotes.settings.ToolbarPosition.TOP
-            ToolbarAnchor.BOTTOM_CENTER -> com.xnotes.settings.ToolbarPosition.BOTTOM
-            ToolbarAnchor.CENTER_LEFT -> com.xnotes.settings.ToolbarPosition.LEFT
-            ToolbarAnchor.CENTER_RIGHT -> com.xnotes.settings.ToolbarPosition.RIGHT
-            else -> null
-        } else null
-        val moved = bar.copy(geometry = bar.geometry.movedTo(anchor, floating = dockPosition == null,
-            fromEdge = toolbarDockEdge(bar, workspace.bars.indexOf(bar), toolbarLook)))
-        if (moved == bar && (bar.geometry.floating || dockPosition != null && toolbarLook.position == dockPosition)) return
+        val index = workspace.bars.indexOf(bar)
+        val isPrimary = index == 0
+        val previousEdge = toolbarDockEdge(bar, index, toolbarLook)
+        val targetEdge = anchor.floatingEdge()
+        // Dragging chooses an edge and alignment, not a new Docked/Floating mode.
+        // Mode switching belongs to the dedicated inspector control. The previous
+        // code silently undocked secondary bars (or primary corner drops), causing
+        // the position controls to disagree with the gesture.
+        val docked = previousEdge != null
+        val dockPosition = if (docked && isPrimary) targetEdge.toolbarPosition() else null
+        val nextGeometry = bar.geometry.movedTo(anchor, floating = !docked,
+            fromEdge = previousEdge ?: bar.geometry.anchor.floatingEdge()).copy(
+            dockEdge = if (docked) targetEdge else null,
+            dockAlignment = alignment,
+        )
+        val moved = bar.copy(geometry = nextGeometry)
+        if (moved == bar && (dockPosition == null || toolbarLook.position == dockPosition)) return
         val changed = workspace.replaceBar(moved)
         if (dockPosition != null) {
             applyHomePreferences(settings.prefs.copy(toolbarLook = toolbarLook.copy(floating = false, position = dockPosition)))

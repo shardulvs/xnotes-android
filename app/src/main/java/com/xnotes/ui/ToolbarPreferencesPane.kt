@@ -375,10 +375,10 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
                         selectedEntry = section to index
                         toolbarPropertyTab = ToolbarPropertyTab.ELEMENTS
                     },
-                    onMoveBar = { id, anchor ->
+                    onMoveBar = { id, anchor, alignment ->
                         editor.moveToolbarBar(
                             if (canvasTab) com.xnotes.core.tools.ToolbarContext.CANVAS else com.xnotes.core.tools.ToolbarContext.NOTE,
-                            id, anchor,
+                            id, anchor, alignment,
                         )
                     },
                     onReorderBar = { id, target ->
