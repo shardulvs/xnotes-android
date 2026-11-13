@@ -3,6 +3,8 @@ package com.xnotes.ui
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -10,6 +12,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInRoot
@@ -50,14 +57,23 @@ internal fun ToolbarLiveReorderBar(
         animationSpec = if (isSource) snap() else spring(), label = "liveBarX-${bar.id}")
     val animatedY by animateDpAsState(y.dp,
         animationSpec = if (isSource) snap() else spring(), label = "liveBarY-${bar.id}")
-    // A bar changing between row and column smoothly resizes its container.
-    // Tool icons remain upright: no rotating or fading the entire toolbar.
-    val animatedWidth by animateDpAsState(placement.width.dp,
-        animationSpec = androidx.compose.animation.core.tween(220),
-        label = "liveBarWidth-${bar.id}")
-    val animatedHeight by animateDpAsState(placement.height.dp,
-        animationSpec = androidx.compose.animation.core.tween(220),
-        label = "liveBarHeight-${bar.id}")
+    // Capture the target dimensions on release, not after the move callback.
+    // Translation and resize now start together and finish in the same 220 ms.
+    // Icons stay upright; no scaling/rotation or transparency of their contents.
+    var settlingSize by remember(bar.id) { mutableStateOf<Pair<Dp, Dp>?>(null) }
+    var settlingPlacement by remember(bar.id) { mutableStateOf<ToolbarDropPosition?>(null) }
+    LaunchedEffect(anchor, alignment, settlingPlacement) {
+        val target = settlingPlacement
+        if (target != null && anchor == target.anchor && alignment == target.alignment) {
+            settlingSize = null
+            settlingPlacement = null
+        }
+    }
+    val sizeSpec = tween<Dp>(220, easing = FastOutSlowInEasing)
+    val animatedWidth by animateDpAsState(settlingSize?.first ?: placement.width.dp,
+        animationSpec = sizeSpec, label = "liveBarWidth-${bar.id}")
+    val animatedHeight by animateDpAsState(settlingSize?.second ?: placement.height.dp,
+        animationSpec = sizeSpec, label = "liveBarHeight-${bar.id}")
     val currentCommit by rememberUpdatedState(onReorderBar)
     val density = LocalDensity.current
     Box(
@@ -106,6 +122,12 @@ internal fun ToolbarLiveReorderBar(
                 },
                 onPlacementPreview = { target ->
                     reorder.previewPlacement(bar.id, target)
+                },
+                onSettleTarget = { target ->
+                    settlingPlacement = target
+                    settlingSize = target?.let { projectedSlot(it) }?.let {
+                        it.width.dp to it.height.dp
+                    }
                 },
             ) { content() }
         }

@@ -33,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -118,7 +119,15 @@ internal fun ToolbarWorkspacePreview(
     val screenDensity = LocalDensity.current
     var stageBounds by remember { mutableStateOf(Rect.Zero) }
     val reorder = remember { ToolbarWorkspaceReorderController() }
-    LaunchedEffect(workspace) { reorder.acknowledge(workspace) }
+    val settlingOrientation = remember { mutableStateMapOf<String, com.xnotes.core.tools.ToolbarDropPosition>() }
+    LaunchedEffect(workspace) {
+        reorder.acknowledge(workspace)
+        settlingOrientation.entries.toList().forEach { (id, target) ->
+            val bar = workspace.bars.firstOrNull { it.id == id }
+            if (bar == null || (bar.geometry.anchor == target.anchor &&
+                bar.geometry.dockAlignment == target.alignment)) settlingOrientation.remove(id)
+        }
+    }
     val commitReorder by rememberUpdatedState(onReorderBar)
     // Pure layout resolver remains independent from Compose state and gesture lifecycle.
     val basePlan = remember(workspace, look, screenWidth, screenHeight, colors.size) {
@@ -234,6 +243,15 @@ internal fun ToolbarWorkspacePreview(
                 // bar against the occupied screen edge, rather than centering a short
                 // one-row floating bar in a two-row peer's taller allocation.
                 val edgeAlignment = placement.edge.toolbarContentAlignment()
+                val previewOrientation = settlingOrientation[bar.id]
+                val visualBar = previewOrientation?.let { target ->
+                    toolbarProjectedMove(workspace, look, bar.id, target)?.first
+                        ?.bars?.firstOrNull { it.id == bar.id }
+                } ?: bar
+                val visualVertical = previewOrientation?.let {
+                    it.anchor == com.xnotes.core.tools.ToolbarAnchor.CENTER_LEFT ||
+                        it.anchor == com.xnotes.core.tools.ToolbarAnchor.CENTER_RIGHT
+                } ?: vertical
                 // Keep the outer slot at the predicted target geometry so the
                 // drag surface never passes through a zero-sized/out-of-bounds node.
                 val positionModifier = Modifier.offset(x = visibleX, y = visibleY)
@@ -259,6 +277,7 @@ internal fun ToolbarWorkspacePreview(
                             onMoveBar(movedId, destination, alignment)
                         },
                         onDragStart = if (onReorderBar == null) null else { _ ->
+                            settlingOrientation.remove(bar.id)
                             reorder.start(bar.id, peers, vertical, workspace, anchor,
                                 toolbarFloatingAlignment(bar))
                         },
@@ -281,16 +300,20 @@ internal fun ToolbarWorkspacePreview(
                         onPlacementPreview = { target ->
                             reorder.previewPlacement(bar.id, target)
                         },
+                        onSettleTarget = { target ->
+                            if (target == null) settlingOrientation.remove(bar.id)
+                            else settlingOrientation[bar.id] = target
+                        },
                     ) {
                         PreviewBar(
-                            bar = bar,
+                            bar = visualBar,
                             selected = bar.id == selectedId,
                             effectiveSize = if (index == 0) look.size else when (bar.geometry.scale) {
                                 ToolbarScale.COMPACT -> ToolbarSize.COMPACT
                                 ToolbarScale.REGULAR -> ToolbarSize.REGULAR
                                 ToolbarScale.COMFORTABLE -> ToolbarSize.COMFORTABLE
                             },
-                            vertical = vertical,
+                            vertical = visualVertical,
                             floating = floating,
                             availableWidth = placement.width.dp,
                             availableHeight = placement.height.dp,

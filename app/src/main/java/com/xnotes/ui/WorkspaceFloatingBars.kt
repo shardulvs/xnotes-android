@@ -76,6 +76,8 @@ fun ToolbarDragSurface(
     snapTargetInRoot: ((ToolbarDropPosition) -> Offset?)? = null,
     /** Called during dragging only; never changes the saved workspace. */
     onPlacementPreview: ((ToolbarDropPosition?) -> Unit)? = null,
+    /** Starts and clears the destination's size change with the SAME 220-ms snap. */
+    onSettleTarget: ((ToolbarDropPosition?) -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     val moveBarNow by rememberUpdatedState(onMoveBar)
@@ -86,6 +88,7 @@ fun ToolbarDragSurface(
     val cancelCallback by rememberUpdatedState(onDragCancel)
     val snapTargetNow by rememberUpdatedState(snapTargetInRoot)
     val previewPlacementNow by rememberUpdatedState(onPlacementPreview)
+    val settleTargetNow by rememberUpdatedState(onSettleTarget)
     val settleScope = rememberCoroutineScope()
     var settleJob by remember(id) { mutableStateOf<Job?>(null) }
     var drag by remember(id) { mutableStateOf(Offset.Zero) }
@@ -113,12 +116,14 @@ fun ToolbarDragSurface(
             // Modifier.offset already renders zero for the acknowledged anchor.
             drag = Offset.Zero
             pendingPlacement = null
+            settleTargetNow?.invoke(null)
         } else {
             // An invalid/rejected move must not leave a stranded toolbar forever.
             delay(1000)
             if (pendingPlacement == pending) {
                 drag = Offset.Zero
                 pendingPlacement = null
+                settleTargetNow?.invoke(null)
                 cancelCallback?.invoke()
             }
         }
@@ -133,6 +138,7 @@ fun ToolbarDragSurface(
             if (held != null) {
                 settleJob?.cancel()
                 settleJob = null
+                settleTargetNow?.invoke(null)
                 pendingPlacement = null
                 drag = Offset.Zero
                 stableHover = ToolbarDropPosition(anchor, alignmentNow)
@@ -168,6 +174,7 @@ fun ToolbarDragSurface(
                     drag = Offset.Zero
                     dragging = false
                     stableHover = null
+                    settleTargetNow?.invoke(null)
                     previewPlacementNow?.invoke(null)
                     cancelCallback?.invoke()
                 } else {
@@ -189,6 +196,9 @@ fun ToolbarDragSurface(
                                 // animating the source *from* its old position after release.
                                 if (changed) pendingPlacement = target
                                 val destinationOffset = projectedRoot - barBounds.topLeft
+                                // Announce the target before the first translation frame:
+                                // size and movement use a shared 220-ms easing curve.
+                                if (changed) settleTargetNow?.invoke(target)
                                 settleJob = settleScope.launch {
                                     animate(0f, 1f,
                                         animationSpec = tween(220, easing = FastOutSlowInEasing),
@@ -199,11 +209,14 @@ fun ToolbarDragSurface(
                                         moveBarNow(id, target.anchor, target.alignment)
                                     } else {
                                         drag = Offset.Zero
+                                        settleTargetNow?.invoke(null)
                                     }
                                 }
                             } else {
                                 if (changed) {
                                     pendingPlacement = target
+                                    // No animated translation without a projected slot.
+                                    // Parent geometry still controls the resize on commit.
                                     moveBarNow(id, target.anchor, target.alignment)
                                 } else {
                                     drag = Offset.Zero
