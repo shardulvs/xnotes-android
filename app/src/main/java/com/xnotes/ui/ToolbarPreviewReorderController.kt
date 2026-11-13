@@ -95,6 +95,14 @@ internal class ToolbarPreviewReorderController {
         return accepted
     }
 
+    /** An anchor move is not a lane reorder: keep its source on the direct (non-spring)
+     * placement path while the new edge and rotated dimensions are published. Otherwise
+     * the parent springs from the previous slot as ToolbarDragSurface clears its offset,
+     * showing a brief snapback even when pendingAnchor is correctly acknowledged. */
+    fun markAnchorMoveReleased(id: String) {
+        lastReleasedId = id
+    }
+
     fun cancel(id: String) {
         if (sourceId == id) clearGesture()
     }
