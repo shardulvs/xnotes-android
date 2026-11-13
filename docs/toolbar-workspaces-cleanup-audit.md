@@ -51,7 +51,7 @@ No persistence schema, migration, gesture transaction, primary toolbar identity 
 
 ## Important code that must **not** be removed as apparent leftovers
 
-- `ToolbarPreviewReorderController` keeps the last valid hover target when a pointer crosses empty space, and holds a pending reorder until the workspace acknowledges it. Removing either behavior reintroduces observed flicker.
+- `ToolbarWorkspaceReorderController` keeps the last valid hover target when a pointer crosses empty space, and holds a pending reorder until the workspace acknowledges it. Removing either behavior reintroduces observed flicker.
 - `ToolbarDragSurface` retains a released move's offset until its anchor is acknowledged; it has a bounded fallback for rejected changes. A one-frame snapback regression guards this.
 - Preview placement marks the released source for direct movement while only peer bars spring. A separate cross-edge test guards the TOP-to-RIGHT transition.
 - Docking dimensions rotate when moving between perpendicular edges; saved requested sizes are not overwritten by viewport clamps.
@@ -78,3 +78,9 @@ No persistence schema, migration, gesture transaction, primary toolbar identity 
 - Device: Redmi Pad 2, Android 16, `com.xnotes.debug`, connected over ADB. The user previously reported that the flicker appeared gone after hardware review; this is encouraging, not proof of every timing/ROM configuration.
 - Current tests: the inspector-width Compose regression, its existing responsive layout test, preview move/reorder instrumentation, full JVM and release lint should be rerun after every cleanup batch. Record actual outcomes in the PR description rather than claiming suites that have not been rerun.
 - Risk: stateful Compose gesture code is particularly sensitive to recomposition and pointer timing; keep changes small, reversible and independently validated.
+
+## Pass 6: live gestures and shared lane-depth alignment (2026-11-13)
+
+- XNote and XCanvas now support **the same long-press reorder of same-lane peer toolbars** as the preview, whether floating or docked. Runtime layouts reuse the shared reorder controller, display the moved source under the pointer, animate peers only, and persist visual order with stable bar IDs. Prevent nested drag handling on the primary bar when multi-dock rendering is active.
+- Fixed the live renderer's top-left placement inside a lane whose depth was reserved for a taller/two-row peer. The common edge-alignment helper now places every shorter bar flush to its appropriate physical edge (notably BOTTOM). Both floating and docked runtime use it, matching the preview.
+- Tests cover real `ToolbarFrame` one-row/two-row layouts, explicit-height mismatched peers, floating/docked reorder gestures and the pre-existing preview drag regressions. Hardware stylus, split-screen and orientation still need manual visual QA.

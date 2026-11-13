@@ -8,7 +8,7 @@ import com.xnotes.core.tools.ToolbarWorkspace
 import org.junit.Assert.*
 import org.junit.Test
 
-class ToolbarPreviewReorderControllerTest {
+class ToolbarWorkspaceReorderControllerTest {
     private val initial = mapOf(
         "left" to Rect(0f, 0f, 100f, 45f),
         "middle" to Rect(110f, 0f, 210f, 45f),
@@ -22,7 +22,7 @@ class ToolbarPreviewReorderControllerTest {
     ))
 
     @Test fun hoverDoesNotPersistAndReleaseKeepsSourceInDirectPlacementMode() {
-        val state = ToolbarPreviewReorderController()
+        val state = ToolbarWorkspaceReorderController()
         for ((id, bounds) in initial) state.updateBounds(id, bounds)
         state.start("middle", initial.keys.toList(), verticalAxis = false, workspace = workspace)
         state.hover("middle", Offset(260f, 20f))
@@ -44,7 +44,7 @@ class ToolbarPreviewReorderControllerTest {
     }
 
     @Test fun hoveringThroughGapsDoesNotUndoThePreviewReorder() {
-        val state = ToolbarPreviewReorderController()
+        val state = ToolbarWorkspaceReorderController()
         initial.forEach { (id, bounds) -> state.updateBounds(id, bounds) }
         state.start("middle", initial.keys.toList(), verticalAxis = false, workspace = workspace)
         state.hover("middle", Offset(260f, 20f))
@@ -60,7 +60,7 @@ class ToolbarPreviewReorderControllerTest {
     }
 
     @Test fun invalidDropAndCancellationDoNotCommit() {
-        val state = ToolbarPreviewReorderController()
+        val state = ToolbarWorkspaceReorderController()
         initial.forEach { (id, rect) -> state.updateBounds(id, rect) }
         state.start("middle", listOf("middle", "right"), verticalAxis = false, workspace = workspace)
         assertFalse(state.drop("middle", Offset(10f, 20f)) { _, _ -> fail("invalid target") })
