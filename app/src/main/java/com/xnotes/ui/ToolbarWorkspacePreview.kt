@@ -202,6 +202,15 @@ internal fun ToolbarWorkspacePreview(
                     label = "barReorderY-${bar.id}")
                 val visibleX = if (sourceIsControlled) x.dp else animatedX
                 val visibleY = if (sourceIsControlled) y.dp else animatedY
+                // The lane uses its tallest/widest peer as its depth. Align each actual
+                // bar against the occupied screen edge, rather than centering a short
+                // one-row floating bar in a two-row peer's taller allocation.
+                val edgeAlignment = when (placement.edge) {
+                    com.xnotes.core.tools.ToolbarDockEdge.TOP -> Alignment.TopCenter
+                    com.xnotes.core.tools.ToolbarDockEdge.BOTTOM -> Alignment.BottomCenter
+                    com.xnotes.core.tools.ToolbarDockEdge.LEFT -> androidx.compose.ui.AbsoluteAlignment.CenterLeft
+                    com.xnotes.core.tools.ToolbarDockEdge.RIGHT -> androidx.compose.ui.AbsoluteAlignment.CenterRight
+                }
                 val positionModifier = Modifier.offset(x = visibleX, y = visibleY)
                     .width(placement.width.dp).height(placement.height.dp)
                     .testTag("preview-bar-${bar.id}")
@@ -214,13 +223,18 @@ internal fun ToolbarWorkspacePreview(
                 // Gestures and animation state must belong to a bar ID, not to its
                 // list position when a workspace adds/removes or reorders neighbors.
                 key(bar.id) {
-                Box(positionModifier, contentAlignment = Alignment.Center) {
+                Box(positionModifier, contentAlignment = edgeAlignment) {
                     ToolbarDragSurface(
                         id = bar.id,
                         anchor = anchor,
                         movable = bar.geometry.movable,
                         paneBounds = stageBounds,
-                        onMoveBar = onMoveBar,
+                        onMoveBar = { movedId, destination ->
+                            // Parent placement and drag offset must change atomically;
+                            // do not spring the moved source back through its old edge.
+                            reorder.markAnchorMoveReleased(movedId)
+                            onMoveBar(movedId, destination)
+                        },
                         onDragStart = if (onReorderBar == null) null else { _ ->
                             reorder.start(bar.id, peers, vertical, workspace)
                         },
@@ -311,6 +325,7 @@ private fun PreviewBar(
             shape,
         )
         .clickable(onClick = onSelect)
+        .testTag("preview-content-${bar.id}")
 
     if (vertical) {
         Column(
