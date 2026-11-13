@@ -368,12 +368,12 @@ internal fun ToolbarPreferencesPane(editor: Editor, onBack: () -> Unit) {
                     onSelectBar = { id ->
                         showBar(id)
                         selectedEntry = null
-                        toolbarPropertyTab = ToolbarPropertyTab.SETTINGS
+                        // A preview tap selects the bar without changing the inspector tab.
                     },
                     onSelectEntry = { id, section, index ->
                         showBar(id)
                         selectedEntry = section to index
-                        toolbarPropertyTab = ToolbarPropertyTab.ELEMENTS
+                        // Selection is independent of the currently visible Bars/Elements tab.
                     },
                     onMoveBar = { id, anchor, alignment ->
                         editor.moveToolbarBar(
