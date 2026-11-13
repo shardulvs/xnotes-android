@@ -135,6 +135,7 @@ internal fun ToolbarWorkspacePreview(
         Modifier
             .fillMaxWidth()
             .aspectRatio(toolbarPreviewAspectRatio(screenWidth, screenHeight))
+            .testTag("toolbar-preview-stage")
             .clip(RoundedCornerShape(14.dp))
             .background(Color(0xFFE7EAF0))
             .border(1.dp, palette.border.toComposeColor(), RoundedCornerShape(14.dp))
@@ -143,8 +144,6 @@ internal fun ToolbarWorkspacePreview(
         // Layout against the actual window width, then scale all dp/sp measurements together.
         // This preserves the bar-to-screen ratio even in a narrower settings pane.
         val scale = toolbarPreviewScale(maxWidth, screenWidth)
-        val stageWidth = maxWidth / scale
-        val stageHeight = maxHeight / scale
         CompositionLocalProvider(
             LocalDensity provides Density(screenDensity.density * scale, screenDensity.fontScale),
         ) {
@@ -260,8 +259,8 @@ internal fun ToolbarWorkspacePreview(
                             },
                             vertical = vertical,
                             floating = floating,
-                            availableWidth = placement?.width?.dp ?: (stageWidth - 20.dp),
-                            availableHeight = placement?.height?.dp ?: (stageHeight - 20.dp),
+                            availableWidth = placement.width.dp,
+                            availableHeight = placement.height.dp,
                             colors = colors,
                             activeColorIndex = activeColorIndex,
                             pageNumber = pageNumber,

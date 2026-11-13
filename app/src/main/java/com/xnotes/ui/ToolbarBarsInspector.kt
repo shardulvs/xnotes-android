@@ -14,6 +14,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -50,6 +51,14 @@ internal fun ToolbarBarsInspector(
     val effectiveEdge = toolbarDockEdge(selectedBar, selectedIndex, look)
         ?: selectedBar.geometry.anchor.floatingEdge()
     val vertical = effectiveEdge == ToolbarDockEdge.LEFT || effectiveEdge == ToolbarDockEdge.RIGHT
+    // Geometry planning can traverse every toolbar and lane. Do it only when the
+    // workspace or viewport changes, not on unrelated inspector recompositions.
+    val plan = remember(workspace, look, screenWidth, screenHeight, colorCount) {
+        toolbarPreviewLayoutPlan(workspace, look, screenWidth, screenHeight, colorCount)
+    }
+    val docked = toolbarDockEdge(selectedBar, selectedIndex, look) != null
+    val placement = if (docked) plan.docked.placement(selectedBar.id)
+        else plan.floating.placement(selectedBar.id)
 
     // Identity is separate from all behavior and placement modifiers.
     ToolbarInspectorCard {
@@ -90,12 +99,6 @@ internal fun ToolbarBarsInspector(
                         if (selectedIndex == 0) look.copy(size = size) else look)
                 },
             )
-            val primaryDocked = selectedIndex == 0 && toolbarDockEdge(selectedBar, 0, look) != null
-            val secondaryDocked = selectedIndex != 0 &&
-                selectedBar.geometry.dockEdge != null && !selectedBar.geometry.floating
-            val plan = toolbarPreviewLayoutPlan(workspace, look, screenWidth, screenHeight, colorCount)
-            val placement = if (primaryDocked || secondaryDocked) plan.docked.placement(selectedBar.id)
-                else plan.floating.placement(selectedBar.id)
             if (placement != null && placement.lane != selectedBar.geometry.dockLane) {
                 Text(context.getString(R.string.toolbar_config_redistributed_lane, placement.lane + 1),
                     color = palette.accent.toComposeColor(), style = MaterialTheme.typography.bodySmall)

@@ -13,7 +13,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.xnotes.core.tools.ToolbarEntry
 import com.xnotes.core.tools.ToolbarItem
-import com.xnotes.core.tools.ToolbarLayout
 import com.xnotes.core.tools.ToolbarSection
 
 /** Empty, selectable layout item; for side toolbars it runs vertically. */
@@ -24,10 +23,6 @@ internal fun ToolbarSpacer(entry: ToolbarEntry) {
     if (bar.vertical) Spacer(Modifier.height(length).width(bar.button))
     else Spacer(Modifier.width(length).height(bar.button))
 }
-
-/** Maximum thickness measured perpendicular to a bar. */
-internal fun toolbarCrossCells(layout: ToolbarLayout?): Int =
-    layout?.visibleSections?.maxOfOrNull { it.crossCells }?.coerceIn(1, 3) ?: 1
 
 /** Identical layout in notes, canvas and settings preview.
  * Sections hold 1–3 independent lanes. Sidebars transpose rows into columns.

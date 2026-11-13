@@ -331,13 +331,18 @@ class ToolbarTitleAndPreviewReorderComposeTest {
         }
         rule.waitForIdle()
         val surface = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+        // Inject on a STATIONARY preview root, never the moving source. A moving
+        // injection target can change the local coordinate origin between events,
+        // creating an artificial reverse pointer delta on real hardware.
+        val stage = rule.onNodeWithTag("toolbar-preview-stage", useUnmergedTree = true)
+        val stageOrigin = stage.fetchSemanticsNode().boundsInRoot.topLeft
         val before = surface.fetchSemanticsNode().boundsInRoot
         val target = rule.onNodeWithTag("preview-bar-target", useUnmergedTree = true)
             .fetchSemanticsNode().boundsInRoot
         val total = target.center.x - before.center.x
         val step = total / 10f
-        surface.performTouchInput {
-            down(center)
+        stage.performTouchInput {
+            down(before.center - stageOrigin)
             advanceEventTime(780)
             moveBy(Offset(step, 0f))
             advanceEventTime(32)
@@ -345,7 +350,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
         rule.waitForIdle()
         var last = surface.fetchSemanticsNode().boundsInRoot.center.x
         repeat(9) { index ->
-            surface.performTouchInput { moveBy(Offset(step, 0f)); advanceEventTime(32) }
+            stage.performTouchInput { moveBy(Offset(step, 0f)); advanceEventTime(32) }
             rule.waitForIdle()
             val current = surface.fetchSemanticsNode().boundsInRoot.center.x
             assertTrue("Bar reversed between frames $index: $last -> $current", current >= last - 5f)
@@ -353,7 +358,7 @@ class ToolbarTitleAndPreviewReorderComposeTest {
                 kotlin.math.abs(current - (before.center.x + step*(index+2))) <= 30f)
             last = current
         }
-        surface.performTouchInput { up() }
+        stage.performTouchInput { up() }
     }
 
     @Test fun dragMultipleSmallStepsShouldTrackPointerWithoutOscillations() {
