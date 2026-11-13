@@ -34,6 +34,13 @@ No persistence schema, migration, gesture transaction, primary toolbar identity 
 - Verification on the **merged and optimized tree**: `:app:assembleDebug`, `:app:assembleDebugAndroidTest`, `:app:testDebugUnitTest` (**2,646 tests, no failures**) and `:app:lintVitalRelease` all passed; 30/30 Compose instrumentation tests passed on the connected Redmi Pad 2. Upstream/native builds were compiled for the supported ABIs. Tests simulate touch input, not a manual pen session.
 - Six draft review stages (#4–#9) continue to carry only their incremental feature changes. Their original bases were updated locally via forward merges; the final review-stage tree is checked against the integration tree before the branches are published. No force pushes or historical commit deletions.
 
+## Pass 4: editor component boundaries and isolated reviewer builds (2026-11-13)
+
+- `ToolbarCustomizer.kt` was previously ~697 lines and owned section card layout, item rows, drag gesture surfaces, ghost painting, and icon mapping in one file. Its **main body is now ~229 lines**, while `ToolbarSectionEditorCards.kt` owns section headers, drag strips, add-section control and insertion marks, and `ToolbarItemEditorRows.kt` owns chips, drag ghosts, item menus and icon mapping. This was a **source relocation**, not an algorithm change: pointer callbacks, `rememberUpdatedState`, bounds capture, and ghost drawing retain the original logic.
+- `ToolbarPreferencesPane.kt` previously ~588 lines; `ToolbarWorkspaceSelector.kt` now owns the XNote/XCanvas tabs, chosen-bar menu and create/duplicate/remove/copy controls as a pure presentation component. The PreferencesPane still validates placement and owns editor updates, persistence and workspaces; the selector only dispatches callbacks and manages popup-open state. Isolated Compose tests guard selection/context and disallow deleting the primary bar.
+- An opt-in `-PtoolbarReviewBuild=true` Gradle property builds a signed review APK under **`com.xnotes.pr431review`**, with a review suffix in the version name. Normal releases still use their original Android package and signing behavior. This makes a reviewer build installable alongside the official XNotes and the debug app. The signing key and `keystore.properties` remain outside Git.
+- A short Redmi Pad 2 demo plan is maintained in [toolbar-workspaces-demo-guide.md](toolbar-workspaces-demo-guide.md); reviewers need to see the **continuous cross-edge drag**, not only the toolbar after release. The PR description must not imply the video exists until the new recording is actually uploaded.
+
 ## Important code that must **not** be removed as apparent leftovers
 
 - `ToolbarPreviewReorderController` keeps the last valid hover target when a pointer crosses empty space, and holds a pending reorder until the workspace acknowledges it. Removing either behavior reintroduces observed flicker.
@@ -45,11 +52,16 @@ No persistence schema, migration, gesture transaction, primary toolbar identity 
 
 ## Further refactoring (not yet performed)
 
-1. Continue extracting `ToolbarPreferencesPane` selection and editor mutations (now ~588 source lines) behind a dedicated adapter; only creation and duplication planning were isolated in pass 2. Preserve the exact workspace update path and primary identity.
-2. Separate toolbar section drag presentation from palette and section editing in `ToolbarCustomizer` (currently ~696 lines). Consolidate shared geometry/hit testing through existing pure helpers; avoid creating tiny files with circular dependencies.
-3. Review geometry layout planning under frequent slider changes with benchmarks before optimizing hot paths further. A cache is justified only when it avoids identical computations.
-4. Add tests for landscape/portrait, sidebar open/closed, 1–3 simultaneous bars, floating/docked transitions, accessibility, split view, and real stylus gestures. Keep manual QA independent from automated touch injection.
-5. Compare each stacked stage to its parent after changes. Do not force-push history or delete tests simply to reduce diff size.
+1. Continue separating **editor state mutations/transactions** from `ToolbarPreferencesPane` (now ~523 source lines); the XNote/XCanvas selector and bar action menus have already moved to a presentational component. Do not redirect persistence through unstable state snapshots.
+2. Benchmark geometry planning and section hit-testing before more performance changes; the visuals and long-press strips have already moved out of `ToolbarCustomizer` (now ~229 lines), but gesture transitions still require end-to-end tests.
+3. Add manual QA for landscape/portrait, floating/docked moves, multi-bar pinned-region interactions, split view, and real Xiaomi Smart Pen gestures. The existing Compose suite injects touch events, not stylus hardware input.
+4. Keep tests, release notes and the modular PR stack in sync. No force pushes or history removal solely to reduce the commit count.
+
+## Current validation snapshot (refactor pass 4)
+
+- `2,646/2,646` JVM tests passed with JVM numeric formatting fixed to English (`JAVA_TOOL_OPTIONS='-Duser.language=en -Duser.country=US'`); without that explicit locale, an unrelated existing `SteadyTraceTest` expects dot decimals and fails on the Brazilian host's comma formatting. This was an environment-dependent assertion, not a toolbar regression.
+- `32/32` Compose tests passed on the `Small_Tablet` emulator at 1920×1200 and **240 dpi**, including two new isolated selector-menu tests. The wide-inspector geometry test intentionally needs sufficient available dp to form two columns; at the emulator's default 320 dpi it correctly stacks into one column instead.
+- The new preview/demo APK is isolated under a distinct review application ID. Do not install it over the official package or mistake its signing certificate for upstream's official release key.
 
 ## Validation and remaining caveats
 

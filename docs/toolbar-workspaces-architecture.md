@@ -45,3 +45,13 @@ See [toolbar-workspaces-cleanup-audit.md](toolbar-workspaces-cleanup-audit.md) f
 ## Current upstream compatibility (0.9.9)
 
 The integration review branch merges upstream `master` at `0e73e160`. Keep the Android test runner while accepting upstream version code 70. The upstream editor-retirement save lifecycle, ZIP stamp/check logic and current menu/tool-width behavior remain upstream-owned; toolbar customization must not replace those implementation paths. Section picker availability is memoized per immutable toolbar layout and available-item set; repeatable Colors and Spacer entries are intentionally exempt from one-instance restrictions.
+
+## Component boundaries after PR #431 cleanup
+
+- `ToolbarCustomizer.kt`: section/region composition, drop targets, and callback routing (no visual row/section implementations).
+- `ToolbarSectionEditorCards.kt`: section card scaffold, long-press grip, add-section controls, and insertion guides.
+- `ToolbarItemEditorRows.kt`: item rows, item/section drag-ghost visuals, searchable tool picker, and icon mapping.
+- `ToolbarWorkspaceSelector.kt`: independent presentation of context tabs, bar selection and bar-action menus; actual editor mutations and constraints remain in `ToolbarPreferencesPane.kt`.
+- `ToolbarWorkspaceCreationPlanner.kt`: immutable add/duplicate planning; no UI state or persistent file mutations.
+
+Reviewer builds are opt-in (`./gradlew :app:assembleRelease -PtoolbarReviewBuild=true`), use Android package `com.xnotes.pr431review` and require a local signing configuration. Normal upstream builds are not changed by the flag's absence. See [the demo guide](toolbar-workspaces-demo-guide.md) for the new real-stylus demonstration requested before review.
