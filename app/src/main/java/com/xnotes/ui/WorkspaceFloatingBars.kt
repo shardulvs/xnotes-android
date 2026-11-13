@@ -23,7 +23,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -37,7 +36,6 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -90,7 +88,6 @@ fun ToolbarDragSurface(
     val previewPlacementNow by rememberUpdatedState(onPlacementPreview)
     val settleScope = rememberCoroutineScope()
     var settleJob by remember(id) { mutableStateOf<Job?>(null) }
-    var orientationFadeJob by remember(id) { mutableStateOf<Job?>(null) }
     var drag by remember(id) { mutableStateOf(Offset.Zero) }
     var dragging by remember(id) { mutableStateOf(false) }
     var barBounds by remember(id) { mutableStateOf(Rect.Zero) }
@@ -100,8 +97,6 @@ fun ToolbarDragSurface(
     // briefly redraw at its previous slot, then snap forward (the visible flick).
     var pendingPlacement by remember(id) { mutableStateOf<ToolbarDropPosition?>(null) }
     var stableHover by remember(id) { mutableStateOf<ToolbarDropPosition?>(null) }
-    var settleRotation by remember(id) { mutableFloatStateOf(0f) }
-    var settleOpacity by remember(id) { mutableFloatStateOf(1f) }
     val alignmentNow by rememberUpdatedState(currentAlignment)
     fun resolvedPlacement(offset: Offset): ToolbarDropPosition? {
         val pane = paneBoundsNow
@@ -118,18 +113,6 @@ fun ToolbarDragSurface(
             // Modifier.offset already renders zero for the acknowledged anchor.
             drag = Offset.Zero
             pendingPlacement = null
-            settleRotation = 0f
-            if (settleOpacity < 1f) {
-                // Use the remembered scope: changing pendingPlacement cancels this
-                // keyed LaunchedEffect, so an inline fade would stop at 12% opacity.
-                orientationFadeJob?.cancel()
-                val startOpacity = settleOpacity
-                orientationFadeJob = settleScope.launch {
-                    animate(startOpacity, 1f, animationSpec = tween(140)) { value, _ ->
-                        settleOpacity = value
-                    }
-                }
-            }
         } else {
             // An invalid/rejected move must not leave a stranded toolbar forever.
             delay(1000)
@@ -137,8 +120,6 @@ fun ToolbarDragSurface(
                 drag = Offset.Zero
                 pendingPlacement = null
                 cancelCallback?.invoke()
-                settleRotation = 0f
-                settleOpacity = 1f
             }
         }
     }
@@ -152,12 +133,8 @@ fun ToolbarDragSurface(
             if (held != null) {
                 settleJob?.cancel()
                 settleJob = null
-                orientationFadeJob?.cancel()
-                orientationFadeJob = null
                 pendingPlacement = null
                 drag = Offset.Zero
-                settleRotation = 0f
-                settleOpacity = 1f
                 stableHover = ToolbarDropPosition(anchor, alignmentNow)
                 dragging = true
                 dragStartInRoot = barBounds.topLeft + held.position
@@ -191,8 +168,6 @@ fun ToolbarDragSurface(
                     drag = Offset.Zero
                     dragging = false
                     stableHover = null
-                    settleRotation = 0f
-                    settleOpacity = 1f
                     previewPlacementNow?.invoke(null)
                     cancelCallback?.invoke()
                 } else {
@@ -214,30 +189,16 @@ fun ToolbarDragSurface(
                                 // animating the source *from* its old position after release.
                                 if (changed) pendingPlacement = target
                                 val destinationOffset = projectedRoot - barBounds.topLeft
-                                val sourceVertical = anchor == ToolbarAnchor.CENTER_LEFT ||
-                                    anchor == ToolbarAnchor.CENTER_RIGHT
-                                val destVertical = target.anchor == ToolbarAnchor.CENTER_LEFT ||
-                                    target.anchor == ToolbarAnchor.CENTER_RIGHT
-                                val changingAxis = sourceVertical != destVertical
                                 settleJob = settleScope.launch {
                                     animate(0f, 1f,
                                         animationSpec = tween(220, easing = FastOutSlowInEasing),
                                     ) { fraction, _ ->
                                         drag = moved + (destinationOffset - moved) * fraction
-                                        if (changingAxis) {
-                                            // A brief rotation/fade bridges the row-to-column
-                                            // composition switch. The new upright tools fade
-                                            // back in after the workspace acknowledges the move.
-                                            settleRotation = (if (destVertical) 90f else -90f) * fraction
-                                            settleOpacity = 1f - 0.88f * fraction
-                                        }
                                     }
                                     if (changed) {
                                         moveBarNow(id, target.anchor, target.alignment)
                                     } else {
                                         drag = Offset.Zero
-                                        settleRotation = 0f
-                                        settleOpacity = 1f
                                     }
                                 }
                             } else {
@@ -267,10 +228,6 @@ fun ToolbarDragSurface(
     Box(
         Modifier
             .offset { IntOffset(visualDrag.x.roundToInt(), visualDrag.y.roundToInt()) }
-            .graphicsLayer {
-                rotationZ = settleRotation
-                alpha = settleOpacity
-            }
             .testTag("toolbar-drag-surface-$id")
             // A docked bar is an earlier sibling of the canvas. Lift it while moving so the
             // canvas (and adjacent split panes) cannot paint over the dragged toolbar.
@@ -315,11 +272,16 @@ fun BoxScope.WorkspaceFloatingBars(
                 bar.id to toolbarReorderPeersInPlan(workspace, bar.id, basePlan, floating = true)
             }
         }
-        if (hoveredId != null && hoveredTarget != null && reorder.targetId == null) {
-            toolbarFloatingDropSlot(workspace, baseLook, hoveredId, hoveredTarget,
-                maxWidth, maxHeight, colorCount)?.let { slot ->
-                ToolbarDropIndicator(slot, hoveredId)
+        if (hoveredId != null) {
+            val slot = when {
+                reorder.targetId != null ->
+                    toolbarReorderDockSlot(workspace, baseLook, hoveredId, proposedPlan)
+                hoveredTarget != null ->
+                    toolbarFloatingDropSlot(workspace, baseLook, hoveredId, hoveredTarget,
+                        maxWidth, maxHeight, colorCount)
+                else -> null
             }
+            slot?.let { ToolbarDropIndicator(it, hoveredId) }
         }
         for ((index, bar) in workspace.bars.withIndex()) {
             val placement = (if (reorder.sourceId == bar.id) basePlan else proposedPlan)

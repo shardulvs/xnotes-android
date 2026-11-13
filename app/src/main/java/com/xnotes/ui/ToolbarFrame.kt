@@ -200,11 +200,16 @@ internal fun ColumnScope.ToolbarAround(
                 start = basePlan.leftInset.dp, top = basePlan.topInset.dp,
                 end = basePlan.rightInset.dp, bottom = basePlan.bottomInset.dp,
             )) { content({}) }
-            if (hoveredId != null && hoveredTarget != null && reorder.targetId == null) {
-                toolbarDockDropSlot(workspace, look, hoveredId, hoveredTarget,
-                    maxWidth, maxHeight)?.let { slot ->
-                    ToolbarDropIndicator(slot, hoveredId)
+            if (hoveredId != null) {
+                val slot = when {
+                    reorder.targetId != null ->
+                        toolbarReorderDockSlot(workspace, look, hoveredId, proposedPlan)
+                    hoveredTarget != null ->
+                        toolbarDockDropSlot(workspace, look, hoveredId, hoveredTarget,
+                            maxWidth, maxHeight)
+                    else -> null
                 }
+                slot?.let { ToolbarDropIndicator(it, hoveredId) }
             }
             for ((index, dockBar) in workspace.bars.withIndex()) {
                 val placement = (if (reorder.sourceId == dockBar.id) basePlan else proposedPlan)

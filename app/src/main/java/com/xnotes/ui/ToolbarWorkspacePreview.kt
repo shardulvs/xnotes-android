@@ -1,6 +1,7 @@
 package com.xnotes.ui
 
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.snap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -182,11 +183,16 @@ internal fun ToolbarWorkspacePreview(
                     y += rule
                 }
             }
-            if (hoveredId != null && hoveredTarget != null && reorder.targetId == null) {
-                toolbarPreviewDropSlot(workspace, look, hoveredId, hoveredTarget,
-                    screenWidth, screenHeight, colors.size)?.let { slot ->
-                    ToolbarDropIndicator(slot, hoveredId)
+            if (hoveredId != null) {
+                val slot = when {
+                    reorder.targetId != null ->
+                        toolbarReorderPreviewSlot(workspace, look, hoveredId, previewPlan)
+                    hoveredTarget != null ->
+                        toolbarPreviewDropSlot(workspace, look, hoveredId, hoveredTarget,
+                            screenWidth, screenHeight, colors.size)
+                    else -> null
                 }
+                slot?.let { ToolbarDropIndicator(it, hoveredId) }
             }
             workspace.bars.forEachIndexed { index, bar ->
                 if (!bar.visible) return@forEachIndexed
@@ -214,6 +220,8 @@ internal fun ToolbarWorkspacePreview(
                 // lands directly on the committed slot after release. Returning the
                 // source through an animated coordinate causes a visible snapback.
                 val sourceIsControlled = isDraggedBar || reorder.lastReleasedId == bar.id
+                // Keep animations attached to the stable bar ID across workspace updates.
+                key(bar.id) {
                 val animatedX by animateDpAsState(x.dp,
                     animationSpec = if (sourceIsControlled) snap() else androidx.compose.animation.core.spring(),
                     label = "barReorderX-${bar.id}")
@@ -226,6 +234,8 @@ internal fun ToolbarWorkspacePreview(
                 // bar against the occupied screen edge, rather than centering a short
                 // one-row floating bar in a two-row peer's taller allocation.
                 val edgeAlignment = placement.edge.toolbarContentAlignment()
+                // Keep the outer slot at the predicted target geometry so the
+                // drag surface never passes through a zero-sized/out-of-bounds node.
                 val positionModifier = Modifier.offset(x = visibleX, y = visibleY)
                     .width(placement.width.dp).height(placement.height.dp)
                     .testTag("preview-bar-${bar.id}")
@@ -235,9 +245,6 @@ internal fun ToolbarWorkspacePreview(
                         reorder.updateBounds(bar.id, bounds)
                     }
                 val peers = peersByBar[bar.id].orEmpty()
-                // Gestures and animation state must belong to a bar ID, not to its
-                // list position when a workspace adds/removes or reorders neighbors.
-                key(bar.id) {
                 Box(positionModifier, contentAlignment = edgeAlignment) {
                     ToolbarDragSurface(
                         id = bar.id,
@@ -340,7 +347,10 @@ private fun PreviewBar(
     // Match the live ToolbarFrame shape, including the user's corner-style setting.
     val shape = if (floating) androidx.compose.material3.MaterialTheme.shapes.extraLarge
         else RoundedCornerShape(0.dp)
+    // Animate only the toolbar body's dimensions; the surrounding drag slot
+    // remains at its target coordinates so cross-edge releases cannot flicker.
     val surface = Modifier
+        .animateContentSize(animationSpec = androidx.compose.animation.core.tween(220))
         .then(if (floating) Modifier.shadow(6.dp, shape) else Modifier)
         .clip(shape)
         .background(palette.panel.toComposeColor())

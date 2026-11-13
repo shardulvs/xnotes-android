@@ -12,7 +12,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
@@ -51,12 +50,20 @@ internal fun ToolbarLiveReorderBar(
         animationSpec = if (isSource) snap() else spring(), label = "liveBarX-${bar.id}")
     val animatedY by animateDpAsState(y.dp,
         animationSpec = if (isSource) snap() else spring(), label = "liveBarY-${bar.id}")
+    // A bar changing between row and column smoothly resizes its container.
+    // Tool icons remain upright: no rotating or fading the entire toolbar.
+    val animatedWidth by animateDpAsState(placement.width.dp,
+        animationSpec = androidx.compose.animation.core.tween(220),
+        label = "liveBarWidth-${bar.id}")
+    val animatedHeight by animateDpAsState(placement.height.dp,
+        animationSpec = androidx.compose.animation.core.tween(220),
+        label = "liveBarHeight-${bar.id}")
     val currentCommit by rememberUpdatedState(onReorderBar)
     val density = LocalDensity.current
     Box(
         Modifier.offset(x = if (isSource) x.dp else animatedX,
                         y = if (isSource) y.dp else animatedY)
-            .width(placement.width.dp).height(placement.height.dp)
+            .width(animatedWidth).height(animatedHeight)
             .testTag("live-toolbar-slot-${bar.id}")
             .zIndex(if (reorder.sourceId == bar.id) 2f else if (reorder.targetId == bar.id) 1f else 0f)
             .onGloballyPositioned { coordinates ->

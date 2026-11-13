@@ -110,6 +110,32 @@ internal fun toolbarPreviewDropSlot(
         y = slot.y + preview.y - preview.placement.y)
 }
 
+/** The reorder indicator uses the exact *proposed* slot, not the frozen source
+ * slot or peer hitboxes. The same projection drives the neighbours' animation. */
+internal fun toolbarReorderDockSlot(
+    workspace: ToolbarWorkspace, look: ToolbarLook, id: String,
+    proposedPlan: com.xnotes.core.tools.ToolbarDockPlan,
+): ToolbarDropSlot? {
+    val index = workspace.bars.indexOfFirst { it.id == id && it.visible }
+    if (index < 0) return null
+    val placement = proposedPlan.placement(id) ?: return null
+    return toolbarDropSlot(placement, workspace.bars[index], index, look)
+}
+
+internal fun toolbarReorderPreviewSlot(
+    workspace: ToolbarWorkspace, look: ToolbarLook, id: String,
+    proposedPlan: ToolbarPreviewLayoutPlan,
+): ToolbarDropSlot? {
+    val index = workspace.bars.indexOfFirst { it.id == id && it.visible }
+    if (index < 0) return null
+    val position = proposedPlan.position(id) ?: return null
+    val slot = toolbarDropSlot(position.placement, workspace.bars[index], index, look)
+    return slot.copy(
+        x = slot.x + position.x - position.placement.x,
+        y = slot.y + position.y - position.placement.y,
+    )
+}
+
 /** Non-interactive target overlay. The bar remains responsive to pen/finger events above it. */
 @Composable
 internal fun ToolbarDropIndicator(slot: ToolbarDropSlot, id: String) {
