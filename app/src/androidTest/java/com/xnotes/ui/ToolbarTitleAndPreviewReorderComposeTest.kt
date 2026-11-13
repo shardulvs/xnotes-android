@@ -247,10 +247,20 @@ class ToolbarTitleAndPreviewReorderComposeTest {
             if (name == "XCanvas title") rule.runOnIdle { canvas = true }
             rule.waitForIdle()
             val titleNode = rule.onNodeWithContentDescription(name)
-            titleNode.assertExists().assertIsDisplayed()
+            titleNode.assertExists()
             val title = titleNode.getUnclippedBoundsInRoot()
             val barBounds = rule.onNodeWithTag("preview-bar-main", useUnmergedTree = true)
                 .getUnclippedBoundsInRoot()
+            // An intermittent real-device failure can occur when the preview title
+            // first enters composition. Keep the visibility assertion intact and
+            // attach the geometry to the failure for actionable diagnosis.
+            try {
+                titleNode.assertIsDisplayed()
+            } catch (e: AssertionError) {
+                val stage = rule.onNodeWithTag("toolbar-preview-stage", useUnmergedTree = true)
+                    .getUnclippedBoundsInRoot()
+                throw AssertionError("Title '$name' not visible; title=$title bar=$barBounds stage=$stage", e)
+            }
             assertTrue("Vertical title exceeds toolbar thickness: $title vs $barBounds",
                 (title.right - title.left).value <= (barBounds.right - barBounds.left).value + 2f)
         }
