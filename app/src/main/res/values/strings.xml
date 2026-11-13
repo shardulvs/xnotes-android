@@ -121,6 +121,7 @@
     <string name="caption_vertical_scrolling">Vertical scrolling</string>
     <string name="caption_free_movement">Free page movement</string>
     <string name="caption_pdf_filters">PDF colour filters</string>
+    <string name="adjust">Adjust</string>
     <string name="filter_contrast">Contrast</string>
     <string name="filter_invert">Invert</string>
     <string name="filter_brightness">Brightness</string>
@@ -848,12 +849,12 @@
     <string name="version_copied">Version copied</string>
     <string name="icon_bubblegum">Bubblegum and violet</string>
     <string name="icon_cream_rose">Cream and rose</string>
-    <string name="icon_lime">Lime and violet</string>
-    <string name="icon_aqua">Aqua</string>
     <string name="icon_ink_tile">Ink tile</string>
-    <string name="icon_classic">Classic</string>
     <string name="icon_graphite">Graphite</string>
-    <string name="icon_cream_tile">Cream tile</string>
+    <string name="icon_sumi">Sumi</string>
+    <string name="icon_pow">Pow</string>
+    <string name="icon_marbling">Marbling</string>
+    <string name="icon_classic">Classic</string>
 
     <!-- Text formatting -->
     <string name="checkbox_item">Checkbox item</string>

@@ -1,0 +1,8 @@
+- Eyedropper in the colour picker
+- PDF filter sliders
+- Ink widths in half pixel steps
+- Improve picture performance
+- Fix hold to snap with the ruler showing
+- Fix typing AltGr characters in text
+- Fix PDF notes forking into _1 copies on some tablets
+- Fix a note emptied by a restart during a save

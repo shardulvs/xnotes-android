@@ -331,9 +331,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         private set
 
     /** Prepares one of the shared temp dirs. The launch purge drops temps orphaned by a crash, which
-     *  is safe for the primary editor because no real note is open yet at construction. A secondary
-     *  pane is built mid-session, with the primary's note already live in these dirs, so it only
-     *  takes the handle. */
+     *  is safe for the primary editor because no real note is open yet at construction: an activity
+     *  rebuilt in a living process waits out the editor it replaces first ([RetiredEditors]). A
+     *  secondary pane is built mid-session, with the primary's note already live in these dirs, so
+     *  it only takes the handle. */
     private fun tempDir(name: String): java.io.File =
         java.io.File(appContext.filesDir, name).apply {
             mkdirs()
@@ -501,7 +502,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** When non-null, the current note lives in the granted folder and autosaves to this URI. */
     var autosaveUri: String? = null
         private set
-    private val autosaveScope = kotlinx.coroutines.MainScope()
+    /** Parent of everything this editor runs in the background; [RetiredEditors] completes it once the editor is retired. */
+    private val background = kotlinx.coroutines.SupervisorJob()
+    private val autosaveScope = kotlinx.coroutines.CoroutineScope(background + kotlinx.coroutines.Dispatchers.Main)
 
     /** The note autosave's debounce timer. Cancelled freely: nothing has been written yet. */
     private var noteDebounceJob: kotlinx.coroutines.Job? = null
@@ -825,10 +828,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 val tmp = java.io.File.createTempFile("save", ".xcanvas", saveTmpDir)
                 try {
                     java.io.FileOutputStream(tmp).use { canvasCodec.write(doc, it) }
-                    val out = appContext.contentResolver.openOutputStream(android.net.Uri.parse(uri), "wt")
-                        ?: return@runCatching false
-                    out.use { java.io.FileInputStream(tmp).use { input -> input.copyTo(it, copyBuffer) } }
-                    rememberStamp(uri)
+                    // Opening the canvas truncates it, so the temp is opened first; see [copyOver].
+                    val copied = com.xnotes.core.util.copyOver(tmp, copyBuffer) {
+                        appContext.contentResolver.openOutputStream(android.net.Uri.parse(uri), "wt")
+                    }
+                    if (!copied) return@runCatching false
+                    rememberStamp(uri, entriesIn(tmp))
                     true
                 } finally {
                     tmp.delete()
@@ -3075,6 +3080,16 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         secondary?.persist() // the other pane's note has to be flushed on pause too
     }
 
+    /**
+     * The activity that owned this editor is gone. Its background work, the save and the session
+     * write from its pause among it, is handed to [RetiredEditors]: the next activity lets it run
+     * to its end, closes it to anything new, and only then builds its own editor.
+     */
+    fun retire() {
+        secondary?.retire()
+        RetiredEditors.inProcess.add(background)
+    }
+
     /** Persist the open canvas, or clear the stored one when a canvas is not what is open. */
     private fun saveCanvasSession() {
         val canvas = infiniteOrNull
@@ -4749,6 +4764,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             viewStates.rekeyTree(from, to)
             docMeta.rekeyTree(from, to)
             knownStamps.remove(oldUri)?.let { knownStamps[newUri] = it }
+            knownEntries.remove(oldUri)?.let { knownEntries[newUri] = it }
             invalidateThumb(oldUri)
         }
         val tree = browseRoot?.let { android.net.Uri.parse(it) } ?: return
@@ -5036,6 +5052,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** The stamp each file carried after this editor last opened or wrote it, by uri. */
     private val knownStamps = java.util.concurrent.ConcurrentHashMap<String, FileStamp>()
 
+    /** Each file's zip directory as this editor last read or wrote it, by uri: what a moved stamp is checked against. */
+    private val knownEntries = java.util.concurrent.ConcurrentHashMap<String, com.xnotes.format.ZipTail.Directory>()
+
     /** Where a fork landed: the new file's uri, and the name to show the user. */
     private class Fork(val uri: String, val name: String)
 
@@ -5062,10 +5081,33 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
     }.getOrNull()
 
-    /** Keep what the provider now reports for [uri] as its known stamp, or forget it when it reports nothing. */
-    private fun rememberStamp(uri: String) {
+    /**
+     * The zip directory of the document at [uri], or null when it cannot be read as one.
+     *
+     * The stream built on the descriptor is never closed: closing it closes that descriptor, and the
+     * ParcelFileDescriptor would then close a number the system may already have handed to something
+     * else. Only the descriptor itself is closed, once.
+     */
+    private fun entriesOf(uri: String): com.xnotes.format.ZipTail.Directory? = runCatching {
+        appContext.contentResolver.openFileDescriptor(android.net.Uri.parse(uri), "r")?.use { pfd ->
+            com.xnotes.format.ZipTail.read(java.io.FileInputStream(pfd.fileDescriptor).channel)
+        }
+    }.getOrNull()
+
+    /** The zip directory of [temp], the file a save was just copied from, or null when it cannot be read. */
+    private fun entriesIn(temp: java.io.File): com.xnotes.format.ZipTail.Directory? =
+        runCatching { java.io.FileInputStream(temp).use { com.xnotes.format.ZipTail.read(it.channel) } }.getOrNull()
+
+    /**
+     * Keep what [uri] holds now as the file this editor knows: the stamp its provider reports, and
+     * its zip directory, which is [entries] when the caller has just written the file and is read
+     * back from it otherwise. Forgets both when the provider reports no stamp.
+     */
+    private fun rememberStamp(uri: String, entries: com.xnotes.format.ZipTail.Directory? = null) {
+        val dir = entries ?: entriesOf(uri)
         val stamp = stampOf(uri)
         if (stamp != null) knownStamps[uri] = stamp else knownStamps.remove(uri)
+        if (stamp != null && dir != null) knownEntries[uri] = dir else knownEntries.remove(uri)
     }
 
     /**
@@ -5077,11 +5119,19 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * An unreadable stamp is **not** evidence. A provider that won't report size or mtime must never
      * trigger a fork: a spurious duplicate file is a worse default than the plain write. Nor is an
      * mtime that drifted under two seconds at the same size, which SD cards do on their own.
+     *
+     * A stamp that did move is only a reason to look. Some storage reports a modified time that
+     * settles later with nobody writing, so the file counts as changed only when its zip directory
+     * no longer matches the one this editor knows, or cannot be compared with it.
      */
     private fun changedUnderneath(uri: String): Boolean {
         val known = knownStamps[uri] ?: return false
         val now = stampOf(uri) ?: return false
-        return !known.matches(now)
+        if (known.matches(now)) return false
+        val entries = knownEntries[uri] ?: return true
+        if (entriesOf(uri)?.let { entries.sameAs(it) } != true) return true
+        knownStamps[uri] = now // the same save under a new stamp; the stamp is what was wrong
+        return false
     }
 
     /** The parent folder's document id for the file at [uri], or null when it has none. */
@@ -5193,9 +5243,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 val timing = com.xnotes.format.DocumentCodec.WriteTiming()
                 java.io.FileOutputStream(tmp).use { codec.write(doc, it, timing = timing) }
                 val copyStart = System.nanoTime()
-                val out = appContext.contentResolver.openOutputStream(android.net.Uri.parse(uri), "wt")
-                    ?: return@runCatching false
-                out.use { java.io.FileInputStream(tmp).use { input -> input.copyTo(it, copyBuffer) } }
+                // Opening the note truncates it, so the temp is opened first; see [copyOver].
+                val copied = com.xnotes.core.util.copyOver(tmp, copyBuffer) {
+                    appContext.contentResolver.openOutputStream(android.net.Uri.parse(uri), "wt")
+                }
+                if (!copied) return@runCatching false
                 state.lastSaveEncodeMs = msBetween(encodeStart, copyStart) // all four for the debug overlay
                 state.lastSaveCopyMs = msSince(copyStart)
                 state.lastSaveManifestMs = timing.manifestMs
@@ -5203,7 +5255,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 state.lastSaveDeflateMs = timing.deflateMs
                 state.lastSaveManifestBytes = timing.manifestBytes
                 state.lastSaveBytes = tmp.length() // live file size for the debug overlay
-                rememberStamp(uri) // read back what the provider reports, not what we wrote
+                // The stamp is read back from the provider; the directory is the temp's, whose bytes the file now is.
+                rememberStamp(uri, entriesIn(tmp))
                 true
             } finally {
                 tmp.delete()
@@ -5232,12 +5285,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (expected.isEmpty()) return@runCatching false
 
         val target = android.net.Uri.parse(uri)
-        // Streams built on a descriptor the provider owns are never closed here: closing one closes
-        // that descriptor, and the ParcelFileDescriptor would then close a number the system may
-        // already have handed to something else. Only the descriptor itself is closed, once.
-        val existing = appContext.contentResolver.openFileDescriptor(target, "r")?.use { pfd ->
-            com.xnotes.format.ZipTail.read(java.io.FileInputStream(pfd.fileDescriptor).channel)
-        } ?: return@runCatching false
+        val existing = entriesOf(uri) ?: return@runCatching false
 
         // Every asset has to still be the same file in the same place, or the manifest is not the
         // only thing that changed and the whole bundle has to be rebuilt.
@@ -5264,17 +5312,24 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 }
             }
             val spliceStart = System.nanoTime()
+            var entries: com.xnotes.format.ZipTail.Directory? = null
             val length = java.io.FileInputStream(tmp).use { tail ->
                 val tailDir = com.xnotes.format.ZipTail.read(tail.channel)
                     ?: return@runCatching false
+                // As in [entriesOf], the streams built on the provider's descriptor are never closed.
                 appContext.contentResolver.openFileDescriptor(target, "rw")?.use { pfd ->
-                    com.xnotes.format.ZipTail.splice(
+                    val written = com.xnotes.format.ZipTail.splice(
                         java.io.FileOutputStream(pfd.fileDescriptor).channel,
                         tailStart,
                         ordered.subList(0, expected.size),
                         tail.channel,
                         tailDir,
                     )
+                    // The directory the file now ends in, read while its descriptor is still open.
+                    if (written >= 0L) entries = runCatching {
+                        com.xnotes.format.ZipTail.read(java.io.FileInputStream(pfd.fileDescriptor).channel)
+                    }.getOrNull()
+                    written
                 } ?: -1L
             }
             if (length < 0L) return@runCatching false
@@ -5285,7 +5340,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             state.lastSaveDeflateMs = timing.deflateMs
             state.lastSaveManifestBytes = timing.manifestBytes
             state.lastSaveBytes = length
-            rememberStamp(uri) // read back what the provider reports, not what we wrote
+            rememberStamp(uri, entries) // the stamp is read back from the provider, not taken from what we wrote
             true
         } finally {
             tmp.delete()
@@ -7641,6 +7696,16 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private fun handleFlowKey(e: android.view.KeyEvent): Boolean {
         val ctrl = e.isCtrlPressed
         val shift = e.isShiftPressed
+        // A physical keyboard AltGr carries no flag of its own: it arrives as Alt (and often as
+        // Ctrl too), and the layout has already composed what the chord stands for - AltGr+Q on a
+        // QWERTZ board comes back as "@" before any rule below reads the modifiers as commands.
+        // Ctrl on its own still means a shortcut, so an unbound Ctrl chord stays global.
+        if (e.isAltPressed && e.unicodeChar != 0) {
+            val composed = deadKeys.accept(e.unicodeChar) ?: return true // a dead key waiting for its letter
+            flowText.applyReplace(flowText.selection, composed)
+            return true
+        }
+
         when {
             // Escape backs out of the slash menu first; a second one ends the session.
             e.keyCode == android.view.KeyEvent.KEYCODE_ESCAPE ->
@@ -7690,7 +7755,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             e.keyCode == android.view.KeyEvent.KEYCODE_MOVE_END -> flowLineEdge(start = false, extend = shift)
             else -> {
                 val ch = e.unicodeChar
-                if (ch == 0 || e.isAltPressed) return false
+                if (ch == 0) return false
                 val typed = deadKeys.accept(ch) ?: return true // a dead key waiting for its letter
                 flowText.applyReplace(flowText.selection, typed)
             }

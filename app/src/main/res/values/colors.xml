@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="window_bg">#0A0A0A</color>
-    <!-- Launcher icon tiles, one per icon the About easter egg offers. -->
+    <!-- Launcher icon tiles, one per icon. -->
     <color name="ic_launcher_background">#FF0D0B13</color>
     <color name="ic_launcher_background_cream_rose">#FF0C0B0E</color>
-    <color name="ic_launcher_background_lime">#FF0C0B12</color>
-    <color name="ic_launcher_background_aqua">#FF070C10</color>
     <color name="ic_launcher_background_ink_tile">#FFFF6B9A</color>
-    <color name="ic_launcher_background_classic">#FF0A0B0C</color>
     <color name="ic_launcher_background_graphite">#FF0D0D10</color>
-    <color name="ic_launcher_background_cream_tile">#FFF5F0E4</color>
+    <color name="ic_launcher_background_sumi">#FFF1E9D9</color>
+    <color name="ic_launcher_background_pow">#FFE8262D</color>
+    <color name="ic_launcher_background_marbling">#FF1B275F</color>
+    <color name="ic_launcher_background_classic">#FF000000</color>
     <!-- The launch screen behind the icon: the default theme's light background; values-night has the dark one. -->
     <color name="launch_stage">#FFE6E1E9</color>
 </resources>
