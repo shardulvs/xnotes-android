@@ -20,6 +20,7 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
+import com.xnotes.R
 import com.xnotes.core.tools.ToolbarAnchor
 import com.xnotes.core.tools.ToolbarBar
 import com.xnotes.core.tools.ToolbarDockEdge
@@ -31,6 +32,7 @@ import com.xnotes.settings.ToolbarPosition
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
+import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Test
 
 /** Device-level tests: exercise actual Compose controls, not only the model's edge mapping. */
@@ -49,18 +51,21 @@ class ToolbarDockComposeTest {
                     onChange = { geometry = it })
             }
         }
-        rule.onNodeWithText("Length").assertExists()
+        // The Redmi Pad 2 reports pt-BR labels; never assert hard-coded English.
+        val resources = InstrumentationRegistry.getInstrumentation().targetContext.resources
+        rule.onNodeWithText(resources.getString(R.string.toolbar_config_length)).assertExists()
         rule.onNodeWithText("430 dp").assertExists()
-        rule.onNodeWithText("Thickness").assertExists()
+        rule.onNodeWithText(resources.getString(R.string.toolbar_config_thickness)).assertExists()
         rule.onNodeWithText("70 dp").assertExists()
         rule.runOnIdle {
             geometry = geometry.movedTo(ToolbarAnchor.TOP_CENTER, floating = false)
             vertical = false
         }
         rule.waitForIdle()
-        rule.onNodeWithText("Length").assertExists()
+        // The localized labels must remain stable after rotation.
+        rule.onNodeWithText(resources.getString(R.string.toolbar_config_length)).assertExists()
         rule.onNodeWithText("430 dp").assertExists()
-        rule.onNodeWithText("Thickness").assertExists()
+        rule.onNodeWithText(resources.getString(R.string.toolbar_config_thickness)).assertExists()
         rule.onNodeWithText("70 dp").assertExists()
     }
 

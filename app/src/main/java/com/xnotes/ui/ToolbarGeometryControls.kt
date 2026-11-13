@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -43,8 +42,11 @@ internal fun ToolbarGeometryControls(
     val maxLength = axisDp.coerceIn(48, 2048)
     val maxThickness = toolbarSafeDockDepth(acrossDp.toFloat()).roundToInt().coerceAtLeast(48)
     BoxWithConstraints(Modifier.fillMaxWidth().testTag("toolbar-dimensions")) {
-        // Keep the sliders aligned to an actual two-column grid on wide cards.
-        val controlWidth = if (maxWidth >= 350.dp) (maxWidth - 10.dp) / 2 else maxWidth
+        // The inspector itself can be one of two cards beside an open navigation rail.
+        // A 350dp threshold nested two short sliders inside that already half-width
+        // card, leaving the rest apparently empty. Only split when *this card* has
+        // enough width to give both sliders a useful touch target (>=315dp each).
+        val controlWidth = if (maxWidth >= 640.dp) (maxWidth - 10.dp) / 2 else maxWidth
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
             ToolbarMeasure(toolbarStrings.getString(R.string.toolbar_config_length), geometry.lengthDp(vertical),
@@ -82,7 +84,7 @@ private fun ToolbarMeasure(
     onChange: (Int?) -> Unit,
 ) {
     val toolbarStrings = androidx.compose.ui.platform.LocalContext.current
-    Column(modifier) {
+    Column(modifier.testTag("toolbar-measure")) {
         Row(verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = MaterialTheme.typography.bodyMedium,

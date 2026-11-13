@@ -18,6 +18,7 @@ import com.xnotes.core.tools.ToolbarAnchor
 import com.xnotes.core.tools.ToolbarBar
 import com.xnotes.core.tools.ToolbarGeometry
 import com.xnotes.core.tools.ToolbarLayout
+import com.xnotes.core.tools.ToolbarWorkspace
 import com.xnotes.settings.ToolbarLook
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -26,6 +27,52 @@ import org.junit.Test
 /** Verifies organization responds to pane width, without hiding controls or creating unequal columns. */
 class ToolbarBarsBalancedComposeTest {
     @get:Rule val rule = createComposeRule()
+
+    @Test fun sidebarWidthInspectorGivesSlidersTheFullCardWidth() {
+        // With the tablet navigation rail open, ~930dp remains for preferences.
+        // The inspector divides that into two cards, so dimensions must use one
+        // full-width column; the old 350dp threshold incorrectly split them again.
+        var availableWidth by mutableStateOf(930.dp)
+        val bar = ToolbarBar("colors", "Colors", ToolbarLayout.DEFAULT,
+            geometry = ToolbarGeometry(anchor = ToolbarAnchor.TOP_CENTER, floating = true))
+        rule.setContent {
+            MaterialTheme {
+                Box(Modifier.width(availableWidth)) {
+                    ToolbarBarsInspector(
+                        workspace = ToolbarWorkspace(listOf(bar)),
+                        selectedBar = bar,
+                        look = ToolbarLook(floating = true),
+                        screenWidth = 1137.dp, screenHeight = 710.dp, colorCount = 5,
+                        onUpdateBar = {}, onConfigureDock = { _, _ -> },
+                    )
+                }
+            }
+        }
+        rule.waitForIdle()
+        fun inspect() {
+            val available = rule.onNodeWithTag("toolbar-dimensions", useUnmergedTree = true)
+                .getUnclippedBoundsInRoot()
+            val controls = rule.onAllNodesWithTag("toolbar-measure", useUnmergedTree = true)
+            val nodes = controls.fetchSemanticsNodes()
+            assertTrue("Expected five dimension controls, got ${nodes.size}", nodes.size == 5)
+            // Semantics can return unspecified layout bounds for controls fully
+            // outside the Compose test viewport (the stacked inspector is scrollable
+            // and taller than this device's window). Inspect unclipped rectangles
+            // only for the controls that are actually laid out in the test window.
+            val measured = (0 until nodes.size).map { controls[it].getUnclippedBoundsInRoot() }
+                .filter { it.left.value.isFinite() && it.right.value.isFinite() }
+            assertTrue("No measurable slider in the current viewport: $available", measured.isNotEmpty())
+            for (control in measured) {
+                assertTrue("Slider measure only partially fills the card: control=$control card=$available",
+                    (control.right - control.left).value >= (available.right - available.left).value * 0.90f)
+            }
+        }
+        inspect()
+        // Also check the inspector in its single-card stacked mode.
+        rule.runOnIdle { availableWidth = 520.dp }
+        rule.waitForIdle()
+        inspect()
+    }
 
     @Test fun widePaneGroupsAreAdjacentAndNarrowPaneStacksThem() {
         var screenWidth by mutableStateOf(900.dp)
