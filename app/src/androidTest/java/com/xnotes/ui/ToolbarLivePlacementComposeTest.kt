@@ -1,0 +1,861 @@
+package com.xnotes.ui
+
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.down
+import androidx.compose.ui.test.moveBy
+import androidx.compose.ui.test.up
+import androidx.compose.ui.unit.dp
+import com.xnotes.core.tools.ToolbarAnchor
+import com.xnotes.core.tools.ToolbarBar
+import com.xnotes.core.tools.ToolbarDockAlignment
+import com.xnotes.core.tools.ToolbarDockEdge
+import com.xnotes.core.tools.ToolbarGeometry
+import com.xnotes.core.tools.ToolbarEntry
+import com.xnotes.core.tools.ToolbarItem
+import com.xnotes.core.tools.ToolbarSection
+import com.xnotes.core.tools.ToolbarLayout
+import com.xnotes.core.tools.ToolbarWorkspace
+import com.xnotes.settings.ToolbarLook
+import com.xnotes.settings.ToolbarPosition
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+
+/** Tests the *live* XNote/XCanvas containers, not the already-correct editor preview. */
+class ToolbarLivePlacementComposeTest {
+    @get:Rule val rule = createComposeRule()
+
+    private fun bar(id: String, tall: Boolean, floating: Boolean) = ToolbarBar(
+        id, id, ToolbarLayout.DEFAULT,
+        geometry = ToolbarGeometry(
+            dockEdge = if (floating) null else ToolbarDockEdge.BOTTOM,
+            anchor = ToolbarAnchor.BOTTOM_CENTER,
+            dockAlignment = ToolbarDockAlignment.CENTER,
+            floating = floating,
+            dockLane = 0,
+            widthDp = 148,
+            heightDp = if (tall) 112 else 52,
+        ),
+    )
+
+    /** Actual ToolbarFrame + ToolbarSectionGrid measurements: one row vs two rows. */
+    private fun naturalBar(id: String, rows: Int, floating: Boolean): ToolbarBar {
+        val entries = if (rows == 2) listOf(
+            ToolbarEntry(ToolbarItem.PEN, lane = 0),
+            ToolbarEntry(ToolbarItem.ERASER, lane = 1),
+        ) else listOf(ToolbarEntry(ToolbarItem.COLORS, lane = 0))
+        return ToolbarBar(id, id,
+            ToolbarLayout(listOf(ToolbarSection(entries, lanes = rows))),
+            geometry = ToolbarGeometry(
+                floating = floating, anchor = ToolbarAnchor.BOTTOM_CENTER,
+                dockEdge = if (floating) null else ToolbarDockEdge.BOTTOM,
+                dockAlignment = ToolbarDockAlignment.CENTER,
+                dockLane = 0, widthDp = 220, heightDp = null,
+            ))
+    }
+
+    @Composable
+    private fun RealToolbar(bar: ToolbarBar) {
+        Box(Modifier.testTag("natural-${bar.id}")) {
+            ToolbarFrame(armed = null, layout = bar.layout, geometry = bar.geometry) {
+                ToolbarSections(bar.layout) { _, section ->
+                    ToolbarSectionGrid(section) { _ -> Box(Modifier.size(42.dp)) }
+                }
+            }
+        }
+    }
+
+    @Test fun naturalOneRowBarTouchesBottomEdgeBesideTwoRowBarInDockedMode() {
+        val bars = ToolbarWorkspace(listOf(
+            naturalBar("two", 2, false), naturalBar("one", 1, false)))
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalToolbarLook provides ToolbarLook()) {
+                    Column(Modifier.size(840.dp, 380.dp)) {
+                        ToolbarAround(bar = { RealToolbar(bars.bars.first()) },
+                            onCover = { _, _, _, _ -> },
+                            workspace = bars,
+                            dockedContent = { RealToolbar(it) }) {
+                            Box(Modifier.fillMaxSize())
+                        }
+                    }
+                }
+            }
+        }
+        val tall = rule.onNodeWithTag("natural-two", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        val short = rule.onNodeWithTag("natural-one", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("Natural 1-row dock bar does not meet 2-row bottom edge: $short / $tall",
+            kotlin.math.abs((tall.bottom - short.bottom).value) <= 2f)
+        assertTrue("Expected real two-row toolbar to be taller than one-row toolbar", tall.top < short.top)
+    }
+
+    @Test fun naturalOneRowBarTouchesBottomEdgeBesideTwoRowBarInFloatingMode() {
+        val bars = ToolbarWorkspace(listOf(
+            naturalBar("two", 2, true), naturalBar("one", 1, true)))
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalToolbarLook provides ToolbarLook(floating = true)) {
+                    Box(Modifier.size(840.dp, 380.dp)) {
+                        WorkspaceFloatingBars(bars, onMoveBar = { _, _, _ -> },
+                            primaryContent = { RealToolbar(bars.bars.first()) },
+                            content = { RealToolbar(it) })
+                    }
+                }
+            }
+        }
+        val tall = rule.onNodeWithTag("natural-two", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        val short = rule.onNodeWithTag("natural-one", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("Natural 1-row float bar does not meet 2-row bottom edge: $short / $tall",
+            kotlin.math.abs((tall.bottom - short.bottom).value) <= 2f)
+        assertTrue("Expected real two-row toolbar to be taller than one-row toolbar", tall.top < short.top)
+    }
+
+    @Test fun twoLeftDockedBarsMovingNearBottomCornerKeepsBothVisible() {
+        // Repro: the pointer starts low on a full-height LEFT rail. The BAR's
+        // centre never approaches BOTTOM, even though the stylus does.
+        fun leftRail(id: String, lane: Int) = ToolbarBar(id, id,
+            ToolbarLayout(listOf(ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN))))),
+            geometry = ToolbarGeometry(
+                anchor = ToolbarAnchor.CENTER_LEFT,
+                dockEdge = ToolbarDockEdge.LEFT,
+                dockAlignment = ToolbarDockAlignment.CENTER,
+                dockLane = lane,
+                widthDp = 68,
+                heightDp = null,
+            ))
+        val initial = ToolbarWorkspace(listOf(leftRail("moving", 0), leftRail("peer", 1)))
+        var workspace by mutableStateOf(initial)
+        var look by mutableStateOf(ToolbarLook(position = ToolbarPosition.LEFT))
+        var commits = 0
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalToolbarLook provides look) {
+                    Column(Modifier.size(840.dp, 380.dp).testTag("left-bottom-stage")) {
+                        ToolbarAround(
+                            bar = { RealToolbar(workspace.bars.first()) },
+                            onCover = { _, _, _, _ -> }, workspace = workspace,
+                            dockedContent = { RealToolbar(it) },
+                            onMoveBar = { id, anchor, alignment ->
+                                commits++
+                                val (movedWorkspace, movedLook) = toolbarProjectedMove(
+                                    workspace, look, id,
+                                    com.xnotes.core.tools.ToolbarDropPosition(anchor, alignment))!!
+                                workspace = movedWorkspace
+                                look = movedLook
+                            },
+                            onReorderBar = { source, target ->
+                                workspace = workspace.reorderVisualBar(source, target)
+                            },
+                        ) { floating ->
+                            Box(Modifier.fillMaxSize()) { floating() }
+                        }
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        val stageBounds = rule.onNodeWithTag("left-bottom-stage").fetchSemanticsNode().boundsInRoot
+        val moving = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        // Finger is on LOWER portion of the rail, not its centre.
+        val fingerDown = Offset(moving.center.x, moving.bottom - 28f)
+        val fingerUp = Offset(stageBounds.left + stageBounds.width * .20f,
+            stageBounds.bottom - 12f)
+        rule.onNodeWithTag("left-bottom-stage").performTouchInput {
+            down(fingerDown - stageBounds.topLeft)
+            advanceEventTime(790)
+            moveBy(fingerUp - fingerDown)
+            advanceEventTime(50)
+            up()
+        }
+        rule.waitForIdle()
+        rule.runOnIdle {
+            assertEquals("Cross-edge move was swallowed as a reorder", 1, commits)
+            assertEquals(ToolbarDockEdge.BOTTOM, workspace.bars[0].geometry.dockEdge)
+            assertEquals(ToolbarDockEdge.LEFT, workspace.bars[1].geometry.dockEdge)
+            assertEquals(listOf("moving", "peer"), workspace.bars.map { it.id })
+        }
+        val plan = toolbarDockPlan(workspace, look, 840.dp, 380.dp)
+        assertTrue("No bar may disappear from plan: ${plan.rejected}", plan.rejected.isEmpty())
+        for (id in listOf("moving", "peer")) {
+            val slot = rule.onNodeWithTag("live-toolbar-slot-$id", useUnmergedTree = true)
+                .getUnclippedBoundsInRoot()
+            val stage = rule.onNodeWithTag("left-bottom-stage").getUnclippedBoundsInRoot()
+            assertTrue("Bar $id must remain visible after the dock move: $slot vs $stage",
+                slot.right > slot.left && slot.bottom > slot.top &&
+                    slot.left >= stage.left - 2.dp && slot.top >= stage.top - 2.dp &&
+                    slot.right <= stage.right + 2.dp && slot.bottom <= stage.bottom + 2.dp)
+        }
+    }
+
+    @Test fun repeatedTwoBarLeftRightMovesAlwaysCommitAndClearTheGhost() {
+        fun side(id: String, lane: Int) = ToolbarBar(id, id,
+            ToolbarLayout(listOf(ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN))))),
+            geometry = ToolbarGeometry(
+                anchor = ToolbarAnchor.CENTER_LEFT, dockEdge = ToolbarDockEdge.LEFT,
+                dockAlignment = ToolbarDockAlignment.CENTER, dockLane = lane,
+                widthDp = 65, heightDp = 180,
+            ))
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(
+            side("moving", 0), side("peer", 1),
+        )))
+        var look by mutableStateOf(ToolbarLook(position = ToolbarPosition.LEFT))
+        var commits = 0
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalToolbarLook provides look) {
+                    Column(Modifier.size(840.dp, 430.dp).testTag("repeated-move-stage")) {
+                        ToolbarAround(bar = { RealToolbar(workspace.bars.first()) },
+                            onCover = { _, _, _, _ -> }, workspace = workspace,
+                            dockedContent = { RealToolbar(it) },
+                            onMoveBar = { id, anchor, alignment ->
+                                commits++
+                                val changed = toolbarProjectedMove(workspace, look, id,
+                                    com.xnotes.core.tools.ToolbarDropPosition(anchor, alignment))!!
+                                workspace = changed.first
+                                look = changed.second
+                            },
+                            onReorderBar = { from, to ->
+                                workspace = workspace.reorderVisualBar(from, to)
+                            },
+                        ) { floating -> Box(Modifier.fillMaxSize()) { floating() } }
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        for (i in 0 until 4) {
+            val desired = if (i % 2 == 0) ToolbarDockEdge.RIGHT else ToolbarDockEdge.LEFT
+            val stage = rule.onNodeWithTag("repeated-move-stage").fetchSemanticsNode().boundsInRoot
+            val source = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+                .fetchSemanticsNode().boundsInRoot
+            val down = source.center
+            val release = Offset(
+                if (desired == ToolbarDockEdge.RIGHT) stage.right - 12f else stage.left + 12f,
+                stage.center.y,
+            )
+            rule.onNodeWithTag("repeated-move-stage").performTouchInput {
+                down(down - stage.topLeft)
+                advanceEventTime(790)
+                moveBy(release - down)
+                advanceEventTime(50)
+                up()
+            }
+            rule.waitForIdle()
+            rule.runOnIdle {
+                assertEquals("Iteration $i must commit exactly once", i + 1, commits)
+                assertEquals("Iteration $i returned to the previous edge", desired,
+                    workspace.bars[0].geometry.dockEdge)
+                assertEquals(ToolbarDockEdge.LEFT, workspace.bars[1].geometry.dockEdge)
+            }
+            val planned = toolbarDockPlan(workspace, look, 840.dp, 430.dp)
+            assertTrue("Iteration $i hid a peer: ${planned.rejected}", planned.rejected.isEmpty())
+            rule.onNodeWithTag("toolbar-drop-indicator-moving", useUnmergedTree = true)
+                .assertDoesNotExist()
+            rule.onNodeWithTag("live-toolbar-slot-peer", useUnmergedTree = true).assertExists()
+        }
+    }
+
+    /** Same drag transaction under different tool density and dock depth. Each case
+     * checks repeated transfers, including returning to a previously occupied edge.
+     * Single successful drags are insufficient to expose stale pointerInput captures. */
+    private fun verifyMultiLineCrossEdgeScenario(rows: Int, floating: Boolean,
+                                                  thickness: Int, length: Int,
+                                                  destinationOccupied: Boolean = false) {
+        val tools = (0 until rows).flatMap { lane -> listOf(
+            ToolbarEntry(ToolbarItem.PEN, lane = lane),
+            ToolbarEntry(ToolbarItem.ERASER, lane = lane),
+        ) }
+        val layout = ToolbarLayout(listOf(ToolbarSection(tools, lanes = rows)))
+        fun bar(id: String, lane: Int) = ToolbarBar(id, id, layout,
+            geometry = ToolbarGeometry(
+                floating = floating,
+                anchor = ToolbarAnchor.CENTER_LEFT,
+                dockEdge = if (floating) null else ToolbarDockEdge.LEFT,
+                dockAlignment = ToolbarDockAlignment.CENTER,
+                dockLane = lane,
+                widthDp = thickness,
+                heightDp = length,
+            ))
+        val initialBars = listOf(bar("moving", 0), bar("peer", 1)) +
+            if (destinationOccupied) listOf(bar("destination", 0).copy(geometry =
+                bar("destination", 0).geometry.copy(
+                    anchor = ToolbarAnchor.CENTER_RIGHT,
+                    dockEdge = if (floating) null else ToolbarDockEdge.RIGHT,
+                ))) else emptyList()
+        var workspace by mutableStateOf(ToolbarWorkspace(initialBars))
+        var look by mutableStateOf(ToolbarLook(
+            position = ToolbarPosition.LEFT, floating = floating,
+        ))
+        var commits = 0
+        val onMove: (String, ToolbarAnchor, ToolbarDockAlignment) -> Unit = { id, anchor, alignment ->
+            val projected = toolbarProjectedMove(workspace, look, id,
+                com.xnotes.core.tools.ToolbarDropPosition(anchor, alignment))!!
+            workspace = projected.first
+            look = projected.second
+            commits++
+        }
+        val onReorder: (String, String) -> Unit = { source, target ->
+            workspace = workspace.reorderVisualBar(source, target)
+        }
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalToolbarLook provides look) {
+                    if (floating) {
+                        Box(Modifier.size(840.dp, 430.dp).testTag("size-matrix-stage")) {
+                            WorkspaceFloatingBars(workspace, onMoveBar = onMove,
+                                primaryContent = { RealToolbar(workspace.bars[0]) },
+                                content = { RealToolbar(it) }, onReorderBar = onReorder)
+                        }
+                    } else {
+                        Column(Modifier.size(840.dp, 430.dp).testTag("size-matrix-stage")) {
+                            ToolbarAround(bar = { RealToolbar(workspace.bars[0]) },
+                                onCover = { _, _, _, _ -> }, workspace = workspace,
+                                dockedContent = { RealToolbar(it) },
+                                onMoveBar = onMove, onReorderBar = onReorder) { floatingBars ->
+                                Box(Modifier.fillMaxSize()) { floatingBars() }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        val destinations = listOf(
+            ToolbarDockEdge.RIGHT, ToolbarDockEdge.TOP,
+            ToolbarDockEdge.BOTTOM, ToolbarDockEdge.LEFT,
+        )
+        for ((index, destination) in destinations.withIndex()) {
+            val stage = rule.onNodeWithTag("size-matrix-stage").fetchSemanticsNode().boundsInRoot
+            val moving = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+                .fetchSemanticsNode().boundsInRoot
+            val release = when (destination) {
+                ToolbarDockEdge.RIGHT -> Offset(stage.right - 12f, stage.center.y)
+                ToolbarDockEdge.LEFT -> Offset(stage.left + 12f, stage.center.y)
+                ToolbarDockEdge.TOP -> Offset(stage.center.x, stage.top + 12f)
+                ToolbarDockEdge.BOTTOM -> Offset(stage.center.x, stage.bottom - 12f)
+            }
+            rule.onNodeWithTag("size-matrix-stage").performTouchInput {
+                down(moving.center - stage.topLeft)
+                advanceEventTime(790)
+                moveBy(release - moving.center)
+                advanceEventTime(50)
+                up()
+            }
+            rule.waitForIdle()
+            rule.runOnIdle {
+                assertEquals("rows=$rows floating=$floating thickness=$thickness step=$index",
+                    index + 1, commits)
+                val edge = workspace.bars[0].geometry.let {
+                    if (it.floating) it.anchor.floatingEdge() else it.dockEdge
+                }
+                assertEquals("Moving bar returned or teleported", destination, edge)
+                assertEquals("Peer changed edges", ToolbarDockEdge.LEFT,
+                    workspace.bars[1].geometry.let {
+                        if (it.floating) it.anchor.floatingEdge() else it.dockEdge
+                    })
+                if (destinationOccupied) assertEquals(
+                    "The destination-side peer changed edges", ToolbarDockEdge.RIGHT,
+                    workspace.bars[2].geometry.let {
+                        if (it.floating) it.anchor.floatingEdge() else it.dockEdge
+                    },
+                )
+                val planned = if (floating)
+                    toolbarFloatingPlan(workspace, look, 840.dp, 430.dp, 5)
+                else toolbarDockPlan(workspace, look, 840.dp, 430.dp)
+                assertTrue("Planning rejected a bar: ${planned.rejected}",
+                    planned.rejected.isEmpty())
+            }
+            rule.onNodeWithTag("toolbar-drop-indicator-moving", useUnmergedTree = true)
+                .assertDoesNotExist()
+            rule.onNodeWithTag("live-toolbar-slot-moving", useUnmergedTree = true).assertExists()
+            rule.onNodeWithTag("live-toolbar-slot-peer", useUnmergedTree = true).assertExists()
+            if (destinationOccupied) rule.onNodeWithTag(
+                "live-toolbar-slot-destination", useUnmergedTree = true).assertExists()
+        }
+    }
+
+    @Test fun compactSingleLineDockedEdgeMatrix() =
+        verifyMultiLineCrossEdgeScenario(1, false, 52, 148)
+
+    @Test fun regularTwoLineDockedEdgeMatrix() =
+        verifyMultiLineCrossEdgeScenario(2, false, 112, 196)
+
+    @Test fun largeThreeLineDockedEdgeMatrix() =
+        verifyMultiLineCrossEdgeScenario(3, false, 172, 255)
+
+    @Test fun compactSingleLineFloatingEdgeMatrix() =
+        verifyMultiLineCrossEdgeScenario(1, true, 52, 148)
+
+    @Test fun regularTwoLineFloatingEdgeMatrix() =
+        verifyMultiLineCrossEdgeScenario(2, true, 112, 196)
+
+    @Test fun largeThreeLineFloatingEdgeMatrix() =
+        verifyMultiLineCrossEdgeScenario(3, true, 172, 255)
+
+    @Test fun twoLineDockedEdgesWithOccupiedDestination() =
+        verifyMultiLineCrossEdgeScenario(2, false, 112, 196, destinationOccupied = true)
+
+    @Test fun threeLineDockedEdgesWithOccupiedDestination() =
+        verifyMultiLineCrossEdgeScenario(3, false, 172, 255, destinationOccupied = true)
+
+    @Test fun twoLineFloatingEdgesWithOccupiedDestination() =
+        verifyMultiLineCrossEdgeScenario(2, true, 112, 196, destinationOccupied = true)
+
+    @Test fun threeLineFloatingEdgesWithOccupiedDestination() =
+        verifyMultiLineCrossEdgeScenario(3, true, 172, 255, destinationOccupied = true)
+
+    @Test fun crossEdgeAfterReorderHoverShowsIndicatorAndPrepositionsPeers() {
+        val initial = ToolbarWorkspace(listOf(
+            bar("moving", false, true), bar("peer", false, true)))
+        var workspace by mutableStateOf(initial)
+        var moveCommits = 0
+        val look = ToolbarLook(floating = true)
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalToolbarLook provides look) {
+                    Box(Modifier.size(840.dp, 380.dp).testTag("cross-edge-stage")) {
+                        WorkspaceFloatingBars(workspace, onMoveBar = { id, anchor, alignment ->
+                            moveCommits++
+                            workspace = toolbarProjectedMove(workspace, look, id,
+                                com.xnotes.core.tools.ToolbarDropPosition(anchor, alignment))!!.first
+                        }, onReorderBar = { from, to ->
+                            workspace = workspace.reorderVisualBar(from, to)
+                        }, primaryContent = { Box(Modifier.size(148.dp, 52.dp)) },
+                            content = { Box(Modifier.size(148.dp, 52.dp)) })
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        val stage = rule.onNodeWithTag("cross-edge-stage", useUnmergedTree = true)
+        val stageTopLeft = stage.fetchSemanticsNode().boundsInRoot.topLeft
+        val first = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot.center
+        val neighbor = rule.onNodeWithTag("live-toolbar-slot-peer", useUnmergedTree = true)
+        val peerBefore = neighbor.fetchSemanticsNode().boundsInRoot.center
+        stage.performTouchInput {
+            down(first - stageTopLeft)
+            advanceEventTime(790)
+            moveBy(peerBefore - first)
+            advanceEventTime(48)
+        }
+        rule.waitForIdle()
+        // The same long-press gesture now crosses from reorder into edge placement.
+        // The peer's original hitbox remains frozen, but it must stop blocking the ghost.
+        stage.performTouchInput {
+            moveBy(Offset(0f, stageTopLeft.y + 25f - peerBefore.y))
+            advanceEventTime(48)
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag("toolbar-drop-indicator-moving", useUnmergedTree = true).assertExists()
+        rule.runOnIdle { assertEquals("Pre-layout must not persist a move", 0, moveCommits) }
+        val peerDuring = neighbor.fetchSemanticsNode().boundsInRoot.center
+        assertTrue("Neighbour must prepare its new position before the drop",
+            kotlin.math.abs(peerBefore.x - peerDuring.x) > 5f ||
+                kotlin.math.abs(peerBefore.y - peerDuring.y) > 5f)
+        stage.performTouchInput { up() }
+        rule.waitForIdle()
+        rule.runOnIdle {
+            assertEquals(1, moveCommits)
+            assertTrue(workspace.bars.first().geometry.anchor in listOf(
+                ToolbarAnchor.TOP_LEFT, ToolbarAnchor.TOP_CENTER, ToolbarAnchor.TOP_RIGHT))
+        }
+    }
+
+    @Test fun orientationResizeAndMovementProgressTogetherBeforeCommit() {
+        val moving = bar("moving", false, true)
+        val peer = bar("peer", false, true).copy(geometry =
+            bar("peer", false, true).geometry.copy(anchor = ToolbarAnchor.TOP_CENTER))
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(moving, peer)))
+        var commits = 0
+        val look = ToolbarLook(floating = true)
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalToolbarLook provides look) {
+                    Box(Modifier.size(840.dp, 380.dp).testTag("sync-stage")) {
+                        WorkspaceFloatingBars(workspace, onMoveBar = { id, anchor, alignment ->
+                            commits++
+                            workspace = toolbarProjectedMove(workspace, look, id,
+                                com.xnotes.core.tools.ToolbarDropPosition(anchor, alignment))!!.first
+                        }, onReorderBar = { from, to ->
+                            workspace = workspace.reorderVisualBar(from, to)
+                        }, primaryContent = { Box(Modifier.size(52.dp)) },
+                            content = { Box(Modifier.size(52.dp)) })
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        val stage = rule.onNodeWithTag("sync-stage", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val source = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+        val slot = rule.onNodeWithTag("live-toolbar-slot-moving", useUnmergedTree = true)
+        val origin = slot.getUnclippedBoundsInRoot()
+        val center = source.fetchSemanticsNode().boundsInRoot.center
+        rule.mainClock.autoAdvance = false
+        rule.onNodeWithTag("sync-stage", useUnmergedTree = true).performTouchInput {
+            down(center - stage.topLeft)
+            advanceEventTime(780)
+            moveBy(Offset(stage.right - 25f - center.x, stage.center.y - center.y))
+            advanceEventTime(48)
+            up()
+        }
+        rule.mainClock.advanceTimeByFrame()
+        val initial = slot.getUnclippedBoundsInRoot()
+        val initialDragX = source.getUnclippedBoundsInRoot().left.value
+        rule.runOnIdle { assertEquals("The move must not commit before the shared animation", 0, commits) }
+        rule.mainClock.advanceTimeBy(105)
+        val mid = slot.getUnclippedBoundsInRoot()
+        val midDragX = source.getUnclippedBoundsInRoot().left.value
+        assertTrue("The horizontal toolbar must narrow DURING movement: $initial / $mid",
+            (mid.right - mid.left).value < (initial.right - initial.left).value - 10f)
+        assertTrue("The vertical toolbar must grow DURING movement: $initial / $mid",
+            (mid.bottom - mid.top).value > (initial.bottom - initial.top).value + 10f)
+        // Final settlement is now measured from the canonical outer slot,
+        // not the old inner content inset. This destination can be only a few
+        // dp from the release point; the 10-dp minimum was an arbitrary distance
+        // assertion, not a continuity check. Verify nonzero concurrent progress
+        // and then that the midpoint stays on the completed movement segment.
+        assertTrue("Translation must progress with resize: $initialDragX -> $midDragX",
+            kotlin.math.abs(midDragX - initialDragX) > 3f)
+        rule.runOnIdle { assertEquals("Size changed only after an early commit", 0, commits) }
+        rule.mainClock.advanceTimeBy(240)
+        rule.waitForIdle()
+        rule.runOnIdle {
+            assertEquals(1, commits)
+            assertEquals(ToolbarAnchor.CENTER_RIGHT, workspace.bars.first().geometry.anchor)
+        }
+        val landed = slot.getUnclippedBoundsInRoot()
+        val landedDragX = source.getUnclippedBoundsInRoot().left.value
+        val minX = minOf(initialDragX, landedDragX) - 8f
+        val maxX = maxOf(initialDragX, landedDragX) + 8f
+        assertTrue("Mid-settle translation reversed or overshot the completed path: " +
+            "$initialDragX -> $midDragX -> $landedDragX",
+            midDragX in minX..maxX)
+        assertTrue("The landing width must match the resized destination",
+            (landed.right - landed.left).value < (origin.right - origin.left).value - 40f)
+        rule.mainClock.autoAdvance = true
+    }
+
+    @Test fun floatingMoveShowsProjectedTargetAndSettlesAfterRelease() {
+        val moving = bar("moving", false, true)
+        val peer = bar("peer", false, true).let { it.copy(geometry =
+            it.geometry.copy(anchor = ToolbarAnchor.TOP_CENTER,
+                dockAlignment = ToolbarDockAlignment.CENTER)) }
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(moving, peer)))
+        var commits = 0
+        val look = ToolbarLook(floating = true)
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalToolbarLook provides look) {
+                    Box(Modifier.size(840.dp, 380.dp).testTag("drop-stage")) {
+                        WorkspaceFloatingBars(workspace = workspace,
+                            onMoveBar = { id, anchor, alignment ->
+                                commits++
+                                workspace = toolbarProjectedMove(workspace, look, id,
+                                    com.xnotes.core.tools.ToolbarDropPosition(anchor, alignment))!!.first
+                            },
+                            onReorderBar = { source, destination ->
+                                workspace = workspace.reorderVisualBar(source, destination)
+                            },
+                            primaryContent = { Box(Modifier.size(148.dp, 52.dp)) },
+                            content = { Box(Modifier.size(148.dp, 52.dp)) },
+                        )
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        val stage = rule.onNodeWithTag("drop-stage", useUnmergedTree = true)
+        val origin = stage.fetchSemanticsNode().boundsInRoot.topLeft
+        val barCenter = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot.center
+        // Drag to the top, but away from the other bar so reorder won't consume it.
+        stage.performTouchInput {
+            down(barCenter - origin)
+            advanceEventTime(780)
+            moveBy(Offset(-145f, origin.y + 25f - barCenter.y))
+            advanceEventTime(48)
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag("toolbar-drop-indicator-moving", useUnmergedTree = true).assertExists()
+        rule.runOnIdle { assertEquals("The bar must not persist while the finger is down", 0, commits) }
+        stage.performTouchInput { up() }
+        rule.waitForIdle()
+        rule.runOnIdle {
+            assertEquals("A single completed move must be persisted", 1, commits)
+            assertTrue("The released bar must move to the top edge",
+                workspace.bars.first().geometry.anchor in listOf(
+                    ToolbarAnchor.TOP_LEFT, ToolbarAnchor.TOP_CENTER, ToolbarAnchor.TOP_RIGHT))
+        }
+        val slot = rule.onNodeWithTag("live-toolbar-slot-moving", useUnmergedTree = true)
+            .getUnclippedBoundsInRoot()
+        val stageBox = stage.getUnclippedBoundsInRoot()
+        assertTrue("Bar should settle near the target top edge: $slot vs $stageBox",
+            slot.top < stageBox.top + 60.dp)
+    }
+
+    @Test fun legacyPrimaryAndColorsUseSameFloatingLaneAndCanReorder() {
+        // The primary uses legacy ToolbarLook.floating rather than geometry.floating.
+        // The old runtime drew it separately from colors; unlike the preview, its
+        // lower edge could drift and it was excluded from same-lane gesture reorder.
+        val primary = naturalBar("main", 2, true).let { bar ->
+            bar.copy(geometry = bar.geometry.copy(floating = false))
+        }
+        val colors = naturalBar("colors", 1, true)
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(primary, colors)))
+        val look = ToolbarLook(floating = true, position = ToolbarPosition.BOTTOM)
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalToolbarLook provides look) {
+                    Column(Modifier.size(840.dp, 380.dp)) {
+                        ToolbarAround(
+                            bar = { RealToolbar(workspace.bars.first()) },
+                            onCover = { _, _, _, _ -> },
+                            workspace = workspace,
+                            dockedContent = { RealToolbar(it) },
+                            onMoveBar = { _, _, _ -> },
+                            onReorderBar = { from, to ->
+                                workspace = workspace.reorderVisualBar(from, to)
+                            },
+                        ) { oldFloating ->
+                            Box(Modifier.fillMaxSize()) {
+                                oldFloating()
+                                WorkspaceFloatingBars(workspace, onMoveBar = { _, _, _ -> },
+                                    onReorderBar = { from, to ->
+                                        workspace = workspace.reorderVisualBar(from, to)
+                                    },
+                                    primaryContent = { RealToolbar(workspace.bars.first()) },
+                                    content = { RealToolbar(it) },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        assertEquals("Legacy primary must not be rendered twice", 1,
+            rule.onAllNodesWithTag("natural-main", useUnmergedTree = true)
+                .fetchSemanticsNodes().size)
+        val main = rule.onNodeWithTag("natural-main", useUnmergedTree = true)
+            .getUnclippedBoundsInRoot()
+        val colorBar = rule.onNodeWithTag("natural-colors", useUnmergedTree = true)
+            .getUnclippedBoundsInRoot()
+        assertTrue("Legacy floating main and colors do not share bottom edge: $main / $colorBar",
+            kotlin.math.abs((main.bottom - colorBar.bottom).value) <= 2f)
+        val source = rule.onNodeWithTag("toolbar-drag-surface-main", useUnmergedTree = true)
+        val start = source.fetchSemanticsNode().boundsInRoot.center
+        val end = rule.onNodeWithTag("live-toolbar-slot-colors", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot.center
+        source.performTouchInput {
+            down(center)
+            advanceEventTime(780)
+            moveBy(Offset(end.x - start.x, end.y - start.y))
+            advanceEventTime(40)
+            up()
+        }
+        rule.waitForIdle()
+        rule.runOnIdle {
+            assertEquals(listOf("colors", "main"),
+                workspace.bars.sortedBy { it.geometry.visualOrder }.map { it.id })
+        }
+    }
+
+    @Test fun shortDockedBottomBarSharesScreenEdgeWithTwoRowPeer() {
+        val workspace = ToolbarWorkspace(listOf(bar("two", true, false), bar("one", false, false)))
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalToolbarLook provides ToolbarLook()) {
+                    Column(Modifier.size(840.dp, 380.dp)) {
+                        ToolbarAround(
+                            bar = { Box(Modifier.size(148.dp, 112.dp).testTag("two-content")) },
+                            onCover = { _, _, _, _ -> },
+                            workspace = workspace,
+                            dockedContent = { Box(Modifier.width(148.dp).height(52.dp).testTag("one-content")) },
+                        ) { _ -> Box(Modifier.fillMaxSize()) }
+                    }
+                }
+            }
+        }
+        val tall = rule.onNodeWithTag("two-content", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        val short = rule.onNodeWithTag("one-content", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("Docked bottom shorter bar is floating inside the taller lane: $short vs $tall",
+            kotlin.math.abs((tall.bottom - short.bottom).value) <= 2f)
+        assertTrue("Regression scenario must use different row heights", tall.top < short.top)
+    }
+
+    @Test fun shortFloatingBottomBarSharesScreenEdgeWithTwoRowPeer() {
+        val workspace = ToolbarWorkspace(listOf(bar("two", true, true), bar("one", false, true)))
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalToolbarLook provides ToolbarLook(floating = true)) {
+                    Box(Modifier.size(840.dp, 380.dp)) {
+                        WorkspaceFloatingBars(workspace, onMoveBar = { _, _, _ -> },
+                            primaryContent = { Box(Modifier.size(148.dp, 112.dp).testTag("two-content")) },
+                            content = { Box(Modifier.width(148.dp).height(52.dp).testTag("one-content")) })
+                    }
+                }
+            }
+        }
+        val tall = rule.onNodeWithTag("two-content", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        val short = rule.onNodeWithTag("one-content", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("Floating bottom shorter bar is floating inside the taller lane: $short vs $tall",
+            kotlin.math.abs((tall.bottom - short.bottom).value) <= 2f)
+        assertTrue("Regression scenario must use different row heights", tall.top < short.top)
+    }
+
+    @Test fun dockedBarOrientationChangesByResizingTheSlot() {
+        val horizontal = bar("resizing", false, false).copy(geometry =
+            bar("resizing", false, false).geometry.copy(
+                anchor = ToolbarAnchor.BOTTOM_CENTER, dockEdge = ToolbarDockEdge.BOTTOM,
+                widthDp = 240, heightDp = 55))
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(horizontal)))
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalToolbarLook provides ToolbarLook()) {
+                    Column(Modifier.size(840.dp, 380.dp)) {
+                        ToolbarAround(bar = { Box(Modifier.size(55.dp)) },
+                            onCover = { _, _, _, _ -> }, workspace = workspace,
+                            dockedContent = { Box(Modifier.size(55.dp)) },
+                        ) { _ -> Box(Modifier.fillMaxSize()) }
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        val node = rule.onNodeWithTag("live-toolbar-slot-resizing", useUnmergedTree = true)
+        val original = node.getUnclippedBoundsInRoot()
+        rule.mainClock.autoAdvance = false
+        rule.runOnIdle {
+            val bar = workspace.bars.first()
+            workspace = workspace.replaceBar(bar.copy(geometry = bar.geometry.copy(
+                anchor = ToolbarAnchor.CENTER_RIGHT, dockEdge = ToolbarDockEdge.RIGHT,
+                widthDp = 55, heightDp = 240)))
+        }
+        rule.mainClock.advanceTimeByFrame()
+        val first = node.getUnclippedBoundsInRoot()
+        rule.mainClock.advanceTimeBy(96)
+        val middle = node.getUnclippedBoundsInRoot()
+        rule.mainClock.advanceTimeBy(360)
+        val completed = node.getUnclippedBoundsInRoot()
+        assertTrue("Initial horizontal slot must be wide", (original.right - original.left).value > 200f)
+        assertTrue("Final vertical slot must be narrow", (completed.right - completed.left).value < 90f)
+        assertTrue("Width should interpolate, not jump to final size: $first / $middle / $completed",
+            (middle.right - middle.left).value < (first.right - first.left).value - 8f &&
+                (middle.right - middle.left).value > (completed.right - completed.left).value + 8f)
+        assertTrue("Height should interpolate towards vertical: $first / $middle / $completed",
+            (middle.bottom - middle.top).value > (first.bottom - first.top).value + 8f &&
+                (middle.bottom - middle.top).value < (completed.bottom - completed.top).value - 8f)
+        rule.mainClock.autoAdvance = true
+    }
+
+    @Test fun liveFloatingBarsCanReorderWithSameLongPressGestureAsPreview() {
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(
+            bar("moving", false, true), bar("target", false, true))))
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalToolbarLook provides ToolbarLook(floating = true)) {
+                    Box(Modifier.size(840.dp, 380.dp)) {
+                        WorkspaceFloatingBars(workspace = workspace,
+                            onMoveBar = { _, _, _ -> },
+                            onReorderBar = { from, to -> workspace = workspace.reorderVisualBar(from, to) },
+                            primaryContent = { Box(Modifier.size(148.dp, 52.dp)) },
+                            content = { Box(Modifier.size(148.dp, 52.dp)) })
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        val from = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+        val to = rule.onNodeWithTag("live-toolbar-slot-target", useUnmergedTree = true)
+        val start = from.fetchSemanticsNode().boundsInRoot.center
+        val end = to.fetchSemanticsNode().boundsInRoot.center
+        from.performTouchInput {
+            down(center)
+            advanceEventTime(790)
+            moveBy(Offset(end.x - start.x, end.y - start.y))
+            advanceEventTime(48)
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag("toolbar-drop-indicator-moving", useUnmergedTree = true)
+            .assertExists()
+        rule.runOnIdle {
+            assertEquals("The reorder preview must not persist until release",
+                listOf("moving", "target"),
+                workspace.bars.sortedBy { it.geometry.visualOrder }.map { it.id })
+        }
+        from.performTouchInput { up() }
+        rule.waitForIdle()
+        rule.runOnIdle {
+            assertEquals(listOf("target", "moving"),
+                workspace.bars.sortedBy { it.geometry.visualOrder }.map { it.id })
+        }
+    }
+
+    @Test fun liveDockedBarsCanReorderWithSameLongPressGestureAsPreview() {
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(
+            bar("moving", false, false), bar("target", false, false))))
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalToolbarLook provides ToolbarLook()) {
+                    Column(Modifier.size(840.dp, 380.dp)) {
+                        ToolbarAround(bar = { Box(Modifier.size(148.dp, 52.dp)) },
+                            onCover = { _, _, _, _ -> },
+                            workspace = workspace,
+                            dockedContent = { Box(Modifier.size(148.dp, 52.dp)) },
+                            onMoveBar = { _, _, _ -> },
+                            onReorderBar = { from, to -> workspace = workspace.reorderVisualBar(from, to) },
+                        ) { _ -> Box(Modifier.fillMaxSize()) }
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        val from = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+        val to = rule.onNodeWithTag("live-toolbar-slot-target", useUnmergedTree = true)
+        val start = from.fetchSemanticsNode().boundsInRoot.center
+        val end = to.fetchSemanticsNode().boundsInRoot.center
+        from.performTouchInput {
+            down(center)
+            advanceEventTime(790)
+            moveBy(Offset(end.x - start.x, end.y - start.y))
+            advanceEventTime(48)
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag("toolbar-drop-indicator-moving", useUnmergedTree = true)
+            .assertExists()
+        rule.runOnIdle {
+            assertEquals("The reorder preview must not persist until release",
+                listOf("moving", "target"),
+                workspace.bars.sortedBy { it.geometry.visualOrder }.map { it.id })
+        }
+        from.performTouchInput { up() }
+        rule.waitForIdle()
+        rule.runOnIdle {
+            assertEquals(listOf("target", "moving"),
+                workspace.bars.sortedBy { it.geometry.visualOrder }.map { it.id })
+        }
+    }
+}
