@@ -143,14 +143,19 @@ class PaginatedLayoutTest {
     @Test fun freeModeStopsEitherEdgeAtTheMiddleOfTheClearArea() {
         val st = state(3)
         st.freeMovement = true
+        st.insetLeft = 80.0
         st.insetTop = 120.0 // a floating toolbar moves the middle below the screen's own centre
         st.zoom = 0.9 * st.clearH / st.contentH
         st.goToPage(1)
         val page = st.pageRects[1]
-        st.scrollBy(0.0, -1e6)
+        st.scrollBy(-1e6, -1e6)
+        assertEquals(st.clearCenter().x, st.contentToViewport(Pt(page.left, page.centerY)).x, 1e-6)
         assertEquals(st.clearCenter().y, st.contentToViewport(Pt(page.centerX, page.top)).y, 1e-6)
-        st.scrollBy(0.0, 1e6)
+        assertTrue(st.atRowEdge(next = false))
+        st.scrollBy(1e6, 1e6)
+        assertEquals(st.clearCenter().x, st.contentToViewport(Pt(page.right, page.centerY)).x, 1e-6)
         assertEquals(st.clearCenter().y, st.contentToViewport(Pt(page.centerX, page.bottom)).y, 1e-6)
+        assertTrue(st.atRowEdge(next = true))
     }
 
     @Test fun goToPageJumpsTheWindowToTheRow() {
