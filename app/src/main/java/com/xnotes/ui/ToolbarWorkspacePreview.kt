@@ -307,6 +307,10 @@ internal fun ToolbarWorkspacePreview(
                         anchor = anchor,
                         movable = bar.geometry.movable,
                         paneBounds = stageBounds,
+                        parentSlotInRoot = Offset(
+                            stageBounds.left + with(previewDensity) { visibleX.toPx() },
+                            stageBounds.top + with(previewDensity) { visibleY.toPx() },
+                        ),
                         currentAlignment = toolbarFloatingAlignment(bar),
                         onMoveBar = { movedId, destination, alignment ->
                             // Parent placement and drag offset must change atomically;

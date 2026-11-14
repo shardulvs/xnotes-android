@@ -774,4 +774,83 @@ class ToolbarTitleAndPreviewReorderComposeTest {
                 current.bars.sortedBy { it.geometry.visualOrder }.map { it.id })
         }
     }
+
+    /** Redmi recording: a vertical LEFT rail moved beside an occupied TOP peer
+     * previously protruded above the preview before snapping horizontal. */
+    @Test fun leftToOccupiedTopPreviewKeepsSourceVisibleThroughoutMorph() {
+        val tools = ToolbarLayout(listOf(ToolbarSection(listOf(
+            ToolbarEntry(ToolbarItem.PEN), ToolbarEntry(ToolbarItem.ERASER),
+        ))))
+        val peer = ToolbarBar("peer", "Top", tools, geometry = ToolbarGeometry(
+            anchor = ToolbarAnchor.TOP_CENTER, dockEdge = ToolbarDockEdge.TOP,
+            dockAlignment = ToolbarDockAlignment.CENTER, heightDp = 52))
+        val moving = ToolbarBar("moving", "Colors", tools, geometry = ToolbarGeometry(
+            anchor = ToolbarAnchor.CENTER_LEFT, dockEdge = ToolbarDockEdge.LEFT,
+            dockAlignment = ToolbarDockAlignment.CENTER, widthDp = 65, heightDp = 240))
+        val look = ToolbarLook()
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(peer, moving)))
+        var commits = 0
+        rule.setContent {
+            MaterialTheme {
+                Box(Modifier.fillMaxWidth()) {
+                    ToolbarWorkspacePreview(
+                        workspace = workspace, look = look, selectedId = "moving",
+                        colors = emptyList(), activeColorIndex = 0, pageNumber = 1,
+                        pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
+                        selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
+                        onMoveBar = { id, anchor, alignment ->
+                            val change = toolbarProjectedMove(workspace, look, id,
+                                ToolbarDropPosition(anchor, alignment))!!
+                            workspace = change.first
+                            commits++
+                        },
+                        onReorderBar = { source, target ->
+                            workspace = workspace.reorderVisualBar(source, target)
+                        },
+                    )
+                }
+            }
+        }
+        rule.waitForIdle()
+        val stage = rule.onNodeWithTag("toolbar-preview-stage", useUnmergedTree = true)
+        val pane = stage.fetchSemanticsNode().boundsInRoot
+        val movingNode = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+        val content = rule.onNodeWithTag("preview-content-moving", useUnmergedTree = true)
+        val start = movingNode.fetchSemanticsNode().boundsInRoot.center
+        val pointerAtTop = Offset(pane.center.x, pane.top + 5f)
+        rule.mainClock.autoAdvance = false
+        stage.performTouchInput {
+            down(start - pane.topLeft)
+            advanceEventTime(790)
+            moveBy(pointerAtTop - start)
+            advanceEventTime(48)
+        }
+        rule.mainClock.advanceTimeByFrame()
+        val dragging = movingNode.fetchSemanticsNode().boundsInRoot
+        assertTrue("LEFT bar protruded above TOP during hover: $dragging / $pane",
+            dragging.top >= pane.top - 3f)
+        val visibleDuringDrag = content.fetchSemanticsNode().boundsInRoot
+        assertTrue("Visual toolbar body escaped during hover: $visibleDuringDrag / $pane",
+            visibleDuringDrag.top >= pane.top - 3f)
+        stage.performTouchInput { up() }
+        repeat(12) { frame ->
+            rule.mainClock.advanceTimeByFrame()
+            val rect = movingNode.fetchSemanticsNode().boundsInRoot
+            assertTrue("Morph frame $frame protruded above TOP: $rect / $pane",
+                rect.top >= pane.top - 3f)
+            val body = content.fetchSemanticsNode().boundsInRoot
+            assertTrue("Morph frame $frame rendered content above TOP: $body / $pane",
+                body.top >= pane.top - 3f)
+        }
+        rule.mainClock.advanceTimeBy(280)
+        rule.waitForIdle()
+        rule.runOnIdle {
+            assertEquals("Cross-edge must commit exactly once", 1, commits)
+            assertEquals(ToolbarDockEdge.TOP, workspace.bars[1].geometry.dockEdge)
+            assertEquals(ToolbarDockEdge.TOP, workspace.bars[0].geometry.dockEdge)
+        }
+        rule.onNodeWithTag("preview-bar-peer", useUnmergedTree = true).assertExists()
+        rule.onNodeWithTag("preview-bar-moving", useUnmergedTree = true).assertExists()
+        rule.mainClock.autoAdvance = true
+    }
 }

@@ -265,4 +265,144 @@ class ToolbarDragSurfaceSettlementTest {
         assertTrue("settled bar must follow the new parent slot",
             node.getUnclippedBoundsInRoot().left.value > before + 200f)
     }
+
+    /** Regression from the Redmi Pad 2 recording (13:39): when a tall LEFT rail is
+     * grabbed in its middle and released near an already occupied TOP edge, the
+     * entire source must remain visible while it settles into the projected slot. */
+    @Test fun tallBarCrossEdgeSettleNeverEscapesVisibleStage() {
+        var bounds by mutableStateOf(Rect.Zero)
+        var anchor by mutableStateOf(ToolbarAnchor.CENTER_LEFT)
+        var movingX by mutableStateOf(0.dp)
+        var movingY by mutableStateOf(160.dp)
+        var commits = 0
+        rule.setContent {
+            val density = LocalDensity.current
+            MaterialTheme {
+                Box(Modifier.size(800.dp, 520.dp)
+                    .testTag("occupied-edge-stage")
+                    .onGloballyPositioned { bounds = it.boundsInRoot() }) {
+                    Box(Modifier.offset(x = 250.dp, y = 0.dp).size(220.dp, 60.dp)
+                        .testTag("occupied-edge-peer"))
+                    Box(Modifier.offset(x = movingX, y = movingY).size(65.dp, 260.dp)) {
+                        ToolbarDragSurface(
+                            id = "edge-clamp", anchor = anchor, movable = true,
+                            paneBounds = bounds,
+                            onMoveBar = { _, target, _ ->
+                                commits++
+                                anchor = target
+                                movingX = 480.dp
+                                movingY = 12.dp
+                            },
+                            snapTargetInRoot = {
+                                Offset(bounds.left + with(density) { 480.dp.toPx() },
+                                    bounds.top + with(density) { 12.dp.toPx() })
+                            },
+                        ) { Box(Modifier.size(65.dp, 260.dp)) }
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        val stage = rule.onNodeWithTag("occupied-edge-stage", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val moving = rule.onNodeWithTag("toolbar-drag-surface-edge-clamp", useUnmergedTree = true)
+        val original = moving.fetchSemanticsNode().boundsInRoot
+        val move = Offset(stage.center.x - original.center.x, stage.top + 4f - original.center.y)
+        rule.mainClock.autoAdvance = false
+        moving.performTouchInput {
+            down(center)
+            advanceEventTime(790)
+            moveBy(move)
+            advanceEventTime(48)
+        }
+        rule.mainClock.advanceTimeByFrame()
+        val held = moving.fetchSemanticsNode().boundsInRoot
+        assertTrue("Dragged toolbar escaped above TOP while held: $held / $stage",
+            held.top >= stage.top - 3f)
+        moving.performTouchInput { up() }
+        repeat(12) { frame ->
+            rule.mainClock.advanceTimeByFrame()
+            val current = moving.fetchSemanticsNode().boundsInRoot
+            assertTrue("Settle frame $frame escaped above TOP: $current / $stage",
+                current.top >= stage.top - 3f)
+            assertTrue("Settle frame $frame escaped horizontally: $current / $stage",
+                current.left >= stage.left - 3f && current.right <= stage.right + 3f)
+        }
+        rule.mainClock.advanceTimeBy(300)
+        rule.waitForIdle()
+        rule.runOnIdle { assertEquals("Expected one move after landing", 1, commits) }
+        rule.onNodeWithTag("occupied-edge-peer", useUnmergedTree = true).assertExists()
+        rule.mainClock.autoAdvance = true
+    }
+
+    /** Prevents the Redmi end-of-settle flash when editor state acknowledges the
+     * target anchor before the parent planner publishes its destination slot. */
+    @Test fun acknowledgedProjectedMoveDoesNotFlashAtOldSlotDuringParentHandoff() {
+        var anchor by mutableStateOf(ToolbarAnchor.CENTER_LEFT)
+        var alignment by mutableStateOf(ToolbarDockAlignment.CENTER)
+        var parentAtDestination by mutableStateOf(false)
+        var pane by mutableStateOf(Rect.Zero)
+        var commits = 0
+        val targetX = 790f
+        val targetY = 16f
+        rule.setContent {
+            val density = LocalDensity.current
+            MaterialTheme {
+                Box(Modifier.size(1100.dp, 650.dp)
+                    .onGloballyPositioned { pane = it.boundsInRoot() }) {
+                    Box(Modifier.offset(
+                        x = if (parentAtDestination) with(density) { targetX.toDp() } else 30.dp,
+                        y = if (parentAtDestination) with(density) { targetY.toDp() } else 220.dp,
+                    ).size(65.dp, 250.dp)) {
+                        ToolbarDragSurface(
+                            id = "handoff", anchor = anchor, movable = true,
+                            currentAlignment = alignment, paneBounds = pane,
+                            parentSlotInRoot = Offset(
+                                pane.left + if (parentAtDestination) targetX else with(density) { 30.dp.toPx() },
+                                pane.top + if (parentAtDestination) targetY else with(density) { 220.dp.toPx() },
+                            ),
+                            onMoveBar = { _, next, nextAlignment ->
+                                commits++
+                                anchor = next
+                                alignment = nextAlignment
+                                // Deliberately leave the parent slot in the OLD place
+                                // for one frame; real planner recomposition may lag.
+                            },
+                            snapTargetInRoot = {
+                                Offset(pane.left + targetX, pane.top + targetY)
+                            },
+                        ) { Box(Modifier.size(65.dp, 250.dp)) }
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        val node = rule.onNodeWithTag("toolbar-drag-surface-handoff", useUnmergedTree = true)
+        val initial = node.fetchSemanticsNode().boundsInRoot
+        rule.mainClock.autoAdvance = false
+        node.performTouchInput {
+            down(center)
+            advanceEventTime(790)
+            moveBy(Offset(700f, -315f))
+            advanceEventTime(32)
+            up()
+        }
+        rule.mainClock.advanceTimeBy(285)
+        rule.waitForIdle()
+        rule.runOnIdle { assertEquals("Expected an acknowledged move", 1, commits) }
+        val afterAck = node.fetchSemanticsNode().boundsInRoot
+        assertTrue("New anchor drew at the old parent slot: $initial -> $afterAck",
+            afterAck.left - initial.left > 350f)
+        // Parent now moves to its actual destination, as the real planner does.
+        rule.runOnIdle {
+            parentAtDestination = true
+        }
+        repeat(5) { frame ->
+            rule.mainClock.advanceTimeByFrame()
+            val bounds = node.fetchSemanticsNode().boundsInRoot
+            assertTrue("Parent handoff blinked back on frame $frame: $bounds",
+                bounds.left - initial.left > 350f)
+        }
+        rule.mainClock.autoAdvance = true
+    }
 }

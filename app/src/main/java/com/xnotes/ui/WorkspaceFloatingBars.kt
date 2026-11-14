@@ -26,6 +26,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
@@ -53,6 +54,29 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
+
+/** Keep the visible toolbar inside its window even when the pointer reaches an edge.
+ * Hit testing still uses the raw pointer; only the rendered drag is constrained.
+ * Otherwise a vertical bar grabbed near its centre projects above TOP, then jumps
+ * back inside the window while morphing beside a toolbar already docked there. */
+internal fun toolbarVisibleDrag(offset: Offset, slot: Rect, pane: Rect): Offset {
+    if (slot == Rect.Zero || pane == Rect.Zero || pane.width <= 0f || pane.height <= 0f ||
+        !offset.x.isFinite() || !offset.y.isFinite()) return offset
+    fun fit(raw: Float, from: Float, to: Float, low: Float, high: Float): Float {
+        val minimum = low - from
+        val maximum = high - to
+        // For an oversized bar, preserve the pointer motion while keeping the
+        // viewport covered instead of jumping to the centre at gesture start.
+        return if (minimum <= maximum) raw.coerceIn(minimum, maximum)
+        else raw.coerceIn(maximum, minimum)
+    }
+    return Offset(
+        fit(offset.x, slot.left, slot.right, pane.left, pane.right),
+        fit(offset.y, slot.top, slot.bottom, pane.top, pane.bottom),
+    )
+}
 
 /**
  * Hold anywhere on a toolbar's container to pick it up. Ordinary taps still reach
@@ -66,6 +90,9 @@ fun ToolbarDragSurface(
     movable: Boolean,
     paneBounds: Rect,
     onMoveBar: (String, ToolbarAnchor, ToolbarDockAlignment) -> Unit,
+    /** Current parent slot root position, derived from the layout plan in composition.
+     * Unlike onGloballyPositioned, it updates in the same pass as the new anchor. */
+    parentSlotInRoot: Offset? = null,
     currentAlignment: ToolbarDockAlignment = ToolbarDockAlignment.CENTER,
     /** Optional preview callbacks: shared long-press move gesture handles lane reordering. */
     onDragStart: ((Offset) -> Unit)? = null,
@@ -84,6 +111,7 @@ fun ToolbarDragSurface(
 ) {
     val moveBarNow by rememberUpdatedState(onMoveBar)
     val paneBoundsNow by rememberUpdatedState(paneBounds)
+    val parentSlotNow by rememberUpdatedState(parentSlotInRoot)
     val startCallback by rememberUpdatedState(onDragStart)
     val moveCallback by rememberUpdatedState(onDragPosition)
     val dropCallback by rememberUpdatedState(onDrop)
@@ -102,6 +130,10 @@ fun ToolbarDragSurface(
     // Resetting drag *before* onMoveBar published its workspace caused the bar to
     // briefly redraw at its previous slot, then snap forward (the visible flick).
     var pendingPlacement by remember(id) { mutableStateOf<ToolbarDropPosition?>(null) }
+    // The projected destination is fixed in root pixels. The parent planner may
+    // acknowledge the new anchor one frame before its slot actually relocates.
+    // Retain the root position through that handoff rather than resetting drag.
+    var pendingRootTarget by remember(id) { mutableStateOf<Offset?>(null) }
     var stableHover by remember(id) { mutableStateOf<ToolbarDropPosition?>(null) }
     // pointerInput(id) intentionally survives recomposition. Read the CURRENT
     // anchor as state, or a subsequent RIGHT -> LEFT drag will still compare
@@ -128,6 +160,7 @@ fun ToolbarDragSurface(
     fun discardGesture() {
         drag = Offset.Zero
         pendingPlacement = null
+        pendingRootTarget = null
         stableHover = null
         settleTargetNow?.invoke(null)
         previewPlacementNow?.invoke(null)
@@ -136,10 +169,25 @@ fun ToolbarDragSurface(
     LaunchedEffect(anchor, currentAlignment, pendingPlacement) {
         val pending = pendingPlacement ?: return@LaunchedEffect
         if (anchor == pending.anchor && currentAlignment == pending.alignment) {
-            // Modifier.offset already renders zero for the acknowledged anchor.
-            drag = Offset.Zero
-            pendingPlacement = null
-            settleTargetNow?.invoke(null)
+            val targetInRoot = pendingRootTarget
+            if (targetInRoot != null) {
+                // State acknowledgement and the parent slot's layout pass do NOT
+                // happen atomically. Dropping the offset now briefly paints the
+                // source at its old location (the final-frame blink). Keep the
+                // source painted at its projected root position until the actual
+                // untransformed parent slot reaches that destination.
+                withTimeoutOrNull(600) {
+                    snapshotFlow { parentSlotNow ?: barBounds.topLeft }.first { slot ->
+                        (slot - targetInRoot).getDistance() <= 3f
+                    }
+                }
+            }
+            if (pendingPlacement == pending) {
+                drag = Offset.Zero
+                pendingPlacement = null
+                pendingRootTarget = null
+                settleTargetNow?.invoke(null)
+            }
         } else {
             // An invalid/rejected move must not leave a stranded toolbar forever.
             delay(1000)
@@ -158,6 +206,7 @@ fun ToolbarDragSurface(
                 settleJob = null
                 settleTargetNow?.invoke(null)
                 pendingPlacement = null
+                pendingRootTarget = null
                 drag = Offset.Zero
                 stableHover = ToolbarDropPosition(anchorNow, alignmentNow)
                 dragging = true
@@ -207,7 +256,10 @@ fun ToolbarDragSurface(
                                 // reaching the ghost destination do we persist the move.
                                 // This avoids drawing one frame at the original slot or
                                 // animating the source *from* its old position after release.
-                                if (changed) pendingPlacement = target
+                                if (changed) {
+                                    pendingPlacement = target
+                                    pendingRootTarget = projectedRoot
+                                }
                                 val destinationOffset = projectedRoot - barBounds.topLeft
                                 // Announce the target before the first translation frame:
                                 // size and movement use a shared 220-ms easing curve.
@@ -215,11 +267,16 @@ fun ToolbarDragSurface(
                                     settleTargetNow?.invoke(target)
                                     settleProgressNow?.invoke(0f)
                                 }
+                                // Start from the actual visible offset, not the raw
+                                // pointer delta (which may place half a vertical bar
+                                // beyond an edge). This avoids a pause at the clamp
+                                // followed by a visible jump into the occupied lane.
+                                val releaseOffset = toolbarVisibleDrag(moved, barBounds, paneBoundsNow)
                                 settleJob = settleScope.launch {
                                     animate(0f, 1f,
                                         animationSpec = tween(220, easing = FastOutSlowInEasing),
                                     ) { fraction, _ ->
-                                        drag = moved + (destinationOffset - moved) * fraction
+                                        drag = releaseOffset + (destinationOffset - releaseOffset) * fraction
                                         if (changed) settleProgressNow?.invoke(fraction)
                                     }
                                     if (changed) {
@@ -240,6 +297,7 @@ fun ToolbarDragSurface(
                                     // Legacy single-bar gestures have no projection
                                     // callback and retain the direct-commit path.
                                     pendingPlacement = target
+                                    pendingRootTarget = null
                                     moveBarNow(id, target.anchor, target.alignment)
                                 } else {
                                     discardGesture()
@@ -257,10 +315,21 @@ fun ToolbarDragSurface(
             }
         }
     }
-    // Acknowledgement changes the anchor and parent placement together; discard
-    // the old drag offset in that SAME composition to avoid a second overshoot.
-    val visualDrag = if (pendingPlacement != null && anchor == pendingPlacement?.anchor &&
-        currentAlignment == pendingPlacement?.alignment) Offset.Zero else drag
+    // Keep the final root position fixed during asynchronous editor/planner
+    // acknowledgement. The source's new parent slot can arrive one layout pass
+    // later, so an immediate zero offset would flash the source at its old slot.
+    val acknowledged = pendingPlacement != null && anchor == pendingPlacement?.anchor &&
+        currentAlignment == pendingPlacement?.alignment
+    val rawVisualDrag = when {
+        acknowledged && pendingRootTarget != null &&
+            (parentSlotInRoot != null || barBounds != Rect.Zero) ->
+            pendingRootTarget!! - (parentSlotInRoot ?: barBounds.topLeft)
+        acknowledged -> Offset.Zero // Legacy path without a projected slot.
+        else -> drag
+    }
+    val visualDrag = if (dragging || pendingPlacement != null)
+        toolbarVisibleDrag(rawVisualDrag, barBounds, paneBoundsNow)
+    else rawVisualDrag
     Box(
         Modifier
             .offset { IntOffset(visualDrag.x.roundToInt(), visualDrag.y.roundToInt()) }
@@ -280,7 +349,11 @@ fun ToolbarDragSurface(
                     rendered.right - visualDrag.x,
                     rendered.bottom - visualDrag.y,
                 )
-                if (barBounds != slot) barBounds = slot
+                // A transient offscreen/zero-size measurement is not the new slot.
+                // Never save it as gesture geometry or a subsequent drag can start
+                // from (0,0), visibly teleporting across the preview.
+                if (rendered.width > 0f && rendered.height > 0f && barBounds != slot)
+                    barBounds = slot
             }
             .then(gesture),
     ) {
