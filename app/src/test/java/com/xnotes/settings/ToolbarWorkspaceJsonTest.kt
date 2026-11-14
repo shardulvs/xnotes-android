@@ -105,21 +105,22 @@ class ToolbarWorkspaceJsonTest {
         assertEquals(canvas, oldReader.canvas.bars.single().layout)
     }
 
-    @Test fun experimentalGroupSettingsRollbackKeepsExistingBarsAndElements() {
-        val layout = ToolbarLayout(listOf(ToolbarSection(listOf(
-            ToolbarEntry(ToolbarItem.PEN), ToolbarEntry(ToolbarItem.ERASER),
-        ))))
-        val profiles = ToolbarWorkspaces.fromLegacy(layout, ToolbarLayout.CANVAS_DEFAULT)
-        val experimental = ToolbarWorkspaceJson.write(profiles).put("version", 7)
-        experimental.getJSONObject("note").getJSONArray("bars").getJSONObject(0)
-            .getJSONArray("sections").getJSONObject(0).getJSONArray("entries")
-            .put(JSONObject().put("id", "tool_group")
-                .put("group", JSONObject().put("id", "group-1")
-                    .put("tools", JSONArray().put("pen").put("eraser"))))
-        val restored = ToolbarWorkspaceJson.read(experimental)!!
-        assertEquals(layout, restored.note.bars.single().layout)
-        assertEquals(ToolbarLayout.CANVAS_DEFAULT, restored.canvas.bars.single().layout)
-        assertEquals(6, ToolbarWorkspaceJson.write(restored).getInt("version"))
+    @Test fun experimentalVersionsAreRejectedWithoutCrashingSettings() {
+        val saved = ToolbarWorkspaceJson.write(
+            ToolbarWorkspaces.fromLegacy(ToolbarLayout.DEFAULT, ToolbarLayout.CANVAS_DEFAULT),
+        )
+        for (version in listOf(1, 2, 3, 4, 5, 7, 99)) {
+            val unsupported = JSONObject(saved.toString()).put("version", version)
+            assertNull("Experimental version $version should not be migrated",
+                ToolbarWorkspaceJson.read(unsupported))
+            val stored = Settings().toJson().put("toolbar_workspaces", unsupported)
+            val result = Settings.fromJson(stored)
+            assertNull(result.toolbarWorkspaces)
+            assertEquals(ToolbarLayout.DEFAULT,
+                result.effectiveToolbarWorkspaces().note.bars.single().layout)
+            assertEquals(ToolbarLayout.CANVAS_DEFAULT,
+                result.effectiveToolbarWorkspaces().canvas.bars.single().layout)
+        }
     }
 
     private fun compactLayout(vararg items: ToolbarItem): ToolbarLayout =
@@ -188,53 +189,30 @@ class ToolbarWorkspaceJsonTest {
         assertEquals(245, restored.toolbarWorkspaces!!.note.bars[1].geometry.widthDp)
     }
 
-    @Test fun sectionsRoundTripAndLegacyGridAndV1ArraysMigrate() {
+    @Test fun sectionsAndLanesRoundTripInCurrentSchema() {
         val group = compactLayout(ToolbarItem.PEN, ToolbarItem.DASHED, ToolbarItem.CALLIGRAPHY)
             .setSectionLanes(0, 2).moveItem(0, 2, 0, 3, toLane = 1)
         val profiles = ToolbarWorkspaces.fromLegacy(group, ToolbarLayout.CANVAS_DEFAULT)
         val json = ToolbarWorkspaceJson.write(profiles)
         assertEquals(6, json.getInt("version"))
         assertEquals(group, ToolbarWorkspaceJson.read(json)!!.note.bars.single().layout)
-
-        // Legacy v1 section arrays have no section metadata.
-        val oldJson = ToolbarWorkspaceJson.write(profiles).put("version", 1)
-        val first = oldJson.getJSONObject("note").getJSONArray("bars").getJSONObject(0)
-        first.put("sections", JSONArray().put(JSONArray()
-            .put(JSONObject().put("id", "pen"))
-            .put(JSONObject().put("id", "dashed"))))
-        val oldSection = ToolbarWorkspaceJson.read(oldJson)!!.note.bars.single().layout.sections.single()
-        assertEquals(1, oldSection.lanes)
-        assertEquals(listOf(ToolbarItem.PEN, ToolbarItem.DASHED), oldSection.entries.map { it.item })
-
-        // v2 grid of 2 columns migrated to two separate rows, preserving original order.
-        val oldGrid = ToolbarWorkspaceJson.write(profiles).put("version", 2)
-        oldGrid.getJSONObject("note").getJSONArray("bars").getJSONObject(0)
-            .put("sections", JSONArray().put(JSONObject().put("grid_columns", 2)
-                .put("entries", JSONArray()
-                    .put(JSONObject().put("id", "pen"))
-                    .put(JSONObject().put("id", "dashed"))
-                    .put(JSONObject().put("id", "calligraphy")))))
-        val migrated = ToolbarWorkspaceJson.read(oldGrid)!!.note.bars.single().layout.sections.single()
-        assertEquals(2, migrated.lanes)
-        assertEquals(listOf(0, 0, 1), migrated.entries.map { it.lane })
     }
 
-    @Test fun regionDistributionRoundTripsWithSectionsAndOldSettingsStayContinuous() {
+    @Test fun regionDistributionRoundTripsWithValidDefaultsForMissingFields() {
         val layout = compactLayout(ToolbarItem.PEN, ToolbarItem.DASHED)
             .setSectionLanes(0, 3)
             .setSectionRegion(0, ToolbarRegion.END)
             .setDistribution(ToolbarDistribution.REGIONS)
         val json = ToolbarWorkspaceJson.write(ToolbarWorkspaces.fromLegacy(layout, ToolbarLayout.CANVAS_DEFAULT))
-        val restored = ToolbarWorkspaceJson.read(json)!!.note.bars.single().layout
-        assertEquals(layout, restored)
-        val legacy = JSONObject(json.toString()).put("version", 5)
-        val oldBar = legacy.getJSONObject("note").getJSONArray("bars").getJSONObject(0)
-        oldBar.remove("distribution")
-        oldBar.getJSONArray("sections").getJSONObject(0).remove("region")
-        val oldLayout = ToolbarWorkspaceJson.read(legacy)!!.note.bars.single().layout
-        assertEquals(ToolbarDistribution.CONTINUOUS, oldLayout.distribution)
-        assertEquals(ToolbarRegion.START, oldLayout.sections.single().region)
-        assertEquals(3, oldLayout.sections.single().lanes)
+        assertEquals(layout, ToolbarWorkspaceJson.read(json)!!.note.bars.single().layout)
+        val incomplete = JSONObject(json.toString())
+        val bar = incomplete.getJSONObject("note").getJSONArray("bars").getJSONObject(0)
+        bar.remove("distribution")
+        bar.getJSONArray("sections").getJSONObject(0).remove("region")
+        val defaulted = ToolbarWorkspaceJson.read(incomplete)!!.note.bars.single().layout
+        assertEquals(ToolbarDistribution.CONTINUOUS, defaulted.distribution)
+        assertEquals(ToolbarRegion.START, defaulted.sections.single().region)
+        assertEquals(3, defaulted.sections.single().lanes)
     }
 
     @Test fun pinnedStartAndEndPersistSeparatelyWithoutChangingOldWorkspaces() {
@@ -256,7 +234,7 @@ class ToolbarWorkspaceJsonTest {
         assertEquals(layout.sections, old.sections)
     }
 
-    @Test fun colorBlocksPersistAndV3AbsoluteRangesMigrateToDynamic() {
+    @Test fun colorBlocksPersistAsDynamicFractions() {
         val layout = compactLayout(ToolbarItem.COLORS).setSectionLanes(0, 2).setColorBlocks(2)
         val json = ToolbarWorkspaceJson.write(
             ToolbarWorkspaces.fromLegacy(layout, ToolbarLayout.CANVAS_DEFAULT),
@@ -265,21 +243,6 @@ class ToolbarWorkspaceJsonTest {
         assertEquals(layout, restored)
         assertEquals((0..4).toList(), restored.sections.single().entries[0].colorIndices(10).toList())
         assertEquals((5..9).toList(), restored.sections.single().entries[1].colorIndices(10).toList())
-
-        // v3 saved absolute ranges, and must be converted to fractions on load.
-        val oldV3 = JSONObject(json.toString()).put("version", 3)
-        val entries = oldV3.getJSONObject("note").getJSONArray("bars")
-            .getJSONObject(0).getJSONArray("sections").getJSONObject(0).getJSONArray("entries")
-        entries.getJSONObject(0).put("color_start", 0).put("color_count", 3)
-            .remove("color_part")
-        entries.getJSONObject(0).remove("color_parts")
-        entries.getJSONObject(1).put("color_start", 3).put("color_count", 2)
-            .remove("color_part")
-        entries.getJSONObject(1).remove("color_parts")
-        val migrated = ToolbarWorkspaceJson.read(oldV3)!!.note.bars.single().layout
-        assertEquals(layout, migrated)
-        assertEquals((0..4).toList(), migrated.sections.single().entries[0].colorIndices(10).toList())
-        assertEquals((5..9).toList(), migrated.sections.single().entries[1].colorIndices(10).toList())
     }
 
     @Test fun unsupportedSchemaFallsBackToLegacySettingsSafely() {
@@ -299,16 +262,43 @@ class ToolbarWorkspaceJsonTest {
         val duplicate = JSONObject(noteBars.getJSONObject(0).toString()).put("name", "collision")
         noteBars.put(duplicate)
         val canvas = json.getJSONObject("canvas").getJSONArray("bars").getJSONObject(0)
-        canvas.put("sections", JSONArray().put(JSONArray()
-            .put(JSONObject().put("id", "pen").put("visible", true))
-            .put(JSONObject().put("id", "page_nav").put("visible", true))
-            .put(JSONObject().put("id", "unrecognized").put("visible", true))
-            .put(JSONObject().put("id", "pen").put("visible", true))))
+        canvas.put("sections", JSONArray().put(JSONObject().put("lanes", 1)
+            .put("entries", JSONArray()
+                .put(JSONObject().put("id", "pen").put("visible", true))
+                .put(JSONObject().put("id", "page_nav").put("visible", true))
+                .put(JSONObject().put("id", "unrecognized").put("visible", true))
+                .put(JSONObject().put("id", "pen").put("visible", true)))))
         val parsed = ToolbarWorkspaceJson.read(json)!!
         assertEquals(1, parsed.note.bars.size)
         assertEquals(listOf(ToolbarItem.PEN), parsed.canvas.bars.single()
             .layout.sections.single().entries.map { it.item })
         assertFalse(parsed.shared)
+    }
+
+    @Test fun malformedOrEmptyWorkspaceFallsBackToOriginalToolbarsWithoutCrash() {
+        val previous = Settings(
+            toolbarLayout = ToolbarLayout.DEFAULT.moveSection(0, 2),
+            canvasToolbarLayout = ToolbarLayout.CANVAS_DEFAULT.moveSection(0, 2),
+        )
+        val valid = ToolbarWorkspaceJson.write(ToolbarWorkspaces.fromLegacy(
+            ToolbarLayout.DEFAULT, ToolbarLayout.CANVAS_DEFAULT,
+        ))
+        val invalid = listOf(
+            JSONObject(),
+            JSONObject(valid.toString()).put("note", JSONObject()),
+            JSONObject(valid.toString()).put("canvas", JSONObject()),
+            JSONObject(valid.toString()).getJSONObject("note")
+                .put("bars", JSONArray()).let { JSONObject(valid.toString()).put("note", it) },
+            JSONObject(valid.toString()).put("version", "invalid"),
+            JSONObject(valid.toString()).put("note", JSONArray()),
+        )
+        invalid.forEachIndexed { index, malformed ->
+            val parsed = Settings.fromJson(previous.toJson().put("toolbar_workspaces", malformed))
+            assertNull("Malformed workspace $index should not be used", parsed.toolbarWorkspaces)
+            val fallback = parsed.effectiveToolbarWorkspaces()
+            assertEquals(previous.toolbarLayout, fallback.note.bars.single().layout)
+            assertEquals(previous.canvasToolbarLayout, fallback.canvas.bars.single().layout)
+        }
     }
 
     @Test fun invalidDimensionValuesAreClampedDuringLoading() {
