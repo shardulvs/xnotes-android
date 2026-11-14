@@ -90,6 +90,7 @@ import com.xnotes.canvas.ViewingMode
 import com.xnotes.core.model.FunctionSpec
 import com.xnotes.core.model.Orientation
 import com.xnotes.core.model.PageEdge
+import com.xnotes.core.model.PageMargins
 import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.PageSizeChoice
 import com.xnotes.core.text.FlowMargins
@@ -654,15 +655,35 @@ fun MarginsPopup(editor: Editor, onDismiss: () -> Unit) {
     val px = PageSize.mmToPx(mm, editor.documentDpi).roundToInt()
     val edgeLabel = edge?.let { stringResource(it.labelRes) } ?: stringResource(R.string.edge_all)
 
+    // Expand page: extra paper on an edge as a fraction of the page's width/height. Unset inherits page -> note -> none.
+    var expandEdge by remember { mutableStateOf<PageEdge?>(null) } // null = all edges
+    var docExpand by remember { mutableStateOf(editor.documentMargins) }
+    var pageExpand by remember { mutableStateOf(editor.currentPageMargins) }
+    val expand = if (tab == 0) docExpand else pageExpand
+    fun applyExpand(next: PageMargins) {
+        if (tab == 0) {
+            docExpand = next; editor.setDocumentMargins(next)
+        } else {
+            pageExpand = next; editor.setCurrentPageMargins(next)
+        }
+    }
+    fun PageMargins.withAll(e: PageEdge?, f: Double?) =
+        if (e != null) withEdge(e, f) else PageEdge.entries.fold(this) { m, x -> m.withEdge(x, f) }
+    val expandOwn = expand.edge(expandEdge ?: PageEdge.LEFT)
+    val expandInherited = if (tab == 1) docExpand.edge(expandEdge ?: PageEdge.LEFT) else null
+    val expandPercent = ((expandOwn ?: expandInherited ?: 0.0) * 100).toFloat().coerceIn(0f, 100f)
+    val expandLabel = expandEdge?.let { stringResource(it.labelRes) } ?: stringResource(R.string.edge_all)
+
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
         Column(Modifier.width(286.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
-            PopupTitle(stringResource(R.string.title_margins))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ModeChip(stringResource(R.string.all_pages), tab == 0) { tab = 0 }
                 ModeChip(stringResource(R.string.current_page), tab == 1) { tab = 1 }
             }
 
-            Spacer(Modifier.size(12.dp))
+            Spacer(Modifier.size(8.dp))
+            PopupTitle(stringResource(R.string.margin_settings))
+            Spacer(Modifier.size(4.dp))
             StyleCaption(stringResource(R.string.caption_side))
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -697,6 +718,37 @@ fun MarginsPopup(editor: Editor, onDismiss: () -> Unit) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 // On Current Page, Reset drops the page's own margins so it follows All Pages again.
                 ModeChip(stringResource(R.string.reset), false) { apply(null) }
+            }
+
+            HorizontalDivider(Modifier.padding(vertical = 12.dp), color = LocalPalette.current.border.toComposeColor())
+            PopupTitle(stringResource(R.string.expand_page))
+            Spacer(Modifier.size(4.dp))
+            StyleCaption(stringResource(R.string.caption_side))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                ModeChip(stringResource(R.string.edge_all), expandEdge == null) { expandEdge = null }
+                PageEdge.entries.forEach { e ->
+                    ModeChip(stringResource(e.labelRes), expandEdge == e) { expandEdge = e }
+                }
+            }
+
+            Spacer(Modifier.size(12.dp))
+            StyleCaption(stringResource(R.string.caption_value_percent, expandLabel, expandPercent.roundToInt()) + if (expandOwn == null) stringResource(R.string.default_suffix) else "")
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ModeChip(stringResource(R.string.default_choice), expandOwn == null) { applyExpand(expand.withAll(expandEdge, null)) }
+                Slider(
+                    value = expandPercent,
+                    onValueChange = { applyExpand(expand.withAll(expandEdge, it.toDouble() / 100.0)) },
+                    valueRange = 0f..100f,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            Spacer(Modifier.size(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                ModeChip(stringResource(R.string.reset), false) { applyExpand(PageMargins()) }
             }
         }
     }

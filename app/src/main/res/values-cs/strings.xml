@@ -117,6 +117,8 @@
     <string name="caption_new_page_size">Velikost nové stránky</string>
     <string name="same_as_previous">Stejná jako předchozí</string>
     <string name="title_margins">Okraje</string>
+    <string name="margin_settings">Nastavení okrajů</string>
+    <string name="expand_page">Rozšířit stránku</string>
     <string name="caption_side">Strana</string>
     <string name="expand_range">Rozšířit rozsah</string>
     <string name="show_margins">Zobrazit okraje</string>
@@ -307,6 +309,7 @@
     <string name="default_suffix">"  (výchozí)"</string>
     <string name="caption_opacity_percent">"Krytí  %1$d%%"</string>
     <string name="caption_value_mm_px">"%1$s  %2$.1f mm (%3$d px)"</string>
+    <string name="caption_value_percent">"%1$s  %2$d%%"</string>
     <string name="caption_rotate_degrees">"Otočit  %1$d°"</string>
     <string name="caption_glow_intensity">Intenzita</string>
 

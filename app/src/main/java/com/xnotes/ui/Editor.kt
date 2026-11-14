@@ -3522,6 +3522,37 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         flowConfigChanged()
     }
 
+    // --- expand page (extra paper on any edge): document-wide ("All Pages") and per-page ---
+
+    /** The document-wide expand override; per-page values layer on top (see [PageMargins]). */
+    val documentMargins: PageMargins get() = state.document.margins
+
+    /** The current page's own expand override (an empty [PageMargins] when there is no page). */
+    val currentPageMargins: PageMargins
+        get() = state.document.pages.getOrNull(state.currentPageIndex())?.margins ?: PageMargins()
+
+    fun setDocumentMargins(margins: PageMargins) {
+        if (state.document.margins == margins) return
+        state.document.margins = margins
+        applyMarginChange()
+    }
+
+    fun setCurrentPageMargins(margins: PageMargins) {
+        val page = state.document.pages.getOrNull(state.currentPageIndex()) ?: return
+        if (page.margins == margins) return
+        page.margins = margins
+        applyMarginChange()
+    }
+
+    /** Persisted but not undoable, like a style change. The paper resizes, so caches are dropped and pages laid out again. */
+    private fun applyMarginChange() {
+        state.invalidatePageGeometry()
+        state.relayout()
+        state.document.dirty = true
+        refreshContent()
+        view.requestRender()
+    }
+
     /** Show the margin lines while the popup's slider is held, on top of the "Show margins" pref. */
     fun setMarginPreview(on: Boolean) {
         if (controller.marginPreview == on) return
