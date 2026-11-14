@@ -532,8 +532,13 @@ class ToolbarLivePlacementComposeTest {
             (mid.right - mid.left).value < (initial.right - initial.left).value - 10f)
         assertTrue("The vertical toolbar must grow DURING movement: $initial / $mid",
             (mid.bottom - mid.top).value > (initial.bottom - initial.top).value + 10f)
-        assertTrue("Movement must advance during the same frames: $initialDragX -> $midDragX",
-            kotlin.math.abs(midDragX - initialDragX) > 10f)
+        // Final settlement is now measured from the canonical outer slot,
+        // not the old inner content inset. This destination can be only a few
+        // dp from the release point; the 10-dp minimum was an arbitrary distance
+        // assertion, not a continuity check. Verify nonzero concurrent progress
+        // and then that the midpoint stays on the completed movement segment.
+        assertTrue("Translation must progress with resize: $initialDragX -> $midDragX",
+            kotlin.math.abs(midDragX - initialDragX) > 3f)
         rule.runOnIdle { assertEquals("Size changed only after an early commit", 0, commits) }
         rule.mainClock.advanceTimeBy(240)
         rule.waitForIdle()
@@ -542,6 +547,12 @@ class ToolbarLivePlacementComposeTest {
             assertEquals(ToolbarAnchor.CENTER_RIGHT, workspace.bars.first().geometry.anchor)
         }
         val landed = slot.getUnclippedBoundsInRoot()
+        val landedDragX = source.getUnclippedBoundsInRoot().left.value
+        val minX = minOf(initialDragX, landedDragX) - 8f
+        val maxX = maxOf(initialDragX, landedDragX) + 8f
+        assertTrue("Mid-settle translation reversed or overshot the completed path: " +
+            "$initialDragX -> $midDragX -> $landedDragX",
+            midDragX in minX..maxX)
         assertTrue("The landing width must match the resized destination",
             (landed.right - landed.left).value < (origin.right - origin.left).value - 40f)
         rule.mainClock.autoAdvance = true

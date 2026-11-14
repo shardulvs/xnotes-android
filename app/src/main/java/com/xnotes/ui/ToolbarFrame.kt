@@ -178,7 +178,9 @@ internal fun ColumnScope.ToolbarAround(
         LaunchedEffect(workspace) { reorder.acknowledge(workspace) }
         var paneBounds by remember { mutableStateOf(Rect.Zero) }
         BoxWithConstraints(rest.onGloballyPositioned { paneBounds = it.boundsInRoot() }) {
-            val basePlan = toolbarDockPlan(workspace, look, maxWidth, maxHeight)
+            val basePlan = remember(workspace, look, maxWidth, maxHeight) {
+                toolbarDockPlan(workspace, look, maxWidth, maxHeight)
+            }
             val reordered = reorder.displayedWorkspace(workspace)
             val hoveredId = reorder.sourceId
             val hoveredTarget = reorder.hoverPlacement
@@ -190,7 +192,9 @@ internal fun ColumnScope.ToolbarAround(
             val proposedWorkspace = previewMove?.first ?: reordered
             val proposedLook = previewMove?.second ?: look
             val proposedPlan = if (proposedWorkspace == workspace && proposedLook == look) basePlan
-                else toolbarDockPlan(proposedWorkspace, proposedLook, maxWidth, maxHeight)
+                else remember(proposedWorkspace, proposedLook, maxWidth, maxHeight) {
+                    toolbarDockPlan(proposedWorkspace, proposedLook, maxWidth, maxHeight)
+                }
             val peers = remember(workspace, basePlan, onReorderBar != null) {
                 if (onReorderBar == null) emptyMap() else workspace.bars.associate { dockBar ->
                     dockBar.id to toolbarReorderPeersInPlan(workspace, dockBar.id, basePlan,

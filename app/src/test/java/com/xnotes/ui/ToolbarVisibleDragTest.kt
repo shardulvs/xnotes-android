@@ -44,6 +44,30 @@ class ToolbarVisibleDragTest {
             toolbarSettleDestinationOffset(target, null, oldChild))
     }
 
+    @Test fun rightAlignedChildDoesNotJumpWhenOuterLaneExpandsAfterCommit() {
+        val compact = toolbarAlignedContentTopLeft(1140f, 339f,
+            83f, 330f, 83f, 330f, com.xnotes.core.tools.ToolbarDockEdge.RIGHT)
+        val expanded = toolbarAlignedContentTopLeft(1140f, 339f,
+            108f, 330f, 83f, 330f, com.xnotes.core.tools.ToolbarDockEdge.RIGHT)
+        // The drop target is x=1166. Animate the compensation from +26 to +1
+        // while the parent grows and moves the child naturally from 1140 to 1165.
+        assertEquals(1140f, compact.x, .001f)
+        assertEquals(1165f, expanded.x, .001f)
+        assertEquals(1166f, compact.x + (1166f - compact.x), .001f)
+        assertEquals(1166f, expanded.x + (1166f - expanded.x), .001f)
+    }
+
+    @Test fun bottomAlignedChildCompensatesHeightWithoutMovingHorizontally() {
+        val initial = toolbarAlignedContentTopLeft(150f, 200f,
+            220f, 55f, 220f, 55f, com.xnotes.core.tools.ToolbarDockEdge.BOTTOM)
+        val final = toolbarAlignedContentTopLeft(150f, 200f,
+            220f, 92f, 220f, 55f, com.xnotes.core.tools.ToolbarDockEdge.BOTTOM)
+        assertEquals(150f, initial.x, .001f)
+        assertEquals(150f, final.x, .001f)
+        assertEquals(200f, initial.y, .001f)
+        assertEquals(237f, final.y, .001f)
+    }
+
     @Test fun missingGeometryDoesNotChangePointerMotion() {
         val offset = Offset(170f, -260f)
         assertEquals(offset, toolbarVisibleDrag(offset, Rect.Zero, Rect.Zero))
