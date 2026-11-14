@@ -2,7 +2,6 @@ package com.xnotes.ui
 
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.layout.Box
@@ -34,6 +33,10 @@ import com.xnotes.core.tools.ToolbarDockPlacement
 import com.xnotes.core.tools.ToolbarDropPosition
 import com.xnotes.core.tools.ToolbarWorkspace
 
+/** One easing curve for both peer translation and resizing. The dragged bar
+ * uses its own matching 220-ms pointer-to-slot settle transition. */
+internal val toolbarPeerSlotAnimationSpec = tween<Dp>(220, easing = FastOutSlowInEasing)
+
 /** Mirrors the preview's optimistic gesture/reorder transaction on a real toolbar.
  * The source remains under the pointer, while peers animate to their proposed slots.
  * Do not derive state from bar list indices: bar identity survives every reorder. */
@@ -56,9 +59,9 @@ internal fun ToolbarLiveReorderBar(
 ) {
     val isSource = reorder.sourceId == bar.id || reorder.lastReleasedId == bar.id
     val animatedX by animateDpAsState(x.dp,
-        animationSpec = if (isSource) snap() else spring(), label = "liveBarX-${bar.id}")
+        animationSpec = if (isSource) snap() else toolbarPeerSlotAnimationSpec, label = "liveBarX-${bar.id}")
     val animatedY by animateDpAsState(y.dp,
-        animationSpec = if (isSource) snap() else spring(), label = "liveBarY-${bar.id}")
+        animationSpec = if (isSource) snap() else toolbarPeerSlotAnimationSpec, label = "liveBarY-${bar.id}")
     // Capture the target dimensions on release, not after the move callback.
     // Translation and resize now start together and finish in the same 220 ms.
     // Icons stay upright; no scaling/rotation or transparency of their contents.
@@ -74,7 +77,7 @@ internal fun ToolbarLiveReorderBar(
             morph = null
         }
     }
-    val sizeSpec = tween<Dp>(220, easing = FastOutSlowInEasing)
+    val sizeSpec = toolbarPeerSlotAnimationSpec
     val animatedWidth by animateDpAsState(settlingSize?.first ?: placement.width.dp,
         animationSpec = sizeSpec, label = "liveBarWidth-${bar.id}")
     val animatedHeight by animateDpAsState(settlingSize?.second ?: placement.height.dp,
