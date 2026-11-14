@@ -51,6 +51,10 @@ internal fun ToolbarSectionGrid(
             } else cell(entry)
         }
     }
+    if (LocalToolbarContainerMorph.current != null) {
+        ToolbarMorphSectionGrid(section, cell)
+        return
+    }
     if (section.lanes == 1) {
         section.visibleEntries.forEach { measuredCell(it) }
         return

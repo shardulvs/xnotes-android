@@ -362,7 +362,21 @@ internal fun ToolbarFrame(
     CompositionLocalProvider(LocalToolGlide provides glide, LocalBar provides bar,
         LocalCompactToolbarRegions provides compactRegions, LocalMenuOffset provides menuOffset,
         LocalTipSide provides tipSide) {
-        if (bar.vertical) {
+        val morph = LocalToolbarContainerMorph.current
+        if (morph != null) {
+            // Container Transform: keep one surface while the child groups and
+            // every tool interpolate between row and column coordinates. The
+            // outer slot changes size on the exact same gesture fraction.
+            Box(
+                Modifier.fillMaxSize().then(surface).testTag("toolbar-frame"),
+                contentAlignment = Alignment.Center,
+            ) {
+                CompositionLocalProvider(LocalBar provides bar.copy(vertical = morph.toVertical)) {
+                    Box(Modifier.toolGlide(glide, armed)) { content() }
+                }
+                trailing?.invoke()
+            }
+        } else if (bar.vertical) {
             Column(
                 stretch.width(toolbarWidth(bar, layout, geometry)).then(surface).testTag("toolbar-frame"),
                 horizontalAlignment = Alignment.CenterHorizontally,

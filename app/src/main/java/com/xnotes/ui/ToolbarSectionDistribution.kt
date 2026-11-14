@@ -54,6 +54,10 @@ internal fun ToolbarSections(
     layout: ToolbarLayout,
     sectionContent: @Composable (Int, ToolbarSection) -> Unit,
 ) {
+    if (LocalToolbarContainerMorph.current != null) {
+        ToolbarMorphSections(layout, sectionContent)
+        return
+    }
     val visible = layout.sections.withIndex().filter { it.value.hasVisible }
     if (layout.distribution == ToolbarDistribution.CONTINUOUS || LocalCompactToolbarRegions.current) {
         // In compact floating bars, group labels still determine order, not fixed-width slots.

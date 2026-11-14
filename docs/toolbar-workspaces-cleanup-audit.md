@@ -112,3 +112,10 @@ No persistence schema, migration, gesture transaction, primary toolbar identity 
 - Begin the orientation width/height transition on pointer release together with the 220-ms position tween, rather than waiting for the committed anchor update. No rotation, scaling of icons, or alpha effect.
 - Preserve stable source hitboxes and wait to persist placement until translation and size settlement have completed; the preview changes its internal layout while retaining its outer drag coordinates.
 - Added instrumented timing regression to assert that width, height and horizontal position all progress while the committed workspace still has its old anchor.
+
+## Pass 11: material-style toolbar container transform (2026-11-13)
+
+- Replace the final-frame Row↔Column swap with coordinated interpolation of **individual tools, controls and section positions** during cross-edge settlement. The preview and XNote/XCanvas runtime share `ToolbarContainerMorph.kt`, avoiding a second independent rendering path for the geometry math.
+- Handle compound Colors/Zoom/page-navigation entries as individual measurable children rather than opaque blocks; preserve visual button size and colour-swatch cross-axis centring. Keep icons upright and preserve the Material shape rather than rotating/fading/scaling a toolbar bitmap.
+- Use the same gesture's 220-ms progress for position and item layout, while retaining the old source slot until the parent acknowledges anchor and alignment. Respect pinned Start/Center/End regions and preserve original layouts outside active morphs.
+- Validation on `Small_Tablet` following the final preview compound-control fix: **51/51 Compose tests** and **2,664/2,664 JVM tests** (including five new morph math tests), plus release lint and debug build. OEM stylus visual inspection remains pending.

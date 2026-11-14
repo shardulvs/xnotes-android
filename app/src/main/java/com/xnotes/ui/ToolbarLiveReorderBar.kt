@@ -15,6 +15,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.Modifier
@@ -62,11 +64,14 @@ internal fun ToolbarLiveReorderBar(
     // Icons stay upright; no scaling/rotation or transparency of their contents.
     var settlingSize by remember(bar.id) { mutableStateOf<Pair<Dp, Dp>?>(null) }
     var settlingPlacement by remember(bar.id) { mutableStateOf<ToolbarDropPosition?>(null) }
+    var morph by remember(bar.id) { mutableStateOf<ToolbarContainerMorph?>(null) }
+    var morphProgress by remember(bar.id) { mutableFloatStateOf(0f) }
     LaunchedEffect(anchor, alignment, settlingPlacement) {
         val target = settlingPlacement
         if (target != null && anchor == target.anchor && alignment == target.alignment) {
             settlingSize = null
             settlingPlacement = null
+            morph = null
         }
     }
     val sizeSpec = tween<Dp>(220, easing = FastOutSlowInEasing)
@@ -128,8 +133,20 @@ internal fun ToolbarLiveReorderBar(
                     settlingSize = target?.let { projectedSlot(it) }?.let {
                         it.width.dp to it.height.dp
                     }
+                    val startVertical = placement.edge == com.xnotes.core.tools.ToolbarDockEdge.LEFT ||
+                        placement.edge == com.xnotes.core.tools.ToolbarDockEdge.RIGHT
+                    val endVertical = target?.anchor?.let {
+                        it == ToolbarAnchor.CENTER_LEFT || it == ToolbarAnchor.CENTER_RIGHT
+                    }
+                    morph = if (endVertical != null && endVertical != startVertical)
+                        ToolbarContainerMorph(startVertical, endVertical, 0f) else null
+                    morphProgress = 0f
                 },
-            ) { content() }
+                onSettleProgress = { progress -> morphProgress = progress },
+            ) {
+                CompositionLocalProvider(LocalToolbarContainerMorph provides
+                    morph?.copy(fraction = morphProgress)) { content() }
+            }
         }
     }
 }

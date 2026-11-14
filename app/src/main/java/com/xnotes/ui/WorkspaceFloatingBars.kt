@@ -78,6 +78,8 @@ fun ToolbarDragSurface(
     onPlacementPreview: ((ToolbarDropPosition?) -> Unit)? = null,
     /** Starts and clears the destination's size change with the SAME 220-ms snap. */
     onSettleTarget: ((ToolbarDropPosition?) -> Unit)? = null,
+    /** One progress source for translation, contour and individual tool positions. */
+    onSettleProgress: ((Float) -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     val moveBarNow by rememberUpdatedState(onMoveBar)
@@ -89,6 +91,7 @@ fun ToolbarDragSurface(
     val snapTargetNow by rememberUpdatedState(snapTargetInRoot)
     val previewPlacementNow by rememberUpdatedState(onPlacementPreview)
     val settleTargetNow by rememberUpdatedState(onSettleTarget)
+    val settleProgressNow by rememberUpdatedState(onSettleProgress)
     val settleScope = rememberCoroutineScope()
     var settleJob by remember(id) { mutableStateOf<Job?>(null) }
     var drag by remember(id) { mutableStateOf(Offset.Zero) }
@@ -198,12 +201,16 @@ fun ToolbarDragSurface(
                                 val destinationOffset = projectedRoot - barBounds.topLeft
                                 // Announce the target before the first translation frame:
                                 // size and movement use a shared 220-ms easing curve.
-                                if (changed) settleTargetNow?.invoke(target)
+                                if (changed) {
+                                    settleTargetNow?.invoke(target)
+                                    settleProgressNow?.invoke(0f)
+                                }
                                 settleJob = settleScope.launch {
                                     animate(0f, 1f,
                                         animationSpec = tween(220, easing = FastOutSlowInEasing),
                                     ) { fraction, _ ->
                                         drag = moved + (destinationOffset - moved) * fraction
+                                        if (changed) settleProgressNow?.invoke(fraction)
                                     }
                                     if (changed) {
                                         moveBarNow(id, target.anchor, target.alignment)

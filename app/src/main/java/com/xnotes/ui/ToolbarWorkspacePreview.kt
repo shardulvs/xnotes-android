@@ -120,12 +120,16 @@ internal fun ToolbarWorkspacePreview(
     var stageBounds by remember { mutableStateOf(Rect.Zero) }
     val reorder = remember { ToolbarWorkspaceReorderController() }
     val settlingOrientation = remember { mutableStateMapOf<String, com.xnotes.core.tools.ToolbarDropPosition>() }
+    val morphProgress = remember { mutableStateMapOf<String, Float>() }
     LaunchedEffect(workspace) {
         reorder.acknowledge(workspace)
         settlingOrientation.entries.toList().forEach { (id, target) ->
             val bar = workspace.bars.firstOrNull { it.id == id }
             if (bar == null || (bar.geometry.anchor == target.anchor &&
-                bar.geometry.dockAlignment == target.alignment)) settlingOrientation.remove(id)
+                bar.geometry.dockAlignment == target.alignment)) {
+                settlingOrientation.remove(id)
+                morphProgress.remove(id)
+            }
         }
     }
     val commitReorder by rememberUpdatedState(onReorderBar)
@@ -252,6 +256,9 @@ internal fun ToolbarWorkspacePreview(
                     it.anchor == com.xnotes.core.tools.ToolbarAnchor.CENTER_LEFT ||
                         it.anchor == com.xnotes.core.tools.ToolbarAnchor.CENTER_RIGHT
                 } ?: vertical
+                val containerMorph = if (previewOrientation != null && vertical != visualVertical)
+                    ToolbarContainerMorph(vertical, visualVertical, morphProgress[bar.id] ?: 0f)
+                    else null
                 // Keep the outer slot at the predicted target geometry so the
                 // drag surface never passes through a zero-sized/out-of-bounds node.
                 val positionModifier = Modifier.offset(x = visibleX, y = visibleY)
@@ -301,10 +308,17 @@ internal fun ToolbarWorkspacePreview(
                             reorder.previewPlacement(bar.id, target)
                         },
                         onSettleTarget = { target ->
-                            if (target == null) settlingOrientation.remove(bar.id)
-                            else settlingOrientation[bar.id] = target
+                            if (target == null) {
+                                settlingOrientation.remove(bar.id)
+                                morphProgress.remove(bar.id)
+                            } else {
+                                settlingOrientation[bar.id] = target
+                                morphProgress[bar.id] = 0f
+                            }
                         },
+                        onSettleProgress = { progress -> morphProgress[bar.id] = progress },
                     ) {
+                        CompositionLocalProvider(LocalToolbarContainerMorph provides containerMorph) {
                         PreviewBar(
                             bar = visualBar,
                             selected = bar.id == selectedId,
@@ -327,6 +341,7 @@ internal fun ToolbarWorkspacePreview(
                             onSelectEntry = { section, entry -> onSelectEntry(bar.id, section, entry) },
                             selectedEntry = if (bar.id == selectedId) selectedEntry else null,
                         )
+                        }
                     }
                     if (reorder.targetId == bar.id) {
                         // The destination placeholder moves with the live rearranged toolbar.
@@ -367,6 +382,7 @@ private fun PreviewBar(
         if (vertical) bar.geometry.heightDp else bar.geometry.widthDp)
     val autoLengthPinned = floating && bar.layout.hasPinnedRegions &&
         (if (vertical) bar.geometry.heightDp == null else bar.geometry.widthDp == null)
+    val morph = LocalToolbarContainerMorph.current
     // Match the live ToolbarFrame shape, including the user's corner-style setting.
     val shape = if (floating) androidx.compose.material3.MaterialTheme.shapes.extraLarge
         else RoundedCornerShape(0.dp)
@@ -385,7 +401,17 @@ private fun PreviewBar(
         .clickable(onClick = onSelect)
         .testTag("preview-content-${bar.id}")
 
-    if (vertical) {
+    if (morph != null) {
+        // Both orientations share one animated container and stable item instances.
+        // Morph progress comes from the same 220-ms tween moving the dragged bar.
+        CompositionLocalProvider(LocalBar provides metrics.copy(vertical = morph.toVertical)) {
+            Box(surface.padding(metrics.padding), contentAlignment = Alignment.Center) {
+                PreviewSections(bar.layout, metrics, colors, activeColorIndex, pageNumber,
+                    pageCount, zoomLabel, titleLabel, onSelectEntry, selectedEntry,
+                    vertical = morph.toVertical, compactRegions = compactRegions)
+            }
+        }
+    } else if (vertical) {
         Column(
             surface
                 .then(if (bar.geometry.heightDp != null) Modifier.height(bar.geometry.heightDp.dp)
@@ -452,18 +478,26 @@ private fun PreviewSections(
                 // Reference identity distinguishes repeated Colors occurrences with equal values.
                 val entryIndex = section.entries.indexOfFirst { it === entry }
                 val selected = selectedEntry == (sectionIndex to entryIndex)
-                Box(
-                    Modifier
-                        .then(if (selected) Modifier.border(
-                            1.dp, palette.accent.toComposeColor(), RoundedCornerShape(5.dp),
-                        ) else Modifier)
-                        .clickable { onSelectEntry(sectionIndex, entryIndex) },
-                ) {
-                    PreviewTool(
-                        entry, colors, activeColorIndex, pageNumber, pageCount,
+                if (LocalToolbarContainerMorph.current != null) {
+                    // During a container transform the shared reflow engine must
+                    // receive each color/page/zoom control as a separate measurable.
+                    // Wrapping PreviewTool in a Box would turn the entire group into
+                    // one child and cause its inner Row/Column to snap on release.
+                    PreviewTool(entry, colors, activeColorIndex, pageNumber, pageCount,
                         zoomLabel, titleLabel,
-                        { onSelectEntry(sectionIndex, entryIndex) }, vertical,
-                    )
+                        { onSelectEntry(sectionIndex, entryIndex) }, vertical)
+                } else {
+                    Box(
+                        Modifier
+                            .then(if (selected) Modifier.border(
+                                1.dp, palette.accent.toComposeColor(), RoundedCornerShape(5.dp),
+                            ) else Modifier)
+                            .clickable { onSelectEntry(sectionIndex, entryIndex) },
+                    ) {
+                        PreviewTool(entry, colors, activeColorIndex, pageNumber, pageCount,
+                            zoomLabel, titleLabel,
+                            { onSelectEntry(sectionIndex, entryIndex) }, vertical)
+                    }
                 }
             }
         }
@@ -511,7 +545,10 @@ private fun PreviewTool(
         }
     }
     if (item == ToolbarItem.COLORS || item == ToolbarItem.PAGE_NAV || item == ToolbarItem.ZOOM) {
-        if (vertical) Column(horizontalAlignment = Alignment.CenterHorizontally) { controls() }
+        if (LocalToolbarContainerMorph.current != null) {
+            // ToolbarMorphEntry arranges the emitted controls continuously.
+            controls()
+        } else if (vertical) Column(horizontalAlignment = Alignment.CenterHorizontally) { controls() }
         else Row(verticalAlignment = Alignment.CenterVertically) { controls() }
     } else {
         controls()
