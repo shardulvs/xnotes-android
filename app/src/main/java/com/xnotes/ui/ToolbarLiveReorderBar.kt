@@ -129,6 +129,9 @@ internal fun ToolbarLiveReorderBar(
                     reorder.previewPlacement(bar.id, target)
                 },
                 onSettleTarget = { target ->
+                    // Recovery watchdog covers a source removed by relayout before
+                    // the 220-ms settle coroutine can publish its commit.
+                    if (target != null) reorder.markAnchorMoveReleased(bar.id)
                     settlingPlacement = target
                     settlingSize = target?.let { projectedSlot(it) }?.let {
                         it.width.dp to it.height.dp

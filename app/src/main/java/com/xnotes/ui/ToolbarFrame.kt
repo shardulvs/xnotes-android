@@ -174,6 +174,7 @@ internal fun ColumnScope.ToolbarAround(
     if (workspace != null && dockedContent != null && workspace.hasMultiDock(look)) {
         SideEffect { onCover(0.0, 0.0, 0.0, 0.0) }
         val reorder = remember { ToolbarWorkspaceReorderController() }
+        ToolbarReorderRecoveryEffect(reorder)
         LaunchedEffect(workspace) { reorder.acknowledge(workspace) }
         var paneBounds by remember { mutableStateOf(Rect.Zero) }
         BoxWithConstraints(rest.onGloballyPositioned { paneBounds = it.boundsInRoot() }) {

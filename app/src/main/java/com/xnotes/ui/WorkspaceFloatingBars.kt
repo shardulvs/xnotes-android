@@ -103,6 +103,10 @@ fun ToolbarDragSurface(
     // briefly redraw at its previous slot, then snap forward (the visible flick).
     var pendingPlacement by remember(id) { mutableStateOf<ToolbarDropPosition?>(null) }
     var stableHover by remember(id) { mutableStateOf<ToolbarDropPosition?>(null) }
+    // pointerInput(id) intentionally survives recomposition. Read the CURRENT
+    // anchor as state, or a subsequent RIGHT -> LEFT drag will still compare
+    // against the LEFT anchor captured on the first gesture and be dropped as a no-op.
+    val anchorNow by rememberUpdatedState(anchor)
     val alignmentNow by rememberUpdatedState(currentAlignment)
     fun resolvedPlacement(offset: Offset): ToolbarDropPosition? {
         val pane = paneBoundsNow
@@ -114,8 +118,20 @@ fun ToolbarDragSurface(
         val pointer = dragStartInRoot + offset - pane.topLeft
         return ToolbarAnchorResolver.stablePlacement(
             pointer.x, pointer.y, pane.width, pane.height,
-            stableHover ?: ToolbarDropPosition(anchor, alignmentNow),
+            stableHover ?: ToolbarDropPosition(anchorNow, alignmentNow),
         )
+    }
+    // Every terminal gesture path (cancel, rejected target, unchanged placement,
+    // and failed acknowledgement) must release the *same* preview transaction.
+    // Resetting only drag used to teleport the source home while leaving the
+    // indicator and its neighbours at the projected destination indefinitely.
+    fun discardGesture() {
+        drag = Offset.Zero
+        pendingPlacement = null
+        stableHover = null
+        settleTargetNow?.invoke(null)
+        previewPlacementNow?.invoke(null)
+        cancelCallback?.invoke()
     }
     LaunchedEffect(anchor, currentAlignment, pendingPlacement) {
         val pending = pendingPlacement ?: return@LaunchedEffect
@@ -127,12 +143,7 @@ fun ToolbarDragSurface(
         } else {
             // An invalid/rejected move must not leave a stranded toolbar forever.
             delay(1000)
-            if (pendingPlacement == pending) {
-                drag = Offset.Zero
-                pendingPlacement = null
-                settleTargetNow?.invoke(null)
-                cancelCallback?.invoke()
-            }
+            if (pendingPlacement == pending) discardGesture()
         }
     }
     // Keep the active pointer stream alive while the preview recomposes and rescales.
@@ -148,7 +159,7 @@ fun ToolbarDragSurface(
                 settleTargetNow?.invoke(null)
                 pendingPlacement = null
                 drag = Offset.Zero
-                stableHover = ToolbarDropPosition(anchor, alignmentNow)
+                stableHover = ToolbarDropPosition(anchorNow, alignmentNow)
                 dragging = true
                 dragStartInRoot = barBounds.topLeft + held.position
                 startCallback?.invoke(dragStartInRoot)
@@ -177,13 +188,8 @@ fun ToolbarDragSurface(
                     }
                 }
                 if (canceled) {
-                    pendingPlacement = null
-                    drag = Offset.Zero
                     dragging = false
-                    stableHover = null
-                    settleTargetNow?.invoke(null)
-                    previewPlacementNow?.invoke(null)
-                    cancelCallback?.invoke()
+                    discardGesture()
                 } else {
                     val moved = drag
                     val droppedAt = dragStartInRoot + moved
@@ -194,7 +200,7 @@ fun ToolbarDragSurface(
                         barBounds != Rect.Zero && paneBoundsNow != Rect.Zero) {
                         val target = stableHover ?: resolvedPlacement(moved)
                         if (target != null) {
-                            val changed = target.anchor != anchor || target.alignment != alignmentNow
+                            val changed = target.anchor != anchorNow || target.alignment != alignmentNow
                             val projectedRoot = snapTargetNow?.invoke(target)
                             if (projectedRoot != null) {
                                 // Slide while the parent still owns the OLD slot. Only after
@@ -219,35 +225,33 @@ fun ToolbarDragSurface(
                                     if (changed) {
                                         moveBarNow(id, target.anchor, target.alignment)
                                     } else {
-                                        drag = Offset.Zero
-                                        settleTargetNow?.invoke(null)
+                                        // A no-op drop still needs the reorder controller
+                                        // released. Otherwise its hover projection survives
+                                        // after the bar eases back to its original slot.
+                                        discardGesture()
                                     }
                                 }
                             } else {
                                 if (changed && snapTargetNow != null) {
-                                    // Projection explicitly rejected this destination.
-                                    // Never persist an unplaceable bar: the planner would
-                                    // omit it and the second toolbar would appear to vanish.
-                                    drag = Offset.Zero
-                                    previewPlacementNow?.invoke(null)
-                                    settleTargetNow?.invoke(null)
-                                    cancelCallback?.invoke()
+                                    // The preview and the destination planner disagreed.
+                                    // Restore the peer allocation and clear the ghost.
+                                    discardGesture()
                                 } else if (changed) {
                                     // Legacy single-bar gestures have no projection
                                     // callback and retain the direct-commit path.
                                     pendingPlacement = target
                                     moveBarNow(id, target.anchor, target.alignment)
                                 } else {
-                                    drag = Offset.Zero
+                                    discardGesture()
                                 }
                             }
                         } else {
-                            drag = Offset.Zero
-                            cancelCallback?.invoke()
+                            discardGesture()
                         }
-                    } else {
+                    } else if (handled) {
                         drag = Offset.Zero
-                        if (!handled) cancelCallback?.invoke()
+                    } else {
+                        discardGesture()
                     }
                 }
             }
@@ -264,7 +268,20 @@ fun ToolbarDragSurface(
             // A docked bar is an earlier sibling of the canvas. Lift it while moving so the
             // canvas (and adjacent split panes) cannot paint over the dragged toolbar.
             .zIndex(if (dragging || pendingPlacement != null) 10f else 0f)
-            .onGloballyPositioned { if (drag == Offset.Zero) barBounds = it.boundsInRoot() }
+            .onGloballyPositioned { coordinates ->
+                // Track the PARENT SLOT even while an old offset is still being
+                // acknowledged. Previously we stopped recording bounds while
+                // drag != 0; after moving LEFT -> RIGHT the next drag could use
+                // the OLD LEFT coordinates and resolve the next drop as a no-op.
+                val rendered = coordinates.boundsInRoot()
+                val slot = Rect(
+                    rendered.left - visualDrag.x,
+                    rendered.top - visualDrag.y,
+                    rendered.right - visualDrag.x,
+                    rendered.bottom - visualDrag.y,
+                )
+                if (barBounds != slot) barBounds = slot
+            }
             .then(gesture),
     ) {
         content()
@@ -282,6 +299,7 @@ fun BoxScope.WorkspaceFloatingBars(
     onReorderBar: ((String, String) -> Unit)? = null,
 ) {
     val reorder = remember { ToolbarWorkspaceReorderController() }
+    ToolbarReorderRecoveryEffect(reorder)
     LaunchedEffect(workspace) { reorder.acknowledge(workspace) }
     var paneBounds by remember { mutableStateOf(Rect.Zero) }
     val baseLook = LocalToolbarLook.current

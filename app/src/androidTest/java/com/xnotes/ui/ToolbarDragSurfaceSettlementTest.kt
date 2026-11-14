@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -26,6 +27,10 @@ import androidx.compose.ui.test.advanceEventTime
 import androidx.compose.ui.unit.dp
 import com.xnotes.core.tools.ToolbarDockAlignment
 import com.xnotes.core.tools.ToolbarAnchor
+import com.xnotes.core.tools.ToolbarWorkspace
+import com.xnotes.core.tools.ToolbarBar
+import com.xnotes.core.tools.ToolbarLayout
+import com.xnotes.core.tools.ToolbarDropPosition
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -132,6 +137,87 @@ class ToolbarDragSurfaceSettlementTest {
         val after = surface.getUnclippedBoundsInRoot()
         assertTrue("Bar should return to its existing valid position",
             kotlin.math.abs(before.left.value - after.left.value) < 2f)
+    }
+
+    @Test fun rejectedCrossEdgeDropClearsGhostAndRestoresPeerAllocation() {
+        val workspace = ToolbarWorkspace(listOf(
+            ToolbarBar("moving", "Moving", ToolbarLayout.DEFAULT),
+            ToolbarBar("peer", "Peer", ToolbarLayout.DEFAULT),
+        ))
+        val reorder = ToolbarWorkspaceReorderController()
+        var pane by mutableStateOf(Rect.Zero)
+        val target = ToolbarDropPosition(ToolbarAnchor.CENTER_RIGHT, ToolbarDockAlignment.CENTER)
+        var commits = 0
+        rule.setContent {
+            MaterialTheme {
+                Box(Modifier.width(720.dp).height(380.dp)
+                    .onGloballyPositioned { pane = it.boundsInRoot() }) {
+                    if (reorder.sourceId != null && reorder.hoverPlacement == target) {
+                        Box(Modifier.size(60.dp).testTag("stale-ghost"))
+                    }
+                    Box(Modifier.offset(x = if (reorder.sourceId != null) 130.dp else 80.dp)
+                        .size(52.dp).testTag("projected-peer"))
+                    ToolbarDragSurface(
+                        id = "moving", anchor = ToolbarAnchor.CENTER_LEFT,
+                        movable = true, paneBounds = pane,
+                        onMoveBar = { _, _, _ -> commits++ },
+                        onDragStart = {
+                            reorder.start("moving", emptyList(), verticalAxis = true,
+                                workspace = workspace, originalAnchor = ToolbarAnchor.CENTER_LEFT)
+                        },
+                        onDrop = { false },
+                        onPlacementPreview = { reorder.previewPlacement("moving", it) },
+                        onDragCancel = { reorder.cancel("moving") },
+                        snapTargetInRoot = { null },
+                    ) { Box(Modifier.size(65.dp, 280.dp)) }
+                }
+            }
+        }
+        rule.waitForIdle()
+        val peer = rule.onNodeWithTag("projected-peer", useUnmergedTree = true)
+        val originalX = peer.getUnclippedBoundsInRoot().left.value
+        val source = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+        source.performTouchInput {
+            down(center)
+            advanceEventTime(780)
+            moveBy(Offset(900f, 150f))
+            advanceEventTime(48)
+        }
+        rule.waitForIdle()
+        assertNotNull("The projected destination must be tracked", reorder.hoverPlacement)
+        assertTrue("The old peer allocation must be shown before drop",
+            peer.getUnclippedBoundsInRoot().left.value > originalX + 25f)
+        source.performTouchInput { up() }
+        rule.waitForIdle()
+        rule.runOnIdle {
+            assertEquals("Rejected move must not save", 0, commits)
+            assertNull("A failed drop cannot leave a source in the controller", reorder.sourceId)
+            assertNull("A failed drop cannot leave the destination reserved", reorder.hoverPlacement)
+        }
+        rule.onNodeWithTag("stale-ghost", useUnmergedTree = true).assertDoesNotExist()
+        assertEquals("The peer must move back after a failed drop",
+            originalX, peer.getUnclippedBoundsInRoot().left.value, 2f)
+    }
+
+    @Test fun abandonedMoveWatchdogClearsProjectionAfterMissingAcknowledgement() {
+        val workspace = ToolbarWorkspace(listOf(
+            ToolbarBar("moving", "Moving", ToolbarLayout.DEFAULT),
+        ))
+        val reorder = ToolbarWorkspaceReorderController()
+        rule.setContent { ToolbarReorderRecoveryEffect(reorder) }
+        rule.runOnIdle {
+            reorder.start("moving", emptyList(), verticalAxis = true, workspace = workspace,
+                originalAnchor = ToolbarAnchor.CENTER_LEFT)
+            reorder.previewPlacement("moving",
+                ToolbarDropPosition(ToolbarAnchor.CENTER_RIGHT, ToolbarDockAlignment.CENTER))
+            reorder.markAnchorMoveReleased("moving")
+        }
+        rule.mainClock.advanceTimeBy(1500)
+        rule.waitForIdle()
+        rule.runOnIdle {
+            assertNull("A detached source must not hold the ghost forever", reorder.sourceId)
+            assertNull("A detached source must release projected peers", reorder.hoverPlacement)
+        }
     }
 
     @Test fun delayedAnchorCommitDoesNotShowTheOldLocation() {

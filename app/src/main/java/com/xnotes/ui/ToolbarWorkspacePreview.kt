@@ -119,6 +119,7 @@ internal fun ToolbarWorkspacePreview(
     val screenDensity = LocalDensity.current
     var stageBounds by remember { mutableStateOf(Rect.Zero) }
     val reorder = remember { ToolbarWorkspaceReorderController() }
+    ToolbarReorderRecoveryEffect(reorder)
     val settlingOrientation = remember { mutableStateMapOf<String, com.xnotes.core.tools.ToolbarDropPosition>() }
     val morphProgress = remember { mutableStateMapOf<String, Float>() }
     LaunchedEffect(workspace) {
@@ -328,6 +329,7 @@ internal fun ToolbarWorkspacePreview(
                             reorder.previewPlacement(bar.id, target)
                         },
                         onSettleTarget = { target ->
+                            if (target != null) reorder.markAnchorMoveReleased(bar.id)
                             if (target == null) {
                                 settlingOrientation.remove(bar.id)
                                 morphProgress.remove(bar.id)

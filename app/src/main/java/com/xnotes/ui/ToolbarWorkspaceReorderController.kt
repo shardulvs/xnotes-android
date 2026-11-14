@@ -1,5 +1,7 @@
 package com.xnotes.ui
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -10,6 +12,7 @@ import com.xnotes.core.tools.ToolbarDropPosition
 import com.xnotes.core.tools.ToolbarAnchor
 import com.xnotes.core.tools.ToolbarDockEdge
 import com.xnotes.core.tools.ToolbarDockAlignment
+import kotlinx.coroutines.delay
 
 /**
  * Shared preview/live-toolbar gesture and commit state. Separates hit testing
@@ -153,5 +156,22 @@ internal class ToolbarWorkspaceReorderController {
         sourcePlacement = null
         initialBounds = emptyMap()
         gestureWorkspace = null
+    }
+}
+
+
+/** Recovery if a drag source leaves composition or its editor commit is rejected.
+ * An optimistic destination is allowed to occupy peers only for a bounded time:
+ * without acknowledgement the ghost and projected peer slots must be discarded.
+ * The normal committed path clears immediately in acknowledge(). */
+@Composable
+internal fun ToolbarReorderRecoveryEffect(reorder: ToolbarWorkspaceReorderController) {
+    val source = reorder.sourceId
+    val released = reorder.lastReleasedId
+    LaunchedEffect(source, released) {
+        if (source != null && source == released) {
+            delay(1400)
+            reorder.cancel(source)
+        }
     }
 }
