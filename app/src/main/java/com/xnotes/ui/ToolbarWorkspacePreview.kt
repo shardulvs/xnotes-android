@@ -237,10 +237,10 @@ internal fun ToolbarWorkspacePreview(
                 // Keep animations attached to the stable bar ID across workspace updates.
                 key(bar.id) {
                 val animatedX by animateDpAsState(x.dp,
-                    animationSpec = if (sourceIsControlled) snap() else androidx.compose.animation.core.spring(),
+                    animationSpec = if (sourceIsControlled) snap() else toolbarPeerSlotAnimationSpec,
                     label = "barReorderX-${bar.id}")
                 val animatedY by animateDpAsState(y.dp,
-                    animationSpec = if (sourceIsControlled) snap() else androidx.compose.animation.core.spring(),
+                    animationSpec = if (sourceIsControlled) snap() else toolbarPeerSlotAnimationSpec,
                     label = "barReorderY-${bar.id}")
                 val visibleX = if (sourceIsControlled) x.dp else animatedX
                 val visibleY = if (sourceIsControlled) y.dp else animatedY
@@ -282,8 +282,18 @@ internal fun ToolbarWorkspacePreview(
                 val slotHeight = if (containerMorph != null && projectedPlacement != null)
                     (placement.height + (projectedPlacement.height - placement.height) * fraction).dp
                     else placement.height.dp
+                // Peers share the drag settle's 220-ms curve for position AND size.
+                // A spring on XY paired with an immediate size jump previously made
+                // occupied-edge insertions appear to pause during lane repacking.
+                // The controlled source still follows its explicit morph fraction.
+                val animatedSlotWidth by animateDpAsState(slotWidth,
+                    animationSpec = if (sourceIsControlled) snap() else toolbarPeerSlotAnimationSpec,
+                    label = "previewSlotWidth-${bar.id}")
+                val animatedSlotHeight by animateDpAsState(slotHeight,
+                    animationSpec = if (sourceIsControlled) snap() else toolbarPeerSlotAnimationSpec,
+                    label = "previewSlotHeight-${bar.id}")
                 val positionModifier = Modifier.offset(x = visibleX, y = visibleY)
-                    .width(slotWidth).height(slotHeight)
+                    .width(animatedSlotWidth).height(animatedSlotHeight)
                     .testTag("preview-bar-${bar.id}")
                     .zIndex(if (reorder.sourceId == bar.id) 2f else if (reorder.targetId == bar.id) 1f else 0f)
                     .onGloballyPositioned { coordinates ->
