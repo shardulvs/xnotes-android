@@ -36,7 +36,7 @@ import com.xnotes.platform.AppIcon
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
 
-/** How long a press rests on the About icon, without moving, before the icon picker opens. */
+/** How long a press rests, without moving, before the icon picker opens. */
 private const val PICKER_HOLD_MS = 3000L
 
 private val GAP = 8.dp
@@ -68,7 +68,7 @@ internal fun AppIconImage(icon: AppIcon, size: Dp, contentDescription: String?, 
     if (bitmap != null) Image(bitmap, contentDescription, modifier.size(size)) else Box(modifier.size(size))
 }
 
-/** Every launcher icon, two rows of four, the one in use wearing the selection; a tap switches to one at once. */
+/** Every launcher icon, in rows of four, the one in use wearing the selection; a tap switches to one at once. */
 @Composable
 internal fun IconPicker(current: AppIcon, onPick: (AppIcon) -> Unit, onDismiss: () -> Unit) {
     val palette = LocalPalette.current

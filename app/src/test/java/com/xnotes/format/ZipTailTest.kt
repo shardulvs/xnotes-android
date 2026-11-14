@@ -12,6 +12,7 @@ import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolDefaults
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -183,5 +184,66 @@ class ZipTailTest {
 
         val empty = File.createTempFile("empty", ".zip").apply { deleteOnExit() }
         assertNull(FileInputStream(empty).use { ZipTail.read(it.channel) })
+    }
+
+    // --- telling one save from another, which is what decides whether autosave forks ---
+
+    private fun directoryOf(file: File): ZipTail.Directory =
+        FileInputStream(file).use { ZipTail.read(it.channel) }!!
+
+    /** A one-entry zip holding [text], its entry stamped as written at [time]. */
+    private fun zipOf(text: String, time: Long): File {
+        val file = File.createTempFile("save", ".zip").apply { deleteOnExit() }
+        FileOutputStream(file).use { out ->
+            ZipOutputStream(out).use { zos ->
+                zos.putNextEntry(ZipEntry("manifest.json").apply { this.time = time })
+                zos.write(text.toByteArray())
+                zos.closeEntry()
+            }
+        }
+        return file
+    }
+
+    @Test fun aFileThatOnlyGotANewModifiedTimeIsTheSameSave() {
+        val file = File.createTempFile("note", ".xnote").apply { deleteOnExit() }
+        write(docWith(strokes = 3, image = imageFile(ByteArray(4096) { 7 })), file)
+        val known = directoryOf(file)
+
+        // Storage whose modified time settles late looks like this: the stamp moves, the bytes do not.
+        assertTrue(file.setLastModified(file.lastModified() - 3_600_000L))
+
+        assertTrue(known.sameAs(directoryOf(file)))
+    }
+
+    @Test fun moreInkIsADifferentSaveSplicedOrWrittenWhole() {
+        val image = imageFile(ByteArray(4096) { 7 })
+        val file = File.createTempFile("note", ".xnote").apply { deleteOnExit() }
+        write(docWith(strokes = 2, image = image), file)
+        val known = directoryOf(file)
+
+        splice(file, docWith(strokes = 9, image = image))
+        val spliced = directoryOf(file)
+        assertFalse(known.sameAs(spliced))
+        assertTrue(spliced.sameAs(directoryOf(file))) // reading it again is still that save
+
+        write(docWith(strokes = 4, image = image), file)
+        assertFalse(spliced.sameAs(directoryOf(file)))
+    }
+
+    @Test fun otherContentOfTheSameSizeIsADifferentSave() {
+        val at = 1_790_000_000_000L
+        val one = zipOf("ink a", at)
+        val other = zipOf("ink b", at)
+
+        assertEquals(one.length(), other.length()) // nothing but the checksum tells them apart
+        assertFalse(directoryOf(one).sameAs(directoryOf(other)))
+    }
+
+    @Test fun theSameContentSavedAtAnotherTimeIsADifferentSave() {
+        val at = 1_790_000_000_000L
+        val known = directoryOf(zipOf("ink", at))
+
+        assertTrue(known.sameAs(directoryOf(zipOf("ink", at))))
+        assertFalse(known.sameAs(directoryOf(zipOf("ink", at + 60_000L))))
     }
 }

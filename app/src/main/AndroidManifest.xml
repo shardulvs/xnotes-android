@@ -78,34 +78,12 @@
             </intent-filter>
         </activity-alias>
 
-        <!-- The other icons, off until one is picked in About. -->
+        <!-- The other icons, off until one is picked. -->
         <activity-alias
             android:name=".IconCreamRose"
             android:enabled="false"
             android:exported="true"
             android:icon="@mipmap/ic_launcher_cream_rose"
-            android:targetActivity=".EditorActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-        <activity-alias
-            android:name=".IconLime"
-            android:enabled="false"
-            android:exported="true"
-            android:icon="@mipmap/ic_launcher_lime"
-            android:targetActivity=".EditorActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-        <activity-alias
-            android:name=".IconAqua"
-            android:enabled="false"
-            android:exported="true"
-            android:icon="@mipmap/ic_launcher_aqua"
             android:targetActivity=".EditorActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -124,17 +102,6 @@
             </intent-filter>
         </activity-alias>
         <activity-alias
-            android:name=".IconClassic"
-            android:enabled="false"
-            android:exported="true"
-            android:icon="@mipmap/ic_launcher_classic"
-            android:targetActivity=".EditorActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-        <activity-alias
             android:name=".IconGraphite"
             android:enabled="false"
             android:exported="true"
@@ -146,10 +113,78 @@
             </intent-filter>
         </activity-alias>
         <activity-alias
+            android:name=".IconSumi"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_sumi"
+            android:targetActivity=".EditorActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".IconPow"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_pow"
+            android:targetActivity=".EditorActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".IconMarbling"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_marbling"
+            android:targetActivity=".EditorActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".IconClassic"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_classic"
+            android:targetActivity=".EditorActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- Icons no longer offered: kept so a launcher entry using one stays, drawn as the icon AppIcons maps it to. -->
+        <activity-alias
+            android:name=".IconLime"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:targetActivity=".EditorActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".IconAqua"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:targetActivity=".EditorActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
             android:name=".IconCreamTile"
             android:enabled="false"
             android:exported="true"
-            android:icon="@mipmap/ic_launcher_cream_tile"
+            android:icon="@mipmap/ic_launcher_ink_tile"
             android:targetActivity=".EditorActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
