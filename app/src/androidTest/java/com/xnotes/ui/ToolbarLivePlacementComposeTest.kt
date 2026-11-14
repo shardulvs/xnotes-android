@@ -130,6 +130,84 @@ class ToolbarLivePlacementComposeTest {
         assertTrue("Expected real two-row toolbar to be taller than one-row toolbar", tall.top < short.top)
     }
 
+    @Test fun twoLeftDockedBarsMovingNearBottomCornerKeepsBothVisible() {
+        // Repro: the pointer starts low on a full-height LEFT rail. The BAR's
+        // centre never approaches BOTTOM, even though the stylus does.
+        fun leftRail(id: String, lane: Int) = ToolbarBar(id, id,
+            ToolbarLayout(listOf(ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN))))),
+            geometry = ToolbarGeometry(
+                anchor = ToolbarAnchor.CENTER_LEFT,
+                dockEdge = ToolbarDockEdge.LEFT,
+                dockAlignment = ToolbarDockAlignment.CENTER,
+                dockLane = lane,
+                widthDp = 68,
+                heightDp = null,
+            ))
+        val initial = ToolbarWorkspace(listOf(leftRail("moving", 0), leftRail("peer", 1)))
+        var workspace by mutableStateOf(initial)
+        var look by mutableStateOf(ToolbarLook(position = ToolbarPosition.LEFT))
+        var commits = 0
+        rule.setContent {
+            MaterialTheme {
+                CompositionLocalProvider(LocalToolbarLook provides look) {
+                    Column(Modifier.size(840.dp, 380.dp).testTag("left-bottom-stage")) {
+                        ToolbarAround(
+                            bar = { RealToolbar(workspace.bars.first()) },
+                            onCover = { _, _, _, _ -> }, workspace = workspace,
+                            dockedContent = { RealToolbar(it) },
+                            onMoveBar = { id, anchor, alignment ->
+                                commits++
+                                val (movedWorkspace, movedLook) = toolbarProjectedMove(
+                                    workspace, look, id,
+                                    com.xnotes.core.tools.ToolbarDropPosition(anchor, alignment))!!
+                                workspace = movedWorkspace
+                                look = movedLook
+                            },
+                            onReorderBar = { source, target ->
+                                workspace = workspace.reorderVisualBar(source, target)
+                            },
+                        ) { floating ->
+                            Box(Modifier.fillMaxSize()) { floating() }
+                        }
+                    }
+                }
+            }
+        }
+        rule.waitForIdle()
+        val stageBounds = rule.onNodeWithTag("left-bottom-stage").fetchSemanticsNode().boundsInRoot
+        val moving = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        // Finger is on LOWER portion of the rail, not its centre.
+        val fingerDown = Offset(moving.center.x, moving.bottom - 28f)
+        val fingerUp = Offset(stageBounds.left + stageBounds.width * .20f,
+            stageBounds.bottom - 12f)
+        rule.onNodeWithTag("left-bottom-stage").performTouchInput {
+            down(fingerDown - stageBounds.topLeft)
+            advanceEventTime(790)
+            moveBy(fingerUp - fingerDown)
+            advanceEventTime(50)
+            up()
+        }
+        rule.waitForIdle()
+        rule.runOnIdle {
+            assertEquals("Cross-edge move was swallowed as a reorder", 1, commits)
+            assertEquals(ToolbarDockEdge.BOTTOM, workspace.bars[0].geometry.dockEdge)
+            assertEquals(ToolbarDockEdge.LEFT, workspace.bars[1].geometry.dockEdge)
+            assertEquals(listOf("moving", "peer"), workspace.bars.map { it.id })
+        }
+        val plan = toolbarDockPlan(workspace, look, 840.dp, 380.dp)
+        assertTrue("No bar may disappear from plan: ${plan.rejected}", plan.rejected.isEmpty())
+        for (id in listOf("moving", "peer")) {
+            val slot = rule.onNodeWithTag("live-toolbar-slot-$id", useUnmergedTree = true)
+                .getUnclippedBoundsInRoot()
+            val stage = rule.onNodeWithTag("left-bottom-stage").getUnclippedBoundsInRoot()
+            assertTrue("Bar $id must remain visible after the dock move: $slot vs $stage",
+                slot.right > slot.left && slot.bottom > slot.top &&
+                    slot.left >= stage.left - 2.dp && slot.top >= stage.top - 2.dp &&
+                    slot.right <= stage.right + 2.dp && slot.bottom <= stage.bottom + 2.dp)
+        }
+    }
+
     @Test fun crossEdgeAfterReorderHoverShowsIndicatorAndPrepositionsPeers() {
         val initial = ToolbarWorkspace(listOf(
             bar("moving", false, true), bar("peer", false, true)))

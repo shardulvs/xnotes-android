@@ -116,6 +116,88 @@ class ToolbarTitleAndPreviewReorderComposeTest {
         rule.onNodeWithTag("toolbar-position-LEFT-CENTER", useUnmergedTree = true).assertIsSelected()
     }
 
+    @Test fun twoTopDockedPreviewBarsMovingOneToRightMorphsWithoutHidingPeer() {
+        // Repro of TOP -> RIGHT with two stacked bars: the previous preview
+        // morphed content under a fixed TOP-sized slot, visibly clipping or
+        // jumping at the final layout commit.
+        val layout = ToolbarLayout(listOf(ToolbarSection(listOf(
+            ToolbarEntry(ToolbarItem.PEN), ToolbarEntry(ToolbarItem.ERASER),
+        ))))
+        fun dockBar(id: String, lane: Int) = ToolbarBar(id, id, layout,
+            geometry = ToolbarGeometry(anchor = ToolbarAnchor.TOP_CENTER,
+                dockEdge = ToolbarDockEdge.TOP, dockLane = lane,
+                dockAlignment = ToolbarDockAlignment.CENTER, heightDp = 52))
+        val look = ToolbarLook()
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(
+            dockBar("peer", 0), dockBar("moving", 1),
+        )))
+        var commits = 0
+        rule.setContent {
+            MaterialTheme {
+                Box(Modifier.fillMaxWidth()) {
+                    ToolbarWorkspacePreview(
+                        workspace = workspace, look = look, selectedId = "moving",
+                        colors = emptyList(), activeColorIndex = 0, pageNumber = 1,
+                        pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
+                        selectedEntry = null, onSelectBar = {},
+                        onSelectEntry = { _, _, _ -> },
+                        onMoveBar = { id, anchor, alignment ->
+                            commits++
+                            workspace = toolbarProjectedMove(workspace, look, id,
+                                ToolbarDropPosition(anchor, alignment))!!.first
+                        },
+                        onReorderBar = { source, target ->
+                            workspace = workspace.reorderVisualBar(source, target)
+                        },
+                    )
+                }
+            }
+        }
+        rule.waitForIdle()
+        val stage = rule.onNodeWithTag("toolbar-preview-stage", useUnmergedTree = true)
+        val bounds = stage.fetchSemanticsNode().boundsInRoot
+        val source = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+        val before = rule.onNodeWithTag("preview-content-moving", useUnmergedTree = true)
+            .getUnclippedBoundsInRoot()
+        val fingerDown = source.fetchSemanticsNode().boundsInRoot.center
+        val fingerUp = Offset(bounds.right - 14f, bounds.center.y)
+        rule.mainClock.autoAdvance = false
+        stage.performTouchInput {
+            down(fingerDown - bounds.topLeft)
+            advanceEventTime(790)
+            moveBy(fingerUp - fingerDown)
+            advanceEventTime(48)
+            up()
+        }
+        rule.mainClock.advanceTimeByFrame()
+        val atStart = rule.onNodeWithTag("preview-content-moving", useUnmergedTree = true)
+            .getUnclippedBoundsInRoot()
+        rule.runOnIdle { assertEquals("Must not commit before morph", 0, commits) }
+        rule.mainClock.advanceTimeBy(105)
+        val midway = rule.onNodeWithTag("preview-content-moving", useUnmergedTree = true)
+            .getUnclippedBoundsInRoot()
+        rule.runOnIdle { assertEquals("Premature commit in preview", 0, commits) }
+        assertTrue("Preview width must shrink DURING settlement: $atStart vs $midway",
+            midway.right - midway.left < atStart.right - atStart.left - 5.dp)
+        assertTrue("Preview height must grow DURING settlement: $atStart vs $midway",
+            midway.bottom - midway.top > atStart.bottom - atStart.top + 5.dp)
+        rule.onNodeWithTag("preview-bar-peer", useUnmergedTree = true).assertExists()
+        rule.mainClock.advanceTimeBy(300)
+        rule.waitForIdle()
+        rule.runOnIdle {
+            assertEquals("Only one move must commit", 1, commits)
+            assertEquals(ToolbarDockEdge.RIGHT, workspace.bars[1].geometry.dockEdge)
+            assertEquals(ToolbarDockEdge.TOP, workspace.bars[0].geometry.dockEdge)
+        }
+        rule.onNodeWithTag("preview-bar-moving", useUnmergedTree = true).assertExists()
+        rule.onNodeWithTag("preview-bar-peer", useUnmergedTree = true).assertExists()
+        val final = rule.onNodeWithTag("preview-content-moving", useUnmergedTree = true)
+            .getUnclippedBoundsInRoot()
+        assertTrue("Preview RIGHT bar must stay vertical: $before / $final",
+            final.bottom - final.top > final.right - final.left)
+        rule.mainClock.autoAdvance = true
+    }
+
     @Test fun crossEdgePreviewDragTracksPointerWhileStillPressedOnRealScreen() {
         val layout = ToolbarLayout(listOf(ToolbarSection(listOf(ToolbarEntry(ToolbarItem.PEN)))))
         val first = ToolbarBar("moving", "Move", layout, geometry = ToolbarGeometry(

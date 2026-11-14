@@ -107,9 +107,13 @@ fun ToolbarDragSurface(
     fun resolvedPlacement(offset: Offset): ToolbarDropPosition? {
         val pane = paneBoundsNow
         if (barBounds == Rect.Zero || pane == Rect.Zero) return null
-        val center = barBounds.center + offset - pane.topLeft
+        // Resolve the edge under the PEN/FINGER, never the centre of the dragged
+        // toolbar. A full-height LEFT rail can keep its centre next to LEFT even
+        // when the user releases the stylus at BOTTOM; the old rule accidentally
+        // turned cross-edge moves into same-lane reorders (or no-op drops).
+        val pointer = dragStartInRoot + offset - pane.topLeft
         return ToolbarAnchorResolver.stablePlacement(
-            center.x, center.y, pane.width, pane.height,
+            pointer.x, pointer.y, pane.width, pane.height,
             stableHover ?: ToolbarDropPosition(anchor, alignmentNow),
         )
     }
@@ -220,10 +224,18 @@ fun ToolbarDragSurface(
                                     }
                                 }
                             } else {
-                                if (changed) {
+                                if (changed && snapTargetNow != null) {
+                                    // Projection explicitly rejected this destination.
+                                    // Never persist an unplaceable bar: the planner would
+                                    // omit it and the second toolbar would appear to vanish.
+                                    drag = Offset.Zero
+                                    previewPlacementNow?.invoke(null)
+                                    settleTargetNow?.invoke(null)
+                                    cancelCallback?.invoke()
+                                } else if (changed) {
+                                    // Legacy single-bar gestures have no projection
+                                    // callback and retain the direct-commit path.
                                     pendingPlacement = target
-                                    // No animated translation without a projected slot.
-                                    // Parent geometry still controls the resize on commit.
                                     moveBarNow(id, target.anchor, target.alignment)
                                 } else {
                                     drag = Offset.Zero

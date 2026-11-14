@@ -96,6 +96,44 @@ class ToolbarDragSurfaceSettlementTest {
         rule.mainClock.autoAdvance = true
     }
 
+    @Test fun projectedDropMustNotPersistIfThePlannerRejectedTheTarget() {
+        var bounds by mutableStateOf(Rect.Zero)
+        var commits = 0
+        var canceled = 0
+        rule.setContent {
+            MaterialTheme {
+                Box(Modifier.width(650.dp).height(380.dp)
+                    .onGloballyPositioned { bounds = it.boundsInRoot() }) {
+                    ToolbarDragSurface(
+                        id = "rejected", anchor = ToolbarAnchor.CENTER_LEFT,
+                        movable = true, paneBounds = bounds,
+                        onMoveBar = { _, _, _ -> commits++ },
+                        snapTargetInRoot = { null },
+                        onDragCancel = { canceled++ },
+                    ) { Box(Modifier.size(70.dp, 280.dp)) }
+                }
+            }
+        }
+        rule.waitForIdle()
+        val surface = rule.onNodeWithTag("toolbar-drag-surface-rejected", useUnmergedTree = true)
+        val before = surface.getUnclippedBoundsInRoot()
+        surface.performTouchInput {
+            down(center)
+            advanceEventTime(780)
+            moveBy(Offset(900f, 200f))
+            advanceEventTime(48)
+            up()
+        }
+        rule.waitForIdle()
+        rule.runOnIdle {
+            assertEquals("An unplaceable destination may not be saved", 0, commits)
+            assertEquals("Cancel should restore the original toolbar", 1, canceled)
+        }
+        val after = surface.getUnclippedBoundsInRoot()
+        assertTrue("Bar should return to its existing valid position",
+            kotlin.math.abs(before.left.value - after.left.value) < 2f)
+    }
+
     @Test fun delayedAnchorCommitDoesNotShowTheOldLocation() {
         var anchor by mutableStateOf(ToolbarAnchor.TOP_LEFT)
         var parentX by mutableStateOf(100.dp)

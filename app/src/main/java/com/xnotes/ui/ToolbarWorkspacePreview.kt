@@ -248,10 +248,19 @@ internal fun ToolbarWorkspacePreview(
                 // one-row floating bar in a two-row peer's taller allocation.
                 val edgeAlignment = placement.edge.toolbarContentAlignment()
                 val previewOrientation = settlingOrientation[bar.id]
-                val visualBar = previewOrientation?.let { target ->
-                    toolbarProjectedMove(workspace, look, bar.id, target)?.first
-                        ?.bars?.firstOrNull { it.id == bar.id }
-                } ?: bar
+                // Project the exact same workspace once per destination, not
+                // once PER animation frame (or independently for content/size).
+                val projectedMorph = remember(workspace, look, bar.id, previewOrientation,
+                    screenWidth, screenHeight, colors.size) {
+                    previewOrientation?.let { target ->
+                        toolbarProjectedMove(workspace, look, bar.id, target)?.let { (next, nextLook) ->
+                            next.bars.firstOrNull { it.id == bar.id } to
+                                toolbarPreviewLayoutPlan(next, nextLook, screenWidth,
+                                    screenHeight, colors.size).position(bar.id)?.placement
+                        }
+                    }
+                }
+                val visualBar = projectedMorph?.first ?: bar
                 val visualVertical = previewOrientation?.let {
                     it.anchor == com.xnotes.core.tools.ToolbarAnchor.CENTER_LEFT ||
                         it.anchor == com.xnotes.core.tools.ToolbarAnchor.CENTER_RIGHT
@@ -259,10 +268,21 @@ internal fun ToolbarWorkspacePreview(
                 val containerMorph = if (previewOrientation != null && vertical != visualVertical)
                     ToolbarContainerMorph(vertical, visualVertical, morphProgress[bar.id] ?: 0f)
                     else null
-                // Keep the outer slot at the predicted target geometry so the
-                // drag surface never passes through a zero-sized/out-of-bounds node.
+                // The previous morph changed the inner Row/Column while keeping a
+                // horizontal-sized parent slot. On a TOP -> RIGHT drop that clipped
+                // the vertical bar to the old 50dp height, then made it jump when
+                // the final workspace arrived. Interpolate the measured allocation
+                // from the same projected planner as the live toolbar and drop ghost.
+                val projectedPlacement = projectedMorph?.second
+                val fraction = containerMorph?.progress ?: 0f
+                val slotWidth = if (containerMorph != null && projectedPlacement != null)
+                    (placement.width + (projectedPlacement.width - placement.width) * fraction).dp
+                    else placement.width.dp
+                val slotHeight = if (containerMorph != null && projectedPlacement != null)
+                    (placement.height + (projectedPlacement.height - placement.height) * fraction).dp
+                    else placement.height.dp
                 val positionModifier = Modifier.offset(x = visibleX, y = visibleY)
-                    .width(placement.width.dp).height(placement.height.dp)
+                    .width(slotWidth).height(slotHeight)
                     .testTag("preview-bar-${bar.id}")
                     .zIndex(if (reorder.sourceId == bar.id) 2f else if (reorder.targetId == bar.id) 1f else 0f)
                     .onGloballyPositioned { coordinates ->
@@ -329,8 +349,8 @@ internal fun ToolbarWorkspacePreview(
                             },
                             vertical = visualVertical,
                             floating = floating,
-                            availableWidth = placement.width.dp,
-                            availableHeight = placement.height.dp,
+                            availableWidth = slotWidth,
+                            availableHeight = slotHeight,
                             colors = colors,
                             activeColorIndex = activeColorIndex,
                             pageNumber = pageNumber,
@@ -389,7 +409,10 @@ private fun PreviewBar(
     // Animate only the toolbar body's dimensions; the surrounding drag slot
     // remains at its target coordinates so cross-edge releases cannot flicker.
     val surface = Modifier
-        .animateContentSize(animationSpec = androidx.compose.animation.core.tween(220))
+        // The morph already controls size on every gesture frame. A second
+        // animateContentSize tween lags behind it, then overshoots at commit.
+        .then(if (morph == null) Modifier.animateContentSize(
+            animationSpec = androidx.compose.animation.core.tween(220)) else Modifier)
         .then(if (floating) Modifier.shadow(6.dp, shape) else Modifier)
         .clip(shape)
         .background(palette.panel.toComposeColor())
@@ -405,7 +428,11 @@ private fun PreviewBar(
         // Both orientations share one animated container and stable item instances.
         // Morph progress comes from the same 220-ms tween moving the dragged bar.
         CompositionLocalProvider(LocalBar provides metrics.copy(vertical = morph.toVertical)) {
-            Box(surface.padding(metrics.padding), contentAlignment = Alignment.Center) {
+            Box(
+                surface.width(availableWidth).height(availableHeight)
+                    .padding(metrics.padding),
+                contentAlignment = Alignment.Center,
+            ) {
                 PreviewSections(bar.layout, metrics, colors, activeColorIndex, pageNumber,
                     pageCount, zoomLabel, titleLabel, onSelectEntry, selectedEntry,
                     vertical = morph.toVertical, compactRegions = compactRegions)

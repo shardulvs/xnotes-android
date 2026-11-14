@@ -119,3 +119,11 @@ No persistence schema, migration, gesture transaction, primary toolbar identity 
 - Handle compound Colors/Zoom/page-navigation entries as individual measurable children rather than opaque blocks; preserve visual button size and colour-swatch cross-axis centring. Keep icons upright and preserve the Material shape rather than rotating/fading/scaling a toolbar bitmap.
 - Use the same gesture's 220-ms progress for position and item layout, while retaining the old source slot until the parent acknowledges anchor and alignment. Respect pinned Start/Center/End regions and preserve original layouts outside active morphs.
 - Validation on `Small_Tablet` following the final preview compound-control fix: **51/51 Compose tests** and **2,664/2,664 JVM tests** (including five new morph math tests), plus release lint and debug build. OEM stylus visual inspection remains pending.
+
+## Pass 12: cross-edge source target and preview morph regression (2026-11-13)
+
+- Fixed the two-bar LEFT → BOTTOM drag in XNote/XCanvas: destination resolution now follows the stylus/finger release point rather than the centre of a full-height source toolbar. A long LEFT rail formerly stayed on LEFT regardless of the finger reaching BOTTOM, potentially appearing to reorder or disappear.
+- A projected cross-edge target rejected by the planner now cancels the gesture and leaves the saved workspace intact rather than committing a toolbar position with no valid visible placement. Legacy single-bar drag without a projection callback still follows the existing direct-commit path.
+- Fixed the settings preview TOP → RIGHT morph: interpolate the **outer preview slot** using target dimensions from the canonical preview plan and the same gesture progress as translation/reflow. Disable the redundant `animateContentSize` during the transform and constrain the surface to its evolving slot, preventing old-axis clipping and double-tween snapping.
+- Regression tests cover the two-bar LEFT → BOTTOM runtime case, two-bar TOP → RIGHT preview case and planner-rejected drop. Each must preserve both bars and update the expected persisted edge only on valid completion.
+- Validation: 54/54 Compose tests passed in smaller emulator batches; targeted tests after the final rejection guard passed 3/3; 2,664/2,664 JVM tests and release lint passed. Redmi Pad 2 hardware stylus QA still required.
