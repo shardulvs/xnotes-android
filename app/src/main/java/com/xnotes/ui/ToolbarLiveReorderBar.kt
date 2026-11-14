@@ -85,6 +85,24 @@ internal fun ToolbarLiveReorderBar(
         animationSpec = sizeSpec, label = "liveBarHeight-${bar.id}")
     val currentCommit by rememberUpdatedState(onReorderBar)
     val density = LocalDensity.current
+    val look = LocalToolbarLook.current
+    val index = workspace.bars.indexOfFirst { it.id == bar.id }
+    val physical = if (index >= 0) toolbarDropSlot(placement, bar, index, look) else null
+    // The source can occupy a narrower intrinsic thickness inside an animated
+    // RIGHT/BOTTOM lane. As that lane expands after commit, the child moves right
+    // (or down) without any pointer translation. Compensate that displacement on
+    // each frame so the visible toolbar stays at its projected destination.
+    val alignedDp = toolbarAlignedContentTopLeft(
+        parentX = x, parentY = y,
+        animatedWidth = animatedWidth.value, animatedHeight = animatedHeight.value,
+        contentWidth = physical?.width ?: animatedWidth.value,
+        contentHeight = physical?.height ?: animatedHeight.value,
+        edge = placement.edge,
+    )
+    val alignedContentSlot = Offset(
+        paneBounds.left + with(density) { alignedDp.x.dp.toPx() },
+        paneBounds.top + with(density) { alignedDp.y.dp.toPx() },
+    )
     Box(
         Modifier.offset(x = if (isSource) x.dp else animatedX,
                         y = if (isSource) y.dp else animatedY)
@@ -108,6 +126,7 @@ internal fun ToolbarLiveReorderBar(
                     paneBounds.left + with(density) { x.dp.toPx() },
                     paneBounds.top + with(density) { y.dp.toPx() },
                 ),
+                alignedContentSlotInRoot = alignedContentSlot,
                 currentAlignment = alignment,
                 onMoveBar = { id, target, targetAlignment ->
                     reorder.markAnchorMoveReleased(id)

@@ -57,7 +57,8 @@ class ToolbarOccupiedTopCenterComposeTest {
     private fun matrix(rows: Int, floating: Boolean, initial: ToolbarAnchor,
                        width: Int, height: Int, extraPeer: Boolean = false,
                        peerOnRightStart: Boolean = false,
-                       viaRightPeer: Boolean = false) {
+                       viaRightPeer: Boolean = false,
+                       dropToRightCenter: Boolean = false) {
         fun layout(count: Int): ToolbarLayout = ToolbarLayout(listOf(ToolbarSection(
             (0 until count).flatMap { lane -> listOf(
                 ToolbarEntry(ToolbarItem.COLORS, lane = lane),
@@ -103,7 +104,7 @@ class ToolbarOccupiedTopCenterComposeTest {
             MaterialTheme {
                 CompositionLocalProvider(LocalToolbarLook provides look) {
                     if (floating) {
-                        Box(Modifier.size(840.dp, 430.dp).testTag("runtime-matrix-stage")) {
+                        Box(Modifier.size(840.dp, if (dropToRightCenter) 525.dp else 430.dp).testTag("runtime-matrix-stage")) {
                             WorkspaceFloatingBars(workspace,
                                 onMoveBar = moveBar,
                                 onReorderBar = reorder,
@@ -113,7 +114,7 @@ class ToolbarOccupiedTopCenterComposeTest {
                             )
                         }
                     } else {
-                        Column(Modifier.size(840.dp, 430.dp).testTag("runtime-matrix-stage")) {
+                        Column(Modifier.size(840.dp, if (dropToRightCenter) 525.dp else 430.dp).testTag("runtime-matrix-stage")) {
                             ToolbarAround(
                                 bar = { Body(workspace.bars[0]) },
                                 onCover = { _, _, _, _ -> },
@@ -134,7 +135,8 @@ class ToolbarOccupiedTopCenterComposeTest {
         val pane = stage.fetchSemanticsNode().boundsInRoot
         val moved = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
         val first = moved.fetchSemanticsNode().boundsInRoot
-        val end = Offset(pane.center.x, pane.top + 10f)
+        val end = if (dropToRightCenter) Offset(pane.right - 10f, pane.center.y)
+            else Offset(pane.center.x, pane.top + 10f)
         rule.mainClock.autoAdvance = false
         stage.performTouchInput {
             down(first.center - pane.topLeft)
@@ -153,6 +155,8 @@ class ToolbarOccupiedTopCenterComposeTest {
             up()
         }
         val peerNode = rule.onNodeWithTag("live-toolbar-slot-peer", useUnmergedTree = true)
+        val bodyNode = rule.onNodeWithTag("actual-body-moving", useUnmergedTree = true)
+        val parentNode = rule.onNodeWithTag("live-toolbar-slot-moving", useUnmergedTree = true)
         var postCommitX: Float? = null
         var postCommitY: Float? = null
         var postPeerX: Float? = null
@@ -164,7 +168,15 @@ class ToolbarOccupiedTopCenterComposeTest {
                 source.width > 1f && source.height > 1f)
             assertTrue("Lost peer at frame=$frame rows=$rows floating=$floating initial=$initial: $peerBox",
                 peerBox.width > 1f && peerBox.height > 1f)
-            if (rows == 1 || extraPeer) println("LIVE_CENTER_TRACE rows=$rows floating=$floating initial=$initial extra=$extraPeer frame=$frame commits=$commits source=$source peer=$peerBox")
+            if (dropToRightCenter) {
+                val body = bodyNode.fetchSemanticsNode().boundsInRoot
+                val wrapper = parentNode.fetchSemanticsNode().boundsInRoot
+                println("RIGHT_CENTER_TRACE rows=$rows floating=$floating initial=$initial frame=$frame commits=$commits source=$source body=$body wrapper=$wrapper peer=$peerBox pane=$pane")
+                assertTrue("Right-edge toolbar escaped viewport in frame $frame, rows=$rows floating=$floating: $source / $pane",
+                    source.right <= pane.right + 3f && source.left >= pane.left - 3f)
+                assertTrue("Rendered Colors content escaped viewport at frame $frame rows=$rows floating=$floating: body=$body stage=$pane",
+                    body.right <= pane.right + 3f && body.left >= pane.left - 3f)
+            }
             if (commits > 0) {
                 postCommitX?.let { old -> assertTrue("Runtime post-commit x jumped frame=$frame rows=$rows floating=$floating initial=$initial: $old -> ${source.left}",
                     kotlin.math.abs(old - source.left) < 18f) }
@@ -180,7 +192,8 @@ class ToolbarOccupiedTopCenterComposeTest {
         rule.runOnIdle {
             assertEquals("Expected one saved move", 1, commits)
             val saved = workspace.bars.first { it.id == "moving" }
-            assertEquals(ToolbarAnchor.TOP_CENTER, saved.geometry.anchor)
+            assertEquals(if (dropToRightCenter) ToolbarAnchor.CENTER_RIGHT else ToolbarAnchor.TOP_CENTER,
+                saved.geometry.anchor)
             assertEquals(ToolbarDockAlignment.CENTER, saved.geometry.dockAlignment)
             assertEquals(if (peerOnRightStart) ToolbarAnchor.CENTER_RIGHT else ToolbarAnchor.TOP_RIGHT,
                 workspace.bars.first().geometry.anchor)
@@ -221,4 +234,22 @@ class ToolbarOccupiedTopCenterComposeTest {
             peerOnRightStart = true, viaRightPeer = true)
     @Test fun hoverThroughRightStartThreeRowsDockedTopCenter() =
         matrix(3, false, ToolbarAnchor.CENTER_RIGHT, 172, 255, true, true, true)
+    /** Redmi 16:10 video: TOP/CENTER one-row Colors to RIGHT/CENTER while
+     * an independent toolbar occupies RIGHT/START. Watch all post-release frames. */
+    @Test fun video1610OneRowFloatingTopToRightWithRightStartPeer() =
+        matrix(1, true, ToolbarAnchor.TOP_CENTER, 220, 55,
+            peerOnRightStart = true, dropToRightCenter = true)
+
+    @Test fun video1610OneRowDockedTopToRightWithRightStartPeer() =
+        matrix(1, false, ToolbarAnchor.TOP_CENTER, 220, 55,
+            peerOnRightStart = true, dropToRightCenter = true)
+
+    @Test fun video1610TwoRowsFloatingTopToRightWithRightStartPeer() =
+        matrix(2, true, ToolbarAnchor.TOP_CENTER, 220, 112,
+            peerOnRightStart = true, dropToRightCenter = true)
+
+    @Test fun video1610ThreeRowsFloatingTopToRightWithRightStartPeer() =
+        matrix(3, true, ToolbarAnchor.TOP_CENTER, 250, 168,
+            peerOnRightStart = true, dropToRightCenter = true)
+
 }
