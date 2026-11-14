@@ -8,6 +8,7 @@ enum class ExplorerLayout(val id: String) {
     GALLERY("gallery"),
     LIST("list"),
     COLUMNS("columns"),
+    TREE("tree"),
     TIMELINE("timeline");
 
     companion object {
@@ -78,6 +79,8 @@ data class ExplorerView(
     val compactRows: Boolean = false,
     /** The Timeline places files on the day they were created, or else the day they were last saved. */
     val timelineByCreated: Boolean = true,
+    /** Whether Tree lists notes and canvases alongside its folders. */
+    val treeShowFiles: Boolean = false,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("layout", layout.id)
@@ -94,6 +97,7 @@ data class ExplorerView(
         .put("folders", folders.id)
         .put("compact_rows", compactRows)
         .put("timeline_by_created", timelineByCreated)
+        .put("tree_show_files", treeShowFiles)
 
     companion object {
         fun fromJson(o: JSONObject?): ExplorerView {
@@ -113,6 +117,7 @@ data class ExplorerView(
                 folders = FolderPlacement.fromId(o.optString("folders")),
                 compactRows = o.optBoolean("compact_rows", false),
                 timelineByCreated = o.optBoolean("timeline_by_created", true),
+                treeShowFiles = o.optBoolean("tree_show_files", false),
             )
         }
     }

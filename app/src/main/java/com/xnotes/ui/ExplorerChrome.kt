@@ -72,6 +72,7 @@ internal fun layoutIcon(l: ExplorerLayout): ImageVector = when (l) {
     ExplorerLayout.GALLERY -> XnotesIcons.gallery
     ExplorerLayout.LIST -> XnotesIcons.list
     ExplorerLayout.COLUMNS -> XnotesIcons.columns
+    ExplorerLayout.TREE -> XnotesIcons.folderTree
     ExplorerLayout.TIMELINE -> XnotesIcons.timeline
 }
 
@@ -417,6 +418,15 @@ internal fun ViewOptionsContent(
                         Text(stringResource(l.labelRes), color = tint, fontSize = 11.5.sp, lineHeight = 14.sp, maxLines = 1)
                     }
                 }
+            }
+        }
+        if (layout == ExplorerLayout.TREE) {
+            OptionBlock(stringResource(R.string.layout_tree)) {
+                ExplorerChip(
+                    stringResource(R.string.tree_show_files),
+                    view.treeShowFiles,
+                    icon = if (view.treeShowFiles) XnotesIcons.check else XnotesIcons.plus,
+                ) { onChange(view.copy(treeShowFiles = !view.treeShowFiles)) }
             }
         }
         if (layout == ExplorerLayout.LIST) {
