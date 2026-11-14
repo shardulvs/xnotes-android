@@ -39,11 +39,14 @@ class ToolbarWorkspaceTest {
         assertEquals("Handwriting", renamed.bars.single().name)
     }
 
-    @Test fun reorderAndRemoveKeepOtherBarsUntouched() {
+    @Test fun visualReorderDoesNotChangePrimaryIdentityAndRemoveKeepsRemainingBars() {
         val original = ToolbarWorkspace(listOf(shortBar("a"), shortBar("b"), shortBar("c")))
-        val moved = original.moveBar("a", 2)
-        assertEquals(listOf("b", "c", "a"), moved.bars.map { it.id })
-        assertEquals(listOf("a", "b", "c"), original.bars.map { it.id })
+        val moved = original.reorderVisualBar("a", "c")
+        assertEquals(listOf("b", "c", "a"),
+            moved.bars.sortedBy { it.geometry.visualOrder }.map { it.id })
+        // The first saved bar stays the primary even when its visible rank moves.
+        assertEquals(listOf("a", "b", "c"), moved.bars.map { it.id })
+        assertTrue(original.bars.all { it.geometry.visualOrder == null })
         val removed = moved.removeBar("c").removeBar("b")
         assertEquals(listOf("a"), removed.bars.map { it.id })
         assertSame(removed, removed.removeBar("a"))
@@ -129,8 +132,9 @@ class ToolbarWorkspaceTest {
                 val canvas = ToolbarWorkspace(listOf(shortBar("canvas", ToolbarItem.MINIMAP)))
                 val original = ToolbarWorkspaces(note, canvas, shared)
                 val changed = original.updateWorkspace(context) { workspace ->
-                    workspace.addBar(shortBar("palette", ToolbarItem.COLORS))
-                        .moveBar("palette", 0)
+                    // Put the imported palette first in this fixture without
+                    // relying on the retired list-order mutation API.
+                    workspace.copy(bars = listOf(shortBar("palette", ToolbarItem.COLORS)) + workspace.bars)
                 }
                 assertEquals(shared, changed.shared)
                 if (context == ToolbarContext.NOTE) {

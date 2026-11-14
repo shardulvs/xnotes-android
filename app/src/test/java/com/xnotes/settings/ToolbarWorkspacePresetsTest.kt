@@ -104,7 +104,8 @@ class ToolbarWorkspacePresetsTest {
             note = ToolbarWorkspace.fromLegacy("study-note", "Estudo", ToolbarLayout.DEFAULT),
             canvas = ToolbarWorkspace.fromLegacy("drawing-canvas", "Desenho", ToolbarLayout.CANVAS_DEFAULT),
         )
-        val applied = current.replaceContextFrom(preset, ToolbarContext.NOTE)
+        val applied = com.xnotes.ui.applyToolbarPresetToContext(
+            current, ToolbarWorkspacePreset("import-note", "Imported note", preset), ToolbarContext.NOTE)
         assertEquals("study-note", applied.note.bars.first().id)
         assertEquals(current.canvas, applied.canvas)
         assertFalse(applied.shared)
@@ -120,7 +121,8 @@ class ToolbarWorkspacePresetsTest {
             canvas = ToolbarWorkspace.fromLegacy("ignored-canvas", "Separado", ToolbarLayout.CANVAS_DEFAULT),
             shared = true,
         )
-        val applied = current.replaceContextFrom(preset, ToolbarContext.CANVAS)
+        val applied = com.xnotes.ui.applyToolbarPresetToContext(
+            current, ToolbarWorkspacePreset("import-canvas", "Imported canvas", preset), ToolbarContext.CANVAS)
         assertEquals(current.note, applied.note)
         assertFalse(applied.shared)
         assertEquals("shared-note", applied.canvas.bars.first().id)

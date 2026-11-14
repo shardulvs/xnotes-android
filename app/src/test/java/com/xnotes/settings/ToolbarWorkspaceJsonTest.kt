@@ -92,8 +92,8 @@ class ToolbarWorkspaceJsonTest {
         val note = ToolbarLayout.DEFAULT.moveSection(0, 2)
         val canvas = ToolbarLayout.CANVAS_DEFAULT.moveSection(0, 2)
         val profiles = base.copy(
-            note = base.note.addBar(ToolbarBar("note-new", "Note", note)).moveBar("note-new", 0),
-            canvas = base.canvas.addBar(ToolbarBar("canvas-new", "Canvas", canvas)).moveBar("canvas-new", 0))
+            note = ToolbarWorkspace(listOf(ToolbarBar("note-new", "Note", note)) + base.note.bars),
+            canvas = ToolbarWorkspace(listOf(ToolbarBar("canvas-new", "Canvas", canvas)) + base.canvas.bars))
         val updated = Settings().withToolbarWorkspaces(profiles)
         val restored = Settings.fromJson(updated.toJson())
         assertEquals(profiles, restored.toolbarWorkspaces)
