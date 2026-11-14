@@ -934,4 +934,183 @@ class ToolbarTitleAndPreviewReorderComposeTest {
         }
         rule.mainClock.autoAdvance = true
     }
+
+    /** Reproduces TOP/CENTER drop while another bar remains in TOP/END.
+     * Position is sampled through the acknowledgement and peer relayout, not
+     * only at the final resting state (which can hide a one-frame jump). */
+    private fun verifyOccupiedTopCenterInsertion(
+        lines: Int, floating: Boolean, sourceAnchor: ToolbarAnchor,
+        preferredWidth: Int, preferredHeight: Int,
+        peerOnRightStart: Boolean = false,
+    ) {
+        val peerLayout = ToolbarLayout(listOf(ToolbarSection(listOf(
+            ToolbarEntry(ToolbarItem.PEN), ToolbarEntry(ToolbarItem.ERASER),
+        ))))
+        val movingLayout = ToolbarLayout(listOf(ToolbarSection(
+            (0 until lines).flatMap { lane -> listOf(
+                ToolbarEntry(ToolbarItem.COLORS, lane = lane),
+                ToolbarEntry(ToolbarItem.SPACER, lane = lane),
+            ) }, lanes = lines,
+        )))
+        val peer = ToolbarBar("peer", "Top right", peerLayout,
+            geometry = ToolbarGeometry(
+                floating = floating,
+                anchor = if (peerOnRightStart) ToolbarAnchor.CENTER_RIGHT else ToolbarAnchor.TOP_RIGHT,
+                dockEdge = if (floating) null else if (peerOnRightStart) ToolbarDockEdge.RIGHT else ToolbarDockEdge.TOP,
+                dockAlignment = if (peerOnRightStart) ToolbarDockAlignment.START else ToolbarDockAlignment.END,
+                widthDp = if (peerOnRightStart) 72 else 168,
+                heightDp = if (peerOnRightStart) 210 else 52,
+            ))
+        val moving = ToolbarBar("moving", "Moving colors", movingLayout,
+            geometry = ToolbarGeometry(
+                floating = floating, anchor = sourceAnchor,
+                dockEdge = if (floating) null else sourceAnchor.floatingEdge(),
+                dockAlignment = when (sourceAnchor) {
+                    ToolbarAnchor.TOP_LEFT, ToolbarAnchor.BOTTOM_LEFT -> ToolbarDockAlignment.START
+                    ToolbarAnchor.TOP_RIGHT, ToolbarAnchor.BOTTOM_RIGHT -> ToolbarDockAlignment.END
+                    else -> ToolbarDockAlignment.CENTER
+                },
+                widthDp = preferredWidth, heightDp = preferredHeight,
+            ))
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(peer, moving)))
+        var look by mutableStateOf(ToolbarLook(floating = floating))
+        var commits = 0
+        rule.setContent {
+            MaterialTheme {
+                Box(Modifier.fillMaxWidth()) {
+                    ToolbarWorkspacePreview(
+                        workspace = workspace, look = look, selectedId = "moving",
+                        colors = emptyList(), activeColorIndex = 0, pageNumber = 1,
+                        pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
+                        selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
+                        onMoveBar = { id, anchor, alignment ->
+                            val result = toolbarProjectedMove(workspace, look, id,
+                                ToolbarDropPosition(anchor, alignment))!!
+                            workspace = result.first
+                            look = result.second
+                            commits++
+                        }, onReorderBar = { from, to ->
+                            workspace = workspace.reorderVisualBar(from, to)
+                        },
+                    )
+                }
+            }
+        }
+        rule.waitForIdle()
+        val pane = rule.onNodeWithTag("toolbar-preview-stage", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val movingNode = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+        val initial = movingNode.fetchSemanticsNode().boundsInRoot
+        val finger = Offset(pane.center.x, pane.top + 12f)
+        rule.mainClock.autoAdvance = false
+        rule.onNodeWithTag("toolbar-preview-stage", useUnmergedTree = true).performTouchInput {
+            down(initial.center - pane.topLeft)
+            advanceEventTime(800)
+            moveBy(finger - initial.center)
+            advanceEventTime(48)
+            up()
+        }
+        val peerNode = rule.onNodeWithTag("preview-bar-peer", useUnmergedTree = true)
+        val initialPeer = peerNode.fetchSemanticsNode().boundsInRoot
+        var committedX: Float? = null
+        var committedY: Float? = null
+        var settledPeerRight: Float? = null
+        var settledPeerTop: Float? = null
+        repeat(26) { frame ->
+            rule.mainClock.advanceTimeByFrame()
+            val rect = movingNode.fetchSemanticsNode().boundsInRoot
+            val peerRect = peerNode.fetchSemanticsNode().boundsInRoot
+            if (lines == 1 || sourceAnchor == ToolbarAnchor.TOP_RIGHT) {
+                println("TOP_CENTER_TRACE lines=$lines floating=$floating start=$sourceAnchor frame=$frame commits=$commits moving=$rect peer=$peerRect peer0=$initialPeer")
+            }
+            assertTrue("Top-right peer disappeared at frame=$frame, rows=$lines floating=$floating: $peerRect",
+                peerRect.width > 1f && peerRect.height > 1f)
+            assertTrue("Source lost bounds at frame=$frame, rows=$lines floating=$floating anchor=$sourceAnchor: $rect",
+                rect.width > 1f && rect.height > 1f)
+            if (commits > 0) {
+                val previousX = committedX
+                val previousY = committedY
+                if (previousX != null && previousY != null) {
+                    assertTrue("Top-center ack jumped x at frame=$frame, rows=$lines floating=$floating from=$sourceAnchor: $previousX -> ${rect.left}",
+                        kotlin.math.abs(rect.left - previousX) < 18f)
+                    assertTrue("Top-center ack jumped y at frame=$frame, rows=$lines floating=$floating from=$sourceAnchor: $previousY -> ${rect.top}",
+                        kotlin.math.abs(rect.top - previousY) < 18f)
+                }
+                val priorPeerRight = settledPeerRight
+                val priorPeerTop = settledPeerTop
+                if (priorPeerRight != null && priorPeerTop != null) {
+                    assertTrue("Peer TOP_RIGHT flickered sideways after ack frame=$frame rows=$lines floating=$floating: $priorPeerRight -> ${peerRect.right}",
+                        kotlin.math.abs(peerRect.right - priorPeerRight) < 18f)
+                    assertTrue("Peer TOP_RIGHT flickered vertically after ack frame=$frame rows=$lines floating=$floating: $priorPeerTop -> ${peerRect.top}",
+                        kotlin.math.abs(peerRect.top - priorPeerTop) < 18f)
+                }
+                settledPeerRight = peerRect.right
+                settledPeerTop = peerRect.top
+                committedX = rect.left
+                committedY = rect.top
+            }
+        }
+        rule.runOnIdle {
+            assertEquals("Exactly one completed placement", 1, commits)
+            val result = workspace.bars.first { it.id == "moving" }
+            assertEquals(ToolbarAnchor.TOP_CENTER, result.geometry.anchor)
+            assertEquals(ToolbarDockAlignment.CENTER, result.geometry.dockAlignment)
+            val unchanged = workspace.bars.first { it.id == "peer" }
+            assertEquals(if (peerOnRightStart) ToolbarAnchor.CENTER_RIGHT else ToolbarAnchor.TOP_RIGHT,
+                unchanged.geometry.anchor)
+            assertEquals(if (peerOnRightStart) ToolbarDockAlignment.START else ToolbarDockAlignment.END,
+                unchanged.geometry.dockAlignment)
+        }
+        rule.onNodeWithTag("preview-bar-peer", useUnmergedTree = true).assertExists()
+        rule.onNodeWithTag("toolbar-drop-indicator-moving", useUnmergedTree = true).assertDoesNotExist()
+        rule.mainClock.autoAdvance = true
+    }
+
+    @Test fun occupiedTopCenterOneLineDockedFromSameTopRightLane() =
+        verifyOccupiedTopCenterInsertion(1, false, ToolbarAnchor.TOP_RIGHT, 148, 52)
+
+    @Test fun occupiedTopCenterOneLineFloatingFromSameTopRightLane() =
+        verifyOccupiedTopCenterInsertion(1, true, ToolbarAnchor.TOP_RIGHT, 148, 52)
+
+    @Test fun occupiedTopCenterTwoLinesDockedFromSameTopRightLane() =
+        verifyOccupiedTopCenterInsertion(2, false, ToolbarAnchor.TOP_RIGHT, 168, 100)
+
+    @Test fun occupiedTopCenterThreeLinesFloatingFromSameTopRightLane() =
+        verifyOccupiedTopCenterInsertion(3, true, ToolbarAnchor.TOP_RIGHT, 185, 152)
+
+    @Test fun rightStartPeerOneLineFloatingIntoTopCenter() =
+        verifyOccupiedTopCenterInsertion(1, true, ToolbarAnchor.TOP_LEFT, 148, 52, peerOnRightStart = true)
+
+    @Test fun rightStartPeerOneLineDockedIntoTopCenter() =
+        verifyOccupiedTopCenterInsertion(1, false, ToolbarAnchor.CENTER_LEFT, 56, 148, peerOnRightStart = true)
+
+    @Test fun rightStartPeerTwoLinesFloatingIntoTopCenter() =
+        verifyOccupiedTopCenterInsertion(2, true, ToolbarAnchor.BOTTOM_CENTER, 166, 112, peerOnRightStart = true)
+
+    @Test fun rightStartPeerTwoLinesDockedIntoTopCenter() =
+        verifyOccupiedTopCenterInsertion(2, false, ToolbarAnchor.TOP_LEFT, 166, 112, peerOnRightStart = true)
+
+    @Test fun rightStartPeerThreeLinesFloatingIntoTopCenter() =
+        verifyOccupiedTopCenterInsertion(3, true, ToolbarAnchor.CENTER_LEFT, 172, 255, peerOnRightStart = true)
+
+    @Test fun rightStartPeerThreeLinesDockedIntoTopCenter() =
+        verifyOccupiedTopCenterInsertion(3, false, ToolbarAnchor.BOTTOM_LEFT, 172, 255, peerOnRightStart = true)
+
+    @Test fun occupiedTopCenterCompactOneLineDockedFromRightCenter() =
+        verifyOccupiedTopCenterInsertion(1, false, ToolbarAnchor.CENTER_RIGHT, 56, 145)
+
+    @Test fun occupiedTopCenterOneLineFloatingFromRightCenter() =
+        verifyOccupiedTopCenterInsertion(1, true, ToolbarAnchor.CENTER_RIGHT, 56, 145)
+
+    @Test fun occupiedTopCenterTwoLinesDockedFromTopLeft() =
+        verifyOccupiedTopCenterInsertion(2, false, ToolbarAnchor.TOP_LEFT, 160, 102)
+
+    @Test fun occupiedTopCenterTwoLinesFloatingFromBottomLeft() =
+        verifyOccupiedTopCenterInsertion(2, true, ToolbarAnchor.BOTTOM_LEFT, 166, 112)
+
+    @Test fun occupiedTopCenterThreeLinesDockedFromRightCenter() =
+        verifyOccupiedTopCenterInsertion(3, false, ToolbarAnchor.CENTER_RIGHT, 172, 255)
+
+    @Test fun occupiedTopCenterThreeLinesFloatingFromTopLeft() =
+        verifyOccupiedTopCenterInsertion(3, true, ToolbarAnchor.TOP_LEFT, 196, 152)
 }

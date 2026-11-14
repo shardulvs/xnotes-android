@@ -78,6 +78,13 @@ internal fun toolbarVisibleDrag(offset: Offset, slot: Rect, pane: Rect): Offset 
     )
 }
 
+/** End-of-morph translation uses the invariant outer slot, not the child
+ * toolbar's initial inner bounds. Horizontal/vertical alignment changes that
+ * inset during reflow; subtracting it from the target leaves a final-frame jump. */
+internal fun toolbarSettleDestinationOffset(
+    targetInRoot: Offset, parentSlotInRoot: Offset?, measuredContentSlot: Rect,
+): Offset = targetInRoot - (parentSlotInRoot ?: measuredContentSlot.topLeft)
+
 /**
  * Hold anywhere on a toolbar's container to pick it up. Ordinary taps still reach
  * the tool buttons; the drawing canvas receives events outside the bars unchanged.
@@ -260,7 +267,16 @@ fun ToolbarDragSurface(
                                     pendingPlacement = target
                                     pendingRootTarget = projectedRoot
                                 }
-                                val destinationOffset = projectedRoot - barBounds.topLeft
+                                // The dragged content may be centred *inside* its original
+                                // slot. During an orientation morph that inset disappears.
+                                // barBounds.topLeft is the old content origin, so using it
+                                // for the FINAL offset leaves a gap at the destination and
+                                // the acknowledged layout visibly jumps to close it.
+                                // The parent slot is stable across the morph and matches
+                                // the target slot's coordinate space.
+                                val destinationOffset = toolbarSettleDestinationOffset(
+                                    projectedRoot, parentSlotNow, barBounds,
+                                )
                                 // Announce the target before the first translation frame:
                                 // size and movement use a shared 220-ms easing curve.
                                 if (changed) {

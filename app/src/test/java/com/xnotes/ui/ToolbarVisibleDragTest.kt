@@ -30,6 +30,20 @@ class ToolbarVisibleDragTest {
         assertEquals(-85f, toolbarVisibleDrag(Offset(-1000f, 0f), wide, viewport).x, 0.001f)
     }
 
+    @Test fun settleTargetUsesParentSlotNotOldCenteredChild() {
+        // RIGHT/CENTER color bar: child starts 24 px in from its parent and
+        // morphs into a TOP/CENTER row whose inset disappears.
+        val target = Offset(519f, 12f)
+        val parent = Offset(1140f, 339f)
+        val oldChild = Rect(1164f, 339f, 1272f, 561f)
+        assertEquals(Offset(-621f, -327f),
+            toolbarSettleDestinationOffset(target, parent, oldChild))
+        // A legacy standalone bar without a parent-plan coordinate still
+        // uses the measured slot as an explicit, documented fallback.
+        assertEquals(Offset(-645f, -327f),
+            toolbarSettleDestinationOffset(target, null, oldChild))
+    }
+
     @Test fun missingGeometryDoesNotChangePointerMotion() {
         val offset = Offset(170f, -260f)
         assertEquals(offset, toolbarVisibleDrag(offset, Rect.Zero, Rect.Zero))
