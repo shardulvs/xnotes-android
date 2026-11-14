@@ -153,6 +153,9 @@ class CanvasView @JvmOverloads constructor(
 
     init {
         isFocusableInTouchMode = true
+        if (android.os.Build.VERSION.SDK_INT >= 34) {
+            isAutoHandwritingEnabled = false
+        }
         setWillNotDraw(false)
     }
 
