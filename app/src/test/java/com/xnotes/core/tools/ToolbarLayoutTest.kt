@@ -21,7 +21,7 @@ class ToolbarLayoutTest {
                 ToolbarItem.PEN, ToolbarItem.DASHED, ToolbarItem.CALLIGRAPHY, ToolbarItem.SPEED,
                 ToolbarItem.TAPER, ToolbarItem.HIGHLIGHTER, ToolbarItem.ERASER,
             ),
-            d.sections[2].entries.map { it.item },
+            d.sections[2].visibleEntries.map { it.item },
         )
         assertEquals(
             listOf(ToolbarItem.PAN, ToolbarItem.SELECT, ToolbarItem.LASSO, ToolbarItem.INSERT_SPACE, ToolbarItem.SCREENSHOT),

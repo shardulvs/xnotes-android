@@ -189,6 +189,10 @@ private fun ToolbarItemView(
         // Canvas-only items; a stored paged layout can never hold one, so nothing is drawn.
         ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP -> Unit
 
+        ToolbarItem.UNIFIED_PEN -> UnifiedPenLauncher(
+            host = editor, armedTool = editor.tool, ink = editor.controller.inkColor.toComposeColor(),
+            onChooseTool = { editor.selectTool(it) }, onSelectColor = { editor.pickColor(it) },
+        )
         ToolbarItem.HOME -> ToolbarIcon(XnotesIcons.prev, stringResource(R.string.toolbar_home)) { onOpenBackstage() }
         // A name has no room down a side rail.
         ToolbarItem.TITLE -> if (!LocalBar.current.vertical) Tooltip(stringResource(R.string.rename_note)) {
