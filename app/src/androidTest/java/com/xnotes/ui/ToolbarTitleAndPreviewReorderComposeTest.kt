@@ -853,4 +853,85 @@ class ToolbarTitleAndPreviewReorderComposeTest {
         rule.onNodeWithTag("preview-bar-moving", useUnmergedTree = true).assertExists()
         rule.mainClock.autoAdvance = true
     }
+
+    /** Regression: one-line Colors rail from RIGHT/CENTER to TOP/END near a peer. */
+    @Test fun rightCenterOneRowColorsToUpperRightHasContinuousSettle() {
+        val primaryLayout = ToolbarLayout(listOf(ToolbarSection(listOf(
+            ToolbarEntry(ToolbarItem.PEN), ToolbarEntry(ToolbarItem.ERASER),
+        ))))
+        val colorsLayout = ToolbarLayout(listOf(ToolbarSection(listOf(
+            ToolbarEntry(ToolbarItem.COLORS),
+        ))))
+        val peer = ToolbarBar("peer", "Top tools", primaryLayout, geometry = ToolbarGeometry(
+            anchor = ToolbarAnchor.TOP_LEFT, dockEdge = ToolbarDockEdge.TOP,
+            dockAlignment = ToolbarDockAlignment.START, heightDp = 52))
+        val colors = ToolbarBar("moving", "Colors", colorsLayout, geometry = ToolbarGeometry(
+            anchor = ToolbarAnchor.CENTER_RIGHT, dockEdge = ToolbarDockEdge.RIGHT,
+            dockAlignment = ToolbarDockAlignment.CENTER, widthDp = 56, heightDp = 190))
+        val look = ToolbarLook()
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(peer, colors)))
+        var commits = 0
+        rule.setContent {
+            MaterialTheme {
+                Box(Modifier.fillMaxWidth()) {
+                    ToolbarWorkspacePreview(
+                        workspace = workspace, look = look, selectedId = "moving",
+                        colors = emptyList(), activeColorIndex = 0, pageNumber = 1,
+                        pageCount = 1, zoomLabel = "100%", titleLabel = "Document",
+                        selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
+                        onMoveBar = { id, anchor, alignment ->
+                            val projected = toolbarProjectedMove(workspace, look, id,
+                                ToolbarDropPosition(anchor, alignment))!!
+                            workspace = projected.first
+                            commits++
+                        }, onReorderBar = { source, target ->
+                            workspace = workspace.reorderVisualBar(source, target)
+                        },
+                    )
+                }
+            }
+        }
+        rule.waitForIdle()
+        val stage = rule.onNodeWithTag("toolbar-preview-stage", useUnmergedTree = true)
+        val pane = stage.fetchSemanticsNode().boundsInRoot
+        val moving = rule.onNodeWithTag("toolbar-drag-surface-moving", useUnmergedTree = true)
+        val start = moving.fetchSemanticsNode().boundsInRoot.center
+        val destination = Offset(pane.right - 96f, pane.top + 10f)
+        rule.mainClock.autoAdvance = false
+        stage.performTouchInput {
+            down(start - pane.topLeft)
+            advanceEventTime(800)
+            moveBy(destination - start)
+            advanceEventTime(48)
+            up()
+        }
+        var stableX = Float.NaN
+        repeat(26) { frame ->
+            rule.mainClock.advanceTimeByFrame()
+            val rect = moving.fetchSemanticsNode().boundsInRoot
+            val body = rule.onNodeWithTag("preview-content-moving", useUnmergedTree = true)
+                .fetchSemanticsNode().boundsInRoot
+            val slot = rule.onNodeWithTag("preview-bar-moving", useUnmergedTree = true)
+                .fetchSemanticsNode().boundsInRoot
+            assertTrue("Final corner source must remain visible, frame $frame: $rect",
+                rect.right <= pane.right + 3f && rect.top >= pane.top - 3f)
+            assertTrue("The Colors body must not escape the preview, frame $frame: $body",
+                body.left >= pane.left - 3f && body.right <= pane.right + 3f)
+            if (commits > 0 && slot.top < pane.top + 150f) {
+                assertTrue("Source and new TOP_RIGHT parent must share one root x at frame $frame: $rect vs $slot",
+                    kotlin.math.abs(rect.left - slot.left) < 10f)
+            }
+            if (commits > 0) {
+                if (stableX.isNaN()) stableX = rect.left
+                assertTrue("After drop, TOP_RIGHT jumped left: frame=$frame finalX=$stableX rect=$rect",
+                    rect.left >= stableX - 20f)
+            }
+        }
+        rule.runOnIdle {
+            assertEquals("Must reach upper right", ToolbarAnchor.TOP_RIGHT,
+                workspace.bars[1].geometry.anchor)
+            assertEquals(1, commits)
+        }
+        rule.mainClock.autoAdvance = true
+    }
 }

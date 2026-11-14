@@ -327,9 +327,18 @@ fun ToolbarDragSurface(
         acknowledged -> Offset.Zero // Legacy path without a projected slot.
         else -> drag
     }
-    val visualDrag = if (dragging || pendingPlacement != null)
-        toolbarVisibleDrag(rawVisualDrag, barBounds, paneBoundsNow)
-    else rawVisualDrag
+    // The root target is computed by the same planner as the committed parent.
+    // After acknowledgement its parent has already moved, but barBounds may still
+    // describe the previous (much narrower) RIGHT rail for one layout frame.
+    // Clamping a valid zero offset against that stale rail applies its oversized
+    // horizontal extent a second time: a one-frame jump LEFT before snapping back.
+    // Constrain only the active gesture / pre-acknowledgement settle. Once the
+    // target is acknowledged, use its exact root-space compensation unmodified.
+    val visualDrag = when {
+        acknowledged && pendingRootTarget != null && parentSlotInRoot != null -> rawVisualDrag
+        dragging || pendingPlacement != null -> toolbarVisibleDrag(rawVisualDrag, barBounds, paneBoundsNow)
+        else -> rawVisualDrag
+    }
     Box(
         Modifier
             .offset { IntOffset(visualDrag.x.roundToInt(), visualDrag.y.roundToInt()) }
