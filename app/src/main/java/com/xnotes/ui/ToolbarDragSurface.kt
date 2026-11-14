@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.offset
@@ -21,6 +22,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -64,6 +66,10 @@ fun ToolbarDragSurface(
     onDragPosition: ((Offset) -> Unit)? = null,
     onDrop: ((Offset) -> Boolean)? = null,
     onDragCancel: (() -> Unit)? = null,
+    /** Keep the editor preview's gesture hit area at the interpolated lane size;
+     * the default still wraps real toolbar content. */
+    fillParentSlot: Boolean = false,
+    contentAlignment: Alignment = Alignment.TopStart,
     /** Optional projected destination in root pixels, shared with the drop indicator. */
     snapTargetInRoot: ((ToolbarDropPosition) -> Offset?)? = null,
     /** Called during dragging only; never changes the saved workspace. */
@@ -318,6 +324,7 @@ fun ToolbarDragSurface(
     Box(
         Modifier
             .offset { IntOffset(visualDrag.x.roundToInt(), visualDrag.y.roundToInt()) }
+            .then(if (fillParentSlot) Modifier.fillMaxSize() else Modifier)
             .testTag("toolbar-drag-surface-$id")
             // A docked bar is an earlier sibling of the canvas. Lift it while moving so the
             // canvas (and adjacent split panes) cannot paint over the dragged toolbar.
@@ -341,6 +348,7 @@ fun ToolbarDragSurface(
                     barBounds = slot
             }
             .then(gesture),
+        contentAlignment = contentAlignment,
     ) {
         content()
     }

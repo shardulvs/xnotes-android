@@ -214,37 +214,6 @@ internal fun toolbarFloatingAlignment(bar: ToolbarBar): ToolbarDockAlignment = w
     else -> ToolbarDockAlignment.CENTER
 }
 
-/** Conservative natural length. The allocated box bounds controls and permits scrolling. */
-private fun estimatedFloatingLength(bar: ToolbarBar, index: Int, look: ToolbarLook, colors: Int): Float {
-    val m = resolvedBarMetrics(toolbarBarSize(bar, index, look), bar.geometry)
-    val vertical = bar.geometry.anchor.floatingEdge() in listOf(ToolbarDockEdge.LEFT, ToolbarDockEdge.RIGHT)
-    val explicit = if (vertical) bar.geometry.heightDp else bar.geometry.widthDp
-    if (explicit != null) return explicit.toFloat()
-    val sections = bar.layout.visibleSections
-    fun sectionLength(section: com.xnotes.core.tools.ToolbarSection): Float =
-        (0 until section.crossCells).maxOfOrNull { lane ->
-            section.entriesInLane(lane).sumOf { entry ->
-                val unit = entry.sizeDp?.toFloat() ?: m.button.value
-                when (entry.item) {
-                    com.xnotes.core.tools.ToolbarItem.SPACER ->
-                        entry.sizeDp?.toFloat() ?: com.xnotes.core.tools.ToolbarEntry.DEFAULT_SPACER_DP.toFloat()
-                    com.xnotes.core.tools.ToolbarItem.COLORS ->
-                        entry.colorIndices(colors).count().coerceAtLeast(1) * m.circle.value
-                    com.xnotes.core.tools.ToolbarItem.PAGE_NAV,
-                    com.xnotes.core.tools.ToolbarItem.ZOOM -> 3f * unit
-                    com.xnotes.core.tools.ToolbarItem.TITLE -> if (vertical) 0f else 120f
-                    else -> unit
-                }.toDouble()
-            }.toFloat()
-        }?.toFloat() ?: 0f
-    fun groupLength(group: List<com.xnotes.core.tools.ToolbarSection>): Float =
-        group.sumOf { sectionLength(it).toDouble() }.toFloat() +
-            (group.size - 1).coerceAtLeast(0) * 14f
-    // Auto-sized floating regions are compact: no mirrored phantom space at the end.
-    // Explicit-width/height bars retain their physical Start/Center/End anchors.
-    return maxOf(48f, groupLength(sections) + 2f * m.padding.value)
-}
-
 /** Auto-packs floating bars into the next free lane; never reserves document space. */
 internal fun toolbarFloatingPlan(
     workspace: ToolbarWorkspace,
@@ -268,7 +237,8 @@ internal fun toolbarFloatingPlan(
         val vertical = edge == ToolbarDockEdge.LEFT || edge == ToolbarDockEdge.RIGHT
         val m = resolvedBarMetrics(toolbarBarSize(bar, index, look), bar.geometry)
         val axisLength = if (vertical) height else width
-        val length = estimatedFloatingLength(bar, index, look, colorCount).coerceAtMost(axisLength)
+        val length = toolbarEstimatedFloatingLength(bar, index, look, colorCount, vertical)
+            .coerceAtMost(axisLength)
         val depth = if (vertical) toolbarWidth(m, bar.layout, bar.geometry).value
             else toolbarHeight(m, bar.layout, bar.geometry).value
         requests.add(ToolbarDockRequest(

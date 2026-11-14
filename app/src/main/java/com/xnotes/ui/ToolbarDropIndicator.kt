@@ -1,7 +1,6 @@
 package com.xnotes.ui
 
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -140,12 +139,12 @@ internal fun toolbarReorderPreviewSlot(
 @Composable
 internal fun ToolbarDropIndicator(slot: ToolbarDropSlot, id: String) {
     val accent = LocalPalette.current.accent.toComposeColor()
-    val x = animateDpAsState(slot.x.dp, spring(), label = "dropIndicatorX-$id")
-    val y = animateDpAsState(slot.y.dp, spring(), label = "dropIndicatorY-$id")
+    val x = animateDpAsState(slot.x.dp, toolbarPeerSlotAnimationSpec, label = "dropIndicatorX-$id")
+    val y = animateDpAsState(slot.y.dp, toolbarPeerSlotAnimationSpec, label = "dropIndicatorY-$id")
     // The outline morphs from a horizontal strip to a vertical rail (and back)
     // while neighbouring bars shift into their predicted positions.
-    val width = animateDpAsState(slot.width.dp, spring(), label = "dropIndicatorWidth-$id")
-    val height = animateDpAsState(slot.height.dp, spring(), label = "dropIndicatorHeight-$id")
+    val width = animateDpAsState(slot.width.dp, toolbarPeerSlotAnimationSpec, label = "dropIndicatorWidth-$id")
+    val height = animateDpAsState(slot.height.dp, toolbarPeerSlotAnimationSpec, label = "dropIndicatorHeight-$id")
     Box(Modifier.offset(x = x.value, y = y.value)
         .width(width.value).height(height.value)
         .background(accent.copy(alpha = 0.15f), RoundedCornerShape(10.dp))

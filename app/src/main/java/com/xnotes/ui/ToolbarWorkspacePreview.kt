@@ -126,8 +126,10 @@ internal fun ToolbarWorkspacePreview(
         reorder.acknowledge(workspace)
         settlingOrientation.entries.toList().forEach { (id, target) ->
             val bar = workspace.bars.firstOrNull { it.id == id }
-            if (bar == null || (bar.geometry.anchor == target.anchor &&
-                bar.geometry.dockAlignment == target.alignment)) {
+            // The gesture host clears the morph AFTER its root-slot handoff.
+            // Clearing on model acknowledgement is one layout frame too early
+            // and makes the preview flash at the committed orientation.
+            if (bar == null) {
                 settlingOrientation.remove(id)
                 morphProgress.remove(id)
             }
@@ -292,6 +294,18 @@ internal fun ToolbarWorkspacePreview(
                 val animatedSlotHeight by animateDpAsState(slotHeight,
                     animationSpec = if (sourceIsControlled) snap() else toolbarPeerSlotAnimationSpec,
                     label = "previewSlotHeight-${bar.id}")
+                val physicalSlot = toolbarDropSlot(placement, bar, index, look)
+                val alignedDp = toolbarAlignedContentTopLeft(
+                    parentX = visibleX.value, parentY = visibleY.value,
+                    animatedWidth = animatedSlotWidth.value,
+                    animatedHeight = animatedSlotHeight.value,
+                    contentWidth = physicalSlot.width, contentHeight = physicalSlot.height,
+                    edge = placement.edge,
+                )
+                val alignedContentInRoot = Offset(
+                    stageBounds.left + with(previewDensity) { alignedDp.x.dp.toPx() },
+                    stageBounds.top + with(previewDensity) { alignedDp.y.dp.toPx() },
+                )
                 val positionModifier = Modifier.offset(x = visibleX, y = visibleY)
                     .width(animatedSlotWidth).height(animatedSlotHeight)
                     .testTag("preview-bar-${bar.id}")
@@ -305,12 +319,15 @@ internal fun ToolbarWorkspacePreview(
                     ToolbarDragSurface(
                         id = bar.id,
                         anchor = anchor,
+                        fillParentSlot = true,
+                        contentAlignment = edgeAlignment,
                         movable = bar.geometry.movable,
                         paneBounds = stageBounds,
                         parentSlotInRoot = Offset(
                             stageBounds.left + with(previewDensity) { visibleX.toPx() },
                             stageBounds.top + with(previewDensity) { visibleY.toPx() },
                         ),
+                        alignedContentSlotInRoot = alignedContentInRoot,
                         currentAlignment = toolbarFloatingAlignment(bar),
                         onMoveBar = { movedId, destination, alignment ->
                             // Parent placement and drag offset must change atomically;
@@ -365,8 +382,8 @@ internal fun ToolbarWorkspacePreview(
                             },
                             vertical = visualVertical,
                             floating = floating,
-                            availableWidth = slotWidth,
-                            availableHeight = slotHeight,
+                            availableWidth = animatedSlotWidth,
+                            availableHeight = animatedSlotHeight,
                             colors = colors,
                             activeColorIndex = activeColorIndex,
                             pageNumber = pageNumber,

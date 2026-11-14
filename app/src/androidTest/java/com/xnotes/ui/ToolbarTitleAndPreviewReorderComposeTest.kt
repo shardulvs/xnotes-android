@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
@@ -33,6 +34,139 @@ import org.junit.Test
 
 class ToolbarTitleAndPreviewReorderComposeTest {
     @get:Rule val rule = createComposeRule()
+
+    /** Regression: slider updates the parent plan immediately, but the preview
+     * background must never lag outside or ahead of its animated slot. Exercise
+     * growing AND shrinking length, thickness, buttons and padding on a drawing
+     * toolbar with colors, composite controls and three separate lanes. */
+    @Test fun canvasLivePreviewResizingKeepsBackgroundInsideAnimatedSlot() {
+        val layout = ToolbarLayout(listOf(ToolbarSection(listOf(
+            ToolbarEntry(ToolbarItem.PEN, lane = 0),
+            ToolbarEntry(ToolbarItem.COLORS, lane = 1),
+            ToolbarEntry(ToolbarItem.ZOOM, lane = 2),
+        ), lanes = 3)))
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(ToolbarBar(
+            "resizing", "Drawing Live", layout, geometry = ToolbarGeometry(
+                floating = true, anchor = ToolbarAnchor.TOP_CENTER,
+                widthDp = 240, heightDp = 132, elementSizeDp = 42, paddingDp = 4,
+            ),
+        ))))
+        val look = ToolbarLook(floating = true)
+        rule.setContent {
+            MaterialTheme {
+                Box(Modifier.fillMaxWidth()) {
+                    ToolbarWorkspacePreview(
+                        workspace = workspace, look = look, selectedId = "resizing",
+                        colors = List(10) { com.xnotes.core.model.Rgba(0, 0, 0, 255) },
+                        activeColorIndex = 0, pageNumber = 1, pageCount = 3,
+                        zoomLabel = "100%", titleLabel = "Drawing", selectedEntry = null,
+                        onSelectBar = {}, onSelectEntry = { _, _, _ -> },
+                        onMoveBar = { _, _, _ -> },
+                    )
+                }
+            }
+        }
+        rule.waitForIdle()
+        rule.mainClock.autoAdvance = false
+        fun assertFits(label: String) {
+            val slot = rule.onNodeWithTag("preview-bar-resizing", useUnmergedTree = true)
+                .getUnclippedBoundsInRoot()
+            val body = rule.onNodeWithTag("preview-content-resizing", useUnmergedTree = true)
+                .getUnclippedBoundsInRoot()
+            val dragSurface = rule.onNodeWithTag("toolbar-drag-surface-resizing", useUnmergedTree = true)
+                .getUnclippedBoundsInRoot()
+            assertTrue("$label: body left outside slot: $body / $slot; drag=$dragSurface",
+                body.left >= slot.left - 2.dp)
+            assertTrue("$label: body top outside slot: $body / $slot", body.top >= slot.top - 2.dp)
+            assertTrue("$label: body right outside slot: $body / $slot", body.right <= slot.right + 2.dp)
+            assertTrue("$label: body bottom outside slot: $body / $slot", body.bottom <= slot.bottom + 2.dp)
+        }
+        assertFits("initial")
+        val sizes = listOf(
+            ToolbarGeometry(floating = true, anchor = ToolbarAnchor.TOP_CENTER,
+                widthDp = 360, heightDp = 164, elementSizeDp = 58, paddingDp = 14),
+            ToolbarGeometry(floating = true, anchor = ToolbarAnchor.TOP_CENTER,
+                widthDp = 120, heightDp = 74, elementSizeDp = 36, paddingDp = 2),
+            ToolbarGeometry(floating = true, anchor = ToolbarAnchor.TOP_CENTER,
+                widthDp = 295, heightDp = 150, elementSizeDp = 64, paddingDp = 10),
+        )
+        sizes.forEachIndexed { step, geometry ->
+            rule.runOnIdle {
+                workspace = workspace.replaceBar(workspace.bars.single().copy(geometry = geometry))
+            }
+            repeat(21) { frame ->
+                rule.mainClock.advanceTimeByFrame()
+                assertFits("step=$step frame=$frame")
+            }
+        }
+        rule.mainClock.autoAdvance = true
+    }
+
+    /** Auto layout should not manufacture scrolling simply because the
+     * estimator forgot swatch padding, composite text or multi-lane spacing.
+     * Only genuinely viewport-oversized bars are allowed to scroll. */
+    @Test fun floatingAutoCanvasBarsWithVariousSizesRowsAndPaletteCountsFitWithoutScroll() {
+        var workspace by mutableStateOf(ToolbarWorkspace(listOf(ToolbarBar(
+            "auto", "Auto drawing", ToolbarLayout(listOf(ToolbarSection(
+                listOf(ToolbarEntry(ToolbarItem.PEN)), lanes = 1))),
+            geometry = ToolbarGeometry(floating = true, anchor = ToolbarAnchor.TOP_CENTER),
+        ))))
+        var look by mutableStateOf(ToolbarLook(floating = true))
+        var palette by mutableStateOf(List(3) { com.xnotes.core.model.Rgba(20, 30, 40) })
+        rule.setContent {
+            MaterialTheme {
+                Box(Modifier.fillMaxWidth()) {
+                    ToolbarWorkspacePreview(
+                        workspace = workspace, look = look, selectedId = "auto",
+                        colors = palette, activeColorIndex = 0, pageNumber = 1, pageCount = 4,
+                        zoomLabel = "100%", titleLabel = "Drawing Live",
+                        selectedEntry = null, onSelectBar = {}, onSelectEntry = { _, _, _ -> },
+                        onMoveBar = { _, _, _ -> },
+                    )
+                }
+            }
+        }
+        for (vertical in listOf(false, true)) {
+            for (rows in 1..3) {
+                for (colors in listOf(3, 8, 12)) {
+                    for (size in ToolbarSize.entries) {
+                        val entries = (0 until rows).flatMap { lane ->
+                            listOf(ToolbarEntry(ToolbarItem.COLORS, lane = lane),
+                                ToolbarEntry(ToolbarItem.PEN, lane = lane),
+                                ToolbarEntry(ToolbarItem.ZOOM, lane = lane))
+                        }
+                        rule.runOnIdle {
+                            look = ToolbarLook(floating = true, size = size)
+                            palette = List(colors) { com.xnotes.core.model.Rgba(40, 60, 80) }
+                            workspace = ToolbarWorkspace(listOf(ToolbarBar(
+                                "auto", "Auto drawing", ToolbarLayout(listOf(ToolbarSection(
+                                    entries, lanes = rows))),
+                                geometry = ToolbarGeometry(floating = true,
+                                    anchor = if (vertical) ToolbarAnchor.CENTER_RIGHT else ToolbarAnchor.TOP_CENTER),
+                            )))
+                        }
+                        rule.waitForIdle()
+                        val body = rule.onNodeWithTag("preview-content-auto", useUnmergedTree = true)
+                            .getUnclippedBoundsInRoot()
+                        val slot = rule.onNodeWithTag("preview-bar-auto", useUnmergedTree = true)
+                            .getUnclippedBoundsInRoot()
+                        assertTrue("auto bar extends beyond slot: vertical=$vertical rows=$rows colors=$colors size=$size body=$body slot=$slot",
+                            body.left >= slot.left - 2.dp && body.top >= slot.top - 2.dp &&
+                                body.right <= slot.right + 2.dp && body.bottom <= slot.bottom + 2.dp)
+                        // The preview body is a scrollable container even when
+                        // there is no overflow; its reported max range must be 0.
+                        val semantics = rule.onNodeWithTag("preview-content-auto", useUnmergedTree = true)
+                            .fetchSemanticsNode().config
+                        val axisKey = if (vertical) SemanticsProperties.VerticalScrollAxisRange
+                            else SemanticsProperties.HorizontalScrollAxisRange
+                        val range = runCatching { semantics[axisKey] }.getOrNull()
+                        assertTrue("Auto bar manufactured overflow: vertical=$vertical rows=$rows colors=$colors size=$size max=${range?.maxValue()}",
+                            range == null || range.maxValue() <= 2f)
+                    }
+                }
+            }
+        }
+    }
 
     @Test fun singleRowTopFloatingBarSharesTheTopEdgeWithTwoRowPeer() {
         val tall = ToolbarLayout(listOf(ToolbarSection(listOf(

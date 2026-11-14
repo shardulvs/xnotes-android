@@ -1,6 +1,6 @@
 package com.xnotes.ui
 
-import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,10 +73,8 @@ internal fun PreviewBar(
     // Animate only the toolbar body's dimensions; the surrounding drag slot
     // remains at its target coordinates so cross-edge releases cannot flicker.
     val surface = Modifier
-        // The morph already controls size on every gesture frame. A second
-        // animateContentSize tween lags behind it, then overshoots at commit.
-        .then(if (morph == null) Modifier.animateContentSize(
-            animationSpec = androidx.compose.animation.core.tween(220)) else Modifier)
+        // The parent's slot owns all size transitions. A second independent
+        // animateContentSize here makes the background lag behind slider changes.
         .then(if (floating) Modifier.shadow(6.dp, shape) else Modifier)
         .clip(shape)
         .background(palette.panel.toComposeColor())
@@ -87,6 +86,14 @@ internal fun PreviewBar(
         .clickable(onClick = onSelect)
         .testTag("preview-content-${bar.id}")
 
+    // Depth is physical content size; peers can reserve a thicker lane. Animate
+    // the physical surface too, but never let it exceed the current slot.
+    val bodyWidth by animateDpAsState(toolbarWidth(metrics, bar.layout, bar.geometry),
+        animationSpec = if (morph == null) toolbarPeerSlotAnimationSpec else snap(),
+        label = "previewPhysicalWidth-${bar.id}")
+    val bodyHeight by animateDpAsState(toolbarHeight(metrics, bar.layout, bar.geometry),
+        animationSpec = if (morph == null) toolbarPeerSlotAnimationSpec else snap(),
+        label = "previewPhysicalHeight-${bar.id}")
     if (morph != null) {
         // Both orientations share one animated container and stable item instances.
         // Morph progress comes from the same 220-ms tween moving the dragged bar.
@@ -104,10 +111,10 @@ internal fun PreviewBar(
     } else if (vertical) {
         Column(
             surface
-                .then(if (bar.geometry.heightDp != null) Modifier.height(bar.geometry.heightDp.dp)
-                    else if (bar.layout.distribution == ToolbarDistribution.REGIONS && !autoLengthPinned) Modifier.height(availableHeight)
-                    else if (floating) Modifier.heightIn(max = availableHeight) else Modifier.fillMaxHeight())
-                .width(toolbarWidth(metrics, bar.layout, bar.geometry))
+                .then(if (bar.geometry.heightDp != null || !floating ||
+                    (bar.layout.distribution == ToolbarDistribution.REGIONS && !autoLengthPinned))
+                    Modifier.height(availableHeight) else Modifier.heightIn(max = availableHeight))
+                .width(minOf(bodyWidth, availableWidth))
                 .then(if (bar.layout.distribution == ToolbarDistribution.CONTINUOUS || compactRegions)
                     Modifier.verticalScroll(rememberScrollState()) else Modifier)
                 .padding(vertical = metrics.padding),
@@ -124,10 +131,10 @@ internal fun PreviewBar(
     } else {
         Row(
             surface
-                .then(if (bar.geometry.widthDp != null) Modifier.width(bar.geometry.widthDp.dp)
-                    else if (bar.layout.distribution == ToolbarDistribution.REGIONS && !autoLengthPinned) Modifier.width(availableWidth)
-                    else if (floating) Modifier.widthIn(max = availableWidth) else Modifier.fillMaxWidth())
-                .height(toolbarHeight(metrics, bar.layout, bar.geometry))
+                .then(if (bar.geometry.widthDp != null || !floating ||
+                    (bar.layout.distribution == ToolbarDistribution.REGIONS && !autoLengthPinned))
+                    Modifier.width(availableWidth) else Modifier.widthIn(max = availableWidth))
+                .height(minOf(bodyHeight, availableHeight))
                 .then(if (bar.layout.distribution == ToolbarDistribution.CONTINUOUS || compactRegions)
                     Modifier.horizontalScroll(rememberScrollState()) else Modifier)
                 .padding(horizontal = metrics.padding),
