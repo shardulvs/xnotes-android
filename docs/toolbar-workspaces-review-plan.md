@@ -5,7 +5,7 @@
 | Stage | Commit checkpoint | Main responsibility |
 | --- | --- | --- |
 | Model | `3445be71` | Layout, workspace domain and geometry invariants |
-| Persistence | `4e04aaa2` | JSON and compatibility/migration |
+| Persistence | `4e04aaa2` | current-schema JSON, invalid-data fallback |
 | Runtime | `086030eb` | Placement and rendering of configurable bars |
 | Editor core | `23730c35` | Dedicated workspace editor, legacy fixes and localization |
 | Dock & regions | `d4e4d219` | Multiple bars, pinned Start/End and safe resize |
@@ -21,7 +21,7 @@ For the concrete first-pass cleanup, regression coverage and retained legacy beh
 2. **Preview controller:** keep gesture transaction and frozen hit-test state outside composables. Do not recompute dock/floating plans inside the per-bar loop.
 3. **Editor state:** decouple selection and workspace mutation from `ToolbarPreferencesPane.kt` in small, test-covered extractions. Avoid callbacks that silently change the primary-bar identity.
 4. **Custom item editor:** split the large `ToolbarCustomizer.kt` by selection/drop planning, palette elements and canvas rendering; do not simply rearrange source lines between files.
-5. **Guardrails:** no unused options, no duplicate locale strings, no hard-coded UI text, no logging in hot pointer paths, and no new persistent properties without a backward-compatible JSON test.
+5. **Guardrails:** no unused options, no duplicate locale strings, no hard-coded UI text, no logging in hot pointer paths, and no new persistent properties without current-schema roundtrip and malformed-data fallback tests.
 
 ## Acceptance checks
 
