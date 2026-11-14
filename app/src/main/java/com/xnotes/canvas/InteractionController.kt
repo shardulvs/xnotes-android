@@ -1278,7 +1278,9 @@ class InteractionController(
             if (drawingIsStylus) e.getPressure(idx).toDouble() else 1.0, e.eventTime, force = false,
         )
         frontInk?.wet(liveStroke, strokePageIndex)
-        requestRender()
+        if (frontInk?.live != true) {
+            requestRender()
+        }
     }
 
     private fun addStrokePoint(vx: Double, vy: Double, pressure: Double, timeMs: Long, force: Boolean) {

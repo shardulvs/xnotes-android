@@ -100,6 +100,9 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
     @Volatile
     private var surfaceH = 0
 
+    @Volatile
+    private var surfaceRotation = -1
+
     /**
      * Whether the pad is holding an opaque copy of what is under it, so hiding it shows nothing.
      *
@@ -159,13 +162,98 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
         // it. Above the canvas but still below the window otherwise, which is where a GL canvas
         // wants it.
         if (onTop) setZOrderOnTop(true) else setZOrderMediaOverlay(true)
+        if (android.os.Build.VERSION.SDK_INT >= 34) {
+            isAutoHandwritingEnabled = false
+        }
         holder.setFormat(android.graphics.PixelFormat.TRANSLUCENT)
         holder.addCallback(this)
+    }
+
+    val installOrientation: Int by lazy {
+        runCatching {
+            val d = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                display ?: context.display
+            } else {
+                display
+            }
+            val displayInfoClass = Class.forName("android.view.DisplayInfo")
+            val displayInfo = displayInfoClass.getDeclaredConstructor().newInstance()
+            val method = d?.javaClass?.getMethod("getDisplayInfo", displayInfoClass)
+            method?.isAccessible = true
+            method?.invoke(d, displayInfo)
+            val field = displayInfoClass.getField("installOrientation")
+            field.getInt(displayInfo)
+        }.getOrElse { Surface.ROTATION_0 }
+    }
+
+    /**
+     * Hardware Composer direct scanout for front buffers (EGL_SINGLE_BUFFER + EGL_FRONT_BUFFER_AUTO_REFRESH)
+     * is physically tied to the display panel's hardware scanout lines.
+     * When the device is physically rotated away from 0-degree physical scanout, mobile DPUs cannot
+     * rotate front-buffered frames in hardware. SurfaceFlinger falls back to GPU composition, which
+     * desynchronizes single-buffered presentation and causes severe stuttering and lag.
+     * In non-direct scanout orientations, the system cleanly falls back to the multi-buffered Skia path.
+     */
+    val isPhysicalScanoutDirect: Boolean
+        get() = ((installOrientation + currentRotation()) % 4) == Surface.ROTATION_0
+
+    private fun currentRotation(): Int = runCatching {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            context.display?.rotation ?: Surface.ROTATION_0
+        } else {
+            @Suppress("DEPRECATION")
+            (context.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager)
+                ?.defaultDisplay?.rotation ?: Surface.ROTATION_0
+        }
+    }.getOrDefault(Surface.ROTATION_0)
+
+    private val displayListener = object : android.hardware.display.DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) {}
+        override fun onDisplayRemoved(displayId: Int) {}
+        override fun onDisplayChanged(displayId: Int) {
+            val d = display ?: return
+            if (d.displayId == displayId) {
+                checkRotation()
+            }
+        }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        val dm = context.getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
+        dm?.registerDisplayListener(displayListener, mainHandler)
+        checkRotation()
+    }
+
+    override fun onDetachedFromWindow() {
+        val dm = context.getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
+        dm?.unregisterDisplayListener(displayListener)
+        super.onDetachedFromWindow()
+    }
+
+    /**
+     * Check if display rotation or refresh rate changed (e.g. after a 180-degree flip).
+     * If rotated, rebuild the EGL surface and layers even if pixel dimensions did not change.
+     */
+    fun checkRotation(force: Boolean = false) {
+        val rot = currentRotation()
+        val hz = display?.refreshRate ?: 0f
+        if (hz > 1f) {
+            refreshMs = (1000f / hz).toLong().coerceIn(4L, 40L)
+        }
+        if (force || (surfaceRotation >= 0 && rot != surfaceRotation)) {
+            Log.i(TAG, "wet pad detected rotation change: $surfaceRotation -> $rot")
+            val w = width
+            val h = height
+            surfaceRotation = rot
+            post { rebuildSurface(w, h, rot) }
+        }
     }
 
     // --- main thread ---
 
     override fun surfaceCreated(holder: SurfaceHolder) {
+        surfaceRotation = currentRotation()
         val t = HandlerThread("xnotes-wet-pad").also { it.start() }
         thread = t
         handler = Handler(t.looper)
@@ -178,7 +266,8 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        post { resize(width, height) }
+        val rot = currentRotation()
+        post { resize(width, height, rot) }
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
@@ -243,7 +332,7 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
         samples: Int,
         clip: com.xnotes.core.infinite.PixelRect? = null,
     ): Boolean {
-        if (!frontBuffering || !ready) return false
+        if (!frontBuffering || !ready || !isPhysicalScanoutDirect) return false
         // The buffer is the size it was made at, and a single buffered surface has no swap to pick
         // a resized window up on. Until [resize] has rebuilt it, ink drawn through the view as it
         // stands would land wherever the compositor stretched the layer, so this stroke takes the
@@ -284,7 +373,7 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
         zoom: Double,
         clip: com.xnotes.core.infinite.PixelRect? = null,
     ): Boolean {
-        if (!frontBuffering || !ready || covered) return false
+        if (!frontBuffering || !ready || covered || !isPhysicalScanoutDirect) return false
         if (!ink.extend(scrollX, scrollY, zoom, width, height, clip)) return false
         // Cancels a handover still waiting to wipe the pad this stroke has just taken over.
         post { releaseGen++ }
@@ -562,7 +651,7 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
     }
 
     /**
-     * Follow the window to its new size, by building the surface again.
+     * Follow the window to its new size or rotation, by building the surface again.
      *
      * A single buffered surface never swaps, and a swap is where EGL would pick a resized window
      * up, so the buffer keeps the size it was allocated at while the compositor stretches it into
@@ -571,8 +660,13 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
      * moment the canvas takes it back. Nothing here is cheap and nothing here is frequent either,
      * since a resize is a layout the whole window has already paid for.
      */
-    private fun resize(w: Int, h: Int) {
-        if (w == surfaceW && h == surfaceH) return
+    private fun resize(w: Int, h: Int, rot: Int = surfaceRotation) {
+        if (w == surfaceW && h == surfaceH && rot == surfaceRotation) return
+        surfaceRotation = rot
+        rebuildSurface(w, h, rot)
+    }
+
+    private fun rebuildSurface(w: Int, h: Int, rot: Int) {
         // A pad that never came up will not come up for being asked twice.
         if (!ready) return
         val surface = target ?: return
@@ -583,7 +677,7 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
         sizeLayer(w, h)
         createEgl(surface)
         setLayerVisible(false)
-        Log.i(TAG, "wet pad surface rebuilt for ${w}x$h, got ${surfaceW}x$surfaceH")
+        Log.i(TAG, "wet pad surface rebuilt for ${w}x$h (rot=$rot), got ${surfaceW}x$surfaceH")
     }
 
     /** SurfaceView sizes its own queue, so the pad's layer is the pad's to size. */

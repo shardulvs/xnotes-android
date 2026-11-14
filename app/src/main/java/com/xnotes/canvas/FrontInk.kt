@@ -144,7 +144,10 @@ class FrontInk(
             owner = stroke
         }
         if (!decided) decide(stroke, pageIndex)
-        if (!live) return
+        if (!live) {
+            view.setUnbufferedStylus(false)
+            return
+        }
 
         val settled = ribbon.settledCount
         if (settled - meshed >= runPoints) {
@@ -180,13 +183,13 @@ class FrontInk(
         decided = false
         runPoints = WET_RUN_POINTS
         tailPart = null
+        view.setUnbufferedStylus(false)
         // Called on the way into every stroke as well, where the pad is not live and a tail may be
         // waiting for this one to join it. Only a stroke actually being dropped goes further.
         if (!live) return
         live = false
         // Strokes that joined this one are still the pad's, and the pad is about to be wiped.
         settle()
-        view.setUnbufferedStylus(false)
         pad.endStroke()
     }
 
@@ -199,8 +202,8 @@ class FrontInk(
      */
     private fun decide(stroke: Stroke, pageIndex: Int) {
         decided = true
-        // Turned off for this device, so there is no pad to consult and nothing to time against it.
-        if (!pad.frontBuffering) return
+        // Turned off for this device or non-direct physical display scanout, so there is no pad to consult.
+        if (!pad.frontBuffering || !pad.isPhysicalScanoutDirect) return
         if (ItemMesher.passFor(stroke) != InkPass.OPAQUE) return
         // A rotated view is a rotation, and the ink shader has room for a scroll and a zoom.
         if (state.rotationDeg != 0) return
@@ -237,6 +240,7 @@ class FrontInk(
      * wiped, and one handover at the end of the run covers every stroke in it.
      */
     private fun join(scrollX: Double, scrollY: Double, zoom: Double, clip: PixelRect): Boolean {
+        if (!pad.isPhysicalScanoutDirect) return false
         if (holds.isEmpty() || !roomToJoin()) return false
         if (!pad.extendStroke(scrollX, scrollY, zoom, clip)) return false
         // The capture the last stroke started is of a box this one is about to grow past.
