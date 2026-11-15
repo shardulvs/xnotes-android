@@ -160,6 +160,9 @@ class EditorActivity : ComponentActivity() {
         com.xnotes.ui.AudioRecording.init(this)
         setTheme(com.xnotes.R.style.Theme_Xnotes) // leave the launch theme behind
         applyFullscreen(!deviceHasDisplayCutout(this)) // provisional; reconciled once the editor loads prefs
+        if (Build.VERSION.SDK_INT >= 34) {
+            window.decorView.isAutoHandwritingEnabled = false
+        }
         // The intent that started the task comes back whenever Android rebuilds it, from a saved state
         // or from Recents after the process died or the app was updated; it was handled the first time.
         val rebuilt = savedInstanceState != null || (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
@@ -265,6 +268,10 @@ class EditorActivity : ComponentActivity() {
         super.onConfigurationChanged(newConfig)
         val night = newConfig.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
         editor?.onSystemDarkModeChanged(night == android.content.res.Configuration.UI_MODE_NIGHT_YES)
+        editor?.pad?.checkRotation()
+        if (editor?.canvasOpen == true) {
+            editor?.infinite?.pad?.checkRotation()
+        }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

@@ -100,6 +100,9 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
     @Volatile
     private var surfaceH = 0
 
+    @Volatile
+    private var surfaceRotation = -1
+
     /**
      * Whether the pad is holding an opaque copy of what is under it, so hiding it shows nothing.
      *
@@ -159,13 +162,68 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
         // it. Above the canvas but still below the window otherwise, which is where a GL canvas
         // wants it.
         if (onTop) setZOrderOnTop(true) else setZOrderMediaOverlay(true)
+        if (android.os.Build.VERSION.SDK_INT >= 34) {
+            isAutoHandwritingEnabled = false
+        }
         holder.setFormat(android.graphics.PixelFormat.TRANSLUCENT)
         holder.addCallback(this)
+    }
+
+    private fun currentRotation(): Int = runCatching {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            (display ?: context.display)?.rotation ?: Surface.ROTATION_0
+        } else {
+            @Suppress("DEPRECATION")
+            (context.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager)
+                ?.defaultDisplay?.rotation ?: Surface.ROTATION_0
+        }
+    }.getOrDefault(Surface.ROTATION_0)
+
+    private val displayListener = object : android.hardware.display.DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) {}
+        override fun onDisplayRemoved(displayId: Int) {}
+        override fun onDisplayChanged(displayId: Int) {
+            val d = display ?: return
+            if (d.displayId == displayId) {
+                checkRotation()
+            }
+        }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        val dm = context.getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
+        dm?.registerDisplayListener(displayListener, mainHandler)
+        checkRotation()
+    }
+
+    override fun onDetachedFromWindow() {
+        val dm = context.getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
+        dm?.unregisterDisplayListener(displayListener)
+        super.onDetachedFromWindow()
+    }
+
+    /**
+     * Check if display rotation or refresh rate changed (e.g. after a 180-degree flip).
+     * If rotated or resized, rebuild the EGL surface and native layer.
+     */
+    fun checkRotation(force: Boolean = false) {
+        val rot = currentRotation()
+        val hz = display?.refreshRate ?: 0f
+        if (hz > 1f) {
+            refreshMs = (1000f / hz).toLong().coerceIn(4L, 40L)
+        }
+        val w = width
+        val h = height
+        if (force || (surfaceRotation >= 0 && (rot != surfaceRotation || (w > 0 && h > 0 && (w != surfaceW || h != surfaceH))))) {
+            post { resize(w, h, rot) }
+        }
     }
 
     // --- main thread ---
 
     override fun surfaceCreated(holder: SurfaceHolder) {
+        surfaceRotation = currentRotation()
         val t = HandlerThread("xnotes-wet-pad").also { it.start() }
         thread = t
         handler = Handler(t.looper)
@@ -178,7 +236,8 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        post { resize(width, height) }
+        val rot = currentRotation()
+        post { resize(width, height, rot) }
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
@@ -201,14 +260,16 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
      * the driver is still queueing a pad frame crashes inside BLASTBufferQueue. Nothing knows about
      * this layer's queue, so nothing syncs it. Before Android 12 there is no such sync.
      */
-    private fun openLayer(holder: SurfaceHolder): Surface? {
+    private fun openLayer(holder: SurfaceHolder, w: Int = 0, h: Int = 0): Surface? {
         if (android.os.Build.VERSION.SDK_INT < 31) return null
         val parent = surfaceControl?.takeIf { it.isValid } ?: return null
         val frame = holder.surfaceFrame
+        val bw = (if (w > 0) w else frame.width()).coerceAtLeast(1)
+        val bh = (if (h > 0) h else frame.height()).coerceAtLeast(1)
         val child = SurfaceControl.Builder()
             .setName("xnotes-wet-pad")
             .setParent(parent)
-            .setBufferSize(frame.width().coerceAtLeast(1), frame.height().coerceAtLeast(1))
+            .setBufferSize(bw, bh)
             .setFormat(android.graphics.PixelFormat.TRANSLUCENT)
             .build()
         // Above the SurfaceView's own layer, which never gets a buffer now.
@@ -562,28 +623,34 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
     }
 
     /**
-     * Follow the window to its new size, by building the surface again.
+     * Follow the window to its new size or rotation, by rebuilding the surface and native layer.
      *
      * A single buffered surface never swaps, and a swap is where EGL would pick a resized window
      * up, so the buffer keeps the size it was allocated at while the compositor stretches it into
      * the layer's new frame. Ink drawn through the view as it stands would then land somewhere
      * else on the glass: a wet stroke that follows the pen at an offset and snaps into place the
-     * moment the canvas takes it back. Nothing here is cheap and nothing here is frequent either,
-     * since a resize is a layout the whole window has already paid for.
+     * moment the canvas takes it back. Recreating the child layer on the main thread refreshes the
+     * native window transform hint and buffer queue, matching the new hardware scanout.
      */
-    private fun resize(w: Int, h: Int) {
-        if (w == surfaceW && h == surfaceH) return
+    private fun resize(w: Int, h: Int, rot: Int = surfaceRotation) {
+        if (w == surfaceW && h == surfaceH && rot == surfaceRotation) return
+        surfaceRotation = rot
         // A pad that never came up will not come up for being asked twice.
         if (!ready) return
-        val surface = target ?: return
         // Every pixel goes with the surface, so nothing on it may be joined or handed over.
         ink.forget()
-        mainHandler.post { onSurfaceLost?.invoke() }
         destroyEgl()
-        sizeLayer(w, h)
-        createEgl(surface)
-        setLayerVisible(false)
-        Log.i(TAG, "wet pad surface rebuilt for ${w}x$h, got ${surfaceW}x$surfaceH")
+        mainHandler.post {
+            onSurfaceLost?.invoke()
+            closeLayer()
+            val newSurface = openLayer(holder, w, h) ?: holder.surface
+            target = newSurface
+            post {
+                createEgl(newSurface)
+                setLayerVisible(false)
+                Log.i(TAG, "wet pad surface rebuilt for ${w}x$h (rot=$rot), got ${surfaceW}x$surfaceH")
+            }
+        }
     }
 
     /** SurfaceView sizes its own queue, so the pad's layer is the pad's to size. */
