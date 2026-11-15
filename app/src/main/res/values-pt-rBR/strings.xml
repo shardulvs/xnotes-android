@@ -143,4 +143,6 @@
     <string name="toolbar_config_lane_and_alignment">Faixa e alinhamento</string>
     <string name="toolbar_config_position_and_alignment">Posição e alinhamento</string>
     <string name="toolbar_config_preferred_lane">Faixa preferida</string>
+    <string name="toolbar_config_roundness">Arredondamento</string>
+    <string name="toolbar_config_roundness_auto_help">Automático segue Configurações &gt; Cantos. Barras de 2 e 3 linhas usam cantos menos arredondados.</string>
 </resources>

@@ -174,6 +174,7 @@ class ToolbarWorkspaceJsonTest {
                 paddingDp = 7,
                 spacingDp = 5,
                 elementSizeDp = 48,
+                cornerRadiusDp = 16,
                 columns = 3,
                 dockEdge = ToolbarDockEdge.RIGHT,
                 dockLane = 2,
@@ -187,6 +188,8 @@ class ToolbarWorkspaceJsonTest {
         assertEquals(2, restored.effectiveToolbarWorkspaces().note.bars.size)
         assertEquals(2, restored.effectiveToolbarWorkspaces().forContext(ToolbarContext.CANVAS).bars.size)
         assertEquals(245, restored.toolbarWorkspaces!!.note.bars[1].geometry.widthDp)
+        assertEquals(16, restored.toolbarWorkspaces!!.note.bars[1].geometry.cornerRadiusDp)
+        assertNull(restored.toolbarWorkspaces!!.note.bars.first().geometry.cornerRadiusDp)
     }
 
     @Test fun sectionsAndLanesRoundTripInCurrentSchema() {

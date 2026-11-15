@@ -174,3 +174,19 @@ No persistence schema, migration, gesture transaction, primary toolbar identity 
 - Preview source's acknowledged root offset now uses `toolbarAlignedContentTopLeft` with the current slot width/height and real physical content thickness, matching the RIGHT/BOTTOM compensation already present in runtime. Drop indicators use the same 220-ms animation as peer bars, rather than an independent spring.
 - Replaced the underestimating floating auto-length heuristic with `ToolbarAutoLength.kt`: actual palette swatches plus 6-dp padding, per-entry size overrides, PAGE_NAV/ZOOM labels, section separators and multi-lane spacing are accounted for. The calculator uses the effective edge instead of a stale saved anchor on the primary bar. The planner still clamps truly oversized content to the viewport; this cannot eliminate necessary scrolling when the total content cannot physically fit.
 - Verification includes a 54-combination canvas preview matrix (horizontal/vertical, 1–3 lanes, 3/8/12 colors, compact/regular/comfortable), JVM geometry tests, and a frame-sampled slider case. Run the established 113 Compose toolbar scenarios as well as the optional tab integration tests after propagation.
+
+## Pass 19: independently configurable automatic/manual bar roundness (2026-11-14)
+
+- Removed the hard-coded MaterialTheme.shapes.extraLarge use as every bar's radius.
+  Automatic corner rounding still follows Settings > Corners, but now adapts from
+  one to two to three rows, with safe upper bounds for manually selected values.
+- Added a nullable ToolbarGeometry.cornerRadiusDp override with bounded JSON
+  persistence; copying a bar preserves its chosen value and each bar is independent.
+- Rendered the same computed shape in ToolbarFrame, PreviewBar and pinned
+  section caps, so resizing and rotating bars do not reveal mismatched corners.
+- Added translated slider/hint (EN and pt-BR), automatic reset, and avoided
+  re-running placement feasibility checks for visual-only radius changes.
+- Tests cover all three global corner scales; 1-, 2- and 3-row rates; explicit
+  0/min/max limits, thin and short bars; dock defaults, JSON round-trip and
+  slider auto/manual behavior. Rerun occupied-edge, live and preview Compose
+  regressions after the patch lands in the stabilization stage.

@@ -111,13 +111,16 @@ class ToolbarWorkspaceTest {
         assertEquals(ToolbarGeometry(), ToolbarGeometry().constrained())
         val limited = ToolbarGeometry(
             widthDp = 10, heightDp = 9000, paddingDp = -5,
-            spacingDp = 99, elementSizeDp = 10, columns = 10,
+            spacingDp = 99, elementSizeDp = 10, cornerRadiusDp = 999, columns = 10,
         ).constrained()
         assertEquals(48, limited.widthDp)
         assertEquals(2048, limited.heightDp)
         assertEquals(0, limited.paddingDp)
         assertEquals(32, limited.spacingDp)
         assertEquals(28, limited.elementSizeDp)
+        assertEquals(40, limited.cornerRadiusDp)
+        assertEquals(0, ToolbarGeometry(cornerRadiusDp = -2).constrained().cornerRadiusDp)
+        assertEquals(null, ToolbarGeometry().constrained().cornerRadiusDp)
         assertEquals(6, limited.columns)
         assertFalse(limited.floating)
         assertTrue(limited.movable)

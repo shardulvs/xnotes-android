@@ -88,7 +88,17 @@ internal fun ToolbarBarsInspector(
             ToolbarAppearanceSettings(
                 geometry = selectedBar.geometry,
                 vertical = vertical,
-                onGeometryChange = { geometry -> onConfigureDock(geometry, look) },
+                layout = selectedBar.layout,
+                size = toolbarBarSize(selectedBar, selectedIndex, look),
+                floating = !docked,
+                onGeometryChange = { geometry ->
+                    if (geometry.copy(cornerRadiusDp = selectedBar.geometry.cornerRadiusDp) ==
+                        selectedBar.geometry) {
+                        // A visual-only radius change has no effect on the layout planner:
+                        // avoid unnecessary fit checks on every slider frame.
+                        onUpdateBar { bar -> bar.copy(geometry = geometry.constrained()) }
+                    } else onConfigureDock(geometry, look)
+                },
                 onScaleChange = { scale ->
                     val size = when (scale) {
                         ToolbarScale.COMPACT -> ToolbarSize.COMPACT

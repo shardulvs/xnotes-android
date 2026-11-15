@@ -15,6 +15,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.xnotes.R
 import com.xnotes.core.tools.ToolbarGeometry
+import com.xnotes.core.tools.ToolbarLayout
 import com.xnotes.core.tools.ToolbarScale
 
 /** Keep size presets next to the numeric size controls, not in placement. */
@@ -23,6 +24,9 @@ import com.xnotes.core.tools.ToolbarScale
 internal fun ToolbarAppearanceSettings(
     geometry: ToolbarGeometry,
     vertical: Boolean,
+    layout: ToolbarLayout = ToolbarLayout.DEFAULT,
+    size: com.xnotes.settings.ToolbarSize = com.xnotes.settings.ToolbarSize.REGULAR,
+    floating: Boolean = true,
     onGeometryChange: (ToolbarGeometry) -> Unit,
     onScaleChange: (ToolbarScale) -> Unit = {},
 ) {
@@ -46,5 +50,11 @@ internal fun ToolbarAppearanceSettings(
         HorizontalDivider()
         ToolbarGeometryControls(geometry = geometry, vertical = vertical,
             onChange = onGeometryChange)
+        HorizontalDivider()
+        ToolbarRoundnessSettings(
+            geometry = geometry, layout = layout, size = size,
+            vertical = vertical, floating = floating,
+            onChange = { onGeometryChange(geometry.copy(cornerRadiusDp = it)) },
+        )
     }
 }

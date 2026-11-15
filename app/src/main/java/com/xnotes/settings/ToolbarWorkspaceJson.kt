@@ -88,6 +88,7 @@ internal object ToolbarWorkspaceJson {
             g.paddingDp?.let { put("padding_dp", it) }
             g.spacingDp?.let { put("spacing_dp", it) }
             g.elementSizeDp?.let { put("element_size_dp", it) }
+            g.cornerRadiusDp?.let { put("corner_radius_dp", it) }
         }
 
     private fun readWorkspace(value: JSONObject?, available: Set<ToolbarItem>): ToolbarWorkspace? {
@@ -162,6 +163,7 @@ internal object ToolbarWorkspaceJson {
             paddingDp = raw.optInt("padding_dp").takeIf { raw.has("padding_dp") },
             spacingDp = raw.optInt("spacing_dp").takeIf { raw.has("spacing_dp") },
             elementSizeDp = raw.optInt("element_size_dp").takeIf { raw.has("element_size_dp") },
+            cornerRadiusDp = raw.optInt("corner_radius_dp").takeIf { raw.has("corner_radius_dp") },
             columns = raw.optInt("columns", 1),
             dockEdge = ToolbarDockEdge.entries.firstOrNull { it.name == raw.optString("dock_edge") },
             dockLane = raw.optInt("dock_lane", 0),

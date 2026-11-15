@@ -17,6 +17,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.drawWithContent
@@ -42,6 +44,11 @@ internal fun toolbarCompactRegions(layout: ToolbarLayout, floating: Boolean, exp
         !layout.hasPinnedRegions
 
 internal val LocalCompactToolbarRegions = staticCompositionLocalOf { false }
+
+/** Pinned region caps inherit the outer toolbar's actual automatic/custom rounding. */
+internal val LocalToolbarSurfaceShape = staticCompositionLocalOf<Shape> {
+    RoundedCornerShape(0.dp)
+}
 
 /**
  * One section is the indivisible group: its one to three lanes stay together.
@@ -238,7 +245,7 @@ private fun PinnedToolbarSections(
     // The capsule and its outline use the exact corner style of the parent ToolbarFrame.
     // Draw the scroll seam just outside the cap, towards the middle; the parent bar clips
     // it to its own silhouette. With no overflow, there is no extra surface or border.
-    val capShape = androidx.compose.material3.MaterialTheme.shapes.extraLarge
+    val capShape = LocalToolbarSurfaceShape.current
     val fadePx = with(density) { 12.dp.toPx() }
     val pinnedGroup: @Composable (List<IndexedValue<ToolbarSection>>, Boolean) -> Unit = { sections, start ->
         val panel = palette.panel.toComposeColor()

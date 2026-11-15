@@ -117,3 +117,24 @@ The physical drop-slot projection and the outer lane are intentionally distinct.
 The customizable workspace feature has not shipped upstream. **Schema v6 is its one supported workspace format**; experimental v1–v5 and v7 were never public contracts and are intentionally not migrated. Unknown versions, empty bar sets and malformed workspace roots are rejected by `ToolbarWorkspaceJson.read`, which returns `null` instead of crashing or constructing an unusable workspace. `Settings.effectiveToolbarWorkspaces()` then constructs a safe primary workspace from the app's existing `toolbarLayout` and `canvasToolbarLayout`, preserving the original XNotes configuration on upgrades from versions before this feature. This is *startup safety*, not support for experimental custom-workspace layouts. Safe parse bounds, input validation and context-specific tool filtering remain required.
 
 Avoid restoring schema-migration branches merely because a deleted experimental layout existed on developer devices. Review coverage: `ToolbarWorkspaceJsonTest.experimentalVersionsAreRejectedWithoutCrashingSettings`, `malformedOrEmptyWorkspaceFallsBackToOriginalToolbarsWithoutCrash`, current-schema roundtrip and preset tests. `ToolbarLegacyPenAliasTest` checks that unreleased aliases are ignored.
+
+## Per-bar corner roundness
+
+ToolbarGeometry.cornerRadiusDp (Int?, nullable) is an individual toolbar appearance override.
+Null is automatic: use Settings > Corners through the active MaterialTheme.shapes.extraLarge,
+adapting the radius to the thickest visible section's lane count. One-line bars can retain
+a pill silhouette; two-row bars use 68% of the themed radius (maximum 26 dp); three-row
+bars use 50% (maximum 20 dp). The absolute maximum is 40 dp for one row. Every radius
+also respects half the physical thickness and half any explicit along-axis length.
+
+The selector resides in ToolbarAppearanceSettings beneath the shared sizing sliders,
+and applies to only the selected bar. Auto clears the override; moving the slider
+persists a manual radius. The control uses the active geometry/scale/orientation, so
+its maximum tracks multi-line sections and resizing. On docked bars, automatic keeps
+the dock edge square; explicit overrides remain available.
+
+ToolbarRoundness.kt is the single radius resolver shared by runtime ToolbarFrame
+and editor PreviewBar. Pinned-region end caps inherit the outer resolved shape through
+LocalToolbarSurfaceShape, avoiding inconsistent rounding on pinned tool groups.
+ToolbarWorkspaceJson writes corner_radius_dp only for explicit values; omitted values
+use automatic behavior. This optional field does not affect toolbar placement geometry.

@@ -67,9 +67,8 @@ internal fun PreviewBar(
     val autoLengthPinned = floating && bar.layout.hasPinnedRegions &&
         (if (vertical) bar.geometry.heightDp == null else bar.geometry.widthDp == null)
     val morph = LocalToolbarContainerMorph.current
-    // Match the live ToolbarFrame shape, including the user's corner-style setting.
-    val shape = if (floating) androidx.compose.material3.MaterialTheme.shapes.extraLarge
-        else RoundedCornerShape(0.dp)
+    // Exact same per-bar corner resolver as the runtime toolbar.
+    val shape = toolbarSurfaceShape(bar.geometry, bar.layout, effectiveSize, vertical, floating)
     // Animate only the toolbar body's dimensions; the surrounding drag slot
     // remains at its target coordinates so cross-edge releases cannot flicker.
     val surface = Modifier
@@ -105,7 +104,7 @@ internal fun PreviewBar(
             ) {
                 PreviewSections(bar.layout, metrics, colors, activeColorIndex, pageNumber,
                     pageCount, zoomLabel, titleLabel, onSelectEntry, selectedEntry,
-                    vertical = morph.toVertical, compactRegions = compactRegions)
+                    vertical = morph.toVertical, compactRegions = compactRegions, surfaceShape = shape)
             }
         }
     } else if (vertical) {
@@ -122,10 +121,10 @@ internal fun PreviewBar(
         ) {
             if (bar.layout.distribution == ToolbarDistribution.REGIONS && !compactRegions && !autoLengthPinned) {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    PreviewSections(bar.layout, metrics, colors, activeColorIndex, pageNumber, pageCount, zoomLabel, titleLabel, onSelectEntry, selectedEntry, vertical = true, compactRegions = compactRegions)
+                    PreviewSections(bar.layout, metrics, colors, activeColorIndex, pageNumber, pageCount, zoomLabel, titleLabel, onSelectEntry, selectedEntry, vertical = true, compactRegions = compactRegions, surfaceShape = shape)
                 }
             } else {
-                PreviewSections(bar.layout, metrics, colors, activeColorIndex, pageNumber, pageCount, zoomLabel, titleLabel, onSelectEntry, selectedEntry, vertical = true, compactRegions = compactRegions)
+                PreviewSections(bar.layout, metrics, colors, activeColorIndex, pageNumber, pageCount, zoomLabel, titleLabel, onSelectEntry, selectedEntry, vertical = true, compactRegions = compactRegions, surfaceShape = shape)
             }
         }
     } else {
@@ -142,10 +141,10 @@ internal fun PreviewBar(
         ) {
             if (bar.layout.distribution == ToolbarDistribution.REGIONS && !compactRegions && !autoLengthPinned) {
                 Box(Modifier.weight(1f).fillMaxHeight()) {
-                    PreviewSections(bar.layout, metrics, colors, activeColorIndex, pageNumber, pageCount, zoomLabel, titleLabel, onSelectEntry, selectedEntry, vertical = false, compactRegions = compactRegions)
+                    PreviewSections(bar.layout, metrics, colors, activeColorIndex, pageNumber, pageCount, zoomLabel, titleLabel, onSelectEntry, selectedEntry, vertical = false, compactRegions = compactRegions, surfaceShape = shape)
                 }
             } else {
-                PreviewSections(bar.layout, metrics, colors, activeColorIndex, pageNumber, pageCount, zoomLabel, titleLabel, onSelectEntry, selectedEntry, vertical = false, compactRegions = compactRegions)
+                PreviewSections(bar.layout, metrics, colors, activeColorIndex, pageNumber, pageCount, zoomLabel, titleLabel, onSelectEntry, selectedEntry, vertical = false, compactRegions = compactRegions, surfaceShape = shape)
             }
         }
     }
@@ -165,11 +164,14 @@ private fun PreviewSections(
     selectedEntry: Pair<Int, Int>?,
     vertical: Boolean,
     compactRegions: Boolean,
+    surfaceShape: androidx.compose.ui.graphics.Shape,
 ) {
     val palette = LocalPalette.current
     // Use the same controls, swatches, labels and separators as a live toolbar.
     // Preview clicks select the edited bar; they never edit the open document.
-    CompositionLocalProvider(LocalBar provides metrics, LocalCompactToolbarRegions provides compactRegions) {
+    CompositionLocalProvider(LocalBar provides metrics,
+        LocalCompactToolbarRegions provides compactRegions,
+        LocalToolbarSurfaceShape provides surfaceShape) {
         ToolbarSections(layout) { sectionIndex, section ->
             ToolbarSectionGrid(section) { entry ->
                 // Reference identity distinguishes repeated Colors occurrences with equal values.

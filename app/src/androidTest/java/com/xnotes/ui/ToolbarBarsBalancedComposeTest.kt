@@ -54,7 +54,7 @@ class ToolbarBarsBalancedComposeTest {
                 .getUnclippedBoundsInRoot()
             val controls = rule.onAllNodesWithTag("toolbar-measure", useUnmergedTree = true)
             val nodes = controls.fetchSemanticsNodes()
-            assertTrue("Expected five dimension controls, got ${nodes.size}", nodes.size == 5)
+            assertTrue("Expected six size/roundness controls, got ${nodes.size}", nodes.size == 6)
             // Semantics can return unspecified layout bounds for controls fully
             // outside the Compose test viewport (the stacked inspector is scrollable
             // and taller than this device's window). Inspect unclipped rectangles
@@ -93,7 +93,7 @@ class ToolbarBarsBalancedComposeTest {
         rule.waitForIdle()
         fun assertGroupsAligned() {
             val measures = rule.onAllNodesWithTag("toolbar-measure", useUnmergedTree = true)
-            assertTrue("Expected five controls", measures.fetchSemanticsNodes().size == 5)
+            assertTrue("Expected geometry controls plus roundness", measures.fetchSemanticsNodes().size == 6)
             val bounds = (0..4).map { measures[it].getUnclippedBoundsInRoot() }
             val widths = bounds.map { (it.right - it.left).value }
             assertTrue("All controls must have the same width: $widths",
