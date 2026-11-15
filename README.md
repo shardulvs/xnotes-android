@@ -4,7 +4,7 @@
 
 <p align="center">
   A handwriting-first notebook for Android, built for pen and stylus. A customized fork of xnotes.<br />
-  Formerly n-notes, renamed n-notes -> sponka because the fork has grown far enough from xnotes to get its own name and icon.
+  Formerly n-notes, renamed n-notes -> sponka because the fork has grown far enough from xnotes to get its own name and icon. App icon by <a href="https://github.com/failure-404">@failure-404</a>.
 </p>
 
 <p align="center">
