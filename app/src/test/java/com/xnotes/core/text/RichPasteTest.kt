@@ -85,6 +85,20 @@ class RichPasteTest {
         assertEquals(listOf("- one", "- two"), html("<p>•&nbsp;one</p><p class=MsoListParagraph>· two</p>"))
     }
 
+    @Test fun rawMarkdownFromAiChatsIsReadAsMarkdown() {
+        val gemini = "Find the area under \$f(x) = 3x^2\$:\n\n\$\$\\int_1^3 (3x^2) \\, dx\$\$\n\n" +
+            "### Step 1: Find the antiderivative\n\nUse the **power rule**: \$x^n\$.\n\n* For \$3x^2\$: \$x^3\$\n* For \$2x\$: \$x^2\$"
+        assertTrue(RichPaste.looksLikeMarkdown(gemini))
+        val p = MarkdownParser.parse(gemini)
+        val heading = p.single { it.headingLevel > 0 }
+        assertEquals(3, heading.headingLevel)
+        assertEquals("Step 1: Find the antiderivative", heading.plainText())
+        assertTrue(p.any { para -> para.runs.any { it.style.bold && it.text == "power rule" } })
+        assertTrue(p.any { para -> para.runs.singleOrNull()?.style?.mathDisplay == true })
+        assertEquals(2, p.count { it.list == ListKind.BULLET })
+        assertTrue(!RichPaste.looksLikeMarkdown("2 * 3 = 6\n#hashtag\n- item\ncost \$5"))
+    }
+
     @Test fun plainTextOnlyWhenItHoldsMaths() {
         assertNull(RichPaste.fromPlain("just *text*, \$5 and \$6"))
         assertEquals(listOf("Euler: \$e^{i\\pi}+1=0\$ \\*", "\$\$a_1\$\$"), RichPaste.fromPlain("Euler: \$e^{i\\pi}+1=0\$ *\n\$\$a_1\$\$"))

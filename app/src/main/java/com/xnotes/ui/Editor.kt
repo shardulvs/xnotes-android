@@ -1631,13 +1631,16 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /**
-     * Paste keeping what the clipboard's formatting says: rich text (headings, emphasis, lists,
-     * tables, maths) from another app, or plain text with TeX maths in it; anything else verbatim.
+     * Paste keeping what the clipboard's formatting says: raw markdown (AI chats), rich text
+     * (headings, emphasis, lists, tables, maths) from another app, or plain text with TeX maths or
+     * bullet lines in it; anything else verbatim.
      */
     fun pasteAtCaret() {
         if (!flowText.active) return
-        val chunks = clipboardHtml()?.let(com.xnotes.core.text.RichPaste::fromHtml)?.takeIf { it.isNotEmpty() }
-            ?: clipboardText()?.let(com.xnotes.core.text.RichPaste::fromPlain)
+        val text = clipboardText()
+        val chunks = text?.takeIf(com.xnotes.core.text.RichPaste::looksLikeMarkdown)?.let(::listOf)
+            ?: clipboardHtml()?.let(com.xnotes.core.text.RichPaste::fromHtml)?.takeIf { it.isNotEmpty() }
+            ?: text?.let(com.xnotes.core.text.RichPaste::fromPlain)
             ?: return pastePlainAtCaret()
         pasteParagraphsAtCaret(
             chunks.flatMap {

@@ -14,6 +14,7 @@ object RichPaste {
     private val MATH_ELEMENT = Regex("<math\\b([^>]*)>([\\s\\S]*?)</math>", RegexOption.IGNORE_CASE)
     private val TEX_ANNOTATION = Regex("<annotation[^>]*application/x-tex[^>]*>([\\s\\S]*?)</annotation>", RegexOption.IGNORE_CASE)
     private val MATH_TEXT = Regex("\\$\\$[\\s\\S]+?\\$\\$|\\\\\\[[\\s\\S]+?\\\\]|\\\\\\([\\s\\S]+?\\\\\\)|(?<![\\w$])\\$[^\\s$](?:[^$\\n]*[^\\s$])?\\$(?![\\w$])")
+    private val MARKDOWN_HINT = Regex("(?m)^#{1,6}[ \\t]+\\S|\\*\\*[^*\\s][^*\\n]*\\*\\*|^[ \\t]*```|\\[[^\\]\\n]+]\\((https?://|mailto:)")
     private val PLAIN_BULLET = Regex("([ \\t]*)([•◦▪▫‣●○■□·–*+-]|\\d{1,3}[.)])[ \\t]+(\\S.*)")
     private val CHAR_BULLET = Regex("^[•◦▪▫‣●○■□·][\\s\u00a0]+")
     private val ENTITY = Regex("&(#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);")
@@ -27,6 +28,12 @@ object RichPaste {
         "header", "footer", "dt", "dd", "figure", "figcaption", "h1", "h2", "h3", "h4", "h5", "h6",
     )
     private const val MATH_MARK = '\u0000'
+
+    /**
+     * Whether plain [text] is raw markdown (what AI chats and markdown editors copy), to be read
+     * whole as markdown: it has a heading, bold, a code fence or a link written out.
+     */
+    fun looksLikeMarkdown(text: String): Boolean = MARKDOWN_HINT.containsMatchIn(text)
 
     /** Markdown chunks for plain [text] that holds TeX maths or bullet lines, or null when it holds neither. */
     fun fromPlain(text: String): List<String>? {
