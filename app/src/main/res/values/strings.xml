@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">n-notes</string>
+    <string name="app_name" translatable="false">sponka</string>
 
     <!-- Tools and toolbar items -->
     <string name="tool_pen">Pen</string>
@@ -559,7 +559,7 @@
     <string name="search_settings">Search settings</string>
     <string name="search_keywords_port">Port old notes shapes axes number line curve function graph upgrade check</string>
     <string name="pref_port">Port old notes</string>
-    <string name="pref_port_help">Rewrites notes that still store axes, number lines, curves or graphs from older n-notes versions. Old copies are backed up, open notes are skipped.</string>
+    <string name="pref_port_help">Rewrites notes that still store axes, number lines, curves or graphs from older sponka versions. Old copies are backed up, open notes are skipped.</string>
     <string name="port_scan">Scan</string>
     <string name="port_run">Port</string>
     <string name="port_scanning">Scanning...</string>
@@ -882,7 +882,7 @@
     <string name="paste_code">Paste as Code</string>
 
     <!-- About -->
-    <string name="app_tagline">A handwriting notes and sketching app for Android</string>
+    <string name="app_tagline">A handwriting notes and sketching app for Android. Formerly n-notes.</string>
     <string name="copy_version">Copy version</string>
     <string name="help_make_better">Help make xnotes better</string>
     <string name="report_bug">Report a bug</string>
@@ -1300,8 +1300,8 @@
     <string name="sync_once_a_day">Once a day</string>
     <string name="sync_never">Never</string>
     <string name="sync_both_ways">Both ways</string>
-    <string name="sync_direction_up">N-Notes to %1$s</string>
-    <string name="sync_direction_down">%1$s to N-Notes</string>
+    <string name="sync_direction_up">Sponka to %1$s</string>
+    <string name="sync_direction_down">%1$s to Sponka</string>
     <string name="sync_none_off">None - off</string>
     <string name="sync_intro">Back up and sync your notes to a cloud service. Only the selected service syncs.</string>
     <string name="sync_new_warning">Cloud sync is new and still being tested. Before you set it up, copy your notes folder somewhere safe, so a sync problem can\'t cost you any notes.</string>
@@ -1387,7 +1387,7 @@
     <string name="working">Working...</string>
     <string name="download">Download</string>
     <string name="failed_reason">Failed: %1$s</string>
-    <string name="update_intro">Check GitHub for a newer n-notes release.</string>
+    <string name="update_intro">Check GitHub for a newer sponka release.</string>
     <string name="update_check_on_startup">Check for updates when the app starts</string>
     <string name="update_check_failed">Update check failed</string>
     <string name="update_check">Check for updates</string>
@@ -1398,7 +1398,7 @@
     <string name="update_download_failed">Download failed</string>
     <string name="update_view_release">View release</string>
     <string name="update_available">Update available</string>
-    <string name="update_is_out">n-notes %1$s is out.</string>
+    <string name="update_is_out">sponka %1$s is out.</string>
     <string name="update_later">Later</string>
     <string name="update_turn_off">Turn off</string>
     <string name="sync_syncing_progress">Syncing %1$s</string>
@@ -1413,9 +1413,9 @@
     <string name="sync_see_log">See sync log</string>
     <string name="close">Close</string>
     <string name="sync_found_by">Found by %1$s on %2$s</string>
-    <string name="about_fork_tagline">A customized fork of xnotes, a handwriting notes and sketching app for Android</string>
-    <string name="help_make_n_notes_better">Help make n-notes better</string>
-    <string name="enjoying_n_notes">"Enjoying n-notes? "</string>
+    <string name="about_fork_tagline">A customized fork of xnotes, a handwriting notes and sketching app for Android. Formerly n-notes.</string>
+    <string name="help_make_n_notes_better">Help make sponka better</string>
+    <string name="enjoying_n_notes">"Enjoying sponka? "</string>
     <string name="ocr_recognizing_handwriting">Recognizing handwriting...</string>
     <string name="ocr_handwriting_failed">Handwriting recognition failed: %1$s</string>
     <string name="ocr_no_text">No text recognized</string>

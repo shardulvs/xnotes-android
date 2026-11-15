@@ -558,7 +558,7 @@
     <string name="search_settings">Hledat v nastavení</string>
     <string name="search_keywords_port">Převést staré poznámky tvary osy číselná osa křivka funkce graf upgrade kontrola</string>
     <string name="pref_port">Převést staré poznámky</string>
-    <string name="pref_port_help">Přepíše poznámky, které ještě ukládají osy, číselné osy, křivky nebo grafy ze starších verzí n-notes. Původní kopie se zálohují, otevřené poznámky se přeskočí.</string>
+    <string name="pref_port_help">Přepíše poznámky, které ještě ukládají osy, číselné osy, křivky nebo grafy ze starších verzí sponka. Původní kopie se zálohují, otevřené poznámky se přeskočí.</string>
     <string name="port_scan">Prohledat</string>
     <string name="port_run">Převést</string>
     <string name="port_scanning">Prohledávání...</string>
@@ -1340,8 +1340,8 @@
     <string name="sync_once_a_day">Jednou denně</string>
     <string name="sync_never">Nikdy</string>
     <string name="sync_both_ways">Oběma směry</string>
-    <string name="sync_direction_up">Z N-Notes do služby %1$s</string>
-    <string name="sync_direction_down">Ze služby %1$s do N-Notes</string>
+    <string name="sync_direction_up">Z Sponka do služby %1$s</string>
+    <string name="sync_direction_down">Ze služby %1$s do Sponka</string>
     <string name="sync_none_off">Žádná - vypnuto</string>
     <string name="sync_intro">Zálohuj a synchronizuj poznámky s cloudovou službou. Synchronizuje se jen vybraná služba.</string>
     <string name="sync_new_warning">Synchronizace s cloudem je nová a pořád se testuje. Než ji nastavíš, zkopíruj složku s poznámkami na bezpečné místo, aby tě případná chyba synchronizace nepřipravila o žádné poznámky.</string>
@@ -1427,7 +1427,7 @@
     <string name="working">Pracuji...</string>
     <string name="download">Stáhnout</string>
     <string name="failed_reason">Selhalo: %1$s</string>
-    <string name="update_intro">Zkontroluje na GitHubu, jestli je k dispozici novější verze n-notes.</string>
+    <string name="update_intro">Zkontroluje na GitHubu, jestli je k dispozici novější verze sponka.</string>
     <string name="update_check_on_startup">Kontrolovat aktualizace při spuštění aplikace</string>
     <string name="update_check_failed">Kontrola aktualizací se nezdařila</string>
     <string name="update_check">Zkontrolovat aktualizace</string>
@@ -1438,7 +1438,7 @@
     <string name="update_download_failed">Stažení se nezdařilo</string>
     <string name="update_view_release">Zobrazit vydání</string>
     <string name="update_available">Dostupná aktualizace</string>
-    <string name="update_is_out">Vyšlo n-notes %1$s.</string>
+    <string name="update_is_out">Vyšlo sponka %1$s.</string>
     <string name="update_later">Později</string>
     <string name="update_turn_off">Vypnout</string>
     <string name="sync_syncing_progress">Synchronizace %1$s</string>
@@ -1455,9 +1455,9 @@
     <string name="sync_see_log">Zobrazit protokol synchronizace</string>
     <string name="close">Zavřít</string>
     <string name="sync_found_by">Zjištěno na zařízení %1$s, %2$s</string>
-    <string name="about_fork_tagline">Upravený fork xnotes, aplikace pro ručně psané poznámky a skicování pro Android</string>
-    <string name="help_make_n_notes_better">Pomoz vylepšit n-notes</string>
-    <string name="enjoying_n_notes">"Líbí se ti n-notes? "</string>
+    <string name="about_fork_tagline">Upravený fork xnotes, aplikace pro ručně psané poznámky a skicování pro Android. Dříve n-notes.</string>
+    <string name="help_make_n_notes_better">Pomoz vylepšit sponka</string>
+    <string name="enjoying_n_notes">"Líbí se ti sponka? "</string>
     <string name="ocr_recognizing_handwriting">Rozpoznávám rukopis...</string>
     <string name="ocr_handwriting_failed">Rozpoznání rukopisu se nezdařilo: %1$s</string>
     <string name="ocr_no_text">Nebyl rozpoznán žádný text</string>

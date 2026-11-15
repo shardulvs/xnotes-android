@@ -445,7 +445,7 @@
     <string name="search_settings">搜索设置</string>
     <string name="search_keywords_port">迁移 旧笔记 形状 坐标轴 数轴 曲线 函数 图像 升级 检查</string>
     <string name="pref_port">迁移旧笔记</string>
-    <string name="pref_port_help">重写仍保存旧版 n-notes 坐标轴、数轴、曲线或函数图像的笔记。旧副本会先备份，打开中的笔记会被跳过。</string>
+    <string name="pref_port_help">重写仍保存旧版 sponka 坐标轴、数轴、曲线或函数图像的笔记。旧副本会先备份，打开中的笔记会被跳过。</string>
     <string name="port_scan">扫描</string>
     <string name="port_run">迁移</string>
     <string name="port_scanning">正在扫描...</string>
@@ -1076,8 +1076,8 @@
     <string name="sync_once_a_day">每天一次</string>
     <string name="sync_never">从不</string>
     <string name="sync_both_ways">双向</string>
-    <string name="sync_direction_up">N-Notes 到 %1$s</string>
-    <string name="sync_direction_down">%1$s 到 N-Notes</string>
+    <string name="sync_direction_up">Sponka 到 %1$s</string>
+    <string name="sync_direction_down">%1$s 到 Sponka</string>
     <string name="sync_none_off">无 - 关闭</string>
     <string name="sync_intro">将笔记备份并同步到云服务。只有所选服务会同步。</string>
     <string name="sync_new_warning">云同步是新功能，仍在测试中。设置之前，请先将笔记文件夹复制到安全的位置，这样即使同步出现问题也不会丢失任何笔记。</string>
@@ -1151,7 +1151,7 @@
     <string name="working">正在处理...</string>
     <string name="download">下载</string>
     <string name="failed_reason">失败：%1$s</string>
-    <string name="update_intro">在 GitHub 上检查是否有更新的 n-notes 版本。</string>
+    <string name="update_intro">在 GitHub 上检查是否有更新的 sponka 版本。</string>
     <string name="update_check_on_startup">应用启动时检查更新</string>
     <string name="update_check_failed">检查更新失败</string>
     <string name="update_check">检查更新</string>
@@ -1162,7 +1162,7 @@
     <string name="update_download_failed">下载失败</string>
     <string name="update_view_release">查看发布页面</string>
     <string name="update_available">有可用更新</string>
-    <string name="update_is_out">n-notes %1$s 已发布。</string>
+    <string name="update_is_out">sponka %1$s 已发布。</string>
     <string name="update_later">稍后</string>
     <string name="update_turn_off">关闭</string>
     <string name="sync_syncing_progress">正在同步 %1$s</string>
@@ -1176,9 +1176,9 @@
     <string name="sync_see_log">查看同步日志</string>
     <string name="close">关闭</string>
     <string name="sync_found_by">由 %1$s 在 %2$s 发现</string>
-    <string name="about_fork_tagline">xnotes 的定制分支，一款 Android 手写笔记和速写应用</string>
-    <string name="help_make_n_notes_better">帮助改进 n-notes</string>
-    <string name="enjoying_n_notes">"喜欢 n-notes 吗？"</string>
+    <string name="about_fork_tagline">xnotes 的定制分支，一款 Android 手写笔记和速写应用。原名 n-notes。</string>
+    <string name="help_make_n_notes_better">帮助改进 sponka</string>
+    <string name="enjoying_n_notes">"喜欢 sponka 吗？"</string>
     <string name="ocr_recognizing_handwriting">正在识别手写内容...</string>
     <string name="ocr_handwriting_failed">手写识别失败：%1$s</string>
     <string name="ocr_no_text">未识别到文本</string>
