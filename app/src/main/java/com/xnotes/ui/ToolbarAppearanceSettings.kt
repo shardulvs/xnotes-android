@@ -49,12 +49,14 @@ internal fun ToolbarAppearanceSettings(
         }
         HorizontalDivider()
         ToolbarGeometryControls(geometry = geometry, vertical = vertical,
-            onChange = onGeometryChange)
-        HorizontalDivider()
-        ToolbarRoundnessSettings(
-            geometry = geometry, layout = layout, size = size,
-            vertical = vertical, floating = floating,
-            onChange = { onGeometryChange(geometry.copy(cornerRadiusDp = it)) },
+            onChange = onGeometryChange,
+            roundness = {
+                ToolbarRoundnessSettings(
+                    geometry = geometry, layout = layout, size = size,
+                    vertical = vertical, floating = floating,
+                    onChange = { onGeometryChange(geometry.copy(cornerRadiusDp = it)) },
+                )
+            },
         )
     }
 }

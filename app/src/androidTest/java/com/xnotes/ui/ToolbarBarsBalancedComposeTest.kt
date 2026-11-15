@@ -94,14 +94,16 @@ class ToolbarBarsBalancedComposeTest {
         fun assertGroupsAligned() {
             val measures = rule.onAllNodesWithTag("toolbar-measure", useUnmergedTree = true)
             assertTrue("Expected geometry controls plus roundness", measures.fetchSemanticsNodes().size == 6)
-            val bounds = (0..4).map { measures[it].getUnclippedBoundsInRoot() }
+            val bounds = (0..5).map { measures[it].getUnclippedBoundsInRoot() }
             val widths = bounds.map { (it.right - it.left).value }
             assertTrue("All controls must have the same width: $widths",
                 widths.all { kotlin.math.abs(it - widths[0]) <= 2f })
             assertTrue("Left group sliders should share a column: $bounds",
                 (1..2).all { kotlin.math.abs((bounds[it].left - bounds[0].left).value) <= 2f })
             assertTrue("Right group sliders should share a column: $bounds",
-                kotlin.math.abs((bounds[3].left - bounds[4].left).value) <= 2f)
+                (4..5).all { kotlin.math.abs((bounds[3].left - bounds[it].left).value) <= 2f })
+            assertTrue("Roundness belongs beside Buttons: $bounds",
+                kotlin.math.abs((bounds[2].top - bounds[5].top).value) <= 2f)
             assertTrue("Groups must be side-by-side and not overlap: $bounds",
                 bounds[0].right < bounds[3].left)
             assertTrue("Rows inside each group must descend: $bounds",

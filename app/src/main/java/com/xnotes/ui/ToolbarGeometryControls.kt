@@ -32,6 +32,7 @@ internal fun ToolbarGeometryControls(
     geometry: ToolbarGeometry,
     vertical: Boolean,
     onChange: (ToolbarGeometry) -> Unit,
+    roundness: (@Composable () -> Unit)? = null,
 ) {
     val toolbarStrings = androidx.compose.ui.platform.LocalContext.current
     val screen = LocalConfiguration.current
@@ -79,6 +80,7 @@ internal fun ToolbarGeometryControls(
                     geometry.spacingDp, 2, 0, 32, Modifier.fillMaxWidth()) {
                     onChange(geometry.copy(spacingDp = it))
                 }
+                roundness?.invoke()
             }
         }
         if (sideBySide) {
