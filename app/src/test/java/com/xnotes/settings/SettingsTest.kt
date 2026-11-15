@@ -4,6 +4,7 @@ import com.xnotes.core.model.Orientation
 import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.tools.InkPalette
+import com.xnotes.core.tools.SelectKind as K
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolbarLayout
 import org.json.JSONObject
@@ -127,6 +128,25 @@ class SettingsTest {
         // Settings saved before the switch existed read as on.
         json.getJSONObject("tools").getJSONObject("eraser").remove("erase_markups")
         assertTrue(Settings.fromJson(json).configFor(Tool.ERASER).eraseMarkups)
+    }
+
+    @Test fun kindFiltersSaveWhatIsOffAndMigrateTheOldLists() {
+        val cfg = Settings().configFor(Tool.LASSO).copy(selectKinds = K.ALL - K.TEXT, erasableKinds = setOf(K.INK))
+        val json = Settings(tools = mapOf(Tool.LASSO to cfg)).toJson()
+        val saved = json.getJSONObject("tools").getJSONObject("lasso")
+        assertEquals("[\"text\"]", saved.getJSONArray("select_kinds_off").toString())
+        assertFalse(saved.has("select_kinds") || saved.has("select_kinds_v2"))
+        val back = Settings.fromJson(json).configFor(Tool.LASSO)
+        assertEquals(K.ALL - K.TEXT, back.selectKinds)
+        assertEquals(setOf(K.INK), back.erasableKinds)
+        // Old full lists: highlighter joins ink when saved before it had a kind, unknown kinds stay off.
+        saved.remove("select_kinds_off"); saved.remove("erasable_kinds_off")
+        saved.put("select_kinds", org.json.JSONArray(listOf("ink", "text"))).put("erasable_kinds", org.json.JSONArray(listOf("shapes")))
+        val old = Settings.fromJson(json).configFor(Tool.LASSO)
+        assertEquals(setOf(K.INK, K.HIGHLIGHTER, K.TEXT), old.selectKinds)
+        assertEquals(setOf(K.SHAPES), old.erasableKinds)
+        saved.put("select_kinds_v2", true)
+        assertEquals(setOf(K.INK, K.TEXT), Settings.fromJson(json).configFor(Tool.LASSO).selectKinds)
     }
 
     @Test fun theTapeToolsModeAndPatternRoundTrip() {

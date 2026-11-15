@@ -397,11 +397,10 @@ data class Settings(
             .put("switch_back_after_erase", c.switchBackAfterErase)
             .put("erase_markups", c.eraseMarkups)
             .put("scribble_erase", c.scribbleErase)
-            .put("erasable_kinds", JSONArray(c.erasableKinds.map { it.id }))
+            .put("erasable_kinds_off", kindsJson(SelectKind.ALL - c.erasableKinds))
             .put("switch_back_after_select", c.switchBackAfterSelect)
             .put("select_whole_items", c.selectWholeItems)
-            .put("select_kinds", JSONArray(c.selectKinds.map { it.id }))
-            .put("select_kinds_v2", true)
+            .put("select_kinds_off", kindsJson(SelectKind.ALL - c.selectKinds))
             .put("snap_to_margins", c.snapToMargins)
             .put("straight_line", c.straightLine)
             .put("scale", c.scale)
@@ -413,6 +412,13 @@ data class Settings(
             .put("tape_pattern", c.tapePattern.id)
             .put("rgba", rgbaArr(c.rgba))
             .apply { c.colorOverride?.let { put("color_override", rgbaArr(it)) } }
+
+        private fun kindsJson(kinds: Set<SelectKind>) = JSONArray(kinds.map { it.id })
+
+        private fun kinds(o: JSONObject, key: String): Set<SelectKind>? =
+            o.optJSONArray(key)?.let { a -> (0 until a.length()).mapNotNull { SelectKind.fromId(a.optString(it)) }.toSet() }
+
+        private fun kindsOff(o: JSONObject, key: String): Set<SelectKind>? = kinds(o, key)?.let { SelectKind.ALL - it }
 
         private fun toolConfig(o: JSONObject, tool: Tool): ToolConfig {
             val d = ToolDefaults.configFor(tool)
@@ -438,12 +444,12 @@ data class Settings(
                 switchBackAfterErase = o.optBoolean("switch_back_after_erase", d.switchBackAfterErase),
                 eraseMarkups = o.optBoolean("erase_markups", d.eraseMarkups),
                 scribbleErase = o.optBoolean("scribble_erase", d.scribbleErase),
-                erasableKinds = o.optJSONArray("erasable_kinds")?.let { a -> (0 until a.length()).mapNotNull { SelectKind.fromId(a.optString(it)) }.toSet() }?.takeIf { it.isNotEmpty() } ?: d.erasableKinds,
+                erasableKinds = (kindsOff(o, "erasable_kinds_off") ?: kinds(o, "erasable_kinds"))?.takeIf { it.isNotEmpty() } ?: d.erasableKinds,
                 switchBackAfterSelect = o.optBoolean("switch_back_after_select", d.switchBackAfterSelect),
                 selectWholeItems = o.optBoolean("select_whole_items", d.selectWholeItems),
-                selectKinds = o.optJSONArray("select_kinds")?.let { a -> (0 until a.length()).mapNotNull { SelectKind.fromId(a.optString(it)) }.toSet() }
+                selectKinds = (kindsOff(o, "select_kinds_off") ?: kinds(o, "select_kinds")
                     // Saved before highlighter strokes had a kind of their own, they were lines.
-                    ?.let { if (!o.has("select_kinds_v2") && SelectKind.INK in it) it + SelectKind.HIGHLIGHTER else it }
+                    ?.let { if (!o.has("select_kinds_v2") && SelectKind.INK in it) it + SelectKind.HIGHLIGHTER else it })
                     ?.takeIf { it.isNotEmpty() }
                     ?: d.selectKinds,
                 snapToMargins = o.optBoolean("snap_to_margins", d.snapToMargins),
