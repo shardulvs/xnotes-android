@@ -1,7 +1,10 @@
-<h1 align="center">n-notes</h1>
+<p align="center"><img src="app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" width="96" alt="sponka icon" /></p>
+
+<h1 align="center">sponka</h1>
 
 <p align="center">
-  A handwriting-first notebook for Android, built for pen and stylus. A customized fork of xnotes.
+  A handwriting-first notebook for Android, built for pen and stylus. A customized fork of xnotes.<br />
+  Formerly n-notes, renamed n-notes -> sponka because the fork has grown far enough from xnotes to get its own name and icon.
 </p>
 
 <p align="center">
@@ -20,11 +23,11 @@ Xnotes is a great app, and I'm grateful that the developer puts so much work int
 
 ## Additions to the original xnotes
 
-n-notes adds more then 50+ features on top of xnotes, while 10+ (2026.11.01) of them were later implemented in xnotes as well. See the full list in [ADDITIONS.md](ADDITIONS.md).
+sponka adds more then 50+ features on top of xnotes, while 10+ (2026.11.01) of them were later implemented in xnotes as well. See the full list in [ADDITIONS.md](ADDITIONS.md).
 
 ## Versioning
 
-Releases are named `{xnotes version}-{n-notes version}`, for example `0.9.7-0.48`: the upstream xnotes release the build is based on, then the fork revision, bumped on every published build.
+Releases are named `{xnotes version}-{sponka version}`, for example `0.9.7-0.48`: the upstream xnotes release the build is based on, then the fork revision, bumped on every published build.
 
 ## Install
 
@@ -58,4 +61,4 @@ Translations are fully LLM-generated and get fixed over time based on user repor
 
 Released under the MIT License, the same as upstream. See [LICENSE](LICENSE).
 
-n-notes is a fork of [xnotes](https://github.com/shardulvs/xnotes-android) by Shardul Vikram Singh.
+sponka (formerly n-notes) is a fork of [xnotes](https://github.com/shardulvs/xnotes-android) by Shardul Vikram Singh.
