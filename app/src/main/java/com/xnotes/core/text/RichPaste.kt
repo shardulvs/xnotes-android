@@ -14,6 +14,8 @@ object RichPaste {
     private val MATH_ELEMENT = Regex("<math\\b([^>]*)>([\\s\\S]*?)</math>", RegexOption.IGNORE_CASE)
     private val TEX_ANNOTATION = Regex("<annotation[^>]*application/x-tex[^>]*>([\\s\\S]*?)</annotation>", RegexOption.IGNORE_CASE)
     private val MATH_TEXT = Regex("\\$\\$[\\s\\S]+?\\$\\$|\\\\\\[[\\s\\S]+?\\\\]|\\\\\\([\\s\\S]+?\\\\\\)|(?<![\\w$])\\$[^\\s$](?:[^$\\n]*[^\\s$])?\\$(?![\\w$])")
+    private val PLAIN_BULLET = Regex("([ \\t]*)([•◦▪▫‣●○■□·–*+-]|\\d{1,3}[.)])[ \\t]+(\\S.*)")
+    private val CHAR_BULLET = Regex("^[•◦▪▫‣●○■□·][\\s\u00a0]+")
     private val ENTITY = Regex("&(#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);")
     private val ENTITIES = mapOf("amp" to "&", "lt" to "<", "gt" to ">", "quot" to "\"", "apos" to "'", "nbsp" to " ")
     private val ESCAPED = "\\*_<>~=|#`$".toSet()
@@ -26,10 +28,34 @@ object RichPaste {
     )
     private const val MATH_MARK = '\u0000'
 
-    /** Markdown chunks for plain [text] that holds TeX maths, or null when it holds none. */
+    /** Markdown chunks for plain [text] that holds TeX maths or bullet lines, or null when it holds neither. */
     fun fromPlain(text: String): List<String>? {
-        if (!MATH_TEXT.containsMatchIn(text)) return null
-        return escapeText(text).split('\n').map { it.trimEnd() }
+        val lines = MATH_TEXT.replace(text) { it.value.replace('\n', ' ') }.split('\n').map { it.trimEnd() }
+        if (!MATH_TEXT.containsMatchIn(text) && lines.none(PLAIN_BULLET::matches)) return null
+        val chunks = mutableListOf<String>()
+        val items = mutableListOf<String>()
+        val indents = mutableListOf<Int>()
+        fun endList() {
+            if (items.isNotEmpty()) chunks += items.joinToString("\n")
+            items.clear()
+            indents.clear()
+        }
+        for (line in lines) {
+            val m = PLAIN_BULLET.matchEntire(line)
+            if (m == null) {
+                endList()
+                chunks += escapeText(line)
+                continue
+            }
+            val indent = m.groupValues[1].replace("\t", "    ").length
+            while (indents.isNotEmpty() && indent < indents.last()) indents.removeAt(indents.size - 1)
+            if (indents.isEmpty() || indent > indents.last()) indents += indent
+            val mark = m.groupValues[2]
+            val marker = if (mark[0].isDigit()) mark.dropLast(1) + ". " else "- "
+            items += "    ".repeat(indents.size - 1) + marker + escapeText(m.groupValues[3])
+        }
+        endList()
+        return chunks
     }
 
     /** Markdown chunks for the clipboard's [html], empty when it shows no text. */
@@ -232,6 +258,8 @@ object RichPaste {
             line.setLength(0)
             if (t.isEmpty()) return
             t = restoreMaths(t)
+            // Bullets some apps write as a character instead of a list.
+            if (itemMarker == null && lists.isEmpty()) t = CHAR_BULLET.replace(t, "- ")
             if (heading > 0) t = "#".repeat(heading) + " " + t
             if (rows != null) return
             val marker = itemMarker

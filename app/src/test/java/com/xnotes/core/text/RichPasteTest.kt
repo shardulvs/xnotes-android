@@ -69,6 +69,22 @@ class RichPasteTest {
         assertEquals(listOf("x"), html("<p><i></i>x<b> </b></p><script>bad()</script><style>p{}</style>"))
     }
 
+    @Test fun plainBulletLinesBecomeLists() {
+        assertEquals(
+            listOf("Shopping:", "- milk\n- eggs\n    1. brown\n    2. white\n- \\*bread\\*", "done"),
+            RichPaste.fromPlain("Shopping:\n• milk\r\n- eggs\n  1. brown\n  2) white\n* *bread*\ndone"),
+        )
+        val p = RichPaste.fromPlain("- a\n\t- b")!!.flatMap { MarkdownParser.parse(it) }
+        assertEquals(listOf("a", "b"), p.map { it.plainText() })
+        assertEquals(ListKind.BULLET, p[1].list)
+        assertTrue(p[1].indent > p[0].indent)
+        assertNull(RichPaste.fromPlain("-not a bullet\n2020 was a year"))
+    }
+
+    @Test fun characterBulletsInHtmlBecomeListItems() {
+        assertEquals(listOf("- one", "- two"), html("<p>•&nbsp;one</p><p class=MsoListParagraph>· two</p>"))
+    }
+
     @Test fun plainTextOnlyWhenItHoldsMaths() {
         assertNull(RichPaste.fromPlain("just *text*, \$5 and \$6"))
         assertEquals(listOf("Euler: \$e^{i\\pi}+1=0\$ \\*", "\$\$a_1\$\$"), RichPaste.fromPlain("Euler: \$e^{i\\pi}+1=0\$ *\n\$\$a_1\$\$"))
