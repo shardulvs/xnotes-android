@@ -1189,6 +1189,9 @@ fun FlowEditMenu(editor: Editor) {
                     properties = PopupProperties(focusable = false),
                 ) {
                     DropdownMenuItem(text = { Text(stringResource(R.string.paste)) }, onClick = {
+                        pasteOpen = false; editor.pasteAtCaret(); editor.dismissFlowContextMenu()
+                    })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.paste_plain)) }, onClick = {
                         pasteOpen = false; editor.pastePlainAtCaret(); editor.dismissFlowContextMenu()
                     })
                     DropdownMenuItem(text = { Text(stringResource(R.string.paste_markdown)) }, onClick = {

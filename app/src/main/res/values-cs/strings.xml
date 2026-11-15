@@ -905,6 +905,7 @@
     <string name="copy_as_image">Kopírovat jako obrázek</string>
     <string name="unlock">Odemknout</string>
     <string name="paste_here">Vložit sem</string>
+    <string name="paste_plain">Vložit jako prostý text</string>
     <string name="paste_markdown">Vložit jako Markdown</string>
     <string name="paste_code">Vložit jako kód</string>
 

@@ -737,6 +737,7 @@
     <string name="share_as_image">分享为图片</string>
     <string name="unlock">解锁</string>
     <string name="paste_here">粘贴到此处</string>
+    <string name="paste_plain">粘贴为纯文本</string>
     <string name="paste_markdown">粘贴为 Markdown</string>
     <string name="paste_code">粘贴为代码</string>
 

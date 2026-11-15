@@ -878,6 +878,7 @@
     <string name="copy_as_image">Copy as image</string>
     <string name="unlock">Unlock</string>
     <string name="paste_here">Paste here</string>
+    <string name="paste_plain">Paste as plain text</string>
     <string name="paste_markdown">Paste as Markdown</string>
     <string name="paste_code">Paste as Code</string>
 

@@ -891,6 +891,7 @@
     <string name="copy_as_image">Copiar como imagen</string>
     <string name="unlock">Desbloquear</string>
     <string name="paste_here">Pegar aquí</string>
+    <string name="paste_plain">Pegar como texto sin formato</string>
     <string name="paste_markdown">Pegar como Markdown</string>
     <string name="paste_code">Pegar como código</string>
 

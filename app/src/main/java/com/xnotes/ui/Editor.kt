@@ -1207,7 +1207,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private val flowInput = com.xnotes.canvas.FlowInput(view, flowText, { state.document.flow })
         .also {
             view.flowInput = it
-            it.onPaste = { pastePlainAtCaret() }
+            it.onPaste = { pasteAtCaret() }
             it.onBackspaceSpecial = { flowBackspaceSpecial() }
             it.onForwardDeleteSpecial = { flowForwardDeleteSpecial() }
         }
@@ -1594,6 +1594,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     fun clipboardHasText(): Boolean = clipboardText() != null
 
+    private fun clipboardHtml(): String? {
+        val cm = appContext.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+            as? android.content.ClipboardManager ?: return null
+        return cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.htmlText?.takeIf { it.isNotBlank() }
+    }
+
     /** Viewport bounds the flow-editing action bar anchors to, or null when closed. */
     var flowContextMenu by mutableStateOf<Rect?>(null)
         private set
@@ -1624,12 +1630,31 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         flowText.replaceExternal(flowText.selection, text)
     }
 
+    /**
+     * Paste keeping what the clipboard's formatting says: rich text (headings, emphasis, lists,
+     * tables, maths) from another app, or plain text with TeX maths in it; anything else verbatim.
+     */
+    fun pasteAtCaret() {
+        if (!flowText.active) return
+        val chunks = clipboardHtml()?.let(com.xnotes.core.text.RichPaste::fromHtml)?.takeIf { it.isNotEmpty() }
+            ?: clipboardText()?.let(com.xnotes.core.text.RichPaste::fromPlain)
+            ?: return pastePlainAtCaret()
+        pasteParagraphsAtCaret(
+            chunks.flatMap {
+                if (it.isBlank()) listOf(Paragraph()) else com.xnotes.core.text.MarkdownParser.parse(it, newTableDefaults.style, toolbarInk())
+            },
+        )
+    }
+
     /** Parse the clipboard's text as markdown and paste it at the caret's font size. */
     fun pasteMarkdownAtCaret() {
         if (!flowText.active) return
         val text = clipboardText() ?: return
+        pasteParagraphsAtCaret(com.xnotes.core.text.MarkdownParser.parse(text, newTableDefaults.style, toolbarInk()))
+    }
+
+    private fun pasteParagraphsAtCaret(paras: List<Paragraph>) {
         val caretSize = flowCaretStyle().sizePt
-        val paras = com.xnotes.core.text.MarkdownParser.parse(text, newTableDefaults.style, toolbarInk())
         if (caretSize != null) {
             for (p in paras) {
                 if (p.headingLevel > 0) continue // its level sizes it
@@ -8501,7 +8526,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_A -> flowText.selectAll()
             ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_C -> flowCopySelection(cut = false)
             ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_X -> flowCopySelection(cut = true)
-            ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_V -> pastePlainAtCaret()
+            ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_V -> pasteAtCaret()
             ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_DPAD_LEFT -> flowMoveWord(forward = false, extend = shift)
             ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> flowMoveWord(forward = true, extend = shift)
             ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_DEL -> flowDeleteWord(forward = false)
