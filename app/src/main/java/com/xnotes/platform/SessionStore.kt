@@ -32,6 +32,7 @@ class SessionStore(private val dir: File, private val codec: DocumentCodec, priv
         val scrollY: Double,
         val zoomLocked: Boolean,
         val viewOverrides: ViewOverrides,
+        val reader: Boolean,
     )
 
     /**
@@ -46,6 +47,7 @@ class SessionStore(private val dir: File, private val codec: DocumentCodec, priv
         scrollY: Double,
         zoomLocked: Boolean,
         viewOverrides: ViewOverrides,
+        reader: Boolean,
         writeDocument: Boolean,
     ) {
         runCatching {
@@ -64,6 +66,7 @@ class SessionStore(private val dir: File, private val codec: DocumentCodec, priv
                 .put("scrollX", scrollX)
                 .put("scrollY", scrollY)
                 .put("zoomLocked", zoomLocked)
+                .put("reader", reader)
             document.path?.let { m.put("path", it) }
             document.displayName?.let { m.put("displayName", it) }
             meta.write(ViewOverridesJson.write(m, viewOverrides))
@@ -94,6 +97,7 @@ class SessionStore(private val dir: File, private val codec: DocumentCodec, priv
             m.optDouble("scrollY", 0.0),
             m.optBoolean("zoomLocked", false),
             ViewOverridesJson.read(m),
+            m.optBoolean("reader", false),
         )
     }
 }

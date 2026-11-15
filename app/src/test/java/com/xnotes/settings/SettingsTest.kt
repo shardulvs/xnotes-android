@@ -88,6 +88,11 @@ class SettingsTest {
         assertTrue(back.prefs.hidePageBorders)
     }
 
+    @Test fun lastCanvasToolRoundTripsAndDropsToolsTheCanvasCannotArm() {
+        assertEquals(Tool.TAPE, Settings.fromJson(Settings(lastCanvasTool = Tool.TAPE).toJson()).lastCanvasTool)
+        assertEquals(Tool.PEN, Settings.fromJson(Settings(lastCanvasTool = Tool.MARKUP).toJson()).lastCanvasTool)
+    }
+
     @Test fun theSpeedPensSmoothingAndTopSpeedRoundTrip() {
         val speed = com.xnotes.core.tools.ToolDefaults.configFor(Tool.SPEED).copy(speedSmoothing = 0.6, speedTop = 0.9)
         val back = Settings.fromJson(Settings(tools = mapOf(Tool.SPEED to speed)).toJson()).configFor(Tool.SPEED)

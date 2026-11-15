@@ -894,6 +894,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             it.toolbarLayout = canvasToolbarLayout
             it.pad.frontBuffering = !settings.prefs.disableFrontBuffering
             it.pickColor(activeColorIndex)
+            it.armTool(settings.lastCanvasTool)
             // A style tuned on the canvas is the same style, so it persists through this editor.
             it.onToolStyleChanged = { settingsDirty = true }
             it.onSwatchColorChanged = { index, color -> adoptSwatchColor(index, color) }
@@ -3220,6 +3221,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 toolbarColorCount = toolbarColorCount,
                 activeColor = activeColorIndex,
                 lastTool = toolBeforeReader ?: tool, // reader's forced Pan is not the user's tool
+                lastCanvasTool = fromCanvas?.tool ?: settings.lastCanvasTool,
                 sidebarVisible = sidebarVisible,
                 renderScale = renderScale,
             )
@@ -3273,9 +3275,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val sy = state.scrollY
         val locked = zoomLocked
         val vo = viewOverrides
+        val reader = readerMode
         autosaveScope.launch {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                session.save(snapshot, zoom, sx, sy, locked, vo, writeDocument = contentChanged)
+                session.save(snapshot, zoom, sx, sy, locked, vo, reader, writeDocument = contentChanged)
             }
         }
     }
@@ -3319,6 +3322,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             refreshContent()
             view.requestRender()
             recoverRecordings(fromSession = true)
+            if (snap.reader) enterReader()
         }
         sessionLoaded = true
     }

@@ -60,6 +60,7 @@ data class Settings(
     val activeColor: Int = 0,
     /** The tool armed when the app was last paused, re-armed on the next launch. */
     val lastTool: Tool = Tool.DEFAULT,
+    val lastCanvasTool: Tool = Tool.PEN,
     val recentColors: List<Rgba> = emptyList(),
     /** The colour circles of each [SwatchRole] the user recoloured; the rest keep their defaults. */
     val swatches: Map<SwatchRole, List<Rgba>> = emptyMap(),
@@ -124,6 +125,7 @@ data class Settings(
             .put("canvas_toolbar_layout", toolbarLayoutJson(canvasToolbarLayout))
             .put("active_color", activeColor)
             .put("last_tool", lastTool.id)
+            .put("last_canvas_tool", lastCanvasTool.id)
             .put("recent_colors", JSONArray().apply { recentColors.forEach { put(rgbaArr(it)) } })
             .apply {
                 if (swatches.isNotEmpty()) put("swatches", JSONObject().apply {
@@ -150,6 +152,9 @@ data class Settings(
     }
 
     companion object {
+        /** The tools the canvas bar can arm; a transient one restored there would show a tool never picked. */
+        private val CANVAS_TOOLS = Tool.PENS + Tool.SELECTIONS + listOf(Tool.HIGHLIGHTER, Tool.ERASER, Tool.PAN, Tool.SHAPE, Tool.TAPE)
+
         fun fromJson(o: JSONObject): Settings {
             val toolsObj = o.optJSONObject("tools")
             val tools = HashMap<Tool, ToolConfig>()
@@ -182,6 +187,8 @@ data class Settings(
                 // leave the bar showing a tool the user never picked.
                 lastTool = Tool.fromId(o.optString("last_tool", ""))
                     ?.takeIf { it in Tool.wheelOrder } ?: Tool.DEFAULT,
+                lastCanvasTool = Tool.fromId(o.optString("last_canvas_tool", ""))
+                    ?.takeIf { it in CANVAS_TOOLS } ?: Tool.PEN,
                 recentColors = rgbaList(o.optJSONArray("recent_colors")).take(24),
                 swatches = swatches(o.optJSONObject("swatches")),
                 browseRoot = o.optString("browse_root", "").ifEmpty { null },
