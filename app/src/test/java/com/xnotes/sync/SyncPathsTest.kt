@@ -1,5 +1,6 @@
 package com.xnotes.sync
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -25,5 +26,10 @@ class SyncPathsTest {
         assertFalse(LocalNoteStore.syncsDir(".xnote/templates"))
         assertTrue(LocalNoteStore.isHiddenPath("Uni/.xnote/colors.json"))
         assertFalse(LocalNoteStore.isHiddenPath("Uni/Maths.xnote"))
+    }
+
+    @Test
+    fun accentedNamesGetOneSpelling() {
+        assertEquals(LocalNoteStore.nfc("ot\u00e1zky.jpg"), LocalNoteStore.nfc("ota\u0301zky.jpg"))
     }
 }

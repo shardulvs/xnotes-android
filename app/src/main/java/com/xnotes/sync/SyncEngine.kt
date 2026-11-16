@@ -130,12 +130,12 @@ class SyncEngine(
     /** Syncs each just-closed note waiting, from a fresh look at it here and at its one cloud folder. */
     private fun syncPriority(state: SyncState, summary: Summary) {
         while (true) {
-            val path = takePriority() ?: return
+            val path = takePriority()?.let(LocalNoteStore::nfc) ?: return
             val started = System.currentTimeMillis()
             try {
                 val loc = LocalNoteStore.entryAt(context, treeUri, path) ?: continue
                 val name = path.substringAfterLast('/')
-                val rem = storage.list(remoteParent(path)).files.firstOrNull { it.name == name }
+                val rem = storage.list(remoteParent(path)).files.firstOrNull { LocalNoteStore.nfc(it.name) == name }
                 // Deletes are never applied from a single folder's view; the full pass judges those.
                 reconcile(path, loc, rem, state, summary, suppressDeletes = true)
                 handled.add(path)
@@ -466,11 +466,13 @@ class SyncEngine(
         if (!visited.add(uuid)) return
         val content = storage.list(uuid)
         for (file in content.files) {
-            val path = join(prefix, file.name)
-            if (LocalNoteStore.syncsFile(path)) out.files[path] = file else out.foreign.add(prefix)
+            val path = join(prefix, LocalNoteStore.nfc(file.name))
+            if (!LocalNoteStore.syncsFile(path)) { out.foreign.add(prefix); continue }
+            // shortcut: of two cloud copies spelled differently, the NFC one is synced and the other left untouched there.
+            if (path !in out.files || file.name == LocalNoteStore.nfc(file.name)) out.files[path] = file
         }
         for (folder in content.folders) {
-            val path = join(prefix, folder.name)
+            val path = join(prefix, LocalNoteStore.nfc(folder.name))
             // Sidecars and their Trash are descended into; other hidden folders (config, templates, .obsidian) are left alone.
             if (!LocalNoteStore.syncsDir(path)) { out.foreign.add(prefix); continue }
             out.folders[path] = folder.id

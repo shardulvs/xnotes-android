@@ -59,6 +59,9 @@ object LocalNoteStore {
     /** The synced files and every synced folder (relative paths), from one walk of the tree. */
     class LocalTree(val files: List<LocalEntry>, val folders: Set<String>)
 
+    /** One spelling for accented names: Android matches "a"+accent and "á" as the same file, so sync keys must too. */
+    fun nfc(name: String): String = java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFC)
+
     fun isNote(name: String) = NOTE_EXTENSIONS.any { name.endsWith(it, ignoreCase = true) }
 
     /** Notes and canvases, plus the read-only kinds (Markdown, Office, CSV, PDF) the reader opens. */
@@ -79,7 +82,7 @@ object LocalNoteStore {
             if (!seen.add(docId)) continue
             val kids = children(context, tree, docId)
             for (child in if (recover && finishSwaps(context, tree, docId, kids)) children(context, tree, docId) else kids) {
-                val rel = if (prefix.isEmpty()) child.name else "$prefix/${child.name}"
+                val rel = if (prefix.isEmpty()) nfc(child.name) else "$prefix/${nfc(child.name)}"
                 if (child.isDir) {
                     if (!syncsDir(rel)) continue
                     folders.add(rel)
@@ -311,7 +314,7 @@ object LocalNoteStore {
     }
 
     private fun findChild(context: Context, tree: Uri, parentDocId: String, name: String, dir: Boolean): String? =
-        children(context, tree, parentDocId).firstOrNull { it.isDir == dir && it.name.equals(name, ignoreCase = true) }?.docId
+        children(context, tree, parentDocId).firstOrNull { it.isDir == dir && nfc(it.name).equals(nfc(name), ignoreCase = true) }?.docId
 
     private fun createDir(context: Context, tree: Uri, parentDocId: String, name: String): String? {
         val parent = DocumentsContract.buildDocumentUriUsingTree(tree, parentDocId)
