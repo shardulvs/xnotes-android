@@ -38,7 +38,7 @@ establishes the visual organization, not FreeNotes' internal action-routing beha
 
 ## Implementation boundaries
 
-`MainActivity.SplitHost` owns the shared chrome and the two stable `EditorPane` nodes. Toolbar
+`SplitHost` (`SplitWorkspace.kt`) owns the shared chrome and the two stable `EditorPane` nodes. Toolbar
 contents are keyed to the active editor to dismiss document-owned popups when focus changes.
 `SharedToolbarFrame` owns scrolling and the tool-glide animation outside that key. The scoped
 `LocalToolbarContentsOnly` tells the native renderers to supply content to the existing frame
@@ -53,7 +53,7 @@ The keyboard text-format bar is drawn once for the active paged editor.
 Both `Toolbar` and `InfiniteToolbar` accept an optional `layout` parameter, defaulting to their
 previous native layout for other callers. This allows layout ownership and action target to be
 different without substituting one editor for another. `UnavailableSharedToolbarItem` reuses the
-customizer's icon identity and labels. Never give the paged renderer a hidden paged editor when
+shared ToolbarItemIcons mapping and labels. Never give the paged renderer a hidden paged editor when
 the active pane is a canvas merely to make the layout look right.
 
 `SharedSplitTools` is a small tool-state bridge invoked by `Editor.focusPane`, independent of the
@@ -67,6 +67,14 @@ This matters for side rails, stacked panes, unequal ratios and open page sidebar
 left rail must not reserve left space in the right-hand document. Docked tools already reduce
 the content viewport, so their extra insets are zero. `LocalToolbarCover` receives pane-local
 padding rather than the whole-workspace padding produced by `ToolbarAround`.
+
+### Modules
+
+- `MainActivity.kt` handles lifecycle, platform requests, and activity-scoped callbacks.
+- `PaneActions.kt` is the small callback contract between that activity and the split UI.
+- `SplitWorkspace.kt` arranges the panes, shared chrome, layout constraints and draggable divider.
+- `PaneSurface.kt` owns each document's stable Android surface, overlays and focus input.
+- `ToolbarItemIcons.kt` centralizes the icon mapping for both the customizer and unavailable tools.
 
 ## Porting to community or other toolbar branches
 
@@ -108,8 +116,12 @@ against upstream. No error was on a new source line; the new strings have both e
 This does not claim that a complete lint run on an untouched upstream checkout was performed.
 
 
+A fresh validation on 2026-11-16 after the extraction passed **2,429 JVM tests** with
+no failures or skips, and produced isolated x86_64 debug and instrumentation APKs.
+The 12-test instrumented suite was rerun on the `Small_Tablet` emulator.
+
 JVM tests cover floating toolbar overlap on all four edges, side-by-side and stacked panes,
-unmeasured surfaces, and mixed-interface preference round trips/fallbacks.
+unmeasured bars and surfaces, and mixed-interface preference round trips/fallbacks.
 
 `SharedSplitToolbarDeviceTest` exercises the production activity, toolbar and native surfaces:
 
