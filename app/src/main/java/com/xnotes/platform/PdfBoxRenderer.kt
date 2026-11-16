@@ -26,6 +26,7 @@ import com.xnotes.core.pal.RasterSurface
 import com.xnotes.core.pal.Renderer
 import com.xnotes.core.pal.TextFlags
 import com.xnotes.core.pdf.GlyphPlacement
+import com.xnotes.core.pdf.InkRuns
 import com.xnotes.core.pdf.LinkFinder
 import com.xnotes.core.pdf.PdfNumbers
 import com.xnotes.core.pdf.PlacedLink
@@ -177,6 +178,15 @@ internal class PdfBoxRenderer(
 
     override fun fillCircle(center: Pt, radius: Double, color: Rgba) =
         fillEllipse(center, radius, radius, color)
+
+    // Ink as round-capped strokes: the swept disc it is on screen, at a fraction of the bytes.
+    override fun fillDiskRibbon(centers: FloatArray, radii: FloatArray, from: Int, count: Int, color: Rgba) {
+        val sb = StringBuilder(count * 24 + 64)
+        val rgb = doubleArrayOf(color.r / 255.0, color.g / 255.0, color.b / 255.0)
+        if (!InkRuns.append(sb, centers, radii, from, count, ox, oy, sx, sy, scaleAbs, rgb)) return
+        tag()
+        translucent(color) { cs.appendRawCommands(sb.toString()) }
+    }
 
     override fun fillEllipse(center: Pt, rx: Double, ry: Double, color: Rgba) {
         if (rx <= 0.0 || ry <= 0.0) return
