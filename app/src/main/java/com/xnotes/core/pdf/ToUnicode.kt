@@ -41,7 +41,7 @@ object ToUnicode {
     }
 
     private fun clean(text: String): String {
-        val kept = text.filter { it != '\u0000' && it != '﻿' && it != '￾' }
+        val kept = text.filter { it != '\u0000' && it != '\uFEFF' && it != '￾' }
         return kept.ifEmpty { "​" }
     }
 

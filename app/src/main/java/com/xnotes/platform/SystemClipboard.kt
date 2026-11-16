@@ -27,7 +27,7 @@ object SystemClipboard {
     fun svgBytes(context: Context): ByteArray? {
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return null
         val text = cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString() ?: return null
-        val t = text.trimStart('﻿').trimStart()
+        val t = text.trimStart('\uFEFF').trimStart()
         val looksSvg = t.startsWith("<svg") || ((t.startsWith("<?xml") || t.startsWith("<!")) && t.contains("<svg"))
         return if (looksSvg) text.toByteArray() else null
     }

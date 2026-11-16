@@ -274,7 +274,7 @@ internal class PdfTags(private val doc: PDDocument, private val setup: Setup) {
 
     private fun xmp(title: String): String {
         val t = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        return "<?xpacket begin=\"﻿\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n" +
+        return "<?xpacket begin=\"\uFEFF\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n" +
             "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n" +
             "<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n" +
             "<rdf:Description rdf:about=\"\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n" +
