@@ -9,6 +9,7 @@ import com.xnotes.gl.InfiniteCanvasView
 import com.xnotes.platform.AndroidTextMeasurer
 import com.xnotes.platform.CanvasTextRaster
 import android.content.Context
+import android.util.Log
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executor
@@ -36,11 +37,9 @@ internal class CanvasTextMeshController(
     private val pending = ConcurrentHashMap<TextItem, Any>()
     private var manipulating: TextItem? = null
     private val rasterDir = File(context.cacheDir, "canvas-text-raster")
-    private val rasterFiles = java.util.IdentityHashMap<TextItem, File>()
+    private val rasterFiles = CanvasTextTextureFiles(scene)
 
-    private fun forgetRaster(item: TextItem) {
-        rasterFiles.remove(item)?.delete()
-    }
+    private fun forgetRaster(item: TextItem) = rasterFiles.forget(item)
 
     fun startGesture(item: TextItem) {
         manipulating = item
@@ -78,7 +77,6 @@ internal class CanvasTextMeshController(
         pending.clear()
         manipulating = null
         preview.clear()
-        rasterFiles.values.forEach { it.delete() }
         rasterFiles.clear()
     }
 
@@ -105,20 +103,22 @@ internal class CanvasTextMeshController(
         executor.execute {
             if (pending[item] !== token) return@execute
             val colorGlyphs = CanvasTextRaster.needsColorGlyphs(snapshot.text)
-            val rendered = if (colorGlyphs) runCatching {
+            val rendered = if (colorGlyphs) try {
                 CanvasTextRaster.render(snapshot, rasterDir)
-            }.getOrNull() else null
+            } catch (error: Exception) {
+                Log.w("CanvasTextMesh", "Color glyph raster failed; using vector fallback", error)
+                null
+            } else null
             val meshed = if (rendered == null) ItemMesher.mesh(snapshot) else null
             view.post {
                 if (pending[item] !== token) {
-                    rendered?.bitmap?.recycle()
-                    rendered?.image?.image?.file?.delete()
+                    rendered?.discard()
                     return@post
                 }
                 if (rendered != null) {
                     scene.textures.offerBitmap(rendered.image.image, rendered.bitmap)
                     forgetRaster(item)
-                    rasterFiles[item] = rendered.image.image.file
+                    rasterFiles.track(item, rendered.image.image)
                     scene.upsertTextTexture(item, rendered.image, snapshot.bounds())
                 } else {
                     forgetRaster(item)

@@ -5,29 +5,14 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.os.SystemClock
 import android.test.InstrumentationTestCase
-import android.view.InputDevice
-import android.view.MotionEvent
 import com.xnotes.core.model.TextItem
 import com.xnotes.core.tools.Tool
 import com.xnotes.platform.CanvasTextRaster
 
 /** End-to-end GL test: color glyphs survive a native-preview-to-texture handoff. */
 class CanvasEmojiRenderTest : InstrumentationTestCase() {
-    private fun tap(editor: InfiniteEditor, x: Float, y: Float) {
-        val now = SystemClock.uptimeMillis()
-        val props = MotionEvent.PointerProperties().apply {
-            id = 0; toolType = MotionEvent.TOOL_TYPE_STYLUS
-        }
-        val coords = MotionEvent.PointerCoords().apply {
-            this.x = x; this.y = y; pressure = 1f; size = 1f
-        }
-        for ((action, delay) in listOf(MotionEvent.ACTION_DOWN to 0L, MotionEvent.ACTION_UP to 35L)) {
-            val event = MotionEvent.obtain(now, now + delay, action, 1,
-                arrayOf(props), arrayOf(coords), 0, 0, 1f, 1f,
-                0, 0, InputDevice.SOURCE_STYLUS, 0)
-            try { editor.interaction.onTouch(event) } finally { event.recycle() }
-        }
-    }
+    private fun tap(editor: InfiniteEditor, x: Float, y: Float) =
+        CanvasTextTestInput.tap(editor, x, y, duration = 35L)
 
     fun testEmojiDetection() {
         assertFalse(CanvasTextRaster.needsColorGlyphs("Plain text αβ हिन्दी مرحبا"))
@@ -38,7 +23,69 @@ class CanvasEmojiRenderTest : InstrumentationTestCase() {
         assertTrue(CanvasTextRaster.needsColorGlyphs("👩🏽‍💻"))
     }
 
-    fun testColorEmojiSurvivesGlHandoff() {
+    fun testSwitchEmojiToPlainAndBackDoesNotAccumulatePngs() {
+        val target = instrumentation.targetContext
+        val folder = java.io.File(target.cacheDir, "canvas-text-raster")
+        fun currentFiles() = folder.listFiles()?.map { it.name }?.toSet().orEmpty()
+        val before = currentFiles()
+        val activity = instrumentation.startActivitySync(
+            Intent(Intent.ACTION_MAIN).setClassName(target.packageName, "com.xnotes.EditorActivity")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        ) as Activity
+        val editor = InfiniteEditor(target)
+        try {
+            instrumentation.runOnMainSync {
+                activity.setContentView(editor.surfaces)
+                editor.viewport.zoom = 1.0
+                editor.armTool(Tool.TEXT_BOX)
+            }
+            instrumentation.waitForIdleSync()
+            fun edit(value: String, x: Float = 240f, y: Float = 260f) {
+                instrumentation.runOnMainSync {
+                    tap(editor, x, y)
+                    assertNotNull(editor.editingField)
+                    editor.updateEditingText(value)
+                    editor.commitText()
+                }
+                val preview = editor.surfaces.getChildAt(2)
+                val deadline = SystemClock.uptimeMillis() + 10_000
+                while (SystemClock.uptimeMillis() < deadline) {
+                    instrumentation.waitForIdleSync()
+                    if (preview.visibility == android.view.View.GONE) break
+                    SystemClock.sleep(40)
+                }
+                assertEquals("GL handoff failed for " + value, android.view.View.GONE, preview.visibility)
+            }
+
+            edit("First 😀 emoji")
+            assertEquals(1, editor.document.items.filterIsInstance<TextItem>().size)
+            assertEquals(1, (currentFiles() - before).size)
+            edit("Changed 🇧🇷 emoji", x = 250f, y = 270f)
+            assertEquals("Editing the same item should replace its PNG, not leak another",
+                1, (currentFiles() - before).size)
+            edit("Now plain text", x = 250f, y = 270f)
+            assertEquals("Switching back to vectors must delete emoji PNGs",
+                emptySet<String>(), currentFiles() - before)
+            assertEquals("Now plain text", editor.document.items.filterIsInstance<TextItem>().single().text)
+            edit("Emoji returned 😀", x = 250f, y = 270f)
+            assertEquals(1, (currentFiles() - before).size)
+            instrumentation.runOnMainSync {
+                editor.document.remove(editor.document.items.filterIsInstance<TextItem>().single())
+            }
+            instrumentation.waitForIdleSync()
+            assertTrue(editor.document.items.filterIsInstance<TextItem>().isEmpty())
+            assertEquals("Deleting the textbox must release its cached PNG",
+                before, currentFiles())
+        } finally {
+            instrumentation.runOnMainSync { activity.finish() }
+        }
+    }
+
+    fun testColorEmojiSurvivesGlHandoff() = verifyEmojiHandoff(1.0)
+
+    fun testColorEmojiSurvivesGlHandoffAtHighZoom() = verifyEmojiHandoff(2.0)
+
+    private fun verifyEmojiHandoff(zoom: Double) {
         val target = instrumentation.targetContext
         val activity = instrumentation.startActivitySync(
             Intent(Intent.ACTION_MAIN).setClassName(target.packageName, "com.xnotes.EditorActivity")
@@ -52,7 +99,7 @@ class CanvasEmojiRenderTest : InstrumentationTestCase() {
             instrumentation.waitForIdleSync()
             var item: TextItem? = null
             instrumentation.runOnMainSync {
-                editor.viewport.zoom = 1.0
+                editor.viewport.zoom = zoom
                 editor.viewport.scrollX = 0.0
                 editor.viewport.scrollY = 0.0
                 editor.armTool(Tool.TEXT_BOX)

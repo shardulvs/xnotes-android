@@ -8,8 +8,6 @@ import android.os.SystemClock
 import android.os.PowerManager
 import android.test.InstrumentationTestCase
 import android.util.Log
-import android.view.InputDevice
-import android.view.MotionEvent
 import android.view.WindowManager
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
@@ -26,6 +24,7 @@ import com.xnotes.format.CanvasCodec
 import com.xnotes.platform.AndroidImageCodec
 import com.xnotes.platform.AndroidTextMeasurer
 import com.xnotes.ui.InfiniteEditor
+import com.xnotes.ui.CanvasTextTestInput
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 
@@ -105,25 +104,8 @@ class CanvasTextBenchmarkTest : InstrumentationTestCase() {
         Log.i("PR428_BENCH", "long/contours n=" + contours.size)
     }
 
-    private fun tap(editor: InfiniteEditor, x: Float, y: Float) {
-        val time = SystemClock.uptimeMillis()
-        val properties = MotionEvent.PointerProperties().apply {
-            id = 0
-            toolType = MotionEvent.TOOL_TYPE_STYLUS
-        }
-        val coords = MotionEvent.PointerCoords().apply {
-            this.x = x
-            this.y = y
-            pressure = 1f
-            size = 1f
-        }
-        for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
-            val event = MotionEvent.obtain(time, time + if (action == MotionEvent.ACTION_UP) 30 else 0,
-                action, 1, arrayOf(properties), arrayOf(coords),
-                0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_STYLUS, 0)
-            try { editor.interaction.onTouch(event) } finally { event.recycle() }
-        }
-    }
+    private fun tap(editor: InfiniteEditor, x: Float, y: Float) =
+        CanvasTextTestInput.tap(editor, x, y)
 
     fun testNativeToGlHandoffLatency() {
         val context = instrumentation.targetContext

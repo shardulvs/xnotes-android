@@ -4,7 +4,6 @@ import android.app.Activity
 import android.content.Intent
 import android.os.SystemClock
 import android.test.InstrumentationTestCase
-import android.view.MotionEvent
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.model.TextItem
 import com.xnotes.core.tools.Tool
@@ -21,26 +20,8 @@ class CanvasTextEditFlowTest : InstrumentationTestCase() {
             armTool(Tool.TEXT_BOX)
         }
 
-    private fun tap(editor: InfiniteEditor, x: Float, y: Float, time: Long) {
-        val pointer = MotionEvent.PointerProperties().apply {
-            id = 0
-            toolType = MotionEvent.TOOL_TYPE_STYLUS
-        }
-        val coords = MotionEvent.PointerCoords().apply { this.x = x; this.y = y; pressure = 1f; size = 1f }
-        fun event(action: Int, whenMs: Long) = MotionEvent.obtain(
-            time, whenMs, action, 1, arrayOf(pointer), arrayOf(coords),
-            0, 0, 1f, 1f, 0, 0, android.view.InputDevice.SOURCE_STYLUS, 0,
-        )
-        val down = event(MotionEvent.ACTION_DOWN, time)
-        val up = event(MotionEvent.ACTION_UP, time + 30)
-        try {
-            editor.interaction.onTouch(down)
-            editor.interaction.onTouch(up)
-        } finally {
-            down.recycle()
-            up.recycle()
-        }
-    }
+    private fun tap(editor: InfiniteEditor, x: Float, y: Float, time: Long) =
+        CanvasTextTestInput.tap(editor, x, y, down = time)
 
     fun testNativeTextAndSelectionChromeMoveTogether() {
         instrumentation.runOnMainSync {

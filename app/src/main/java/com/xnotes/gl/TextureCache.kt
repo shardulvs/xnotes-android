@@ -63,12 +63,33 @@ class TextureCache(private val budgetBytes: Long = DEFAULT_BUDGET_BYTES) {
         ready.add(Pending(image, bitmap, maxEdge(image)))
     }
 
+    /** Evict a temporary text image as soon as its editor stops using it (GL thread only). */
+    fun discard(image: ImageData) {
+        val waiting = ready.iterator()
+        while (waiting.hasNext()) {
+            val next = waiting.next()
+            if (next.image !== image) continue
+            waiting.remove()
+            if (!next.bitmap.isRecycled) next.bitmap.recycle()
+        }
+        decoding.remove(image)
+        entries.remove(image)?.let {
+            residentBytes -= it.bytes
+            GLES30.glDeleteTextures(1, intArrayOf(it.texture), 0)
+        }
+    }
+
     /** Take in whatever finished decoding since the last frame. Call with the context current. */
     fun uploadPending() {
         while (true) {
             val next = ready.poll() ?: return
             decoding.remove(next.image)
             if (next.bitmap.isRecycled) continue
+            // A cancelled text edit may have deleted the source while a decode was pending.
+            if (!next.image.file.exists()) {
+                next.bitmap.recycle()
+                continue
+            }
             val existing = entries.remove(next.image)
             if (existing != null) {
                 residentBytes -= existing.bytes

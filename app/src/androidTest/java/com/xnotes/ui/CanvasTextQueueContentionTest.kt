@@ -5,8 +5,6 @@ import android.content.Intent
 import android.os.SystemClock
 import android.test.InstrumentationTestCase
 import android.util.Log
-import android.view.InputDevice
-import android.view.MotionEvent
 import com.xnotes.core.tools.Tool
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
@@ -14,21 +12,7 @@ import java.util.concurrent.TimeUnit
 
 /** Simulates a slow image decode occupying the canvas's image worker while text is edited. */
 class CanvasTextQueueContentionTest : InstrumentationTestCase() {
-    private fun tap(editor: InfiniteEditor) {
-        val now = SystemClock.uptimeMillis()
-        val props = MotionEvent.PointerProperties().apply {
-            id = 0; toolType = MotionEvent.TOOL_TYPE_STYLUS
-        }
-        val coords = MotionEvent.PointerCoords().apply {
-            x = 230f; y = 230f; pressure = 1f; size = 1f
-        }
-        for ((action, offset) in listOf(MotionEvent.ACTION_DOWN to 0L, MotionEvent.ACTION_UP to 30L)) {
-            val event = MotionEvent.obtain(now, now + offset, action, 1,
-                arrayOf(props), arrayOf(coords), 0, 0, 1f, 1f,
-                0, 0, InputDevice.SOURCE_STYLUS, 0)
-            try { editor.interaction.onTouch(event) } finally { event.recycle() }
-        }
-    }
+    private fun tap(editor: InfiniteEditor) = CanvasTextTestInput.tap(editor, 230f, 230f)
 
     fun testTextHandoffNotQueuedBehindSlowImageDecoding() {
         val context = instrumentation.targetContext

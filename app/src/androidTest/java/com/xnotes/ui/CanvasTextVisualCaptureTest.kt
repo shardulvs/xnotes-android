@@ -5,7 +5,6 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.os.SystemClock
 import android.test.InstrumentationTestCase
-import android.view.InputDevice
 import android.view.MotionEvent
 import com.xnotes.core.model.TextItem
 import com.xnotes.core.tools.Tool
@@ -14,13 +13,8 @@ import java.io.FileOutputStream
 
 /** Real GL/native-surface capture of rapid text moves; never edits a saved note. */
 class CanvasTextVisualCaptureTest : InstrumentationTestCase() {
-    private fun pointer(editor: InfiniteEditor, action: Int, x: Float, y: Float, down: Long, at: Long) {
-        val props = MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_STYLUS }
-        val coords = MotionEvent.PointerCoords().apply { this.x = x; this.y = y; pressure = 1f; size = 1f }
-        val event = MotionEvent.obtain(down, at, action, 1, arrayOf(props), arrayOf(coords),
-            0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_STYLUS, 0)
-        try { editor.interaction.onTouch(event) } finally { event.recycle() }
-    }
+    private fun pointer(editor: InfiniteEditor, action: Int, x: Float, y: Float, down: Long, at: Long) =
+        CanvasTextTestInput.pointer(editor, action, x, y, down, at)
 
     private fun shot(name: String): File {
         val screenshot = instrumentation.uiAutomation.takeScreenshot()
@@ -37,10 +31,10 @@ class CanvasTextVisualCaptureTest : InstrumentationTestCase() {
     /** The rendered text offset and selected box must share the same content-space position. */
     private fun assertDragAligned(editor: InfiniteEditor) {
         val text = editor.document.items.filterIsInstance<TextItem>().single()
-        val fallback = editor.surfaces.getChildAt(2)
+        val fallback = editor.surfaces.getChildAt(2) as CanvasTextPreviewView
         assertEquals(android.view.View.VISIBLE, fallback.visibility)
-        val dx = fallback.javaClass.getMethod("getLiftDx").invoke(fallback) as Double
-        val dy = fallback.javaClass.getMethod("getLiftDy").invoke(fallback) as Double
+        val dx = fallback.liftDx
+        val dy = fallback.liftDy
         val bounds = text.bounds()
         val box = editor.selection.box ?: throw AssertionError("Lost selection")
         assertEquals(bounds.left + dx, box.center.x - box.halfW, 0.01)

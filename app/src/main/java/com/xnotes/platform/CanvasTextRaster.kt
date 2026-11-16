@@ -16,7 +16,13 @@ import kotlin.math.sqrt
 
 /** The standard GL outline route cannot paint color glyph bitmaps (including emoji). */
 internal object CanvasTextRaster {
-    data class Result(val image: ImageItem, val bitmap: Bitmap)
+    /** Owns the bitmap and temporary PNG until handed to the GL texture cache. */
+    data class Result(val image: ImageItem, val bitmap: Bitmap) {
+        fun discard() {
+            if (!bitmap.isRecycled) bitmap.recycle()
+            image.image.file.delete()
+        }
+    }
 
     fun needsColorGlyphs(text: String): Boolean {
         var i = 0
