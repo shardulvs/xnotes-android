@@ -53,6 +53,8 @@ class LiveStrokeRibbonTest {
         holdEnds = stroke.tool == Tool.PEN || stroke.tool == Tool.HIGHLIGHTER,
         finished = finished,
         smoothScale = stroke.smoothScale,
+        speedTop = stroke.config.speedTop,
+        speedSmoothing = stroke.config.speedSmoothing,
     )
 
     private fun assertSameInk(tool: Tool, finished: Boolean) {
@@ -125,6 +127,61 @@ class LiveStrokeRibbonTest {
         settled.releaseGeometry() // banks the ribbon's box, then lets it go
         assertNull(settled.wetRibbon)
         assertEquals(live.bounds(), settled.bounds())
+    }
+
+    private fun assertSameGeometry(label: String, want: com.xnotes.core.stroke.StrokeGeometry, got: com.xnotes.core.stroke.StrokeGeometry) {
+        assertEquals("$label point count", want.pointCount, got.pointCount)
+        for (i in 0 until want.pointCount) {
+            assertEquals("$label cx[$i]", want.cx(i), got.cx(i), 0.0)
+            assertEquals("$label cy[$i]", want.cy(i), got.cy(i), 0.0)
+            assertEquals("$label hw[$i]", want.hw(i), got.hw(i), 0.0)
+        }
+    }
+
+    @Test fun aTipDrawsWhatLiftingThereCommits() {
+        for (far in listOf(0.0, 3.0e6)) {
+            val samples = path(80).map { Sample(it.x + far, it.y - far, it.pressure, it.t) }
+            val end = samples.last()
+            for (tool in listOf(Tool.PEN, Tool.DASHED, Tool.CALLIGRAPHY, Tool.SPEED, Tool.TAPER, Tool.HIGHLIGHTER)) {
+                val live = draw(tool, samples)
+                live.setTip(Sample(end.x + 9.0, end.y + 7.0, 0.95, end.t + 30.0))
+                live.setTip(Sample(end.x + 3.3000001, end.y + 1.7000003, 0.7123456, end.t + 11.3))
+                assertEquals(samples.size, live.sampleCount)
+                val shown = live.geometry()
+                val box = live.bounds()
+                live.addSample(live.tip!!)
+                assertNull(live.tip)
+                assertSameGeometry("$tool at $far", shown, live.geometry())
+                assertEquals("$tool at $far", box, live.bounds())
+            }
+        }
+    }
+
+    @Test fun aTipComesOffAndPenUpDropsIt() {
+        val plain = draw(Tool.CALLIGRAPHY, path(60)).geometry()
+        val stroke = draw(Tool.CALLIGRAPHY, path(60))
+        stroke.setTip(Sample(120.0, 40.0, 0.6, 400.0))
+        assertEquals(61, stroke.geometry().pointCount)
+        stroke.clearTip()
+        assertSameGeometry("cleared", plain, stroke.geometry())
+        stroke.setTip(Sample(120.0, 40.0, 0.6, 400.0))
+        stroke.finished = true
+        assertNull(stroke.tip)
+        assertSameGeometry("lifted", batch(stroke, finished = true), stroke.geometry())
+        stroke.setTip(Sample(130.0, 40.0, 0.6, 400.0))
+        assertNull(stroke.tip)
+    }
+
+    @Test fun aTipSurvivesTheRibbonBeingLetGo() {
+        val stroke = draw(Tool.PEN, path(50))
+        val tip = Sample(110.0, 50.0, 0.5, 400.0)
+        stroke.setTip(tip)
+        val shown = stroke.geometry()
+        stroke.releaseGeometry()
+        assertSameGeometry("rebuilt", shown, stroke.geometry())
+        stroke.setTip(tip)
+        assertNotNull(stroke.wetRibbon)
+        assertSameGeometry("on a fresh ribbon", shown, stroke.geometry())
     }
 
     @Test fun theRibbonSettlesWhileTheStrokeIsStillBeingDrawn() {

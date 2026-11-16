@@ -61,6 +61,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -566,7 +567,7 @@ internal fun NewNoteScreen(
             Spacer(Modifier.size(6.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 ModeChip(stringResource(R.string.default_choice), value == null, onDefault)
-                SwatchCircles(editor, role, value, onPick)
+                CompositionLocalProvider(LocalEyedropper provides false) { SwatchCircles(editor, role, value, onPick) }
             }
         }
 

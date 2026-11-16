@@ -17,16 +17,19 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -84,9 +87,9 @@ import kotlin.math.roundToInt
 
 /**
  * Stroke-tool configuration popup (spec 10 §3): PRESSURE / SENSITIVITY, then the
- * tool's signature control: MULTIPLIER (calligraphy), SPEED (speed pen) or
- * TIP WIDTH PERCENTAGE (taper pen), then WIDTH, and a NEON toggle (with INTENSITY) on
- * any stroke tool but the highlighter.
+ * tool's signature control: MULTIPLIER (calligraphy), THINNING / SMOOTHING / TOP SPEED (speed pen) or
+ * TIP WIDTH PERCENTAGE (taper pen), then WIDTH, a STABILIZATION toggle (with STRENGTH and
+ * CROSSOVER), and a NEON toggle (with INTENSITY) on any stroke tool but the highlighter.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -96,8 +99,10 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
     var sensitivity by remember { mutableStateOf(ToolConversions.minFactorToSensitivity(base.pressureMinFactor).toFloat()) }
     var multiplier by remember { mutableStateOf(ToolConversions.directionStrengthToMultiplier(base.directionStrength).toFloat()) }
     var speed by remember { mutableStateOf(ToolConversions.strengthToSpeed(base.speedStrength).toFloat()) }
+    var smoothing by remember { mutableStateOf(ToolConversions.blurToSmoothing(base.speedSmoothing).toFloat()) }
+    var topSpeed by remember { mutableStateOf(ToolConversions.dpPerMsToTopSpeed(base.speedTop).toFloat()) }
     var taperTip by remember { mutableStateOf((base.taperMinFactor * 100).toFloat()) }
-    var width by remember { mutableStateOf(base.baseWidth.toFloat()) }
+    var width by remember { mutableStateOf(ToolConversions.snapWidth(tool, base.baseWidth).toFloat()) }
     var glow by remember { mutableStateOf(base.neon) }
     var glowIntensity by remember { mutableStateOf(ToolConversions.neonStrengthToIntensity(base.neonStrength).toFloat()) }
     var dashLen by remember { mutableStateOf(base.dashLength.toFloat()) }
@@ -107,21 +112,28 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
     var intensity by remember { mutableStateOf(ToolConversions.highlighterAlphaToIntensity(base.highlighterAlpha).toFloat()) }
     var inverse by remember { mutableStateOf(base.highlighterInverse) }
     var colorOverride by remember { mutableStateOf(base.colorOverride) }
+    var steady by remember { mutableStateOf(base.stabilize) }
+    var steadyStrength by remember { mutableStateOf(ToolConversions.trailToStrength(base.stabilizeTrail).toFloat()) }
+    var crossover by remember { mutableStateOf(ToolConversions.dpPerSToCrossover(base.stabilizeCrossover).toFloat()) }
 
     fun emit() {
         val m = ToolConversions.sensitivityToMinFactor(sensitivity.toDouble())
         val ds = if (tool == Tool.CALLIGRAPHY) ToolConversions.multiplierToDirectionStrength(multiplier.toDouble()) else 0.0
         val sp = if (tool == Tool.SPEED) ToolConversions.speedToStrength(speed.toDouble()) else 0.0
+        val blur = if (tool == Tool.SPEED) ToolConversions.smoothingToBlur(smoothing.toDouble()) else base.speedSmoothing
+        val top = if (tool == Tool.SPEED) ToolConversions.topSpeedToDpPerMs(topSpeed.toDouble()) else base.speedTop
         val tmf = if (tool == Tool.TAPER) taperTip.toDouble() / 100.0 else base.taperMinFactor
         val ha = if (tool == Tool.HIGHLIGHTER) ToolConversions.intensityToHighlighterAlpha(intensity.toDouble()) else base.highlighterAlpha
         editor.updateToolConfig(
             tool,
             base.copy(
-                baseWidth = width.toDouble(),
+                baseWidth = ToolConversions.snapWidth(tool, width.toDouble()),
                 pressureEnabled = pressure,
                 pressureMinFactor = m,
                 directionStrength = ds,
                 speedStrength = sp,
+                speedSmoothing = blur,
+                speedTop = top,
                 taperMinFactor = tmf,
                 neon = glow,
                 neonStrength = ToolConversions.intensityToNeonStrength(glowIntensity.toDouble()),
@@ -132,6 +144,9 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
                 highlighterAlpha = ha,
                 highlighterInverse = inverse,
                 colorOverride = colorOverride,
+                stabilize = steady,
+                stabilizeTrail = ToolConversions.strengthToTrail(steadyStrength.toDouble()),
+                stabilizeCrossover = ToolConversions.crossoverToDpPerS(crossover.toDouble()),
             ),
         )
     }
@@ -168,13 +183,18 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
                 SliderRow(stringResource(R.string.caption_multiplier), multiplier, 1f..5f) { multiplier = it; emit() }
             }
             if (tool == Tool.SPEED) {
-                SliderRow(stringResource(R.string.caption_speed), speed, 0f..100f) { speed = it; emit() }
+                SliderRow(stringResource(R.string.caption_thinning), speed, 0f..100f) { speed = it; emit() }
+                SliderRow(stringResource(R.string.caption_smoothing), smoothing, 0f..100f) { smoothing = it; emit() }
+                SliderRow(stringResource(R.string.caption_top_speed), topSpeed, 0f..100f) { topSpeed = it; emit() }
             }
             if (tool == Tool.TAPER) {
                 SliderRow(stringResource(R.string.caption_tip_width), taperTip, 0f..100f) { taperTip = it; emit() }
             }
             val range = ToolConversions.widthRange(tool)
-            SliderRow(stringResource(R.string.caption_width), width, range.start.toFloat()..range.endInclusive.toFloat()) { width = it; emit() }
+            SliderRow(
+                stringResource(R.string.caption_width), width,
+                range.start.toFloat()..range.endInclusive.toFloat(), step = ToolConversions.WIDTH_STEP.toFloat(),
+            ) { width = it; emit() }
             // SCALE off: ink keeps a constant on-screen thickness whatever zoom you draw at.
             ToggleRow(stringResource(R.string.caption_scale), scale) { scale = it; emit() }
             if (tool == Tool.DASHED) {
@@ -189,6 +209,14 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
                 // INVERSE swaps the multiply blend for a screen one, so the marker lightens the
                 // page instead of darkening it. A multiply has nothing to darken on a dark page.
                 ToggleRow(stringResource(R.string.caption_inverse), inverse) { inverse = it; emit() }
+            }
+            // STABILIZATION steadies the path while drawing; a straight line has nothing to steady.
+            if (tool.isStroke && !(tool == Tool.HIGHLIGHTER && straight)) {
+                ToggleRow(stringResource(R.string.caption_stabilization), steady) { steady = it; emit() }
+                if (steady) {
+                    SliderRow(stringResource(R.string.caption_strength), steadyStrength, 0f..100f) { steadyStrength = it; emit() }
+                    SliderRow(stringResource(R.string.caption_crossover), crossover, 0f..100f) { crossover = it; emit() }
+                }
             }
             // Glow is offered on every stroke tool except the highlighter (translucent) and the
             // dashed pen (it draws a line, not a fillable ribbon, so a halo has nothing to hug).
@@ -437,13 +465,7 @@ private fun TemplateCustomizer(
     val palette = LocalPalette.current
     val dpi = editor.documentDpi
     Column(Modifier.width(286.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
-        Text(
-            stringResource(R.string.back_customize),
-            color = palette.accent.toComposeColor(),
-            fontWeight = FontWeight.Medium,
-            fontSize = 12.sp,
-            modifier = Modifier.clip(MaterialTheme.shapes.extraSmall).clickable(onClick = onBack).padding(vertical = 4.dp),
-        )
+        PopupBackLink(stringResource(R.string.back_customize), onBack)
         Text(
             t.name,
             color = palette.text.toComposeColor(),
@@ -669,7 +691,8 @@ internal fun StyleCaption(text: String) {
  * (resolved) view settings; a change writes that field's per-note override — stored
  * app-side like zoom/scroll, never in the file itself. Like [StylesPopup], the current
  * values can be saved as the global defaults every note without overrides follows
- * ("Default for all notes"), and Reset drops the note's overrides back onto them.
+ * ("Default for all notes"), and Reset drops the note's overrides back onto them. The PDF colour
+ * filters only show their values here; Adjust opens them on a page of their own.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -681,6 +704,7 @@ fun ViewMenuPopup(editor: Editor, onDismiss: () -> Unit) {
     var showDefaultRow by remember { mutableStateOf(editor.viewSettings != editor.viewDefaults) }
     // Unchecking "Default for all notes" goes back to the defaults this popup opened with.
     val openedDefaults = remember { editor.viewDefaults }
+    var filtering by remember { mutableStateOf(false) }
 
     fun apply(new: ViewOverrides) {
         editor.updateViewOverrides(new)
@@ -700,7 +724,18 @@ fun ViewMenuPopup(editor: Editor, onDismiss: () -> Unit) {
     fun setScrollbar(v: Boolean) = apply(overrides.copy(scrollbar = v))
 
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
-        Column(Modifier.width(300.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
+        if (filtering) Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
+            PopupBackLink("\u2039  " + stringResource(R.string.caption_pdf_filters)) { filtering = false }
+            Spacer(Modifier.size(8.dp))
+            FilterSlider(stringResource(R.string.filter_contrast), vs.contrast, 200, ::setContrast)
+            FilterSlider(stringResource(R.string.filter_invert), vs.invert, 100, ::setInvert)
+            FilterSlider(stringResource(R.string.filter_brightness), vs.brightness, 200, ::setBrightness)
+            FilterSlider(stringResource(R.string.filter_sepia), vs.sepia, 200, ::setSepia)
+            Spacer(Modifier.size(4.dp))
+            FilterColorRow(stringResource(R.string.filter_multiply), vs.multiply, PdfColorFilter.MULTIPLY_OFF) { setMultiply(it) }
+            FilterColorRow(stringResource(R.string.filter_screen), vs.screen, PdfColorFilter.SCREEN_OFF) { setScreen(it) }
+            ToggleRow(stringResource(R.string.caption_keep_images), vs.keepImages) { setKeepImages(it) }
+        } else Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
             PopupTitle(stringResource(R.string.title_view))
             StyleCaption(stringResource(R.string.caption_viewing_mode))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -716,14 +751,18 @@ fun ViewMenuPopup(editor: Editor, onDismiss: () -> Unit) {
             }
 
             Spacer(Modifier.size(10.dp))
-            StyleCaption(stringResource(R.string.caption_pdf_filters))
-            FilterSpinRow(stringResource(R.string.filter_contrast), vs.contrast, 0, 200) { setContrast(it) }
-            FilterSpinRow(stringResource(R.string.filter_invert), vs.invert, 0, 100) { setInvert(it) }
-            FilterSpinRow(stringResource(R.string.filter_brightness), vs.brightness, 0, 200) { setBrightness(it) }
-            FilterSpinRow(stringResource(R.string.filter_sepia), vs.sepia, 0, 200) { setSepia(it) }
-            FilterColorRow(stringResource(R.string.filter_multiply), vs.multiply, PdfColorFilter.MULTIPLY_OFF) { setMultiply(it) }
-            FilterColorRow(stringResource(R.string.filter_screen), vs.screen, PdfColorFilter.SCREEN_OFF) { setScreen(it) }
-            ToggleRow(stringResource(R.string.caption_keep_images), vs.keepImages) { setKeepImages(it) }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { StyleCaption(stringResource(R.string.caption_pdf_filters)) }
+                ModeChip(stringResource(R.string.adjust), false) { filtering = true }
+            }
+            Spacer(Modifier.size(4.dp))
+            val off = stringResource(R.string.off)
+            FilterValueRow(stringResource(R.string.filter_contrast), "${vs.contrast}%")
+            FilterValueRow(stringResource(R.string.filter_invert), "${vs.invert}%")
+            FilterValueRow(stringResource(R.string.filter_brightness), "${vs.brightness}%")
+            FilterValueRow(stringResource(R.string.filter_sepia), "${vs.sepia}%")
+            FilterValueRow(stringResource(R.string.filter_multiply), off, vs.multiply.takeIf { it != PdfColorFilter.MULTIPLY_OFF })
+            FilterValueRow(stringResource(R.string.filter_screen), off, vs.screen.takeIf { it != PdfColorFilter.SCREEN_OFF })
 
             Spacer(Modifier.size(10.dp))
             StyleCaption(stringResource(R.string.caption_rotate_degrees, vs.rotation))
@@ -761,26 +800,33 @@ fun ViewMenuPopup(editor: Editor, onDismiss: () -> Unit) {
     }
 }
 
-/** A labelled percentage spinfield (minus / value / plus, stepping by 5) for the PDF filters. */
+/** A PDF filter's value as the View menu shows it: [text], or a dot of [color] when it has one. */
 @Composable
-private fun FilterSpinRow(label: String, value: Int, min: Int, max: Int, onChange: (Int) -> Unit) {
+private fun FilterValueRow(label: String, text: String, color: Rgba? = null) {
     val palette = LocalPalette.current
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = palette.textDim.toComposeColor(), fontSize = 13.sp, modifier = Modifier.width(84.dp))
-        Box(Modifier.size(34.dp).clickable { onChange((value - 5).coerceIn(min, max)) }, contentAlignment = Alignment.Center) {
-            Text("−", color = palette.text.toComposeColor(), fontSize = 18.sp)
-        }
-        Text(
-            "$value%",
-            color = palette.text.toComposeColor(),
-            fontSize = 13.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.width(46.dp),
-        )
-        Box(Modifier.size(34.dp).clickable { onChange((value + 5).coerceIn(min, max)) }, contentAlignment = Alignment.Center) {
-            Text("+", color = palette.text.toComposeColor(), fontSize = 18.sp)
+        Box(Modifier.width(44.dp), contentAlignment = Alignment.CenterEnd) {
+            if (color != null) {
+                Box(
+                    Modifier.size(14.dp).clip(CircleShape).background(color.toComposeColor())
+                        .border(1.dp, palette.border.toComposeColor(), CircleShape),
+                )
+            } else {
+                Text(text, color = palette.text.toComposeColor(), fontSize = 13.sp)
+            }
         }
     }
+}
+
+/** A PDF filter's percentage slider. It applies on release, since every change re-renders the PDF. */
+@Composable
+private fun FilterSlider(label: String, value: Int, max: Int, onSet: (Int) -> Unit) {
+    var held by remember { mutableStateOf<Int?>(null) }
+    SliderRow(
+        label, (held ?: value).toFloat(), 0f..max.toFloat(), step = 1f, suffix = "%",
+        onChangeFinished = { held?.let(onSet); held = null },
+    ) { held = it.roundToInt() }
 }
 
 /**
@@ -989,13 +1035,16 @@ fun TapeConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
     val base = remember { editor.toolConfig(Tool.TAPE) }
     var mode by remember { mutableStateOf(base.tapeMode) }
     var pattern by remember { mutableStateOf(base.tapePattern) }
-    var width by remember { mutableStateOf(base.baseWidth.toFloat()) }
+    var width by remember { mutableStateOf(ToolConversions.snapWidth(Tool.TAPE, base.baseWidth).toFloat()) }
     var scale by remember { mutableStateOf(base.scale) }
     var colorOverride by remember { mutableStateOf(base.colorOverride) }
 
     fun emit() = editor.updateToolConfig(
         Tool.TAPE,
-        base.copy(tapeMode = mode, tapePattern = pattern, baseWidth = width.toDouble(), scale = scale, colorOverride = colorOverride),
+        base.copy(
+            tapeMode = mode, tapePattern = pattern, baseWidth = ToolConversions.snapWidth(Tool.TAPE, width.toDouble()),
+            scale = scale, colorOverride = colorOverride,
+        ),
     )
 
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
@@ -1031,7 +1080,10 @@ fun TapeConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
             if (mode != TapeMode.RECTANGLE) {
                 Spacer(Modifier.size(4.dp))
                 val range = ToolConversions.widthRange(Tool.TAPE)
-                SliderRow(stringResource(R.string.caption_width), width, range.start.toFloat()..range.endInclusive.toFloat()) { width = it; emit() }
+                SliderRow(
+                    stringResource(R.string.caption_width), width,
+                    range.start.toFloat()..range.endInclusive.toFloat(), step = ToolConversions.WIDTH_STEP.toFloat(),
+                ) { width = it; emit() }
                 ToggleRow(stringResource(R.string.caption_scale), scale) { scale = it; emit() }
             }
             Spacer(Modifier.size(8.dp))
@@ -1103,6 +1155,18 @@ internal fun PopupTitle(text: String) {
     )
 }
 
+/** The link at the top of a popup's nested page that leads back out of it. */
+@Composable
+private fun PopupBackLink(text: String, onBack: () -> Unit) {
+    Text(
+        text,
+        color = LocalPalette.current.accent.toComposeColor(),
+        fontWeight = FontWeight.Medium,
+        fontSize = 12.sp,
+        modifier = Modifier.clip(MaterialTheme.shapes.extraSmall).clickable(onClick = onBack).padding(vertical = 4.dp),
+    )
+}
+
 @Composable
 internal fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.width(220.dp)) {
@@ -1116,24 +1180,50 @@ internal fun SliderRow(
     label: String,
     value: Float,
     range: ClosedFloatingPointRange<Float>,
+    step: Float = 0f,
+    suffix: String = "",
     enabled: Boolean = true,
     onChangeFinished: (() -> Unit)? = null,
     onChange: (Float) -> Unit,
 ) {
+    // A stepped row lands on its stops, so its label is the value given, not a rounding of it.
+    val shown = if (step > 0f) snapTo(value, range, step) else value
+    val number = if (step % 1f != 0f) "%.1f".format(shown).trimEnd('0').trimEnd('.', ',') else "%.0f".format(shown)
     Column {
         Text(
-            "$label  ${"%.0f".format(value)}",
+            "$label  $number$suffix",
             color = (if (enabled) LocalPalette.current.text else LocalPalette.current.textDim).toComposeColor(),
             fontSize = 12.sp,
         )
         Slider(
-            value = value,
-            onValueChange = onChange,
+            value = shown,
+            onValueChange = { if (step > 0f) onChange(snapTo(it, range, step)) else onChange(it) },
             onValueChangeFinished = onChangeFinished,
             valueRange = range,
+            steps = if (step > 0f) {
+                (((range.endInclusive - range.start) / step).roundToInt() - 1).coerceAtLeast(0)
+            } else {
+                0
+            },
             enabled = enabled,
+            // Stops this fine would draw as a speckled track; the label already names each one.
+            colors = if (step > 0f) NoTicks else SliderDefaults.colors(),
         )
     }
+}
+
+private val NoTicks
+    @Composable get() = SliderDefaults.colors(
+        activeTickColor = Color.Transparent,
+        inactiveTickColor = Color.Transparent,
+        disabledActiveTickColor = Color.Transparent,
+        disabledInactiveTickColor = Color.Transparent,
+    )
+
+/** [value] moved to the nearest [step] from the start of [range], held at its ends. */
+private fun snapTo(value: Float, range: ClosedFloatingPointRange<Float>, step: Float): Float {
+    return (range.start + ((value - range.start) / step).roundToInt() * step)
+        .coerceIn(range.start, range.endInclusive)
 }
 
 
@@ -1174,8 +1264,11 @@ internal fun DropdownMenu(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val palette = LocalPalette.current
+    val opened = remember(expanded) { Eyedropper.ended }
+    val ended = expanded && Eyedropper.ended != opened
+    LaunchedEffect(ended) { if (ended) onDismissRequest() }
     androidx.compose.material3.DropdownMenu(
-        expanded = expanded,
+        expanded = expanded && Eyedropper.target == null && !ended,
         onDismissRequest = onDismissRequest,
         modifier = modifier,
         offset = LocalMenuOffset.current,
@@ -1205,6 +1298,7 @@ internal fun AlertDialog(
     shape: Shape = MaterialTheme.shapes.large,
     containerColor: Color = LocalPalette.current.menuBg.toComposeColor(),
 ) {
+    if (Eyedropper.target != null) return
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismissRequest,
         confirmButton = confirmButton,

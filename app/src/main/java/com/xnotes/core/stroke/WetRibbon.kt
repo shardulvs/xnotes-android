@@ -25,9 +25,12 @@ import kotlin.math.min
  *  - its **tangent**, a central difference, so the last point is always provisional;
  *  - the **end-pressure hold** ([StrokeEngine.heldPressureAt]), whose window sits over the last
  *    [StrokeEngine.CAP_HOLD_SAMPLES] points and moves with them;
- *  - the **speed** pen's centred window, which reads [StrokeEngine.SPEED_WINDOW_MS] ahead in time;
+ *  - the **speed** pen's centred window, [StrokeEngine.SPEED_WINDOW_MS] of moving time ahead, and
+ *    its blur, [StrokeEngine.SPEED_BLUR_REACH] sigmas of path ahead;
  *  - the **calligraphy** head, which pins every point flat until the stroke first fills
- *    [StrokeEngine.HEAD_LEN] and then rewrites them once.
+ *    [StrokeEngine.HEAD_LEN] and then rewrites them once;
+ *  - the **calligraphy** reversal, which can only be ruled in or out once the stroke has run
+ *    [StrokeEngine.reversalWait] past the turn.
  *
  * The taper pen settles nothing: its profile is a fraction of the *total* arc, so every point it
  * has ever drawn moves each time the stroke gets longer. [supports] turns it down.
@@ -36,6 +39,9 @@ import kotlin.math.min
  * `finished = false`, point for point, which the tests hold it to. Lift-time rules (the calligraphy
  * dot and its tail cap) are not modelled here at all: they only fire once the pen is up, and the
  * stroke rebuilds through [StrokeEngine.build] then.
+ *
+ * A steadied stroke's samples trail the nib, and [setTip] draws the rest of the way as one more
+ * point taken back off before the next sample, which settles nothing and leaves no trace.
  */
 class WetRibbon(
     private val baseWidth: Double,
@@ -47,6 +53,8 @@ class WetRibbon(
     private val smooth: Boolean,
     private val holdEnds: Boolean,
     private val smoothScale: Double,
+    private val speedTop: Double = StrokeEngine.SPEED_HI,
+    speedSmoothing: Double = StrokeEngine.DEFAULT_SPEED_SMOOTHING,
 ) : RibbonPoints {
     /** Samples taken so far; one ribbon point each. */
     override var pointCount = 0
@@ -68,9 +76,21 @@ class WetRibbon(
     private var tx = EMPTY_D
     private var ty = EMPTY_D
 
-    /** Elapsed ms and cumulative *raw* travel: only the speed pen's window reads them. */
+    /** Elapsed ms, cumulative *raw* travel and cumulative moving time: the speed pen's window reads them. */
     private var times = EMPTY_D
     private var rawCum = EMPTY_D
+    private var tau = EMPTY_D
+
+    /** The raw samples, which the calligraphy nib judges a reversal by, along with [rawCum]. */
+    private var rawX = EMPTY_D
+    private var rawY = EMPTY_D
+
+    /** Smoothed travel up to each sample, and each sample's speed factor before the blur. */
+    private var pathArc = EMPTY_D
+    private var fSpeed = EMPTY_D
+
+    /** Speed factors below this index are final: their windows no longer reach the newest sample. */
+    private var fFinal = 0
 
     /** The nib's slew-limited direction, final up to [nibDone]; calligraphy only. */
     private var nib = EMPTY_D
@@ -93,8 +113,10 @@ class WetRibbon(
 
     private val smoothLen = StrokeEngine.SMOOTH_LEN * max(smoothScale, 0.0)
     private val headLen = StrokeEngine.headLen(smoothScale)
-    private val openLen = StrokeEngine.openLen(smoothScale)
-    private val closeLen = StrokeEngine.closeLen(smoothScale)
+    private val openLen = StrokeEngine.openLen(smoothScale, baseWidth)
+    private val closeLen = StrokeEngine.closeLen(smoothScale, baseWidth)
+    private val reversalWait = StrokeEngine.reversalWait(smoothScale, baseWidth)
+    private val turnScratch = DoubleArray(StrokeEngine.REVERSAL_SCRATCH)
 
     /** Tangents are final below this; the last one is always a backward difference and provisional. */
     private var tanDone = 0
@@ -107,9 +129,14 @@ class WetRibbon(
     private var nibValue = 0.0
     private var nibDone = 0
 
-    /** The speed window's two sample cursors as they stand entering point [settledCount]. */
+    /** The speed window's two sample cursors as they stand entering [fFinal], and the blur's entering [settledCount]. */
     private val speedCursor = IntArray(2)
     private val speedScratch = IntArray(2)
+    private val blurCursor = IntArray(1)
+    private val blurScratch = IntArray(1)
+
+    private val floor = StrokeEngine.floorSpeed(speedTop, speedScale)
+    private val sigma = speedSmoothing * baseWidth
 
     /** Disc box of the settled points; [bounds] unions the live tail into it. */
     private var minX = Double.POSITIVE_INFINITY
@@ -120,17 +147,8 @@ class WetRibbon(
     @Volatile
     private var snapshot: StrokeGeometry? = null
 
-    /** Whether this pen records timing at all; the channel is allocated for it, used once it fills. */
+    /** Whether this pen reads its speed; a stroke with no timing yet reads as still, and draws at full width. */
     private val timed = speedStrength > 0.0
-
-    /** Set by the first sample carrying a real elapsed time, mirroring how [com.xnotes.core.model.Stroke]
-     *  only allocates its time channel once one arrives. Without it the engine reads no speed. */
-    private var anyTime = false
-
-    /** Whether the speed pen's width factor applies yet: the same three gates [StrokeEngine.speedFactors]
-     *  falls out of, so a stroke too young or too brief to time draws at plain pressure width. */
-    private fun speedActive(n: Int): Boolean =
-        timed && anyTime && n >= 2 && times[n - 1] - times[0] > 0.0
 
     // --- reading the ribbon ---
 
@@ -196,9 +214,125 @@ class WetRibbon(
 
     /** Take one more sample: extend every causal channel by a step, then redraw the live tail. */
     fun append(x: Double, y: Double, pressure: Double, t: Double) {
+        dropTip()
+        grow(x, y, pressure, t)
+    }
+
+    // --- the tip ---
+
+    /** Whether the last point is a [setTip] rather than a sample. */
+    private var tipped = false
+
+    /** The carried state as it stood before the tip went on, put back when it comes off. */
+    private val kept = Kept()
+
+    private class Kept {
+        var count = 0
+        var settled = 0
+        var lastX = 0.0
+        var lastY = 0.0
+        var lastP = 0.0
+        var arc = 0.0
+        var tanDone = 0
+        var carryTx = 0.0
+        var carryTy = 0.0
+        var headK = 0
+        var headDir = 0.0
+        var nibValue = 0.0
+        var nibDone = 0
+        var fFinal = 0
+        var speed0 = 0
+        var speed1 = 0
+        var blur = 0
+        var minX = 0.0
+        var minY = 0.0
+        var maxX = 0.0
+        var maxY = 0.0
+    }
+
+    /**
+     * Draw one more point at ([x], [y]) exactly as the next sample would, without taking it. It only
+     * writes past the samples or into the tail, so it comes off by putting the carried state back.
+     */
+    fun setTip(x: Double, y: Double, pressure: Double, t: Double) {
+        if (pointCount == 0) return
+        dropTip()
+        keep()
+        grow(x, y, pressure, t)
+        tipped = true
+        settledCount = kept.settled
+        minX = kept.minX
+        minY = kept.minY
+        maxX = kept.maxX
+        maxY = kept.maxY
+    }
+
+    /** Take the tip off and redraw the tail as the samples alone leave it. */
+    fun clearTip() {
+        if (!tipped) return
+        dropTip()
+        extendTangents()
+        extendNib()
+        rebuildTail()
+    }
+
+    /** Put the carried state back as it was before the tip; the next pass over the tail redraws it. */
+    private fun dropTip() {
+        if (!tipped) return
+        tipped = false
+        val k = kept
+        pointCount = k.count
+        settledCount = k.settled
+        lastRawX = k.lastX
+        lastRawY = k.lastY
+        lastRawP = k.lastP
+        arc = k.arc
+        tanDone = k.tanDone
+        carryTx = k.carryTx
+        carryTy = k.carryTy
+        headK = k.headK
+        headDir = k.headDir
+        nibValue = k.nibValue
+        nibDone = k.nibDone
+        fFinal = k.fFinal
+        speedCursor[0] = k.speed0
+        speedCursor[1] = k.speed1
+        blurCursor[0] = k.blur
+        minX = k.minX
+        minY = k.minY
+        maxX = k.maxX
+        maxY = k.maxY
+        snapshot = null
+    }
+
+    private fun keep() {
+        val k = kept
+        k.count = pointCount
+        k.settled = settledCount
+        k.lastX = lastRawX
+        k.lastY = lastRawY
+        k.lastP = lastRawP
+        k.arc = arc
+        k.tanDone = tanDone
+        k.carryTx = carryTx
+        k.carryTy = carryTy
+        k.headK = headK
+        k.headDir = headDir
+        k.nibValue = nibValue
+        k.nibDone = nibDone
+        k.fFinal = fFinal
+        k.speed0 = speedCursor[0]
+        k.speed1 = speedCursor[1]
+        k.blur = blurCursor[0]
+        k.minX = minX
+        k.minY = minY
+        k.maxX = maxX
+        k.maxY = maxY
+    }
+
+    private fun grow(x: Double, y: Double, pressure: Double, t: Double) {
         val i = pointCount
         ensure(i + 1)
-        if (t != 0.0) anyTime = true
         val step = if (i == 0) 0.0 else hypot(x - lastRawX, y - lastRawY)
         if (i == 0) {
             sx[0] = x
@@ -206,17 +340,33 @@ class WetRibbon(
             sp[0] = pressure
             if (timed) {
                 times[0] = t
+                tau[0] = 0.0
+            }
+            if (timed || ds > 0.0) {
                 rawCum[0] = 0.0
+                pathArc[0] = 0.0
+            }
+            if (ds > 0.0) {
+                rawX[0] = x
+                rawY[0] = y
             }
         } else {
             sx[i] = if (smooth) StrokeEngine.emaStep(sx[i - 1], lastRawX, x, step, smoothLen) else x
             sy[i] = if (smooth) StrokeEngine.emaStep(sy[i - 1], lastRawY, y, step, smoothLen) else y
             sp[i] = StrokeEngine.emaStep(sp[i - 1], lastRawP, pressure, step, smoothLen)
+            arc += hypot(sx[i] - sx[i - 1], sy[i] - sy[i - 1])
             if (timed) {
                 times[i] = t
-                rawCum[i] = rawCum[i - 1] + step
+                tau[i] = tau[i - 1] + StrokeEngine.movingStep(t - times[i - 1], step, floor)
             }
-            arc += hypot(sx[i] - sx[i - 1], sy[i] - sy[i - 1])
+            if (timed || ds > 0.0) {
+                rawCum[i] = rawCum[i - 1] + step
+                pathArc[i] = arc
+            }
+            if (ds > 0.0) {
+                rawX[i] = x
+                rawY[i] = y
+            }
         }
         lastRawX = x
         lastRawY = y
@@ -283,14 +433,21 @@ class WetRibbon(
         nibDone = k + 1
     }
 
-    /** Carry the nib's slew limiter forward over every point whose tangent has stopped moving. */
+    /** Re-run the nib from its last final value: the rate, and any reversal the newest samples confirm or rule out. */
     private fun extendNib() {
         if (ds <= 0.0 || headK < 0) return
-        for (i in nibDone until pointCount - 1) {
-            nibValue = StrokeEngine.nibStep(nibValue, ty[i], stepAlong(i), openLen, closeLen)
-            nib[i] = nibValue
-            nibDone = i + 1
+        val n = pointCount
+        // A point's nib is final once no reversal at or before it can still be confirmed or ruled out.
+        var f = nibDone
+        while (f + 1 < n && rawCum[n - 1] > rawCum[f + 1] + reversalWait) f++
+        var d = nibValue
+        for (i in nibDone until n) {
+            if (i == f) nibValue = d
+            d = StrokeEngine.nibStep(d, ty[i], stepAlong(i), openLen, closeLen)
+            d = StrokeEngine.backfill(d, rawX, rawY, rawCum, n, i, reversalWait, turnScratch)
+            nib[i] = d
         }
+        nibDone = f
     }
 
     /** Travel along the smoothed centreline into point [i]; what the nib measures its rate against. */
@@ -305,39 +462,23 @@ class WetRibbon(
     private fun rebuildTail() {
         val n = pointCount
         val from = settledCount
+        if (timed) refreshSpeed(n)
         val target = settleTarget()
 
-        // The last point's nib value rides on a tangent that is still moving, so it is computed
-        // fresh here rather than committed to [nib].
-        val liveNib = if (ds <= 0.0 || headK < 0) {
-            -1.0
-        } else if (n - 1 < nibDone) {
-            nib[n - 1]
-        } else {
-            StrokeEngine.nibStep(nibValue, ty[n - 1], stepAlong(n - 1), openLen, closeLen)
-        }
-
-        val speed = speedActive(n)
         val held = holdEnds && pressureEnabled
-        speedScratch[0] = speedCursor[0]
-        speedScratch[1] = speedCursor[1]
+        blurScratch[0] = blurCursor[0]
         for (i in from until n) {
-            if (i == target) {
-                speedCursor[0] = speedScratch[0]
-                speedCursor[1] = speedScratch[1]
-            }
+            if (i == target) blurCursor[0] = blurScratch[0]
             // A lone sample is a dot: no tangent, no nib, and the pure-pressure half-width.
             val dir = when {
                 n == 1 -> 0.0
                 ds <= 0.0 -> ty[i]
                 headK < 0 -> -1.0
-                else -> (if (i < nibDone) nib[i] else liveNib).coerceIn(-1.0, StrokeEngine.DOT_DIR_Y)
+                else -> nib[i].coerceIn(-1.0, StrokeEngine.DOT_DIR_Y)
             }
             val pressure = if (held) StrokeEngine.heldPressureAt(sp, n, i) else sp[i]
             var h = StrokeEngine.halfWidth(baseWidth, pressureEnabled, m, ds, pressure, dir)
-            if (speed) {
-                h *= StrokeEngine.speedFactorAt(times, rawCum, n, i, speedScratch, speedStrength, speedScale)
-            }
+            if (timed) h *= StrokeEngine.blurAt(fSpeed, pathArc, n, i, sigma, blurScratch)
             if (n == 1) {
                 halfWidths[0] = h.toFloat()
                 centerline[0] = sx[0].toFloat()
@@ -360,6 +501,26 @@ class WetRibbon(
         settledCount = target
     }
 
+    /** Recompute the speed factors whose windows still reach the newest sample, and move [fFinal] past the rest. */
+    private fun refreshSpeed(n: Int) {
+        val tauN = tau[n - 1]
+        var jf = fFinal
+        if (tauN > 2.0 * StrokeEngine.SPEED_WINDOW_MS) {
+            while (jf < n - 1 && tau[jf] < tauN - StrokeEngine.SPEED_WINDOW_MS) jf++
+        }
+        speedScratch[0] = speedCursor[0]
+        speedScratch[1] = speedCursor[1]
+        for (j in fFinal until n) {
+            if (j == jf) {
+                speedCursor[0] = speedScratch[0]
+                speedCursor[1] = speedScratch[1]
+            }
+            val v = StrokeEngine.windowSpeed(tau, rawCum, n, j, speedScratch)
+            fSpeed[j] = StrokeEngine.speedFactor(v, speedStrength, speedTop, speedScale)
+        }
+        fFinal = jf
+    }
+
     /**
      * How many leading points can no longer change, as the tightest of the pen's lookaheads. Each
      * rule is stated as the first index it still has a claim on; the settled mark is the smallest.
@@ -377,20 +538,20 @@ class WetRibbon(
         }
         // Calligraphy pins every point to the head until the head exists, then rewrites them once.
         if (ds > 0.0 && headK < 0) return 0
-        if (speedActive(n)) {
-            val t0 = times[0]
-            val tN = times[n - 1]
-            // Strictly past the window on both sides: a sample landing on its edge would still be
-            // inside it, and would move the arc the window averages over. The left clamp slides the
-            // window right for early points, which is why the head waits out a whole span.
-            if (tN <= t0 + 2.0 * StrokeEngine.SPEED_WINDOW_MS) return 0
+        if (ds > 0.0) s = min(s, nibDone)
+        if (timed) {
+            // The head's window is clamped to the stroke's first span, so nothing is final until that span is past.
+            if (tau[n - 1] <= 2.0 * StrokeEngine.SPEED_WINDOW_MS) return 0
+            // A point is final once its blur reaches no speed factor that can still change.
             var k = settledCount
-            while (k < n && times[k] + StrokeEngine.SPEED_WINDOW_MS < tN) k++
+            if (sigma > 0.0) {
+                val edge = pathArc[fFinal]
+                val reach = StrokeEngine.SPEED_BLUR_REACH * sigma
+                while (k < n && pathArc[k] + reach < edge) k++
+            } else {
+                k = max(k, fFinal)
+            }
             s = min(s, k)
-        } else if (timed) {
-            // The channel exists but carries nothing usable yet; one timed sample would put every
-            // width back in play, so nothing settles until it does.
-            return 0
         }
         return max(s, 0)
     }
@@ -406,7 +567,16 @@ class WetRibbon(
         ty = ty.copyOf(c)
         if (timed) {
             times = times.copyOf(c)
+            tau = tau.copyOf(c)
+            fSpeed = fSpeed.copyOf(c)
+        }
+        if (timed || ds > 0.0) {
             rawCum = rawCum.copyOf(c)
+            pathArc = pathArc.copyOf(c)
+        }
+        if (ds > 0.0) {
+            rawX = rawX.copyOf(c)
+            rawY = rawY.copyOf(c)
         }
         if (ds > 0.0) nib = nib.copyOf(c)
         centerline = centerline.copyOf(2 * c)
