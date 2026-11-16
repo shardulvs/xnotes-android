@@ -190,8 +190,8 @@ private fun ToolbarItemView(
         ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP -> Unit
 
         ToolbarItem.UNIFIED_PEN -> UnifiedPenLauncher(
-            host = editor, armedTool = editor.tool, ink = editor.controller.inkColor.toComposeColor(),
-            onChooseTool = { editor.selectTool(it) }, onSelectColor = { editor.pickColor(it) },
+            host = editor, armedTool = editor.tool,
+            onChooseTool = { editor.selectTool(it) },
         )
         ToolbarItem.HOME -> ToolbarIcon(XnotesIcons.prev, stringResource(R.string.toolbar_home)) { onOpenBackstage() }
         // A name has no room down a side rail.

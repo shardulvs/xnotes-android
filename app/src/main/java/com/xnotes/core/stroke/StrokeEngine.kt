@@ -67,35 +67,53 @@ object StrokeEngine {
      *  quarter the size. */
     fun headLen(smoothScale: Double): Double = HEAD_LEN * max(smoothScale, 0.0)
 
-    /** [OPEN_LEN] at the stroke's draw zoom; see [headLen]. */
-    fun openLen(smoothScale: Double): Double = OPEN_LEN * max(smoothScale, 0.0)
+    /** Calligraphy pen: the nib width up to which [OPEN_LEN] and [CLOSE_LEN] hold; a wider nib takes proportionally longer. */
+    const val NIB_RATE_WIDTH = 6.0
 
-    /** [CLOSE_LEN] at the stroke's draw zoom; see [headLen]. */
-    fun closeLen(smoothScale: Double): Double = CLOSE_LEN * max(smoothScale, 0.0)
+    /** [OPEN_LEN] at the stroke's draw zoom (see [headLen]), stretched for a nib wider than [NIB_RATE_WIDTH]. */
+    fun openLen(smoothScale: Double, baseWidth: Double): Double =
+        max(OPEN_LEN * max(smoothScale, 0.0), OPEN_LEN / NIB_RATE_WIDTH * baseWidth)
+
+    /** [CLOSE_LEN] at the stroke's draw zoom (see [headLen]), stretched for a nib wider than [NIB_RATE_WIDTH]. */
+    fun closeLen(smoothScale: Double, baseWidth: Double): Double =
+        max(CLOSE_LEN * max(smoothScale, 0.0), CLOSE_LEN / NIB_RATE_WIDTH * baseWidth)
+
+    /** Calligraphy pen: a thin stroke turning back sharper than this many degrees starts thick at the turn, in part. */
+    const val REVERSAL_FROM_DEG = 120.0
+
+    /** Calligraphy pen: a thin stroke turning back at least this sharply starts at full width right at the turn. */
+    const val REVERSAL_FULL_DEG = 160.0
+
+    /** Calligraphy pen: how long a reversed stroke must hold before it starts thick at the turn, in pen widths. */
+    const val REVERSAL_WAIT = 0.5
+
+    /** Calligraphy pen: the shortest reversal wait, in px of hand travel at 100% zoom. */
+    const val REVERSAL_MIN_WAIT = 3.0
+
+    private val REVERSAL_FROM_COS = kotlin.math.cos(Math.toRadians(REVERSAL_FROM_DEG))
+
+    /** The reversal wait at the stroke's draw zoom (see [headLen]), never under [REVERSAL_MIN_WAIT] of hand travel. */
+    fun reversalWait(smoothScale: Double, baseWidth: Double): Double =
+        max(REVERSAL_MIN_WAIT * max(smoothScale, 0.0), REVERSAL_WAIT * baseWidth)
 
     /** Calligraphy pen: the direction-y a dot is built at. Past the broad face's 1.0 on purpose,
      *  so a dot lands slightly bigger than the thickest line and reads as a deliberate mark. */
     const val DOT_DIR_Y = 1.5
 
-    /** Speed pen: dp/ms at/below which the line stays full width, and the speed
-     *  at/above which it reaches its thinnest (0 and ≈3.75 in/s of hand travel).
-     *  Measuring in dp — not page pixels — makes the effect independent of both zoom
-     *  and screen density; see [speedFactors] and the per-stroke speed scale. */
-    const val SPEED_LO = 0.0
+    /** Speed pen: the default top speed in dp/ms, where the line is thinnest (about 10 cm/s of hand travel). */
     const val SPEED_HI = 0.6
 
-    /** Speed pen: half the duration (ms) of the centred window the nib's speed is measured over.
-     *  Speed is the arc length covered across `±this` ms divided by that span. A fixed *time*
-     *  base (not a fixed sample count, which collapses to a point where the pen crawls and the
-     *  distance-gated samples bunch up) keeps the estimate steady and lets the faster ink on
-     *  either side of a brief corner pause dilute it, instead of the width ballooning into a
-     *  blob there. The window slides inward at the stroke's ends so its first and last points
-     *  still average a full span rather than the at-rest tip. */
-    const val SPEED_WINDOW_MS = 40.0
+    /** Speed pen: half the moving time (ms) the nib's speed is measured over around each sample. */
+    const val SPEED_WINDOW_MS = 25.0
 
-    /** Speed pen: minimum per-segment dt (ms) so a duplicate-timestamp pair can't
-     *  divide by ~zero and spike the speed. */
-    const val MIN_DT = 1.0
+    /** Speed pen: a step crossed slower than this fraction of the top speed counts as the pen holding still. */
+    const val SPEED_FLOOR = 0.1
+
+    /** Speed pen: the default blur of the width along the path, in pen widths (the bell's sigma). */
+    const val DEFAULT_SPEED_SMOOTHING = 0.25
+
+    /** Speed pen: how many sigmas the blur's bell reaches either side of a point before it reaches zero. */
+    const val SPEED_BLUR_REACH = 3.0
 
     /** Taper pen: strokes shorter than this arc are left un-tapered, so a quick tick doesn't
      *  collapse to nothing. Quoted at 100% zoom and scaled by the stroke's draw zoom, since what
@@ -231,91 +249,119 @@ object StrokeEngine {
         return t * t * (3 - 2 * t)
     }
 
-    /**
-     * Per-point width multipliers in `[1 − speedStrength, 1]` for the **speed pen**:
-     * the faster the nib travels across the page, the thinner the line (ink has less
-     * time to lay down). Speed at point `i` is the **arc length of the raw samples over a
-     * centred time window** of `±[SPEED_WINDOW_MS]` ms divided by that span, in dp/ms, where
-     * [speedScale] (zoom ÷ density, captured at pen-down) converts page pixels to dp so the
-     * effect is zoom- and device-independent. It reads the raw sample motion, not the smoothed
-     * centerline, so the position low-pass can't compress the start or cut a corner short and
-     * read a false slow-down there. Summing distance and time over a fixed *time* span (not a
-     * fixed sample count) rejects per-sample jitter and keeps slow corners and ends from
-     * collapsing the window onto themselves and ballooning the width. Returns all-`1.0` when off
-     * or the samples carry no usable timing. [steps] is [build]'s raw per-sample travel.
-     */
-    fun speedFactors(
-        samples: List<Sample>,
-        steps: DoubleArray,
+    /** The speed pen's width factor per sample, exactly as [build] applies it; a stroke keeps these once the pen lifts. */
+    fun speedWidths(
+        rawX: DoubleArray,
+        rawY: DoubleArray,
+        rawT: DoubleArray?,
+        baseWidth: Double,
         speedStrength: Double,
+        speedTop: Double,
+        speedSmoothing: Double,
         speedScale: Double,
-    ): DoubleArray = speedFactors(
-        DoubleArray(samples.size) { samples[it].t }, steps, speedStrength, speedScale,
-    )
+        smooth: Boolean,
+        smoothScale: Double,
+    ): DoubleArray {
+        val n = rawX.size
+        val steps = DoubleArray(n)
+        for (i in 1 until n) steps[i] = hypot(rawX[i] - rawX[i - 1], rawY[i] - rawY[i - 1])
+        val smoothLen = SMOOTH_LEN * max(smoothScale, 0.0)
+        val sx = if (smooth) emaByArc(rawX, steps, smoothLen) else rawX
+        val sy = if (smooth) emaByArc(rawY, steps, smoothLen) else rawY
+        val path = DoubleArray(n)
+        for (i in 1 until n) path[i] = path[i - 1] + hypot(sx[i] - sx[i - 1], sy[i] - sy[i - 1])
+        return speedFactorsOver(rawT, steps, path, n, speedStrength, speedTop, speedSmoothing * baseWidth, speedScale)
+    }
 
-    /** [speedFactors] over the elapsed-ms channel alone; [times] holds one entry per sample. */
-    fun speedFactors(
-        times: DoubleArray,
+    /** [speedWidths] over worked-out channels: raw travel per moving ms in a centred window, blurred along [path] by [sigma]. */
+    internal fun speedFactorsOver(
+        times: DoubleArray?,
         steps: DoubleArray,
-        speedStrength: Double,
+        path: DoubleArray,
+        n: Int,
+        strength: Double,
+        top: Double,
+        sigma: Double,
         speedScale: Double,
     ): DoubleArray {
-        val n = times.size
         val out = DoubleArray(n) { 1.0 }
-        if (speedStrength <= 0.0 || n < 2) return out
-        val t0 = times[0]
-        val tN = times[n - 1]
-        if (tN - t0 <= 0.0) return out
+        if (strength <= 0.0 || n < 2) return out
+        val floor = floorSpeed(top, speedScale)
+        val tau = DoubleArray(n)
         val cum = DoubleArray(n)
-        for (i in 1 until n) cum[i] = cum[i - 1] + steps[i]
-        val cursor = IntArray(2)
-        for (i in 0 until n) {
-            out[i] = speedFactorAt(times, cum, n, i, cursor, speedStrength, speedScale)
+        for (i in 1 until n) {
+            tau[i] = tau[i - 1] + movingStep(if (times == null) 0.0 else times[i] - times[i - 1], steps[i], floor)
+            cum[i] = cum[i - 1] + steps[i]
         }
+        val f = DoubleArray(n)
+        val window = IntArray(2)
+        for (i in 0 until n) f[i] = speedFactor(windowSpeed(tau, cum, n, i, window), strength, top, speedScale)
+        val blur = IntArray(1)
+        for (i in 0 until n) out[i] = blurAt(f, path, n, i, sigma, blur)
         return out
     }
 
-    /**
-     * One point's speed width factor, and the body of [speedFactors]. [cum] is cumulative *raw*
-     * travel and [cursor] holds the window's two sample indices, which only ever move forward, so
-     * walking the points in order costs one pass over the stroke rather than a search per point.
-     *
-     * [WetRibbon] calls this directly for the handful of points still inside the window. Restarting
-     * the scan from an older [cursor] is safe: both ends of the window only slide forward as the
-     * stroke grows, so a stale cursor is behind the true one and the scan simply runs further.
-     */
-    internal fun speedFactorAt(
-        times: DoubleArray,
-        cum: DoubleArray,
-        n: Int,
-        i: Int,
-        cursor: IntArray,
-        speedStrength: Double,
-        speedScale: Double,
-    ): Double {
-        val t0 = times[0]
-        val tN = times[n - 1]
-        val half = SPEED_WINDOW_MS
-        // Centre a fixed-duration window on this sample's time; if it runs past either end of
-        // the stroke, slide it inward so the span stays ~2·half rather than shrinking to a point.
-        var a = times[i] - half
-        var b = times[i] + half
-        if (a < t0) { b += t0 - a; a = t0 }
-        if (b > tN) { a -= b - tN; b = tN; if (a < t0) a = t0 }
+    /** Content px per ms below which a step counts as the pen holding still. */
+    internal fun floorSpeed(top: Double, speedScale: Double): Double =
+        if (speedScale > 0.0) SPEED_FLOOR * top / speedScale else 0.0
+
+    /** Moving time across one step: its elapsed ms, but never more than crossing it at [floor] would take. */
+    internal fun movingStep(dt: Double, step: Double, floor: Double): Double {
+        val t = max(dt, 0.0)
+        return if (floor > 0.0) min(t, step / floor) else t
+    }
+
+    /** Raw travel per moving ms across ±[SPEED_WINDOW_MS] around sample [i], slid inward at the ends; [cursor] only moves on. */
+    internal fun windowSpeed(tau: DoubleArray, cum: DoubleArray, n: Int, i: Int, cursor: IntArray): Double {
+        val total = tau[n - 1]
+        if (total <= 0.0) return 0.0
+        var a = tau[i] - SPEED_WINDOW_MS
+        var b = tau[i] + SPEED_WINDOW_MS
+        if (a < 0.0) { b -= a; a = 0.0 }
+        if (b > total) { a = max(a - (b - total), 0.0); b = total }
+        if (b <= a) return 0.0
+        return (arcAt(tau, cum, n, b, cursor, 1) - arcAt(tau, cum, n, a, cursor, 0)) / (b - a)
+    }
+
+    /** Raw arc at moving time [x], read linearly between the samples either side of it. */
+    private fun arcAt(tau: DoubleArray, cum: DoubleArray, n: Int, x: Double, cursor: IntArray, end: Int): Double {
+        var k = cursor[end]
+        while (k < n - 1 && tau[k] < x) k++
+        cursor[end] = k
+        if (k == 0 || tau[k] < x) return cum[k]
+        val t0 = tau[k - 1]
+        val span = tau[k] - t0
+        return if (span > 0.0) cum[k - 1] + (cum[k] - cum[k - 1]) * (x - t0) / span else cum[k]
+    }
+
+    /** The width factor a speed of [v] content px/ms draws at. */
+    internal fun speedFactor(v: Double, strength: Double, top: Double, speedScale: Double): Double =
+        1.0 - strength * smoothstep(0.0, top, v * speedScale)
+
+    /** [f] blurred along [path] at point [i] by a triweight bell of [sigma], each sample weighted by the arc around it. */
+    internal fun blurAt(f: DoubleArray, path: DoubleArray, n: Int, i: Int, sigma: Double, cursor: IntArray): Double {
+        if (sigma <= 0.0) return f[i]
+        val reach = SPEED_BLUR_REACH * sigma
+        val at = path[i]
         var lo = cursor[0]
-        var hi = cursor[1]
-        while (lo < i && times[lo] < a) lo++
-        while (hi < n - 1 && times[hi + 1] <= b) hi++
+        while (lo < i && path[lo] < at - reach) lo++
         cursor[0] = lo
-        cursor[1] = hi
-        // Always span at least one segment so a window that falls between two far-apart slow
-        // samples reads a real speed instead of a zero-length divide.
-        var l = lo
-        var h = hi
-        if (h <= l) { if (h < n - 1) h++ else l-- }
-        val dist = (cum[h] - cum[l]) * speedScale
-        val dt = max(times[h] - times[l], MIN_DT)
-        return 1.0 - speedStrength * smoothstep(SPEED_LO, SPEED_HI, dist / dt)
+        val inv = 1.0 / reach
+        var num = 0.0
+        var den = 0.0
+        var j = lo
+        while (j < n) {
+            val d = path[j] - at
+            if (d > reach) break
+            val own = (if (j > 0) path[j] - path[j - 1] else 0.0) + (if (j < n - 1) path[j + 1] - path[j] else 0.0)
+            val u = d * inv
+            val q = 1.0 - u * u
+            val w = q * q * q * own
+            num += w * f[j]
+            den += w
+            j++
+        }
+        return if (den > 0.0) num / den else f[i]
     }
 
     /**
@@ -384,22 +430,6 @@ object StrokeEngine {
     }
 
     /**
-     * The calligraphy nib's direction channel: a slew limiter over the raw heading. Widening is
-     * earned over [openLen] of travel and thinning is spent over [closeLen], so the width can never
-     * change faster than the writer has earned. This bounds the *rate*, not the duration: a short
-     * heading change is flattened in proportion to how sharp it is, and a gentle one passes through.
-     *
-     * The channel spans 2.0 (thin face -1 to broad face +1), so the per-sample cap is
-     * `step · 2 / rate`, and travelling exactly [openLen] at full cap carries the width from one
-     * extreme to the other. Nothing here reads time: a fast stroke reports sparser samples, each
-     * step is longer, and each gets a proportionally larger allowance, so the same path draws the
-     * same widths however fast it was written.
-     *
-     * Samples up to [holdUntil] are pinned to [seed], which is the head: a rate cannot decide the
-     * start, having no travel behind it to measure. [steps] is travel along the smoothed centreline,
-     * and both lengths are already scaled to the stroke's draw zoom.
-     */
-    /**
      * [headDirection]'s mirror at the other end, run once the pen has lifted. Across the stroke's
      * last [window] of travel the nib may thin but not widen: a lift-off skid and a downstroke that
      * began one sample ago are the same signal, and the stroke ended before either could hold it.
@@ -433,25 +463,131 @@ object StrokeEngine {
         }
     }
 
+    /**
+     * The calligraphy nib's direction channel: a slew limiter over the raw heading. Widening is
+     * earned over [openLen] of travel and thinning is spent over [closeLen], so the width can never
+     * change faster than the writer has earned. This bounds the *rate*, not the duration: a short
+     * heading change is flattened in proportion to how sharp it is, and a gentle one passes through.
+     *
+     * The channel spans 2.0 (thin face -1 to broad face +1), so the per-sample cap is
+     * `step · 2 / rate`, and travelling exactly [openLen] at full cap carries the width from one
+     * extreme to the other. Nothing here reads time: a fast stroke reports sparser samples, each
+     * step is longer, and each gets a proportionally larger allowance, so the same path draws the
+     * same widths however fast it was written.
+     *
+     * Samples up to [holdUntil] are pinned to [seed], which is the head: a rate cannot decide the
+     * start, having no travel behind it to measure. [steps] is travel along the smoothed centreline,
+     * and both lengths are already scaled to the stroke's draw zoom. The one exception to the rate
+     * is a thin stroke turning back into a thick one, which starts thick at the turn ([backfill]),
+     * judged on the raw samples [rx]/[ry] with cumulative raw travel [rcum].
+     */
     private fun nibDirection(
+        rx: DoubleArray,
+        ry: DoubleArray,
+        rcum: DoubleArray,
         ty: DoubleArray,
         steps: DoubleArray,
         openLen: Double,
         closeLen: Double,
+        wait: Double,
         seed: Double,
         holdUntil: Int,
     ): DoubleArray {
-        val out = DoubleArray(ty.size)
+        val n = ty.size
+        val out = DoubleArray(n)
+        val scratch = DoubleArray(REVERSAL_SCRATCH)
         var d = seed
-        for (i in ty.indices) {
+        for (i in 0 until n) {
             if (i <= holdUntil) {
                 out[i] = seed
                 continue
             }
             d = nibStep(d, ty[i], if (i == 0) 0.0 else steps[i], openLen, closeLen)
+            d = backfill(d, rx, ry, rcum, n, i, wait, scratch)
             out[i] = d
         }
         return out
+    }
+
+    /** Scratch [backfill] needs: two chord ends, then the jump's share and its target. */
+    internal const val REVERSAL_SCRATCH = 6
+
+    /** [d] after sample [i], jumped toward the reversed stroke's width if [i] is where a thin run turns back thick. */
+    internal fun backfill(
+        d: Double,
+        rx: DoubleArray,
+        ry: DoubleArray,
+        rcum: DoubleArray,
+        n: Int,
+        i: Int,
+        wait: Double,
+        scratch: DoubleArray,
+    ): Double {
+        if (!reversalAt(rx, ry, rcum, n, i, wait, scratch)) return d
+        val target = scratch[5]
+        return if (target > d) d + scratch[4] * (target - d) else d
+    }
+
+    /** Whether raw sample [i] is the sharpest point of a turn past [REVERSAL_FROM_DEG] whose new stroke heads back for [wait]. */
+    private fun reversalAt(
+        rx: DoubleArray,
+        ry: DoubleArray,
+        rcum: DoubleArray,
+        n: Int,
+        i: Int,
+        wait: Double,
+        scratch: DoubleArray,
+    ): Boolean {
+        if (i < 1 || i + 1 >= n || wait <= 0.0 || rcum[n - 1] <= rcum[i + 1] + wait) return false
+        val c = turnCos(rx, ry, rcum, n, i, wait, scratch)
+        if (c > REVERSAL_FROM_COS) return false
+        val inX = rx[i] - scratch[0]
+        val inY = ry[i] - scratch[1]
+        val outX = scratch[2] - rx[i]
+        val outY = scratch[3] - ry[i]
+        if (c > turnCos(rx, ry, rcum, n, i - 1, wait, scratch) || c >= turnCos(rx, ry, rcum, n, i + 1, wait, scratch)) return false
+        var k = i + 1
+        while (k < n && rcum[k] <= rcum[i] + wait) {
+            if ((rx[k] - rx[k - 1]) * inX + (ry[k] - ry[k - 1]) * inY > 0.0) return false
+            k++
+        }
+        scratch[4] = smoothstep(REVERSAL_FROM_DEG, REVERSAL_FULL_DEG, Math.toDegrees(kotlin.math.acos(c.coerceIn(-1.0, 1.0))))
+        scratch[5] = (outY / hypot(outX, outY)).coerceIn(-1.0, 1.0)
+        return scratch[4] > 0.0
+    }
+
+    /** Cosine of the turn at [j] between the chords [wait] long either side of it, 1 where either is missing. */
+    private fun turnCos(rx: DoubleArray, ry: DoubleArray, rcum: DoubleArray, n: Int, j: Int, wait: Double, scratch: DoubleArray): Double {
+        if (j <= 0 || j >= n - 1 || rcum[j] - wait < 0.0 || rcum[j] + wait > rcum[n - 1]) return 1.0
+        pointAt(rx, ry, rcum, n, rcum[j] - wait, scratch, 0)
+        pointAt(rx, ry, rcum, n, rcum[j] + wait, scratch, 2)
+        val ix = rx[j] - scratch[0]
+        val iy = ry[j] - scratch[1]
+        val ox = scratch[2] - rx[j]
+        val oy = scratch[3] - ry[j]
+        val li = hypot(ix, iy)
+        val lo = hypot(ox, oy)
+        if (li < MIN_TANGENT_LEN || lo < MIN_TANGENT_LEN) return 1.0
+        return (ix * ox + iy * oy) / (li * lo)
+    }
+
+    /** The path's point at arc [s], read linearly between the samples either side of it, into [out] at [at]. */
+    private fun pointAt(x: DoubleArray, y: DoubleArray, cum: DoubleArray, n: Int, s: Double, out: DoubleArray, at: Int) {
+        var lo = 0
+        var hi = n - 1
+        while (lo < hi) {
+            val mid = (lo + hi) ushr 1
+            if (cum[mid] < s) lo = mid + 1 else hi = mid
+        }
+        if (lo == 0) {
+            out[at] = x[0]
+            out[at + 1] = y[0]
+            return
+        }
+        val span = cum[lo] - cum[lo - 1]
+        val f = if (span > 0.0) (s - cum[lo - 1]) / span else 1.0
+        out[at] = x[lo - 1] + (x[lo] - x[lo - 1]) * f
+        out[at + 1] = y[lo - 1] + (y[lo] - y[lo - 1]) * f
     }
 
     /** One step of [nibDirection]'s slew limiter: [d] moved toward [target] by at most what [step]
@@ -520,6 +656,8 @@ object StrokeEngine {
         holdEnds: Boolean = false,
         finished: Boolean = true,
         smoothScale: Double = 1.0,
+        speedTop: Double = SPEED_HI,
+        speedSmoothing: Double = DEFAULT_SPEED_SMOOTHING,
     ): StrokeGeometry {
         val n = samples.size
         if (n == 0) return StrokeGeometry.EMPTY
@@ -527,17 +665,21 @@ object StrokeEngine {
         val rawY = DoubleArray(n)
         val rawP = DoubleArray(n)
         var timed = false
+        var widths = true
         for (i in 0 until n) {
             val s = samples[i]
             rawX[i] = s.x
             rawY[i] = s.y
             rawP[i] = s.pressure
             if (s.t != 0.0) timed = true
+            if (s.widthFactor <= 0.0) widths = false
         }
         val rawT = if (timed) DoubleArray(n) { samples[it].t } else null
+        val rawF = if (widths) DoubleArray(n) { samples[it].widthFactor } else null
         return build(
             rawX, rawY, rawP, rawT, baseWidth, pressureEnabled, m, ds, speedStrength,
             taperEnabled, taperMinFactor, speedScale, smooth, holdEnds, finished, smoothScale,
+            speedTop, speedSmoothing, rawF,
         )
     }
 
@@ -564,6 +706,9 @@ object StrokeEngine {
         holdEnds: Boolean = false,
         finished: Boolean = true,
         smoothScale: Double = 1.0,
+        speedTop: Double = SPEED_HI,
+        speedSmoothing: Double = DEFAULT_SPEED_SMOOTHING,
+        rawF: DoubleArray? = null,
     ): StrokeGeometry {
         val n = rawX.size
         if (n == 0) return StrokeGeometry.EMPTY
@@ -623,8 +768,9 @@ object StrokeEngine {
         }
 
         // Travel along the smoothed centreline and its running total: the path the ink follows, and
-        // what every arc-length rule below is measured in. Only the nib and the taper read it.
-        val needArc = ds > 0.0 || taperEnabled
+        // what every arc-length rule below is measured in. Only the nib, the taper and the speed blur read it.
+        val speedOn = speedStrength > 0.0 && (rawF != null || rawT != null)
+        val needArc = ds > 0.0 || taperEnabled || (speedOn && rawF == null)
         val dirSteps = DoubleArray(if (needArc) n else 0)
         val cum = DoubleArray(dirSteps.size)
         if (needArc) {
@@ -636,10 +782,10 @@ object StrokeEngine {
 
         // Optional width multipliers: speed thins fast travel, taper points the ends. Neither pen is
         // the common one, so the arrays are built only for the strokes that use them.
-        val sf = if (speedStrength > 0.0 && rawT != null) {
-            speedFactors(rawT, steps, speedStrength, speedScale)
-        } else {
-            null
+        val sf = when {
+            !speedOn -> null
+            rawF != null -> rawF
+            else -> speedFactorsOver(rawT, steps, cum, n, speedStrength, speedTop, speedSmoothing * baseWidth, speedScale)
         }
         val tf = if (taperEnabled) taperFactors(cum, taperMinFactor, smoothScale) else null
 
@@ -649,13 +795,19 @@ object StrokeEngine {
         // is a slew limiter capping how fast the width may change per px travelled, OPEN_LEN to widen
         // and CLOSE_LEN to thin, so a stray sample only buys its own fraction of the range. The tail
         // is the head's mirror at pen-up: over the last HEAD_LEN the nib may thin but not widen,
-        // since a lift-off skid ends before it can hold. Nothing here looks ahead past the two ends,
-        // and nothing reads time. Orientation still follows the true tangent; only the width
+        // since a lift-off skid ends before it can hold. Only a reversal looks ahead: a thin run turning
+        // back into a thick one waits for the new stroke to hold, then starts it thick at the turn.
+        // Nothing reads time. Orientation still follows the true tangent; only the width
         // magnitude is held back. A no-op when ds = 0.
         val dirY = if (ds > 0.0) {
             val window = headLen(smoothScale)
             val (head, holdUntil) = headDirection(sx, sy, cum, window, finished)
-            val d = nibDirection(ty, dirSteps, openLen(smoothScale), closeLen(smoothScale), head, holdUntil)
+            val rcum = DoubleArray(n)
+            for (i in 1 until n) rcum[i] = rcum[i - 1] + steps[i]
+            val d = nibDirection(
+                rawX, rawY, rcum, ty, dirSteps, openLen(smoothScale, baseWidth), closeLen(smoothScale, baseWidth),
+                reversalWait(smoothScale, baseWidth), head, holdUntil,
+            )
             if (finished) capTail(d, cum, window)
             d
         } else null

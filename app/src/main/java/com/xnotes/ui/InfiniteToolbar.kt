@@ -89,8 +89,8 @@ fun InfiniteToolbar(
             for (entry in section.visibleEntries) {
                 when (val item = entry.item) {
                     ToolbarItem.UNIFIED_PEN -> UnifiedPenLauncher(
-            host = editor, armedTool = editor.tool, ink = editor.inkColor.toComposeColor(),
-            onChooseTool = { editor.armTool(it) }, onSelectColor = { editor.pickColor(it) },
+            host = editor, armedTool = editor.tool,
+            onChooseTool = { editor.armTool(it) },
         )
         ToolbarItem.HOME -> ToolbarIcon(XnotesIcons.prev, stringResource(R.string.toolbar_home)) { onOpenBackstage() }
                     // A name has no room down a side rail.

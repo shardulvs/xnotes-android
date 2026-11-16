@@ -189,25 +189,14 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
     var lastVisibleItems: Int = 0
         private set
 
-    /** Milliseconds the newest tessellation took, published by whoever produced it. */
-    @Volatile
-    var lastTessellateMs: Double = 0.0
-
     override fun describe(into: GlStats): GlStats = into.copy(
         items = records.size,
         visibleItems = lastVisibleItems,
         drawCalls = lastDrawCalls,
-        vertices = store.usedVertices,
-        vertexCapacity = store.vertexCapacity,
-        indices = store.usedIndices,
-        indexCapacity = store.indexCapacity,
         geometryBytes = store.gpuBytes + wetStore.gpuBytes + tailStore.gpuBytes,
         liveGeometryBytes = store.liveBytes + wetStore.liveBytes + tailStore.liveBytes,
-        wetVertices = wetParts.sumOf { it.slice.vertexCount } + tailParts.sumOf { it.slice.vertexCount },
         textures = textures.textureCount,
         textureBytes = textures.residentBytes,
-        texturesPending = textures.pendingCount,
-        lastTessellateMs = lastTessellateMs,
     )
 
     // --- main-thread API ---

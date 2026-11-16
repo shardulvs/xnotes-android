@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Transparent splash icon: hides the launcher logo on the API 31+ system splash
-     so the dark stage hands straight off to the loader animation. -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="@android:color/transparent" />
-</shape>

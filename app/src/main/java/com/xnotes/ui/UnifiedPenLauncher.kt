@@ -1,12 +1,10 @@
 package com.xnotes.ui
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,7 +17,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -37,12 +34,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -70,16 +61,14 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Pinterest-style radial shortcut: a tap arms the last pen, a second tap opens the full
- * Samsung Notes-inspired settings panel. Long-press shows a compact circular fan; drag and
+ * N-Notes tool settings panel. Long-press shows a compact circular fan; drag and
  * lift chooses the hovered pen. Lifting without a choice ALWAYS dismisses the fan.
  */
 @Composable
 internal fun UnifiedPenLauncher(
     host: ToolPopupHost,
     armedTool: Tool,
-    ink: Color,
     onChooseTool: (Tool) -> Unit,
-    onSelectColor: (Int) -> Unit,
 ) {
     val group = remember { ToolbarToolGroup.defaultWritingGroup() }
     val direction = LocalToolbarLook.current.position.penFanDirection()
@@ -251,7 +240,7 @@ internal fun UnifiedPenLauncher(
                     },
                 contentAlignment = Alignment.Center,
             ) {
-                PenSilhouette(lastItem, ink, Modifier.width(metrics.icon * .72f).height(metrics.icon))
+                PenSilhouette(lastItem, Modifier.width(metrics.icon * .72f).height(metrics.icon))
             }
         }
         if (fanMounted) {
@@ -270,7 +259,6 @@ internal fun UnifiedPenLauncher(
                     direction = direction,
                     selected = hoveredIndex,
                     active = lastItem,
-                    ink = ink,
                     progress = fanProgress.value,
                     onItemPosition = { index, center -> penCentersOnScreen[index] = center },
                 )
@@ -296,7 +284,6 @@ private fun PenFanPalette(
     direction: PenFanDirection,
     selected: Int,
     active: ToolbarItem,
-    ink: Color,
     progress: Float,
     onItemPosition: (Int, Offset) -> Unit,
 ) {
@@ -344,7 +331,7 @@ private fun PenFanPalette(
                     ),
                 contentAlignment = Alignment.Center,
             ) {
-                PenSilhouette(item, ink, Modifier.width(18.dp).height(27.dp))
+                PenSilhouette(item, Modifier.width(18.dp).height(27.dp))
             }
         }
         if (selected in items.indices) {
@@ -358,7 +345,7 @@ private fun PenFanPalette(
 
 /** N-Notes' stroke icon assets, shared by the launcher, gesture fan and toolbar preview. */
 @Composable
-internal fun PenSilhouette(item: ToolbarItem, ink: Color, modifier: Modifier = Modifier) {
+internal fun PenSilhouette(item: ToolbarItem, modifier: Modifier = Modifier) {
     val icon = when (item) {
         ToolbarItem.PEN -> R.drawable.ic_stroke_regular
         ToolbarItem.DASHED -> R.drawable.ic_stroke_dashed
@@ -374,17 +361,4 @@ internal fun PenSilhouette(item: ToolbarItem, ink: Color, modifier: Modifier = M
         modifier = modifier,
         tint = LocalPalette.current.text.toComposeColor(),
     )
-}
-
-@Composable
-internal fun UnifiedPenPreview(ink: Color, onSelect: () -> Unit) {
-    val metrics = LocalBar.current
-    Box(
-        Modifier.size(metrics.button)
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onSelect),
-        contentAlignment = Alignment.Center,
-    ) {
-        PenSilhouette(ToolbarItem.PEN, ink, Modifier.width(metrics.icon * .72f).height(metrics.icon))
-    }
 }
