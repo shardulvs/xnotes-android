@@ -291,12 +291,12 @@ private fun PlayerPanel(session: AudioPlayback.Session, onDismiss: () -> Unit) {
             HorizontalDivider(Modifier.padding(top = 8.dp), color = palette.border.toComposeColor())
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                 val followLabel = stringResource(R.string.audio_follow)
-                androidx.compose.material3.Switch(
+                androidx.compose.material3.Checkbox(
                     checked = AudioPlayback.follow,
                     onCheckedChange = { AudioPlayback.follow = it },
                     modifier = Modifier.semantics { contentDescription = followLabel },
                 )
-                Text(followLabel, color = palette.text.toComposeColor(), fontSize = 14.sp, modifier = Modifier.padding(start = 10.dp))
+                Text(followLabel, color = palette.text.toComposeColor(), fontSize = 14.sp)
                 Spacer(Modifier.weight(1f))
                 val speedLabel = stringResource(R.string.audio_speed)
                 Box(

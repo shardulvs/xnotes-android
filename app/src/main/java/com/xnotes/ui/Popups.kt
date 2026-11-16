@@ -45,7 +45,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -1164,12 +1163,13 @@ internal fun SavedZoomChips(favorites: List<Float>, current: Float, locked: Bool
     }
 }
 
-/** One zoom-limit row: label, a percent spinfield (stepping by 10, greyed while off), a toggle. */
+/** One zoom-limit row: a checkbox, label and a percent spinfield (stepping by 10, greyed while off). */
 @Composable
 private fun ZoomLimitRow(label: String, enabled: Boolean, value: Int, onToggle: (Boolean) -> Unit, onValue: (Int) -> Unit) {
     val palette = LocalPalette.current
     val color = (if (enabled) palette.text else palette.textDim).toComposeColor()
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.offset(x = (-14).dp)) {
+        Checkbox(checked = enabled, onCheckedChange = onToggle)
         Text(label, color = color, fontSize = 12.sp, modifier = Modifier.width(76.dp))
         Box(Modifier.size(34.dp).clickable(enabled = enabled) { onValue(value - 10) }, contentAlignment = Alignment.Center) {
             Text("−", color = color, fontSize = 18.sp)
@@ -1184,8 +1184,6 @@ private fun ZoomLimitRow(label: String, enabled: Boolean, value: Int, onToggle: 
         Box(Modifier.size(34.dp).clickable(enabled = enabled) { onValue(value + 10) }, contentAlignment = Alignment.Center) {
             Text("+", color = color, fontSize = 18.sp)
         }
-        Spacer(Modifier.weight(1f))
-        Switch(checked = enabled, onCheckedChange = onToggle)
     }
 }
 
@@ -1559,9 +1557,10 @@ private fun PopupBackLink(text: String, onBack: () -> Unit) {
 
 @Composable
 internal fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.widthIn(min = 220.dp).fillMaxWidth()) {
+    // The checkbox's 48dp touch frame insets the drawn box; pull the row back to align it.
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.widthIn(min = 220.dp).fillMaxWidth().offset(x = (-14).dp)) {
+        Checkbox(checked = checked, onCheckedChange = onChange)
         Text(label, color = LocalPalette.current.text.toComposeColor(), fontSize = 12.sp)
-        Switch(checked = checked, onCheckedChange = onChange)
     }
 }
 

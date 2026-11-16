@@ -29,7 +29,6 @@ import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -138,8 +137,8 @@ fun TableDialog(editor: Editor, table: FlowTable?, onDismiss: () -> Unit) {
                     }
                 }
                 Spacer(Modifier.size(6.dp))
-                SwitchRow(stringResource(R.string.table_header_row), style.headerRow) { update(s = style.copy(headerRow = it)) }
-                SwitchRow(stringResource(R.string.table_banded_rows), style.banded) { update(s = style.copy(banded = it)) }
+                ToggleRow(stringResource(R.string.table_header_row), style.headerRow) { update(s = style.copy(headerRow = it)) }
+                ToggleRow(stringResource(R.string.table_banded_rows), style.banded) { update(s = style.copy(banded = it)) }
                 if (style.headerRow || style.banded) {
                     ColorRow(stringResource(R.string.table_tint), style.tint, palette.accent, editor) { update(s = style.copy(tint = it)) }
                 }
@@ -241,19 +240,6 @@ private fun Stepper(label: String, value: String, onMinus: () -> Unit, onPlus: (
         Box(Modifier.size(34.dp).clickable(onClick = onPlus), contentAlignment = Alignment.Center) {
             Text("+", color = palette.text.toComposeColor(), fontSize = 18.sp)
         }
-    }
-}
-
-@Composable
-private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            label,
-            color = LocalPalette.current.textDim.toComposeColor(),
-            fontSize = 13.sp,
-            modifier = Modifier.width(202.dp),
-        )
-        Switch(checked = checked, onCheckedChange = onChange)
     }
 }
 
