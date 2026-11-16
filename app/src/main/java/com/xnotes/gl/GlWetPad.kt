@@ -220,7 +220,8 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
             .setName("xnotes-wet-pad")
             .setParent(parent)
             .setBufferSize(w.coerceAtLeast(1), h.coerceAtLeast(1))
-            .setFormat(android.graphics.PixelFormat.TRANSLUCENT)
+            // A SurfaceControl buffer layer needs an explicit RGBA format, unlike SurfaceHolder.
+            .setFormat(android.graphics.PixelFormat.RGBA_8888)
             .build()
         // Above the SurfaceView's own layer, which never gets a buffer now.
         SurfaceControl.Transaction().use { it.setLayer(child, 1).apply() }
@@ -626,7 +627,8 @@ class GlWetPad(context: Context, onTop: Boolean = false) : SurfaceView(context),
         ink.forget()
         mainHandler.post { onSurfaceLost?.invoke() }
         destroyEgl()
-        val fresh = parent != null && parent.isValid && layer != null
+        val fresh = android.os.Build.VERSION.SDK_INT >= 31 &&
+            parent != null && parent.isValid && layer != null
         if (fresh) {
             closeLayer()
             surface = openLayer(parent, w, h) ?: return fail("no layer to reopen")

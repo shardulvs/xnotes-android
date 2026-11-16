@@ -93,7 +93,8 @@ class AndroidRenderer(private val canvas: Canvas) : Renderer {
         val native = nativeBlend(blend) ?: return saveLayerAlpha(bounds, alpha)
         layerPaint.reset()
         layerPaint.alpha = (alpha.coerceIn(0.0, 1.0) * 255).toInt()
-        layerPaint.blendMode = native
+        // nativeBlend returning non-null already implies API 29+, but lint needs the guard here.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) layerPaint.blendMode = native
         canvas.saveLayer(
             bounds.left.toFloat(), bounds.top.toFloat(), bounds.right.toFloat(), bounds.bottom.toFloat(),
             layerPaint,
@@ -311,7 +312,9 @@ class AndroidRenderer(private val canvas: Canvas) : Renderer {
         rasterBlendPaint.isFilterBitmap = true
         rasterBlendPaint.isDither = true
         rasterBlendPaint.alpha = (alpha.coerceIn(0.0, 1.0) * 255).toInt()
-        nativeBlend(blend)?.let { rasterBlendPaint.blendMode = it }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            nativeBlend(blend)?.let { rasterBlendPaint.blendMode = it }
+        }
         val srcRect = src?.let {
             android.graphics.Rect(it.left.toInt(), it.top.toInt(), it.right.toInt(), it.bottom.toInt())
         }

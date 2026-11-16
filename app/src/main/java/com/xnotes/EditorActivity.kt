@@ -213,6 +213,9 @@ class EditorActivity : ComponentActivity() {
     // Stylus side-button keys (Bluetooth/USI pens report the button only this way) are caught here,
     // before Compose focus routing, so the controller sees both press and release regardless of
     // which view holds focus. Other keys fall through to the normal dispatch.
+    // AndroidX marks the inherited forwarding method restricted, but this override must
+    // delegate unhandled keys to the activity's standard dispatch chain.
+    @android.annotation.SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         // The pen writes in whichever pane has the focus, so its button keys go to that pane too.
         if (editor?.active?.onStylusButtonKey(event) == true) return true
