@@ -84,6 +84,8 @@ class CanvasEmojiRenderTest : InstrumentationTestCase() {
 
     fun testColorEmojiSurvivesGlHandoffAtHighZoom() = verifyEmojiHandoff(2.0)
 
+    fun testColorEmojiSurvivesGlHandoffAtFourTimesZoom() = verifyEmojiHandoff(4.0)
+
     private fun verifyEmojiHandoff(zoom: Double) {
         val target = instrumentation.targetContext
         val activity = instrumentation.startActivitySync(

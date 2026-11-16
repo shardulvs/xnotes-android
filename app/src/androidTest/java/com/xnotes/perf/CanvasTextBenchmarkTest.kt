@@ -83,6 +83,31 @@ class CanvasTextBenchmarkTest : InstrumentationTestCase() {
         }
     }
 
+    /** Run this test alone in fresh instrumentation processes to measure the cold path. */
+    fun testColdTextMeshStages() {
+        val content = ("Updated paragraph 0 with word wrapping. ").repeat(25)
+        val text = TextItem(Pt(0.0, 0.0), 320.0, 0.0, content,
+            style.rgba, style.pointSize, style.face, measurer)
+        val started = SystemClock.elapsedRealtimeNanos()
+        val outlines = text.glyphContours()
+        val afterOutlines = SystemClock.elapsedRealtimeNanos()
+        val part = com.xnotes.core.infinite.ShapeTessellator.textPart(
+            outlines, text.rgba, fastLongText = true,
+        ) { it + text.pos }
+        val afterGeometry = SystemClock.elapsedRealtimeNanos()
+        val bounds = text.bounds()
+        val afterBounds = SystemClock.elapsedRealtimeNanos()
+        assertTrue(outlines.isNotEmpty())
+        assertNotNull(part)
+        assertTrue(bounds.h > 0)
+        Log.i("PR428_COLD",
+            "outline_ms=" + (afterOutlines - started) / 1e6 +
+            " geometry_ms=" + (afterGeometry - afterOutlines) / 1e6 +
+            " bounds_ms=" + (afterBounds - afterGeometry) / 1e6 +
+            " total_ms=" + (afterBounds - started) / 1e6 +
+            " contours=" + outlines.size)
+    }
+
     fun testLongTextGeometryBreakdown() {
         val content = ("Updated paragraph 0 with word wrapping. ").repeat(25)
         val text = TextItem(Pt(0.0, 0.0), 320.0, 0.0, content,

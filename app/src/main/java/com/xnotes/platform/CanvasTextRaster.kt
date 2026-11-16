@@ -40,14 +40,18 @@ internal object CanvasTextRaster {
     }
 
     /** Renders native shaping, emoji colors and alpha into a bounded GL-ready bitmap. */
-    fun render(item: TextItem, directory: File): Result? {
+    fun render(item: TextItem, directory: File, maxScale: Double? = null): Result? {
         val paint = AndroidText.textPaint(
             item.font, Color.argb(item.rgba.a, item.rgba.r, item.rgba.g, item.rgba.b),
         )
         val layout = AndroidText.layout(item.text, item.width.toInt(), paint, TextItem.FLAGS)
         val width = layout.width.coerceAtLeast(1)
         val height = layout.height.coerceAtLeast(1)
-        val scale = minOf(2.0, 4096.0 / maxOf(width, height), sqrt(4_194_304.0 / width / height))
+        // A compact box benefits from 4x zoom sharpness; a long paragraph at 4x
+        // takes significantly longer to PNG-encode. Keep its 2x handoff path.
+        val preferredScale = maxScale ?: if (width.toLong() * height <= 65_536L) 4.0 else 2.0
+        val scale = minOf(preferredScale, 4096.0 / maxOf(width, height),
+            sqrt(4_194_304.0 / width / height))
         if (scale <= 0.0 || !scale.isFinite()) return null
         val bitmap = Bitmap.createBitmap(
             ceil(width * scale).toInt().coerceAtLeast(1),

@@ -37,6 +37,26 @@ class CanvasTextResourceTest : InstrumentationTestCase() {
         }
     }
 
+    fun testSmallEmojiRasterSupportsFourTimesZoomWithoutGrowingItsBounds() {
+        val directory = File(instrumentation.targetContext.cacheDir, "pr428-sharp-" + System.nanoTime())
+        val box = text("Emoji 😀 text")
+        val result = CanvasTextRaster.render(box, directory)
+            ?: throw AssertionError("Emoji raster failed")
+        try {
+            // Bitmap resolution increases; the model bounds/position must remain unchanged.
+            assertEquals(box.width, result.image.rect.w, 0.0001)
+            assertEquals(box.pos.x, result.image.rect.x, 0.0001)
+            assertEquals(box.pos.y, result.image.rect.y, 0.0001)
+            assertEquals("Expected 4x density for a compact textbox",
+                (box.width * 4).toInt(), result.bitmap.width)
+            assertTrue(result.bitmap.width <= 4096)
+            assertTrue(result.bitmap.width.toLong() * result.bitmap.height <= 4_200_000L)
+        } finally {
+            result.discard()
+            directory.delete()
+        }
+    }
+
     fun testRasterWriteFailureDoesNotLeaveTempFiles() {
         val fileNotDirectory = File.createTempFile(
             "pr428-not-a-directory-", ".tmp", instrumentation.targetContext.cacheDir,
@@ -120,6 +140,54 @@ class CanvasTextResourceTest : InstrumentationTestCase() {
         jobs.forEach(Runnable::run)
         assertEquals("Entering edit mode must cancel the previous geometry job",
             before, folder.listFiles()?.map { it.name }?.toSet().orEmpty())
+    }
+
+    /** Diagnostic, not a timing assertion: compare PNG encode cost at 2x vs 4x on device. */
+    fun testEmojiTextureScaleBenchmark() {
+        val directory = File(instrumentation.targetContext.cacheDir, "pr428-scale-bench-" + System.nanoTime())
+        directory.mkdirs()
+        try {
+            for (value in listOf("Short 😀 text", ("Wrapped 😀 text. ").repeat(40))) {
+                for (maxScale in listOf(2.0, 4.0)) {
+                    val times = ArrayList<Long>()
+                    var pixels = 0L
+                    var compressed = 0L
+                    repeat(5) {
+                        val started = android.os.SystemClock.elapsedRealtimeNanos()
+                        val result = CanvasTextRaster.render(text(value), directory, maxScale)
+                            ?: throw AssertionError("Raster failed")
+                        val elapsed = android.os.SystemClock.elapsedRealtimeNanos() - started
+                        times.add(elapsed)
+                        pixels = result.bitmap.width.toLong() * result.bitmap.height
+                        compressed = result.image.image.file.length()
+                        result.discard()
+                    }
+                    android.util.Log.i("PR428_RASTER", "chars=" + value.length +
+                        " requested_scale=" + maxScale +
+                        " median_ms=" + times.sorted()[times.size / 2] / 1e6 +
+                        " pixels=" + pixels + " png_bytes=" + compressed)
+                }
+            }
+        } finally {
+            directory.listFiles()?.forEach(File::delete)
+            directory.delete()
+        }
+    }
+
+    fun testLongEmojiTextRetainsFastTwoTimesRasterPath() {
+        val directory = File(instrumentation.targetContext.cacheDir, "pr428-long-scale-" + System.nanoTime())
+        val box = text(("Wrapped 😀 text. ").repeat(40))
+        val result = CanvasTextRaster.render(box, directory)
+            ?: throw AssertionError("Long text raster failed")
+        try {
+            assertEquals("Long emoji text should remain 2x to keep PNG handoff affordable",
+                (box.width * 2).toInt(), result.bitmap.width)
+            assertEquals(box.width, result.image.rect.w, 0.0001)
+            assertTrue(result.bitmap.width.toLong() * result.bitmap.height <= 4_200_000L)
+        } finally {
+            result.discard()
+            directory.delete()
+        }
     }
 
     fun testHugeEmojiRasterRespectsTextureBudget() {
