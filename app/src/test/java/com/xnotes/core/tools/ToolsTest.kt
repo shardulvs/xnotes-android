@@ -1,5 +1,6 @@
 package com.xnotes.core.tools
 
+import com.xnotes.core.geometry.Pt
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.shapes.ShapeKind
 import org.junit.Assert.assertEquals
@@ -123,122 +124,18 @@ class ToolsTest {
         assertEquals(16, Tool.wheelOrder.size)
     }
 
-    /**
-     * The pan's axis locks, which decide how a drag reaches the view on both canvases.
-     *
-     * A locked axis contributes nothing while the other one still moves, which is the whole point of
-     * two separate locks rather than one "panning off" preset: a vertical-only scroll has to be
-     * reachable without also giving up the horizontal one.
-     */
-    @Test fun aLockedAxisContributesNothingWhileTheOtherStillMoves() {
-        val both = ToolConfig()
-        assertEquals(3.0, both.panDx(3.0), 1e-9)
-        assertEquals(4.0, both.panDy(4.0), 1e-9)
-        assertTrue(both.panCanMove)
-
-        val lockedX = both.copy(lockPanX = true)
-        assertEquals(0.0, lockedX.panDx(3.0), 1e-9)
-        assertEquals(4.0, lockedX.panDy(4.0), 1e-9)
-        assertTrue(lockedX.panCanMove)
-
-        val lockedY = both.copy(lockPanY = true)
-        assertEquals(3.0, lockedY.panDx(3.0), 1e-9)
-        assertEquals(0.0, lockedY.panDy(4.0), 1e-9)
-        assertTrue(lockedY.panCanMove)
-
-        // Both held is the one setting where a pan cannot move the view at all, so the gesture is
-        // never begun rather than begun and thrown away every sample.
-        val neither = lockedX.copy(lockPanY = true)
-        assertEquals(0.0, neither.panDx(3.0), 1e-9)
-        assertEquals(0.0, neither.panDy(4.0), 1e-9)
-        assertFalse(neither.panCanMove)
-    }
-
-    /**
-     * The glide that follows a lifted drag is part of the pan, so it obeys the same locks.
-     *
-     * This was the one path that did not: the drag masked its delta, then handed the raw finger
-     * velocity to the fling, so a locked axis held still for exactly as long as the finger was down
-     * and coasted afterwards. A flick along a locked axis alone is now below the start threshold, so
-     * it opens no glide either.
-     */
-    @Test fun aLockedAxisDoesNotCoastAfterTheFingerIsUp() {
-        val lockedX = ToolConfig().copy(lockPanX = true)
-        val glided = lockedX.panVelocity(900.0, 0.0)
-        assertEquals(0.0, glided.x, 1e-9)
-        assertEquals(0.0, glided.length(), 1e-9)
-
-        val both = lockedX.panVelocity(900.0, -400.0)
-        assertEquals(0.0, both.x, 1e-9)
-        assertEquals(-400.0, both.y, 1e-9)
-
-        // Nothing held: the glide is the finger's own velocity, untouched.
-        val free = ToolConfig().panVelocity(900.0, -400.0)
-        assertEquals(900.0, free.x, 1e-9)
-        assertEquals(-400.0, free.y, 1e-9)
-    }
-
-    /**
-     * Sensitivity scales what a hand asks for, and it scales it the same in both directions.
-     *
-     * The zoom factor is applied to the pinch's ratio rather than to the resulting scale, which is
-     * what makes "twice as fast" mean twice as far in either direction instead of only ever making
-     * zooming-in faster and zooming-out slower. Zero is the floor, so a slider can hold an axis
-     * still — which is why an axis lock says so in words instead of leaving it to a slider.
-     */
-    @Test fun sensitivityScalesTheGestureRatherThanTheResult() {
-        val pan = ToolConfig()
-        assertEquals(1.0, pan.panSpeedX, 1e-9)
-        assertEquals(1.0, pan.panSpeedY, 1e-9)
-        assertEquals(1.0, pan.zoomSensitivity, 1e-9)
-
-        val fast = pan.copy(panSpeedX = 2.0, panSpeedY = 0.5)
-        assertEquals(20.0, fast.panDx(10.0), 1e-9)
-        assertEquals(5.0, fast.panDy(10.0), 1e-9)
-
-        // A pinch spread to 1.4x, at twice the rate and at none.
-        val quick = pan.copy(zoomSensitivity = 2.0)
-        assertEquals(1.0 + 0.4 * 2.0, quick.zoomRatio(1.4), 1e-9)
-        assertEquals(1.0 - 0.4 * 2.0, quick.zoomRatio(0.6), 1e-9)
-        assertEquals(1.4, pan.zoomRatio(1.4), 1e-9)
-        assertEquals(1.0, pan.copy(zoomSensitivity = 0.0).zoomRatio(1.4), 1e-9)
-
-        // A held axis is still held at any rate, and a fast locked axis still coasts nowhere.
-        val lockedX = fast.copy(lockPanX = true)
-        assertEquals(0.0, lockedX.panDx(10.0), 1e-9)
-        assertEquals(0.0, lockedX.panVelocity(900.0, 0.0).x, 1e-9)
-    }
-
-    /**
- * The glide's length is stored as a length and reads back as a reciprocal friction.
- *
- * A glide is an exponential decay, so how long it lasts is set by how fast the speed falls and not
- * by a duration. That makes length and friction inverse rather than proportional, and it is why the
- * slider says "how far" and not "how long": halving the friction does not halve the glide, it
- * doubles it, because the slower decay is what lets the same starting speed carry further.
- */
-@Test fun theGlideIsStoredAsALengthAndReadsBackAsItsReciprocal() {
-        val pan = ToolConfig()
-        assertEquals(1.0, pan.panGlide, 1e-9)
-        assertTrue(pan.panGlides())
-        assertEquals(ToolConfig.DEFAULT_GLIDE_FRICTION, pan.panFriction(), 1e-9)
-
-        // Twice the glide, half the friction; four times, a quarter of it.
-        assertEquals(ToolConfig.DEFAULT_GLIDE_FRICTION / 2.0, pan.copy(panGlide = 2.0).panFriction(), 1e-9)
-        assertEquals(ToolConfig.DEFAULT_GLIDE_FRICTION / 4.0, pan.copy(panGlide = 4.0).panFriction(), 1e-9)
-
-        // No glide at all: the view stops where the finger did, which is a refusal to start one
-        // rather than a very fast decay that would still move a frame's worth.
-        val none = pan.copy(panGlide = 0.0)
-        assertFalse(none.panGlides())
-        assertTrue(none.panFriction() > ToolConfig.DEFAULT_GLIDE_FRICTION)
-    }
-
-    /** The locks are the pan's, so they ship off and are remembered like any other tool setting. */
-    @Test fun thePanLocksNothingByDefaultAndArePersisted() {
+    @Test fun panDeltaLocksAndScales() {
         val pan = ToolDefaults.configFor(Tool.PAN)
         assertFalse(pan.lockPanX)
         assertFalse(pan.lockPanY)
+        assertEquals(5, pan.panSensitivity)
+        assertTrue(pan.panGlide)
         assertTrue(Tool.PAN in ToolDefaults.persistedTools)
+
+        assertEquals(Pt(3.0, 4.0), pan.panDelta(3.0, 4.0))
+        assertEquals(Pt(0.0, 4.0), pan.copy(lockPanX = true).panDelta(3.0, 4.0))
+        assertEquals(Pt(3.0, 0.0), pan.copy(lockPanY = true).panDelta(3.0, 4.0))
+        assertEquals(0.2, pan.copy(panSensitivity = 1).panDelta(1.0, 0.0).x, 1e-9)
+        assertEquals(3.0, pan.copy(panSensitivity = 10).panDelta(1.0, 0.0).x, 1e-9)
     }
 }

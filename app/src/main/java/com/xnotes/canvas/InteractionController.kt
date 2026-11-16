@@ -258,6 +258,9 @@ class InteractionController(
     /** Whether a finger draws (true) or pans (false). The stylus always uses the armed tool. */
     var fingerDraws: Boolean = false
 
+    /** Panning allowed while zoom is locked: "single" (default) | "double" | "none". */
+    var zoomLockPan: String = "single"
+
     /** Whether holding a freehand ink stroke still snaps it to a recognized shape (spec: "hold to snap"). */
     var detectShapes: Boolean = false
 
@@ -968,9 +971,9 @@ class InteractionController(
             if (effectiveTool != Tool.PAN) text.clear()
         }
 
-        // Both pan axes held: the drag cannot move the view, so it is not begun at all. The pointer
-        // stays free, so a long press still picks up an item or selects text.
-        if (effectiveTool == Tool.PAN && !panCfg().panCanMove) {
+        // Zoom-lock pan preference, or both pan axes locked: swallow a single-finger pan.
+        // The pointer stays free, so a long press still picks up an item or selects text.
+        if (effectiveTool == Tool.PAN && (!singleFingerPanAllowed() || panCfg().lockPanX && panCfg().lockPanY)) {
             mode = PointerMode.IDLE
             lockedPressAt = Pt(vx, vy)
             armLongPress(Pt(vx, vy), content, isFinger, free)
@@ -4734,8 +4737,10 @@ class InteractionController(
 
     // --- PAN ---
 
-    // The pan tool's own axis locks, read per sample rather than latched at pen-down so the setting
-    // can be changed from the menu mid-drag and take hold at once, like every other tool setting.
+    // When zoom is locked, the zoomLockPan preference decides which pan gestures still move the
+    // viewport: "single" keeps both, "double" drops the single finger, "none" freezes the page.
+    private fun singleFingerPanAllowed(): Boolean = !(state.zoomLocked && zoomLockPan != "single")
+    private fun pinchPanAllowed(): Boolean = !(state.zoomLocked && zoomLockPan == "none")
     private fun panCfg() = configFor(Tool.PAN)
 
     private fun beginPan(vx: Double, vy: Double, fromPenButton: Boolean = false) {
@@ -4748,9 +4753,9 @@ class InteractionController(
     private fun extendPan(vx: Double, vy: Double) {
         trackVelocity(vx, vy)
         onUserMovedView?.invoke()
-        val cfg = panCfg()
-        val dx = cfg.panDx(-(vx - lastPan.x))
-        var dy = cfg.panDy(-(vy - lastPan.y))
+        val pan = panCfg().panDelta(-(vx - lastPan.x), -(vy - lastPan.y))
+        val dx = pan.x
+        var dy = pan.y
         if (!state.verticalScroll) {
             extendPanPaginated(dx, dy)
             lastPan = Pt(vx, vy)
@@ -4849,10 +4854,7 @@ class InteractionController(
         val pull = state.flipOffsetX
         // A finger that stopped before lifting has no flick left, however fast it moved earlier.
         val stopped = System.nanoTime() / 1_000_000L - lastMoveMs > PaginatedFlipPolicy.RELEASE_MOTION_MAX_AGE_MS
-        val raw = if (stopped) Pt.ZERO else panVel
-        // A flip is a horizontal move, so a held axis refuses it here as it refuses the drag that
-        // would otherwise have earned it.
-        val v = Pt(panCfg().panDx(raw.x), panCfg().panDy(raw.y))
+        val v = if (stopped) Pt.ZERO else panCfg().panDelta(panVel.x, panVel.y)
         val deliberate = PaginatedFlipPolicy.shouldCommitOnRelease(
             pull, state.viewportW, state.devicePxPerDp, v.x, v.y, state.zoom,
         )
@@ -4967,12 +4969,9 @@ class InteractionController(
     }
 
     private fun startFling(fingerVel: Pt) {
-        // The glide is part of the pan, so it obeys the axis locks the drag did: the finger really
-        // did move sideways, but a held axis does not carry on moving once the finger is up. A flick
-        // along a locked axis alone is therefore no flick at all, and starts no glide.
-        val vel = panCfg().panVelocity(fingerVel.x, fingerVel.y)
-        if (!panCfg().panGlides() || vel.length() < FLING_MIN_START) return
-        flingVel = Pt(-vel.x, -vel.y) // scroll moves opposite the finger
+        val vel = panCfg().panDelta(-fingerVel.x, -fingerVel.y) // scroll moves opposite the finger
+        if (!panCfg().panGlide || vel.length() < FLING_MIN_START) return
+        flingVel = vel
         flinging = true
         lastFlingMs = System.nanoTime() / 1_000_000L
         choreographer.postFrameCallback(flingFrame)
@@ -4990,7 +4989,7 @@ class InteractionController(
         val beforeX = state.scrollX
         val beforeY = state.scrollY
         state.scrollBy(flingVel.x * dt, flingVel.y * dt)
-        val decay = exp(-panCfg().panFriction() * dt)
+        val decay = exp(-FLING_FRICTION * dt)
         flingVel = Pt(flingVel.x * decay, flingVel.y * decay)
         onViewChanged()
         requestRender()
@@ -5168,7 +5167,7 @@ class InteractionController(
         val mid = (a + b) * 0.5
         trackVelocity(mid.x, mid.y)
         // Zoom lock: pan only (keep the initial zoom).
-        val raw = (pinchInitZoom * panCfg().zoomRatio(dist / pinchInitDist)).coerceIn(state.minZoom, state.maxZoom)
+        val raw = (pinchInitZoom * (dist / pinchInitDist)).coerceIn(state.minZoom, state.maxZoom)
         val wasFit = state.fitWidthActive || state.fitHeightActive
         // Magnetic fit: the live zoom sticks to fit-width — and, paginated, fit-height — while
         // within the band (pinch past it to break free). The lock hint surfaces the moment a
@@ -5183,15 +5182,9 @@ class InteractionController(
             if (!wasFit && nowFit) onFitWidthSnapped()
             else if (wasFit && !nowFit) onFitWidthReleased()
         }
-        // The pinch's midpoint pans the view as well as zooming it. A held axis keeps whatever it had
-        // rather than being re-derived from the anchor — that is what "held" means, and it is why
-        // the axis locks are read here as well as in the one-finger pan.
-        val cfg = panCfg()
-        val freeX = !cfg.lockPanX
-        val freeY = !cfg.lockPanY
-        val targetX = if (freeX) pinchAnchorContent.x * z - mid.x else state.scrollX
-        val targetY = if (freeY) pinchAnchorContent.y * z - mid.y else state.scrollY
-        if (freeX || freeY) {
+        if (pinchPanAllowed()) {
+            val targetX = if (panCfg().lockPanX) state.scrollX else pinchAnchorContent.x * z - mid.x
+            val targetY = if (panCfg().lockPanY) state.scrollY else pinchAnchorContent.y * z - mid.y
             state.scrollX = targetX
             state.scrollY = targetY
             state.clampScroll()
@@ -5235,7 +5228,7 @@ class InteractionController(
         }
         onViewChanged()
         requestRender()
-        if (!panCfg().panCanMove) return
+        if (!pinchPanAllowed()) return
         when {
             state.overscrollY > 0.0 -> releaseOverscroll()
             !state.verticalScroll && state.flipOffsetX != 0.0 -> endPanPaginated()
@@ -5838,6 +5831,7 @@ class InteractionController(
 
         // Inertial fling tuning (viewport px/s).
         const val VEL_SMOOTH = 0.4 // EMA weight on the previous velocity estimate
+        const val FLING_FRICTION = 2.5 // higher = stops sooner; lower = floatier
         const val FLING_MIN_START = 120.0 // minimum flick velocity to start a glide
         const val FLING_MIN_STOP = 24.0 // velocity at which the glide ends
 

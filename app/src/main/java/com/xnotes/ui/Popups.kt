@@ -103,6 +103,7 @@ import com.xnotes.core.shapes.ShapeKind
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
 import com.xnotes.core.tools.ToolConversions
+import com.xnotes.core.tools.ToolDefaults
 import com.xnotes.platform.FontCatalog
 import com.xnotes.platform.TemplateLibrary
 import com.xnotes.settings.Preferences
@@ -1005,78 +1006,32 @@ private fun ZoomLimitRow(label: String, enabled: Boolean, value: Int, onToggle: 
     }
 }
 
-/** The sensitivity sliders' range, as a percent of the app's own rate (1.0 is stored as 100). */
-private val PAN_SENSITIVITY_PCT = 0f..(ToolConfig.PAN_SENSITIVITY_MAX.toFloat() * 100f)
-
-/** The glide slider's range: nothing, up to four times the app's own glide. */
-private val PAN_GLIDE_PCT = 0f..(ToolConfig.PAN_GLIDE_MAX.toFloat() * 100f)
-
-/**
- * Pan configuration popup: what a pan may move along, and how fast.
- *
- * The pan had no settings of its own, so a hand that wanted a horizontal-only scroll — or a faster
- * one — had no way to ask. Its settings belong beside the pen's and the eraser's rather than in the
- * general preferences: they are about how this tool moves, not about the person.
- */
+/** Pan configuration popup: which axes a finger pan moves along, how fast, and whether a flick glides on. */
 @Composable
 fun PanConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
-    val base = remember { editor.toolConfig(Tool.PAN) }
-    var lockX by remember { mutableStateOf(base.lockPanX) }
-    var lockY by remember { mutableStateOf(base.lockPanY) }
-    var zoomLocked by remember { mutableStateOf(editor.hostZoomLocked) }
-    // The sliders work in percent of the app's own rate, because that is the unit a hand can read;
-        // the stored value is the same thing as a plain multiple.
-    var speedX by remember { mutableStateOf((base.panSpeedX * 100).toFloat()) }
-    var speedY by remember { mutableStateOf((base.panSpeedY * 100).toFloat()) }
-    var zoomRate by remember { mutableStateOf((base.zoomSensitivity * 100).toFloat()) }
-    var glide by remember { mutableStateOf((base.panGlide * 100).toFloat()) }
-
-    fun emit() = editor.updateToolConfig(
-        Tool.PAN,
-        base.copy(
-            lockPanX = lockX,
-            lockPanY = lockY,
-            panSpeedX = speedX.toDouble() / 100.0,
-            panSpeedY = speedY.toDouble() / 100.0,
-            zoomSensitivity = zoomRate.toDouble() / 100.0,
-            panGlide = glide.toDouble() / 100.0,
-        ),
-    )
+    var cfg by remember { mutableStateOf(editor.toolConfig(Tool.PAN)) }
+    fun emit(next: ToolConfig) { cfg = next; editor.updateToolConfig(Tool.PAN, next) }
 
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
         Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
             PopupTitle(stringResource(R.string.tool_pan))
-
-            // What the view may do, as three independent holds. The zoom lock is the toolbar's own
-            // setting, reached from here as well so a hand that is setting the pan up has one place
-            // to do it — not a second lock that would have to agree with the first.
             StyleCaption(stringResource(R.string.caption_pan_axes))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                ModeChip(stringResource(R.string.pan_axis_x), selected = lockX) { lockX = !lockX; emit() }
-                ModeChip(stringResource(R.string.pan_axis_y), selected = lockY) { lockY = !lockY; emit() }
-                ModeChip(stringResource(R.string.pan_axis_zoom), selected = zoomLocked) {
-                    zoomLocked = !zoomLocked
-                    editor.toggleHostZoomLock()
+                ModeChip(stringResource(R.string.pan_axis_x), selected = !cfg.lockPanX) { emit(cfg.copy(lockPanX = !cfg.lockPanX)) }
+                ModeChip(stringResource(R.string.pan_axis_y), selected = !cfg.lockPanY) { emit(cfg.copy(lockPanY = !cfg.lockPanY)) }
+                ModeChip(stringResource(R.string.pan_axis_zoom), selected = !editor.hostZoomLocked) { editor.toggleHostZoomLock() }
+            }
+            Spacer(Modifier.size(12.dp))
+            // Snaps to whole steps without the slider's tick dots.
+            SliderRow(stringResource(R.string.caption_pan_sensitivity), cfg.panSensitivity.toFloat(), 1f..10f) { emit(cfg.copy(panSensitivity = it.roundToInt())) }
+            ToggleRow(stringResource(R.string.caption_pan_glide), cfg.panGlide) { emit(cfg.copy(panGlide = it)) }
+            Spacer(Modifier.size(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                ModeChip(stringResource(R.string.reset), false) {
+                    val d = ToolDefaults.configFor(Tool.PAN)
+                    emit(cfg.copy(lockPanX = d.lockPanX, lockPanY = d.lockPanY, panSensitivity = d.panSensitivity, panGlide = d.panGlide))
                 }
             }
-
-            Spacer(Modifier.size(12.dp))
-            // How fast each axis answers, as a multiple of the app's own rate rather than as a
-            // physical width, because that is what a hand is adjusting: "twice as quick". A slider
-            // at 0 and a locked axis look alike until you try to drag, so the holds above say what
-            // the sliders below cannot — that an axis is not going to move at all.
-            StyleCaption(stringResource(R.string.caption_pan_sensitivity))
-            SliderRow(stringResource(R.string.pan_axis_x), speedX, PAN_SENSITIVITY_PCT) { speedX = it; emit() }
-            SliderRow(stringResource(R.string.pan_axis_y), speedY, PAN_SENSITIVITY_PCT) { speedY = it; emit() }
-            SliderRow(stringResource(R.string.pan_axis_zoom), zoomRate, PAN_SENSITIVITY_PCT) { zoomRate = it; emit() }
-
-            Spacer(Modifier.size(12.dp))
-            // How far a lifted drag keeps going. Separate from the rate above because they answer
-            // different questions: a fast drag that stops where the finger did is a thing people
-            // want, and no setting of the rate can produce it — halving the friction doubles the
-            // glide rather than shortening it, since the glide is an exponential decay.
-            StyleCaption(stringResource(R.string.caption_pan_glide))
-            SliderRow(stringResource(R.string.caption_glide), glide, PAN_GLIDE_PCT) { glide = it; emit() }
         }
     }
 }

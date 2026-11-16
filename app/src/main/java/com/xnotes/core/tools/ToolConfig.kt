@@ -135,18 +135,14 @@ data class ToolConfig(
     val markupIntensity: Double = DEFAULT_MARKUP_INTENSITY,
     /** Eraser: also take off the PDF text markups it touches. Only used by [Tool.ERASER]. */
     val eraseMarkups: Boolean = true,
-    /** Pan: the horizontal axis is held still, so a drag only moves the view up and down. Only [Tool.PAN]. */
+    /** Pan: the view does not move sideways. Applies to every finger pan, whichever tool is armed. */
     val lockPanX: Boolean = false,
-    /** Pan: the vertical axis is held still, so a drag only moves the view sideways. Only [Tool.PAN]. */
+    /** Pan: the view does not move up and down. */
     val lockPanY: Boolean = false,
-    /** Pan: how many times as fast the view follows a drag along x; 1.0 is the app's own rate. */
-    val panSpeedX: Double = 1.0,
-    /** Pan: how many times as fast the view follows a drag along y. */
-    val panSpeedY: Double = 1.0,
-    /** Pan: how many times as fast a pinch zooms, applied to the pinch's ratio; 1.0 is the app's own rate. */
-    val zoomSensitivity: Double = 1.0,
-    /** Pan: how many times as long a lifted drag keeps gliding; 1.0 is the app's own glide, 0 stops dead. */
-    val panGlide: Double = 1.0,
+    /** Pan: how fast the view follows a finger, 1..10; 5 is the app's own rate. */
+    val panSensitivity: Int = 5,
+    /** Pan: a flick keeps the view gliding after the finger lifts. */
+    val panGlide: Boolean = true,
     /** Eraser: a pen scribbled over ink erases what it touches. Only used by [Tool.ERASER]. */
     val scribbleErase: Boolean = false,
     /** Eraser: the kinds of item it may take off the page. Only used by [Tool.ERASER]. */
@@ -166,67 +162,15 @@ data class ToolConfig(
     /** Stabilization: the speed in dp/s below which movement counts as slow and is steadied hardest. */
     val stabilizeCrossover: Double = Stabilizer.DEFAULT_CROSSOVER,
 ) {
-    /**
-     * The pan's own rule for a drag, so the paged canvas and the unpaged one cannot answer
-     * differently about what a held axis means.
-     *
-     * A locked axis is taken out of the delta rather than cancelling the gesture: a vertical drag
-     * on a horizontally-locked pan is still a drag, it just moves nothing sideways, and a long press
-     * over it still reaches whatever is underneath.
-     */
-    fun panDx(dx: Double): Double = if (lockPanX) 0.0 else dx * panSpeedX
-    fun panDy(dy: Double): Double = if (lockPanY) 0.0 else dy * panSpeedY
-
-    /**
-     * The pan's own velocity rule, for the glide that follows a lifted drag.
-     *
-     * A glide is part of the pan, not a separate motion: a held axis stops when the finger stops
-     * rather than coasting on afterwards, and a flick that was only ever along a held axis is not a
-     * flick at all.
-     */
-    fun panVelocity(vx: Double, vy: Double): Pt = Pt(panDx(vx), panDy(vy))
-
-    /**
-     * [ratio] — the pinch's distance over its starting distance — pulled toward 1 by the factor, so
-     * 0.0 stands still, 1.0 is the app's own rate and 2.0 spreads twice as far.
-     *
-     * The factor is applied to the ratio rather than to the resulting scale because that is what
-     * makes it mean the same thing in both directions: doubling the rate zooms in twice as far and
-     * out twice as far, instead of halving the exponent and only ever making zooming-in faster.
-     */
-    fun zoomRatio(ratio: Double): Double = 1.0 + (ratio - 1.0) * zoomSensitivity
-
-    /**
-     * How far a lifted drag keeps going, as a multiple of the app's own glide. 1.0 is the ordinary
-     * length, 0.0 stops dead where the finger did.
-     *
-     * The glide decays exponentially, so what sets its length is how fast the speed falls rather
-     * than a duration — which is why the friction is the reciprocal of the length, and why halving
-     * the friction does not halve the glide but doubles it. A hand describes this as the glide
-     * feeling heavy or floaty, not as a time, so that is what is stored.
-     */
-    fun panGlides(): Boolean = panGlide > 0.0
-    fun panFriction(): Double = DEFAULT_GLIDE_FRICTION / panGlide.coerceAtLeast(GLIDE_MIN)
-
-    /** False only when both axes are held — the one case where a pan cannot move the view at all. */
-    val panCanMove: Boolean get() = !(lockPanX && lockPanY)
+    /** A finger's move turned into the view's move: locked axes drop out, the rest is scaled (1 -> 0.2x, 10 -> 3x). */
+    fun panDelta(dx: Double, dy: Double): Pt {
+        val k = if (panSensitivity <= 5) panSensitivity / 5.0 else 1.0 + (panSensitivity - 5) * 0.4
+        return Pt(if (lockPanX) 0.0 else dx * k, if (lockPanY) 0.0 else dy * k)
+    }
 
     companion object {
         const val DEFAULT_MARKUP_INTENSITY = 0.9
         const val MARKUP_INTENSITY_MIN = 0.1
-
-        /** Ceiling on the pan's sensitivity sliders, as a multiple of the app's own rate. Zero is
-         *  the floor: a slider at 0 means "never moves", which is why an axis lock says so in words. */
-        const val PAN_SENSITIVITY_MAX = 3.0
-
-        /** Ceiling on the glide slider, likewise a multiple of the app's own glide length. */
-        const val PAN_GLIDE_MAX = 4.0
-
-        /** The app's own glide decay (1/s). Its reciprocal is the ordinary glide length. */
-        const val DEFAULT_GLIDE_FRICTION = 2.5
-
-        /** The shortest glide that still ends by running out of speed rather than by its own clamp. */
-        const val GLIDE_MIN = 0.05
     }
 }
 

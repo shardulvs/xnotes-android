@@ -410,10 +410,9 @@
     <string name="pan_single">Single-finger pan</string>
     <string name="pan_two">Two-finger pan</string>
     <string name="pan_none">No pan</string>
-    <string name="caption_pan_axes">Axes the view moves on</string>
+    <string name="caption_pan_axes">Pan along</string>
     <string name="caption_pan_sensitivity">Sensitivity</string>
     <string name="caption_pan_glide">Glide</string>
-    <string name="caption_glide">How far a pan carries on</string>
     <string name="pan_axis_x">X</string>
     <string name="pan_axis_y">Y</string>
     <string name="pan_axis_zoom">Zoom</string>

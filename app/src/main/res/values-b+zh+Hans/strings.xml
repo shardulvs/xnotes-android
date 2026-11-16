@@ -346,10 +346,9 @@
     <string name="pan_single">单指平移</string>
     <string name="pan_two">双指平移</string>
     <string name="pan_none">不平移</string>
-    <string name="caption_pan_axes">视图可移动的方向</string>
+    <string name="caption_pan_axes">平移方向</string>
     <string name="caption_pan_sensitivity">灵敏度</string>
     <string name="caption_pan_glide">滑行</string>
-    <string name="caption_glide">平移后继续滑动的距离</string>
     <string name="pan_axis_x">X</string>
     <string name="pan_axis_y">Y</string>
     <string name="pan_axis_zoom">缩放</string>

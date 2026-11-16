@@ -393,9 +393,7 @@ data class Settings(
             .put("erasable_kinds", JSONArray(c.erasableKinds.map { it.id }))
             .put("lock_pan_x", c.lockPanX)
             .put("lock_pan_y", c.lockPanY)
-            .put("pan_speed_x", c.panSpeedX)
-            .put("pan_speed_y", c.panSpeedY)
-            .put("zoom_sensitivity", c.zoomSensitivity)
+            .put("pan_sensitivity", c.panSensitivity)
             .put("pan_glide", c.panGlide)
             .put("switch_back_after_select", c.switchBackAfterSelect)
             .put("select_whole_items", c.selectWholeItems)
@@ -448,10 +446,8 @@ data class Settings(
                 snapToMargins = o.optBoolean("snap_to_margins", d.snapToMargins),
                 lockPanX = o.optBoolean("lock_pan_x", d.lockPanX),
                 lockPanY = o.optBoolean("lock_pan_y", d.lockPanY),
-                panSpeedX = o.optDouble("pan_speed_x", d.panSpeedX).coerceIn(0.0, ToolConfig.PAN_SENSITIVITY_MAX),
-                panSpeedY = o.optDouble("pan_speed_y", d.panSpeedY).coerceIn(0.0, ToolConfig.PAN_SENSITIVITY_MAX),
-                zoomSensitivity = o.optDouble("zoom_sensitivity", d.zoomSensitivity).coerceIn(0.0, ToolConfig.PAN_SENSITIVITY_MAX),
-                panGlide = o.optDouble("pan_glide", d.panGlide).coerceIn(0.0, ToolConfig.PAN_GLIDE_MAX),
+                panSensitivity = o.optInt("pan_sensitivity", d.panSensitivity).coerceIn(1, 10),
+                panGlide = o.optBoolean("pan_glide", d.panGlide),
                 straightLine = o.optBoolean("straight_line", d.straightLine),
                 scale = o.optBoolean("scale", d.scale),
                 highlighterAlpha = o.optDouble("highlighter_alpha", d.highlighterAlpha),

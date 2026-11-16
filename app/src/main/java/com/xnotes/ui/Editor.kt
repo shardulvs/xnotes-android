@@ -3031,6 +3031,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             thumbnailVersion++
         }
         controller.fingerDraws = p.fingerDraws
+        controller.zoomLockPan = p.zoomLockPan
         controller.detectShapes = p.detectShapes
         controller.snapRotation90 = p.snapRotation90
         flowText.markdownInput = p.markdownInput
