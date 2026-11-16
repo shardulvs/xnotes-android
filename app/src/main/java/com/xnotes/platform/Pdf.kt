@@ -88,11 +88,10 @@ object PdfImporter {
  *
  * The imported PDF background stays **vector** — its pages are copied straight into the output via
  * PdfBox, never rasterized — so a 4 MB source no longer balloons into a 100 MB export. Annotations
- * are drawn on top: plain ink, shapes and inserted images become real vector/image objects through
- * [PdfBoxRenderer], and the typed flow and text boxes become real, selectable text. Only
- * effect-heavy items (neon glow, the highlighter's multiply blend, translucent ink) are rasterized
- * in place: cropped to their own box, drawn at the right z-order, and (for the highlighter)
- * composited with Multiply so they still tint what's below.
+ * are drawn on top: ink (the highlighter and translucent ink as transparency groups), shapes and
+ * inserted images become real vector/image objects through [PdfBoxRenderer], and the typed flow and
+ * text boxes become real, selectable text. Only neon, whose glow is a blur, is rasterized in place,
+ * cropped to its own box and drawn at the right z-order.
  *
  * A source page turned by `/Rotate` goes in as it is, with the overlay drawn turned to match
  * ([PageFrame]). If PdfBox cannot parse the source PDF at all we fall back to the framework
@@ -465,7 +464,7 @@ object PdfExporter {
             renderer.beginMark(PdfTags.markOf(item))
             if (PdfItemRaster.needsRaster(item)) {
                 PdfItemRaster.item(item, cover)?.let { raster ->
-                    renderer.drawItemBitmap(raster.bmp, raster.rect, raster.multiply)
+                    renderer.drawItemBitmap(raster.bmp, raster.rect)
                     raster.bmp.recycle()
                 }
                 if (item is ShapeItem) item.paintLabel(renderer)
