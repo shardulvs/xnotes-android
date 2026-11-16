@@ -164,7 +164,7 @@ private fun SplitDivider(
     // Read inside the long-lived drag gesture, which does not restart as the ratio moves.
     val ratioNow = rememberUpdatedState(ratio)
     val onRatioNow = rememberUpdatedState(onRatio)
-    var dragged by remember { mutableStateOf(0f) }
+    var dragged by remember { mutableFloatStateOf(0f) }
     Box(
         modifier = modifier
             .pointerInput(sideBySide, extentPx) {

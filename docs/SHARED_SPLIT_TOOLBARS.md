@@ -109,12 +109,12 @@ and **12 instrumentation tests on the Redmi Pad 2** passed. The validation packa
 `com.xnotes.sharedsplit`, separate from the installed community/debug packages. The in-note
 preference test uses real system-dispatched touches, including the popover window.
 
-`lintDebug` was also run. It is not green: it reports 243 errors in source lines already present
-in upstream `3926304a` (API/constant/restricted-call checks, resource calls, missing existing
-translations and byte-order marks). Each error location's offending source line was compared
-against upstream. No error was on a new source line; the new strings have both existing locales.
-This does not claim that a complete lint run on an untouched upstream checkout was performed.
-
+`lintDebug` was rerun on 2026-11-16 against upstream `6d60eae9`. It is not green:
+260 errors were reported, but every error's offending source line also exists unchanged in
+upstream `master`; none came from a newly added source line. The report also pointed out two
+primitive Compose states in the extracted UI, which were changed to `mutableIntStateOf` and
+`mutableFloatStateOf`. This is a source-line comparison, not a clean lint run on a separate
+untouched upstream checkout.
 
 A fresh validation on 2026-11-16 after the extraction passed **2,515 JVM tests** with
 no failures or skips (US JVM locale), and produced isolated x86_64 debug and instrumentation APKs.

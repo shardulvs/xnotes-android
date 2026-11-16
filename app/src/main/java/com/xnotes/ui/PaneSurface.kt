@@ -249,7 +249,7 @@ private fun BoxScope.ZoomLockHint(editor: Editor) {
     val palette = LocalPalette.current
     var visible by remember { mutableStateOf(false) }
     // Bumped on the initial fit-width snap and on every tap; (re)starts the auto-dismiss timer below.
-    var armToken by remember { mutableStateOf(0) }
+    var armToken by remember { mutableIntStateOf(0) }
     LaunchedEffect(editor.zoomLockHint) {
         if (editor.zoomLockHint > 0) {
             visible = true
