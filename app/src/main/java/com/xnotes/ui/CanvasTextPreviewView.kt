@@ -1,5 +1,6 @@
 package com.xnotes.ui
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.DashPathEffect
@@ -8,7 +9,6 @@ import android.graphics.Path
 import android.text.StaticLayout
 import android.view.View
 import com.xnotes.canvas.ResizeMath
-import com.xnotes.core.geometry.Pt
 import com.xnotes.core.infinite.CanvasSelection
 import com.xnotes.core.infinite.CanvasViewport
 import com.xnotes.core.infinite.OverlayTessellator
@@ -21,6 +21,7 @@ import com.xnotes.platform.AndroidText
  * Native XNote text layout for an XCanvas gesture or a pending GL mesh.
  * Text and selection chrome share a single frame so rapid movements cannot desynchronize them.
  */
+@SuppressLint("ViewConstructor") // Created programmatically with editor-owned viewport and selection.
 internal class CanvasTextPreviewView(
     context: Context,
     private val viewport: CanvasViewport,
@@ -94,24 +95,31 @@ internal class CanvasTextPreviewView(
     override fun onDraw(canvas: Canvas) {
         val text = item ?: return
         if (text.text.isEmpty()) return
-        val key = LayoutKey(text.text, text.width.toInt().coerceAtLeast(1), text.pointSize, text.face, text.rgba)
-        val layout = cachedLayout?.takeIf { layoutKey == key }
-            ?: AndroidText.layout(
-                text.text, key.width,
-                AndroidText.textPaint(
-                    text.font,
-                    android.graphics.Color.argb(text.rgba.a, text.rgba.r, text.rgba.g, text.rgba.b),
-                ),
-                TextItem.FLAGS,
-            ).also {
-                layoutKey = key
-                cachedLayout = it
-            }
+        val width = text.width.toInt().coerceAtLeast(1)
+        val previous = layoutKey
+        val layout = cachedLayout?.takeIf {
+            previous != null && previous.text == text.text && previous.width == width &&
+                previous.pointSize == text.pointSize && previous.face == text.face &&
+                previous.color == text.rgba
+        } ?: AndroidText.layout(
+            text.text, width,
+            AndroidText.textPaint(
+                text.font,
+                android.graphics.Color.argb(text.rgba.a, text.rgba.r, text.rgba.g, text.rgba.b),
+            ),
+            TextItem.FLAGS,
+        ).also {
+            layoutKey = LayoutKey(text.text, width, text.pointSize, text.face, text.rgba)
+            cachedLayout = it
+        }
 
-        val at = viewport.contentToViewport(Pt(text.pos.x + liftDx, text.pos.y + liftDy))
+        val zoom = viewport.zoom
         canvas.save()
-        canvas.translate(at.x.toFloat(), at.y.toFloat())
-        canvas.scale(viewport.zoom.toFloat(), viewport.zoom.toFloat())
+        canvas.translate(
+            ((text.pos.x + liftDx - viewport.scrollX) * zoom).toFloat(),
+            ((text.pos.y + liftDy - viewport.scrollY) * zoom).toFloat(),
+        )
+        canvas.scale(zoom.toFloat(), zoom.toFloat())
         layout.draw(canvas)
         canvas.restore()
         if (selected().items.singleOrNull() === text) drawChrome(canvas)

@@ -2,7 +2,6 @@ package com.xnotes.ui
 
 import android.app.Activity
 import android.content.Intent
-import android.graphics.Bitmap
 import android.os.SystemClock
 import android.test.InstrumentationTestCase
 import com.xnotes.core.model.TextItem
