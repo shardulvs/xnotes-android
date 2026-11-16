@@ -42,6 +42,9 @@
 - **Text toolbar**: the text toolbar is ordered like Google Docs or Word, with a slash button that opens the same menu as typing /.
 - **Automatic text colour**: text colour follows the page background so text stays readable.
 - **General settings**: a General section in Preferences for app-wide options.
+- **Zoom menu**: the toolbar zoom menu has a zoom lock and starred zoom levels, with an optional zoom bar on the canvas that can be turned off.
+- **Pan menu**: lock panning to one axis, and set its sensitivity and how long it glides.
+- **Translations**: Czech, Spanish and French.
 - ~~**Create menu**: the new-note button is now a list to create a note, canvas, folder, or import a file.~~
 - ~~**Sort button**: moved sorting out into its own dedicated button.~~
 - ~~**Find in notes**: search the text of a note.~~
