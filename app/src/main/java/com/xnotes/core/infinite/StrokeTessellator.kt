@@ -1,10 +1,15 @@
 package com.xnotes.core.infinite
 
+import com.xnotes.core.geometry.Geometry
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.stroke.RibbonPoints
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.atan2
+import kotlin.math.ceil
+import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.sin
 
 /**
  * A triangle mesh in content space. Positions are doubles because the canvas is unbounded: a float
@@ -44,13 +49,17 @@ class MeshData(
  * triangles with the current zoom pushed in as a uniform, so ink is resolution independent: there
  * is no raster to be at the wrong scale, and no blur to resolve when a pinch settles.
  *
- * The ribbon needs no triangulator. [RibbonPoints] already carries both rails, a vertex on each
- * per centreline point, so a quad's four corners are read straight off them. Consecutive quads
- * share their whole edge exactly, so the body is watertight with no join geometry at all.
+ * The silhouette is the paged painter's ([com.xnotes.core.pal.Renderer.fillDiskRibbon]): a brush
+ * disc swept down the centreline, each segment the hull of its two end discs. A hull's sides are
+ * tangent to both discs, so they lean back where the brush grows and forward where it shrinks. Rails
+ * laid square across the centreline miss exactly that lean, which is most of what a calligraphy nib
+ * does, and drew its swells thinner and more angular here than on a page.
  *
- * What the rails do not cover is the round ends, and the outer notch where the stroke turns hard
- * enough that the two quads pinch. Both are filled with a disc, which is what the paged renderer
- * sweeps down the centerline, so the silhouette matches the ink the rest of the app draws.
+ * Each hull's straight part is one quad between its four tangent points. Where two meet at a
+ * sample their tangent points nearly coincide, so they share one vertex on the disc's rim there,
+ * and a smooth stroke costs a quad per segment. Where the edge really kinks, at a turn or where the
+ * nib stops widening, each keeps its own and the rim between them is filled. The ends, and a disc
+ * that holds its neighbour whole, are drawn as whole discs.
  *
  * Antialiasing comes from multisampling on these triangle edges rather than from coverage computed
  * in a shader, because MSAA is the only one of the two that composes correctly where a stroke
@@ -72,11 +81,14 @@ object StrokeTessellator {
     const val MAX_CIRCLE_SEGMENTS = MeshBuilder.MAX_CIRCLE_SEGMENTS
 
     /**
-     * Turn angle, in radians, past which a sample gets its own disc. Below it the two ribbon quads
-     * already meet flush; above it their outer edges pinch and leave a notch the disc fills.
-     * Smoothed handwriting turns a fraction of this per sample, so discs stay rare.
+     * Turn angle, in radians, past which a join shows its own disc. Below it the two quads meeting
+     * there share one vertex and cut the rim between them by under half a percent of the radius;
+     * above it the rim is filled. Smoothed handwriting turns a fraction of this per sample.
      */
     const val JOIN_DISC_ANGLE = 0.18
+
+    /** Edge turn, in radians, past which a join is drawn as the sample's whole disc. */
+    private const val WHOLE_DISC_ANGLE = 2.0 * PI / 3.0
 
     /** Half-widths at or below this contribute nothing and are skipped. */
     private const val MIN_HALF_WIDTH = 1e-6
@@ -98,7 +110,8 @@ object StrokeTessellator {
      * which makes the quad bridging them fall to the later run and leaves no gap on the join.
      *
      * The discs a run puts at its own two ends are the same discs the sweep would place there, so
-     * they sit inside the ribbon and change nothing about its silhouette.
+     * they sit inside the ribbon and change nothing about its silhouette. A run reads nothing past
+     * its own points, so a run meshed once stays right however the stroke goes on.
      */
     fun tessellate(
         g: RibbonPoints,
@@ -108,7 +121,6 @@ object StrokeTessellator {
         widthScale: Double = 1.0,
     ): MeshData {
         if (count <= 0) return MeshData.EMPTY
-        val end = from + count
         val b = MeshBuilder(estimateVertices(count), estimateIndices(count))
         if (count == 1) {
             val h = g.hw(from) * widthScale
@@ -116,36 +128,188 @@ object StrokeTessellator {
             return b.build()
         }
         if (widthScale != 1.0) return scaledRibbon(g, from, count, tolerance, widthScale)
-        if (!g.hasRails) return b.build() // geometry without rails: nothing to draw
 
-        // Body: one quad per segment, both of its vertices taken straight off the rails, so
-        // consecutive quads share an entire edge and the ribbon never gaps along its length.
-        for (i in from until end - 1) {
-            val h0 = g.hw(i)
-            val h1 = g.hw(i + 1)
-            if (h0 <= MIN_HALF_WIDTH && h1 <= MIN_HALF_WIDTH) continue
-            // Each rail vertex remembers how far it sits from the centreline, so a stroke thinner
-            // than a pixel can be widened back to one and faded instead of breaking up.
-            val l0 = b.vertex(g.leftX(i), g.leftY(i), g.leftX(i) - g.cx(i), g.leftY(i) - g.cy(i))
-            val r0 = b.vertex(g.rightX(i), g.rightY(i), g.rightX(i) - g.cx(i), g.rightY(i) - g.cy(i))
-            val l1 = b.vertex(g.leftX(i + 1), g.leftY(i + 1), g.leftX(i + 1) - g.cx(i + 1), g.leftY(i + 1) - g.cy(i + 1))
-            val r1 = b.vertex(g.rightX(i + 1), g.rightY(i + 1), g.rightX(i + 1) - g.cx(i + 1), g.rightY(i + 1) - g.cy(i + 1))
-            b.triangle(l0, r0, r1)
-            b.triangle(l0, r1, l1)
+        // Each segment's tangent normals, left x, y then right x, y; none where one disc holds the
+        // other, and that disc is drawn whole instead. A disc held by its neighbour is never drawn
+        // whole itself: down a run of them the largest holds every one.
+        val segs = count - 1
+        val normals = DoubleArray(4 * segs)
+        val body = BooleanArray(segs)
+        val whole = BooleanArray(count)
+        val held = BooleanArray(count)
+        whole[0] = true
+        whole[count - 1] = true
+        val n = DoubleArray(4)
+        for (k in 0 until segs) {
+            val i = from + k
+            val r0 = g.hw(i)
+            val r1 = g.hw(i + 1)
+            if (r0 <= MIN_HALF_WIDTH && r1 <= MIN_HALF_WIDTH) continue
+            if (Geometry.capsule(g.cx(i), g.cy(i), r0, g.cx(i + 1), g.cy(i + 1), r1, n) == Geometry.SWALLOWED) {
+                val big = if (r0 >= r1) k else k + 1
+                whole[big] = true
+                held[if (big == k) k + 1 else k] = true
+                continue
+            }
+            body[k] = true
+            n.copyInto(normals, 4 * k)
         }
 
-        // Round ends. A whole disc rather than a half one: it costs two extra fans per stroke and
-        // removes every orientation question, and it is exactly the disc the paged renderer sweeps.
-        if (g.hw(from) > MIN_HALF_WIDTH) b.circle(g.cx(from), g.cy(from), g.hw(from), tolerance)
-        if (g.hw(end - 1) > MIN_HALF_WIDTH) b.circle(g.cx(end - 1), g.cy(end - 1), g.hw(end - 1), tolerance)
+        // The rim vertices each quad ends on (back) and starts from (front) at every sample.
+        val backL = IntArray(count)
+        val backR = IntArray(count)
+        val frontL = IntArray(count)
+        val frontR = IntArray(count)
+        for (k in 0 until count) {
+            val i = from + k
+            val x = g.cx(i)
+            val y = g.cy(i)
+            val r = g.hw(i)
+            val back = 4 * (k - 1)
+            val front = 4 * k
+            val hasBack = k > 0 && body[k - 1]
+            val hasFront = k < segs && body[k]
+            if (hasBack && hasFront && !whole[k]) {
+                val turnL = turn(normals, back, front)
+                val turnR = turn(normals, back + 2, front + 2)
+                if (abs(turnL) <= WHOLE_DISC_ANGLE && abs(turnR) <= WHOLE_DISC_ANGLE) {
+                    join(b, x, y, r, normals, back, front, turnL, turnR, tolerance, k, backL, backR, frontL, frontR)
+                    continue
+                }
+                whole[k] = true
+            }
+            if (hasBack) {
+                backL[k] = rim(b, x, y, r, normals[back], normals[back + 1])
+                backR[k] = rim(b, x, y, r, normals[back + 2], normals[back + 3])
+            }
+            if (hasFront) {
+                frontL[k] = rim(b, x, y, r, normals[front], normals[front + 1])
+                frontR[k] = rim(b, x, y, r, normals[front + 2], normals[front + 3])
+            }
+            if (whole[k] && !held[k] && r > MIN_HALF_WIDTH) b.circle(x, y, r, tolerance)
+        }
 
-        // Discs at the hard turns only.
-        for (i in from + 1 until end - 1) {
-            val h = g.hw(i)
-            if (h <= MIN_HALF_WIDTH) continue
-            if (turnAngle(g, i) > JOIN_DISC_ANGLE) b.circle(g.cx(i), g.cy(i), h, tolerance)
+        for (k in 0 until segs) {
+            if (!body[k]) continue
+            b.triangle(frontL[k], frontR[k], backR[k + 1])
+            b.triangle(frontL[k], backR[k + 1], backL[k + 1])
         }
         return b.build()
+    }
+
+    /**
+     * Where the two quads meeting at sample [k] attach to its disc, and the rim between them.
+     *
+     * A side whose edge turns less than [JOIN_DISC_ANGLE], or by less than [tolerance] of rim, gets
+     * one vertex both quads share, half way round. Otherwise each quad keeps its own tangent point
+     * and the rim between them is filled as one fan. The fan's points all lie on the disc, so it
+     * never paints outside the ink, and from back left round the front to back right it covers the
+     * notch on whichever side the stroke turns away from.
+     */
+    private fun join(
+        b: MeshBuilder,
+        x: Double,
+        y: Double,
+        r: Double,
+        normals: DoubleArray,
+        back: Int,
+        front: Int,
+        turnL: Double,
+        turnR: Double,
+        tolerance: Double,
+        k: Int,
+        backL: IntArray,
+        backR: IntArray,
+        frontL: IntArray,
+        frontR: IntArray,
+    ) {
+        if (r <= MIN_HALF_WIDTH) {
+            val c = b.vertex(x, y)
+            backL[k] = c
+            backR[k] = c
+            frontL[k] = c
+            frontR[k] = c
+            return
+        }
+        val shareL = shares(r, turnL, tolerance)
+        val shareR = shares(r, turnR, tolerance)
+        if (shareL) {
+            val v = midRim(b, x, y, r, normals, back, front)
+            backL[k] = v
+            frontL[k] = v
+        } else {
+            backL[k] = rim(b, x, y, r, normals[back], normals[back + 1])
+            frontL[k] = rim(b, x, y, r, normals[front], normals[front + 1])
+        }
+        if (shareR) {
+            val v = midRim(b, x, y, r, normals, back + 2, front + 2)
+            backR[k] = v
+            frontR[k] = v
+        } else {
+            backR[k] = rim(b, x, y, r, normals[back + 2], normals[back + 3])
+            frontR[k] = rim(b, x, y, r, normals[front + 2], normals[front + 3])
+        }
+        if (shareL && shareR) return
+
+        val step = 2.0 * PI / circleSegments(r, tolerance)
+        val anchor = backL[k]
+        var last = -1
+        fun fan(v: Int) {
+            if (v == anchor || v == last) return
+            if (last >= 0) b.triangle(anchor, last, v)
+            last = v
+        }
+        if (!shareL) arc(b, x, y, r, normals[back], normals[back + 1], turnL, step) { fan(it) }
+        fan(frontL[k])
+        fan(frontR[k])
+        if (!shareR) arc(b, x, y, r, normals[front + 2], normals[front + 3], -turnR, step) { fan(it) }
+        fan(backR[k])
+    }
+
+    /** Whether one vertex can stand for both quads' tangent points on a side whose edge turns [turn]. */
+    private fun shares(r: Double, turn: Double, tolerance: Double): Boolean =
+        abs(turn) <= JOIN_DISC_ANGLE || r * (1.0 - cos(turn / 2.0)) <= tolerance
+
+    /** The rim points strictly between normal ([nx], [ny]) and that normal turned by [sweep]. */
+    private inline fun arc(
+        b: MeshBuilder,
+        x: Double,
+        y: Double,
+        r: Double,
+        nx: Double,
+        ny: Double,
+        sweep: Double,
+        step: Double,
+        emit: (Int) -> Unit,
+    ) {
+        val parts = ceil(abs(sweep) / step).toInt()
+        for (t in 1 until parts) {
+            val a = sweep * t / parts
+            val c = cos(a)
+            val s = sin(a)
+            emit(rim(b, x, y, r, nx * c - ny * s, nx * s + ny * c))
+        }
+    }
+
+    /** Signed angle from the normal at [a] to the one at [c], both packed x, y in [normals]. */
+    private fun turn(normals: DoubleArray, a: Int, c: Int): Double {
+        val ax = normals[a]
+        val ay = normals[a + 1]
+        val cx = normals[c]
+        val cy = normals[c + 1]
+        return atan2(ax * cy - ay * cx, ax * cx + ay * cy)
+    }
+
+    /** A vertex on the rim of disc ([x], [y], [r]) along unit normal ([nx], [ny]), carrying its offset. */
+    private fun rim(b: MeshBuilder, x: Double, y: Double, r: Double, nx: Double, ny: Double): Int =
+        b.vertex(x + r * nx, y + r * ny, r * nx, r * ny)
+
+    /** The rim vertex half way between the normals at [a] and [c] in [normals]. */
+    private fun midRim(b: MeshBuilder, x: Double, y: Double, r: Double, normals: DoubleArray, a: Int, c: Int): Int {
+        val mx = normals[a] + normals[c]
+        val my = normals[a + 1] + normals[c + 1]
+        val len = hypot(mx, my)
+        return rim(b, x, y, r, mx / len, my / len)
     }
 
     /**
@@ -229,29 +393,6 @@ object StrokeTessellator {
     /** Segments a circle of [radius] needs to stay within [tolerance] of true. */
     fun circleSegments(radius: Double, tolerance: Double): Int =
         MeshBuilder.circleSegments(radius, tolerance)
-
-    /** Angle between the ribbon's normal before and after sample [i], in radians. */
-    fun turnAngle(g: RibbonPoints, i: Int): Double {
-        val n = g.pointCount
-        if (i <= 0 || i >= n - 1) return 0.0
-        val ax = g.cx(i) - g.cx(i - 1)
-        val ay = g.cy(i) - g.cy(i - 1)
-        val bx = g.cx(i + 1) - g.cx(i)
-        val by = g.cy(i + 1) - g.cy(i)
-        val la = hypot(ax, ay)
-        val lb = hypot(bx, by)
-        if (la < 1e-12 || lb < 1e-12) return 0.0
-        val cross = (ax * by - ay * bx) / (la * lb)
-        val dot = (ax * bx + ay * by) / (la * lb)
-        return kotlin.math.abs(atan2(cross, dot))
-    }
-
-    // --- rail accessors: kept as free functions so the tests can pin them to the geometry's own ---
-
-    fun leftX(g: RibbonPoints, n: Int, i: Int): Double = g.leftX(i)
-    fun leftY(g: RibbonPoints, n: Int, i: Int): Double = g.leftY(i)
-    fun rightX(g: RibbonPoints, n: Int, i: Int): Double = g.rightX(i)
-    fun rightY(g: RibbonPoints, n: Int, i: Int): Double = g.rightY(i)
 
     private fun estimateVertices(n: Int): Int = 2 * n + 2 * (MIN_CIRCLE_SEGMENTS + 2) + 16
 
