@@ -6,4 +6,6 @@
     <cache-path name="clipboard" path="clipboard/" />
     <!-- The camera app writes a photo taken for Insert here; it is read in and deleted. -->
     <cache-path name="camera" path="camera/" />
+    <!-- Release APKs downloaded by the in-app updater, opened by the package installer. -->
+    <cache-path name="update" path="update/" />
 </paths>

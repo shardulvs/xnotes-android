@@ -32,7 +32,7 @@ object ReaderPrint {
                         .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
                         .setColorMode(PrintAttributes.COLOR_MODE_COLOR)
                         .build()
-                    SilentPdfPrinter.print(view.createPrintDocumentAdapter("n-notes"), attributes, out) { ok ->
+                    SilentPdfPrinter.print(view.createPrintDocumentAdapter("sponka"), attributes, out) { ok ->
                         view.destroy()
                         if (cont.isActive) cont.resume(ok && out.length() > 0)
                     }

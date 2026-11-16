@@ -427,7 +427,7 @@ private fun StylesButton(editor: Editor, onImportTemplate: () -> Unit) {
     }
 }
 
-/** Opens the page-margins popup (extra paper on any edge, for the document or the current page). */
+/** Opens the text-margins popup (the margins text flows in and selections snap to). */
 @Composable
 private fun MarginsButton(editor: Editor) {
     var open by remember { mutableStateOf(false) }

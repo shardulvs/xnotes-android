@@ -12,6 +12,7 @@ import com.xnotes.core.model.ImageItem
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.Stroke
+import com.xnotes.core.model.TableItem
 import com.xnotes.core.model.TapeItem
 import com.xnotes.core.model.TextItem
 import com.xnotes.core.shapes.ShapeKind
@@ -19,7 +20,7 @@ import com.xnotes.core.tools.Tool
 
 /** What a colour dropped at a point does, as [ColorDrop.decide] finds it. */
 sealed interface DropAction {
-    /** Recolour [item]: ink, a shape's outline, a connector, a text box's words, drawn text or a covered tape. */
+    /** Recolour [item]: ink or a highlighter, a shape's outline, a connector, a table's lines, a text box's words, drawn text or a covered tape. */
     class Recolour(val item: CanvasItem) : DropAction
 
     /** Give [shape] the colour as its own fill, keeping the opacity of any fill it has. */
@@ -33,6 +34,9 @@ sealed interface DropAction {
 
     /** The point is on paper that no lines close off. */
     data object NotClosed : DropAction
+
+    /** Nothing in the drawing to change, but the surface found the point on a PDF text markup of its own. */
+    data object RecolourMarkup : DropAction
 
     /** Nothing the drop may change: lines all round the point. */
     data object None : DropAction
@@ -93,8 +97,9 @@ object ColorDrop {
      * along with the area around them.
      */
     fun decide(items: List<CanvasItem>, map: FillMap, at: Pt, color: Rgba, reach: Double, smallHole: Int): DropAction {
-        lineAt(items, at, reach)?.let { return DropAction.Recolour(it) }
-        return when (val probe = map.probe(at)) {
+        val probe = map.probe(at)
+        lineAt(items, at, reach, skipHighlighters = probe is Probe.Enclosed)?.let { return DropAction.Recolour(it) }
+        return when (probe) {
             Probe.Open -> fillAt(items, at)?.let { DropAction.Refill(it) } ?: DropAction.NotClosed
             Probe.Blocked -> DropAction.None
             is Probe.Enclosed -> enclosed(items, map, probe, at, color, smallHole)
@@ -107,11 +112,15 @@ object ColorDrop {
         return RefillShapes.Entry(shape, before, before?.let { color.copy(a = it.a) } ?: color.withAlpha(255))
     }
 
-    /** The line a drop at [at] lands on, the topmost within [reach]; null for none, a locked one, or one something covers there. */
-    fun lineAt(items: List<CanvasItem>, at: Pt, reach: Double): CanvasItem? {
+    /**
+     * The line a drop at [at] lands on, the topmost within [reach]; null for none, a locked one, or one something covers there.
+     * [skipHighlighters] is for a point inside a closed area, where the area's fill wins over a highlighter band.
+     */
+    fun lineAt(items: List<CanvasItem>, at: Pt, reach: Double, skipHighlighters: Boolean = false): CanvasItem? {
         for (i in items.indices.reversed()) {
             val item = items[i]
             if (!item.bounds().outset(reach).contains(at)) continue
+            if (skipHighlighters && item is Stroke && item.tool == Tool.HIGHLIGHTER) continue
             if (isLine(item) && onLine(item, at, reach)) return item.takeUnless { it.locked }
             if (hides(item, at)) return null
         }
@@ -156,7 +165,7 @@ object ColorDrop {
     private fun fillable(s: ShapeItem) = s.shape.isClosed && !s.isFill && s.shape != ShapeKind.GLYPHS
 
     /** The topmost fill at [at] that a drop may recolour. */
-    private fun fillAt(items: List<CanvasItem>, at: Pt): ShapeItem? {
+    fun fillAt(items: List<CanvasItem>, at: Pt): ShapeItem? {
         for (i in items.indices.reversed()) {
             val f = items[i] as? ShapeItem ?: continue
             if (f.isFill && !f.locked && f.contains(at)) return f
@@ -164,10 +173,12 @@ object ColorDrop {
         return null
     }
 
+    // Highlighters and tapes are lines a drop may recolour, though they never close an area: a
+    // band of either takes the colour like any ink does.
     private fun isLine(item: CanvasItem) = when (item) {
-        is Stroke -> item.tool != Tool.HIGHLIGHTER && !item.isEmpty
+        is Stroke -> !item.isEmpty
         is ShapeItem -> !item.isFill
-        is ConnectorItem, is TextItem -> true
+        is ConnectorItem, is TextItem, is TableItem -> true
         // A peeled tape shows what is under it, so the drop goes through it.
         is TapeItem -> !item.peeled
         else -> false
@@ -178,6 +189,7 @@ object ColorDrop {
         is ShapeItem -> if (item.shape == ShapeKind.GLYPHS) item.contains(at) else item.onOutline(at, reach)
         is ConnectorItem -> item.touches(at, reach)
         is TextItem, is TapeItem -> item.contains(at)
+        is TableItem -> item.intersectsCircle(at.x, at.y, reach)
         else -> false
     }
 

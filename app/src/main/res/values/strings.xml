@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">n-notes</string>
+    <string name="app_name" translatable="false">sponka</string>
 
     <!-- Tools and toolbar items -->
     <string name="tool_pen">Pen</string>
@@ -48,6 +48,7 @@
     <string name="toolbar_colours">Colours</string>
     <string name="toolbar_waypoints">Waypoints</string>
     <string name="toolbar_minimap">Minimap</string>
+    <string name="edge_all">All</string>
     <string name="edge_left">Left</string>
     <string name="edge_right">Right</string>
     <string name="edge_top">Top</string>
@@ -117,6 +118,11 @@
     <string name="caption_new_page_size">New page size</string>
     <string name="same_as_previous">Same as previous</string>
     <string name="title_margins">Margins</string>
+    <string name="margin_settings">Margin settings</string>
+    <string name="expand_page">Expand page</string>
+    <string name="caption_side">Side</string>
+    <string name="expand_range">Expand range</string>
+    <string name="show_margins">Show margins</string>
     <string name="title_view">View</string>
     <string name="caption_viewing_mode">Viewing mode</string>
     <string name="view_single">Single</string>
@@ -124,7 +130,9 @@
     <string name="view_cover">Cover</string>
     <string name="caption_vertical_scrolling">Vertical scrolling</string>
     <string name="caption_free_movement">Free page movement</string>
+    <string name="caption_free_horizontal_scroll">Free horizontal scroll</string>
     <string name="caption_pdf_filters">PDF colour filters</string>
+    <string name="adjust">Adjust</string>
     <string name="filter_contrast">Contrast</string>
     <string name="filter_invert">Invert</string>
     <string name="filter_brightness">Brightness</string>
@@ -301,6 +309,7 @@
     <string name="caption_dashed">Dashed</string>
     <string name="default_suffix">"  (default)"</string>
     <string name="caption_opacity_percent">"Opacity  %1$d%%"</string>
+    <string name="caption_value_mm_px">"%1$s  %2$.1f mm (%3$d px)"</string>
     <string name="caption_value_percent">"%1$s  %2$d%%"</string>
     <string name="caption_rotate_degrees">"Rotate  %1$d°"</string>
     <string name="caption_glow_intensity">Intensity</string>
@@ -556,7 +565,7 @@
     <string name="search_settings">Search settings</string>
     <string name="search_keywords_port">Port old notes shapes axes number line curve function graph upgrade check</string>
     <string name="pref_port">Port old notes</string>
-    <string name="pref_port_help">Rewrites notes that still store axes, number lines, curves or graphs from older n-notes versions. Old copies are backed up, open notes are skipped.</string>
+    <string name="pref_port_help">Rewrites notes that still store axes, number lines, curves or graphs from older sponka versions. Old copies are backed up, open notes are skipped.</string>
     <string name="port_scan">Scan</string>
     <string name="port_run">Port</string>
     <string name="port_scanning">Scanning...</string>
@@ -875,11 +884,12 @@
     <string name="copy_as_image">Copy as image</string>
     <string name="unlock">Unlock</string>
     <string name="paste_here">Paste here</string>
+    <string name="paste_plain">Paste as plain text</string>
     <string name="paste_markdown">Paste as Markdown</string>
     <string name="paste_code">Paste as Code</string>
 
     <!-- About -->
-    <string name="app_tagline">A handwriting notes and sketching app for Android</string>
+    <string name="app_tagline">A handwriting notes and sketching app for Android. Formerly n-notes.</string>
     <string name="copy_version">Copy version</string>
     <string name="help_make_better">Help make xnotes better</string>
     <string name="report_bug">Report a bug</string>
@@ -970,9 +980,9 @@
     <!-- Colour picker -->
     <string name="swatches">Swatches</string>
     <string name="spectrum">Spectrum</string>
+    <string name="caption_recent">Recent</string>
     <string name="eyedropper">Pick a colour from the screen</string>
     <string name="eyedropper_hint">Touch a colour to pick it</string>
-    <string name="caption_recent">Recent</string>
 
     <!-- Canvas and storage -->
     <string name="pull_to_add_page">Pull to add page</string>
@@ -1171,7 +1181,7 @@
     <string name="pref_ocr" translatable="false">OCR</string>
     <string name="pref_export_import">Export &amp; import</string>
     <string name="pref_cloud_sync">Cloud sync</string>
-    <string name="pref_general_summary">Screen, Language, Updates</string>
+    <string name="pref_general_summary">Screen, Language, Permissions, Updates</string>
     <string name="pref_appearance_summary">Theme, Code highlighting, Fonts</string>
     <string name="pref_input_summary">Touch, Stylus, Gestures</string>
     <string name="pref_ocr_summary">Handwriting, Math</string>
@@ -1295,12 +1305,25 @@
     <string name="sync_every_6_hours">Every 6 hours</string>
     <string name="sync_every_12_hours">Every 12 hours</string>
     <string name="sync_once_a_day">Once a day</string>
+    <string name="sync_never">Never</string>
     <string name="sync_both_ways">Both ways</string>
-    <string name="sync_direction_up">N-Notes to %1$s</string>
-    <string name="sync_direction_down">%1$s to N-Notes</string>
+    <string name="sync_direction_up">Sponka to %1$s</string>
+    <string name="sync_direction_down">%1$s to Sponka</string>
     <string name="sync_none_off">None - off</string>
     <string name="sync_intro">Back up and sync your notes to a cloud service. Only the selected service syncs.</string>
     <string name="sync_new_warning">Cloud sync is new and still being tested. Before you set it up, copy your notes folder somewhere safe, so a sync problem can\'t cost you any notes.</string>
+    <string name="sync_battery_restricted">Android limits this app\'s battery use, so automatic sync may not run in the background. Allow unrestricted battery use to keep it running.</string>
+    <string name="battery_allow">Allow</string>
+    <string name="pref_permissions">Permissions</string>
+    <string name="permission_battery">Battery use</string>
+    <string name="permission_battery_unrestricted">Unrestricted, background sync can run</string>
+    <string name="permission_battery_restricted">Restricted, background sync may not run</string>
+    <string name="permission_microphone">Microphone</string>
+    <string name="permission_notifications">Notifications</string>
+    <string name="permission_granted">Granted</string>
+    <string name="permission_not_granted">Not granted</string>
+    <string name="permission_open_app_settings">Open app settings</string>
+    <string name="search_keywords_permissions">Permissions battery unrestricted optimization background microphone notifications</string>
     <string name="sync_cloud_service">Cloud service</string>
     <string name="sync_server_address">Server address</string>
     <string name="sync_user_name">User name</string>
@@ -1319,9 +1342,10 @@
     <string name="sync_wifi_only">Only on Wi-Fi</string>
     <string name="sync_keep_screen_on">Keep screen on while syncing</string>
     <string name="sync_when">When to sync</string>
-    <string name="sync_automatically">Automatically</string>
     <string name="sync_on_note_close">On note close</string>
     <string name="sync_on_app_open">On app open</string>
+    <string name="sync_on_app_close">On app close</string>
+    <string name="sync_many_options_warning">Turning on many sync options at once can cause too many sync requests, which may lead to sync errors.</string>
     <string name="sync_direction">Sync direction</string>
     <string name="sync_frequency">Sync frequency</string>
     <string name="sync_now">Sync now</string>
@@ -1370,16 +1394,18 @@
     <string name="working">Working...</string>
     <string name="download">Download</string>
     <string name="failed_reason">Failed: %1$s</string>
-    <string name="update_intro">Check GitHub for a newer n-notes release.</string>
+    <string name="update_intro">Check GitHub for a newer sponka release.</string>
     <string name="update_check_on_startup">Check for updates when the app starts</string>
     <string name="update_check_failed">Update check failed</string>
     <string name="update_check">Check for updates</string>
     <string name="update_up_to_date">You\'re on the latest version (%1$s).</string>
     <string name="update_available_version">"Update available: %1$s  (you have %2$s)"</string>
     <string name="update_download_apk">Download APK</string>
+    <string name="update_downloading">Downloading update... %1$d%%</string>
+    <string name="update_download_failed">Download failed</string>
     <string name="update_view_release">View release</string>
     <string name="update_available">Update available</string>
-    <string name="update_is_out">n-notes %1$s is out.</string>
+    <string name="update_is_out">sponka %1$s is out.</string>
     <string name="update_later">Later</string>
     <string name="update_turn_off">Turn off</string>
     <string name="sync_syncing_progress">Syncing %1$s</string>
@@ -1394,9 +1420,9 @@
     <string name="sync_see_log">See sync log</string>
     <string name="close">Close</string>
     <string name="sync_found_by">Found by %1$s on %2$s</string>
-    <string name="about_fork_tagline">A customized fork of xnotes, a handwriting notes and sketching app for Android</string>
-    <string name="help_make_n_notes_better">Help make n-notes better</string>
-    <string name="enjoying_n_notes">"Enjoying n-notes? "</string>
+    <string name="about_fork_tagline">A customized fork of xnotes, a handwriting notes and sketching app for Android. Formerly n-notes.</string>
+    <string name="help_make_n_notes_better">Help make sponka better</string>
+    <string name="enjoying_n_notes">"Enjoying sponka? "</string>
     <string name="ocr_recognizing_handwriting">Recognizing handwriting...</string>
     <string name="ocr_handwriting_failed">Handwriting recognition failed: %1$s</string>
     <string name="ocr_no_text">No text recognized</string>
@@ -1416,6 +1442,8 @@
     <string name="sync_status_conflicts">", %1$d conflicts"</string>
     <string name="sync_status_errors">", %1$d errors"</string>
     <string name="sync_notification_title">Syncing notes</string>
+    <string name="sync_error_channel">Cloud sync errors</string>
+    <string name="sync_error_notification_title">Cloud sync failed</string>
     <string name="caption_select_kinds">What to select</string>
     <string name="select_kind_lines">Lines</string>
     <string name="select_kind_highlighter">Highlighter</string>

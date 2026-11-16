@@ -17,6 +17,9 @@ fun Rgba.toComposeColor(): Color = Color(r, g, b, a)
 
 val LocalPalette = staticCompositionLocalOf { Palette.DEFAULT }
 
+/** Orange for warnings and conflicts; the same in every theme. */
+val WarningColor = Color(255, 145, 60)
+
 @Composable
 fun XnotesTheme(palette: Palette, corners: CornerStyle = CornerStyle.ROUNDED, content: @Composable () -> Unit) {
     val shapes = remember(corners) { uiShapes(corners) }

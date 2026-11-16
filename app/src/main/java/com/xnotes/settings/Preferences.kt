@@ -80,6 +80,8 @@ data class Preferences(
     val sideMargin: Double = 16.0,
     /** Whether the hairline outline around every page is left undrawn. */
     val hidePageBorders: Boolean = false,
+    /** Whether the text margins are drawn on every page as dashed lines. */
+    val showMargins: Boolean = false,
     /** User zoom floor: when enabled, no zoom path goes below [minZoomPercent]%. */
     val minZoomEnabled: Boolean = false,
     val minZoomPercent: Int = 50,
@@ -109,11 +111,12 @@ data class Preferences(
     val cloudService: String = "none",
     /** The chosen sync folder per service id, so switching services keeps each one's folder. */
     val cloudFolders: Map<String, CloudFolder> = emptyMap(),
-    val syncAuto: Boolean = true,
     val syncWifiOnly: Boolean = false,
+    /** Minutes between background syncs; 0 means never. */
     val syncIntervalMinutes: Int = 60,
     val syncOnNoteExit: Boolean = false,
     val syncOnAppOpen: Boolean = false,
+    val syncOnAppClose: Boolean = false,
     /** Which way notes flow: "both", "up" (local to cloud), "down" (cloud to local), "off". */
     val syncDirection: String = "both",
     /** Keep the screen from sleeping while a sync runs with the app open. */
@@ -132,7 +135,6 @@ data class Preferences(
     val sidebarTrash: Boolean = true,
     val sidebarFiles: Boolean = true,
     val sidebarSync: Boolean = true,
-    val sidebarAbout: Boolean = true,
     /** Where Home opens: "top" (the notes folder), "last" (the folder last shown) or "shelves" (the notes folder under Recent and Pinned). */
     val homeOpensTo: String = "top",
     /** What a swipe right / left on Home does: one of [HOME_SWIPES]. */
@@ -200,6 +202,7 @@ data class Preferences(
         .put("prefs_categories", prefsCategories)
         .put("side_margin", sideMargin)
         .put("hide_page_borders", hidePageBorders)
+        .put("show_margins", showMargins)
         .put("min_zoom_enabled", minZoomEnabled)
         .put("min_zoom_percent", minZoomPercent)
         .put("max_zoom_enabled", maxZoomEnabled)
@@ -236,11 +239,13 @@ data class Preferences(
             put("cloud_folders", JSONObject().apply {
                 cloudFolders.forEach { (service, f) -> put(service, JSONObject().put("id", f.id).put("name", f.name)) }
             })
-            put("sync_auto", syncAuto)
             put("sync_wifi_only", syncWifiOnly)
             put("sync_interval_minutes", syncIntervalMinutes)
+            // Older versions read "Never" (0) as 15 minutes; their off switch keeps them off.
+            put("sync_auto", syncIntervalMinutes != 0)
             put("sync_on_note_exit", syncOnNoteExit)
             put("sync_on_app_open", syncOnAppOpen)
+            put("sync_on_app_close", syncOnAppClose)
             put("sync_direction", syncDirection)
             put("sync_keep_screen_on", syncKeepScreenOn)
             put("markdown_input", markdownInput)
@@ -254,7 +259,6 @@ data class Preferences(
         .put("sidebar_trash", sidebarTrash)
         .put("sidebar_files", sidebarFiles)
         .put("sidebar_sync", sidebarSync)
-        .put("sidebar_about", sidebarAbout)
         .put("home_opens_to", homeOpensTo)
         .put("home_swipe_right", homeSwipeRight)
         .put("home_swipe_left", homeSwipeLeft)
@@ -360,6 +364,7 @@ data class Preferences(
                 prefsCategories = o.optBoolean("prefs_categories", true),
                 sideMargin = o.optDouble("side_margin", 16.0).coerceIn(0.0, 80.0),
                 hidePageBorders = o.optBoolean("hide_page_borders", false),
+                showMargins = o.optBoolean("show_margins", false),
                 minZoomEnabled = o.optBoolean("min_zoom_enabled", false),
                 minZoomPercent = o.optInt("min_zoom_percent", 50).coerceIn(ZOOM_LIMIT_MIN_PCT, ZOOM_LIMIT_MAX_PCT),
                 maxZoomEnabled = o.optBoolean("max_zoom_enabled", false),
@@ -380,11 +385,13 @@ data class Preferences(
                     f.keys().asSequence().mapNotNull { k -> f.optJSONObject(k)?.let { k to CloudFolder(it.optString("id"), it.optString("name")) } }.toMap()
                 } ?: o.optString("filen_folder_uuid").takeIf { it.isNotEmpty() }
                     ?.let { mapOf("filen" to CloudFolder(it, o.optString("filen_folder_name"))) }.orEmpty(),
-                syncAuto = o.optBoolean("sync_auto", o.optBoolean("filen_auto_sync", true)),
                 syncWifiOnly = o.optBoolean("sync_wifi_only", o.optBoolean("filen_wifi_only", false)),
-                syncIntervalMinutes = o.optInt("sync_interval_minutes", o.optInt("filen_sync_interval_minutes", 60)).coerceIn(15, 1440),
+                // The old "Automatically" switch turned off is now the "Never" interval.
+                syncIntervalMinutes = if (!o.optBoolean("sync_auto", o.optBoolean("filen_auto_sync", true))) 0
+                    else o.optInt("sync_interval_minutes", o.optInt("filen_sync_interval_minutes", 60)).let { if (it == 0) 0 else it.coerceIn(15, 1440) },
                 syncOnNoteExit = o.optBoolean("sync_on_note_exit", o.optBoolean("filen_sync_on_note_exit", false)),
                 syncOnAppOpen = o.optBoolean("sync_on_app_open", o.optBoolean("filen_sync_on_app_open", false)),
+                syncOnAppClose = o.optBoolean("sync_on_app_close", false),
                 syncDirection = o.optString("sync_direction", o.optString("filen_sync_direction", "both"))
                     .let { if (it == "up" || it == "down" || it == "off") it else "both" },
                 syncKeepScreenOn = o.optBoolean("sync_keep_screen_on", false),
@@ -400,7 +407,6 @@ data class Preferences(
                 sidebarTrash = o.optBoolean("sidebar_trash", true),
                 sidebarFiles = o.optBoolean("sidebar_files", true),
                 sidebarSync = o.optBoolean("sidebar_sync", true),
-                sidebarAbout = o.optBoolean("sidebar_about", true),
                 homeOpensTo = o.optString("home_opens_to", "top").let { if (it == "last" || it == "shelves") it else "top" },
                 homeSwipeRight = o.optString("home_swipe_right", "sidebar_open").takeIf { it in HOME_SWIPES } ?: "sidebar_open",
                 homeSwipeLeft = o.optString("home_swipe_left", "sidebar_close").takeIf { it in HOME_SWIPES } ?: "sidebar_close",

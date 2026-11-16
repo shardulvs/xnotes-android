@@ -3,6 +3,7 @@ package com.xnotes.ui
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.util.LruCache
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -151,7 +152,7 @@ internal fun ReaderScreen(editor: Editor, file: ReaderFile, onClose: () -> Unit,
     BackHandler(onBack = onClose)
 
     val content by produceState<ReaderContent?>(null, file.uri) {
-        value = withContext(Dispatchers.IO) { runCatching { loadReader(context, file, labels) }.getOrNull() ?: ReaderContent.Failed }
+        value = withContext(Dispatchers.IO) { runCatching { loadReader(context, editor, file, labels) }.getOrNull() ?: ReaderContent.Failed }
         awaitDispose {
             (value as? ReaderContent.Pdf)?.doc?.let { doc ->
                 CoroutineScope(Dispatchers.IO).launch { doc.lock.withLock { doc.closed = true; doc.pdf.close() } }
@@ -363,7 +364,7 @@ private fun readerColors(p: Palette, background: String = Rgba.toHex(p.paper)) =
  * for turning into a note; null when it will not open. Without [to], each call replaces the previous one's file.
  */
 internal suspend fun readerFileToPdf(context: Context, editor: Editor, file: ReaderFile, to: File? = null): File? {
-    val content = withContext(Dispatchers.IO) { runCatching { readerHtmlBody(context, file, readerLabels(context)) }.getOrNull() } ?: return null
+    val content = withContext(Dispatchers.IO) { runCatching { readerHtmlBody(context, editor, file, readerLabels(context)) }.getOrNull() } ?: return null
     val html = ReaderHtml.printPage(content.body, readerColors(editor.readerPalette(dark = false), "#ffffff"), content.wide)
     val out = to ?: withContext(Dispatchers.IO) {
         File(context.cacheDir, "convert").apply { deleteRecursively(); mkdirs() }.resolve("${file.name.substringBeforeLast('.')}.pdf")
@@ -560,20 +561,23 @@ private fun PdfPages(
     }
 }
 
-private fun loadReader(context: Context, file: ReaderFile, labels: ReaderHtml.Labels): ReaderContent {
+private fun loadReader(context: Context, editor: Editor, file: ReaderFile, labels: ReaderHtml.Labels): ReaderContent {
     if (ReaderKind.ofName(file.name) == ReaderKind.PDF) {
         val pdf = ReaderPdf.open(context, Uri.parse(file.uri)) ?: return ReaderContent.Failed
         val ratios = runCatching { List(pdf.pageCount) { pdf.ratio(it) } }.getOrNull()
         return if (ratios == null || ratios.isEmpty()) { pdf.close(); ReaderContent.Failed } else ReaderContent.Pdf(PdfDoc(pdf, ratios))
     }
-    return readerHtmlBody(context, file, labels) ?: ReaderContent.Failed
+    return readerHtmlBody(context, editor, file, labels) ?: ReaderContent.Failed
 }
 
 /** The HTML body of every reader format but PDF; null for a PDF or an unknown kind. */
-private fun readerHtmlBody(context: Context, file: ReaderFile, labels: ReaderHtml.Labels): ReaderContent.Html? {
+private fun readerHtmlBody(context: Context, editor: Editor, file: ReaderFile, labels: ReaderHtml.Labels): ReaderContent.Html? {
     val uri = Uri.parse(file.uri)
     return when (ReaderKind.ofName(file.name)) {
-        ReaderKind.MARKDOWN -> ReaderContent.Html(ReaderHtml.markdown(readText(context, uri), labels, ::readerMath), wide = false)
+        ReaderKind.MARKDOWN -> ReaderContent.Html(
+            ReaderHtml.markdown(readText(context, uri), labels, ::readerMath) { readLinkedImage(context, editor, uri, it) }, wide = false,
+        )
+        ReaderKind.IMAGE -> ReaderContent.Html(ReaderHtml.image(readBytes(context, uri), file.name), wide = false)
         ReaderKind.CSV -> ReaderContent.Html(ReaderHtml.csv(readText(context, uri), labels), wide = true)
         ReaderKind.DOCX -> ReaderContent.Html(withZip(context, uri) { ReaderHtml.docx(it, ::newParser, labels) }, wide = false)
         ReaderKind.PPTX -> ReaderContent.Html(withZip(context, uri) { ReaderHtml.pptx(it, ::newParser, labels) }, wide = false)
@@ -611,9 +615,27 @@ private fun <T> withZip(context: Context, uri: Uri, block: (ReaderHtml.ZipRead) 
     }
 }
 
+/**
+ * An image a Markdown file at [md] links to: [path] beside it first (tree ids are paths on local storage),
+ * then any file of that name in the vault, the way Obsidian finds attachments.
+ */
+private fun readLinkedImage(context: Context, editor: Editor, md: Uri, path: String): ByteArray? {
+    val besideMd = runCatching {
+        val dir = DocumentsContract.getDocumentId(md).substringBeforeLast('/', "")
+        val id = if (path.startsWith("/") || dir.isEmpty()) null else dir.substringBefore(':') + ":" + ReaderHtml.resolvePath(dir.substringAfter(':'), path)
+        id?.let { readBytes(context, DocumentsContract.buildDocumentUriUsingTree(md, it)) }
+    }.getOrNull()
+    if (besideMd != null) return besideMd
+    val hit = editor.browseRoot?.let { editor.findLinkedFile(it, path) } ?: return null
+    return runCatching { readBytes(context, Uri.parse(hit.documentUri)) }.getOrNull()
+}
+
+private fun readBytes(context: Context, uri: Uri): ByteArray =
+    context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw IllegalStateException("cannot read file")
+
 /** UTF-8, falling back to the local legacy code page for files that are not (Excel's CSV export). */
 private fun readText(context: Context, uri: Uri): String {
-    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: throw IllegalStateException("cannot read file")
+    val bytes = readBytes(context, uri)
     return try {
         Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(bytes)).toString()
     } catch (_: CharacterCodingException) {

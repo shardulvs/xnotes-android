@@ -959,6 +959,16 @@ class DocumentCodecTest {
         assertEquals(PageMargins(top = 0.1), read.pages[1].margins)
     }
 
+    @Test fun aPagesOwnTextMarginsRoundTripAndOthersFollowTheNote() {
+        val doc = Document(pages = mutableListOf(Page(400.0, 800.0), Page(400.0, 800.0)))
+        doc.pages[1].textMargins = com.xnotes.core.text.FlowMargins(5.0, 10.0, 15.0, 120.0)
+
+        val read = roundTrip(doc)
+
+        assertNull(read.pages[0].textMargins)
+        assertEquals(com.xnotes.core.text.FlowMargins(5.0, 10.0, 15.0, 100.0), read.pages[1].textMargins)
+    }
+
     @Test fun noMarginsWritesNoMarginsObject() {
         val out = ByteArrayOutputStream()
         codec.write(Document(pages = mutableListOf(Page(400.0, 800.0))), out)

@@ -8,7 +8,7 @@ import com.xnotes.core.pal.LineMetrics
 import com.xnotes.core.pal.MathBox
 
 /** Page dimensions handed to layout (content px at the document dpi). */
-data class PageBox(val width: Double, val height: Double)
+data class PageBox(val width: Double, val height: Double, val margins: FlowMargins? = null)
 
 /**
  * How a math run is being shown this pass: as the formula it sets, as a box held

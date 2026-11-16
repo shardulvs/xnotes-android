@@ -102,6 +102,18 @@ class FilenApi(@Volatile var apiKey: String? = null) {
         post(gateway, "/v3/upload/done", body)
     }
 
+    /** A 0-byte file has no chunks, which /v3/upload/done rejects ("Invalid chunks"). */
+    fun uploadEmpty(
+        uuid: String, encryptedName: String, nameHashed: String, encryptedSize: String,
+        parent: String, encryptedMime: String, metadata: String,
+    ) {
+        val body = JSONObject()
+            .put("uuid", uuid).put("name", encryptedName).put("nameHashed", nameHashed)
+            .put("size", encryptedSize).put("parent", parent).put("mime", encryptedMime)
+            .put("metadata", metadata).put("version", 2)
+        post(gateway, "/v3/upload/empty", body)
+    }
+
     fun downloadChunk(region: String, bucket: String, uuid: String, index: Int): ByteArray {
         var lastError: IOException? = null
         for (host in egest) {

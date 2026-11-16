@@ -77,6 +77,7 @@ import com.xnotes.core.model.FunctionCurve
 import com.xnotes.core.model.FunctionSpec
 import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.tools.ToolConversions
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
@@ -283,26 +284,29 @@ fun SelectionMenu(
     val size = host.selectionSize()
     val mirrors = host.canMirrorSelection()
     val barHeightPx = with(density) { 48.dp.toPx() }
-    val barWidthPx = with(density) { ((7 + (if (audio != null) 1 else 0) + (if (crops) 1 else 0) + (if (size != null) 1 else 0) + (if (mirrors) 1 else 0)) * 46).dp.toPx() }
     val gap = with(density) { 10.dp.toPx() }
     val centerX = ((rect.left + rect.right) / 2.0).toFloat()
-    val xPx = (centerX - barWidthPx / 2f).coerceAtLeast(with(density) { 8.dp.toPx() })
     val barAbove = rect.top.toFloat() - barHeightPx - gap > 0f
     val yPx = if (barAbove) {
         rect.top.toFloat() - barHeightPx - gap
     } else {
         rect.bottom.toFloat() + gap
     }
-    val xDp = with(density) { xPx.toDp() }
-    val yDp = with(density) { yPx.toDp() }
 
     CompositionLocalProvider(LocalTipSide provides tipSideFor(barAbove)) {
         Row(
             modifier = Modifier
-                .offset(xDp, yDp)
+                // Kept inside the pane; on a narrow one the icons scroll.
+                .layout { measurable, constraints ->
+                    val margin = 8.dp.roundToPx()
+                    val bar = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0, maxWidth = (constraints.maxWidth - 2 * margin).coerceAtLeast(0)))
+                    val x = (centerX - bar.width / 2f).roundToInt().coerceIn(margin, (constraints.maxWidth - bar.width - margin).coerceAtLeast(margin))
+                    layout(bar.width, bar.height) { bar.place(x, yPx.roundToInt()) }
+                }
                 .clip(MaterialTheme.shapes.medium)
                 .background(palette.menuBg.toComposeColor())
-                .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium),
+                .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium)
+                .horizontalScroll(rememberScrollState()),
         ) {
             ActionIcon(XnotesIcons.trash, stringResource(R.string.delete), shortcut = Keys.DELETE, tint = palette.danger.toComposeColor()) { host.deleteSelection() }
             ActionIcon(XnotesIcons.cut, stringResource(R.string.cut)) { host.cutSelection() }
@@ -950,6 +954,7 @@ private fun SelectionStylePopup(host: SelectionMenuHost, onDismiss: () -> Unit) 
                 stringResource(R.string.caption_thickness),
                 width,
                 DrawStyle.MIN_WIDTH.toFloat()..DrawStyle.MAX_WIDTH.toFloat(),
+                step = ToolConversions.WIDTH_STEP.toFloat(),
                 onChangeFinished = { host.restyleSelection(null, null) },
             ) { w ->
                 width = w
@@ -1184,6 +1189,9 @@ fun FlowEditMenu(editor: Editor) {
                     properties = PopupProperties(focusable = false),
                 ) {
                     DropdownMenuItem(text = { Text(stringResource(R.string.paste)) }, onClick = {
+                        pasteOpen = false; editor.pasteAtCaret(); editor.dismissFlowContextMenu()
+                    })
+                    DropdownMenuItem(text = { Text(stringResource(R.string.paste_plain)) }, onClick = {
                         pasteOpen = false; editor.pastePlainAtCaret(); editor.dismissFlowContextMenu()
                     })
                     DropdownMenuItem(text = { Text(stringResource(R.string.paste_markdown)) }, onClick = {
@@ -1213,9 +1221,10 @@ fun PdfSelectionMenu(editor: Editor) {
     val density = LocalDensity.current
     val actions = remember { editor.pdfTextActions() }
     var overflowOpen by remember { mutableStateOf(false) }
+    val marks = if (editor.readerMode) emptyList() else PDF_MARKS
 
     val barHeightPx = with(density) { 48.dp.toPx() }
-    val barWidthPx = with(density) { ((1 + PDF_MARKS.size + if (actions.isEmpty()) 0 else 1) * 46).dp.toPx() }
+    val barWidthPx = with(density) { ((1 + marks.size + if (actions.isEmpty()) 0 else 1) * 46).dp.toPx() }
     val gap = with(density) { 10.dp.toPx() }
     val margin = with(density) { 8.dp.toPx() }
     // When pushed below the selection, also clear the teardrop handles hanging there.
@@ -1238,7 +1247,7 @@ fun PdfSelectionMenu(editor: Editor) {
                 .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium),
         ) {
             ActionIcon(XnotesIcons.copy, stringResource(R.string.copy), shortcut = Keys.COPY) { editor.copyPdfText() }
-            for ((type, icon, label) in PDF_MARKS) {
+            for ((type, icon, label) in marks) {
                 ActionIcon(icon, stringResource(label)) { editor.markPdfSelection(type) }
             }
             if (actions.isNotEmpty()) {

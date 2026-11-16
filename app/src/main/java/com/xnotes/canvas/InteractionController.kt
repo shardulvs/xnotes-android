@@ -414,6 +414,12 @@ class InteractionController(
     /** Content-space guide lines (from, to) shown while a move is snapped to the margins or centre. */
     private var snapGuides: List<Pair<Pt, Pt>> = emptyList()
 
+    /** Draw every visible page's text margins as dashed lines: the "Show margins" preference. */
+    var showMargins = false
+
+    /** Same lines, shown only while the margins popup's slider is held. */
+    var marginPreview = false
+
     // SCREENSHOT (drag a rectangle; on release it stays frozen and offers "copy as image")
     /** The capture rectangle in content space: live while dragging (mode == SHOT), then frozen
      *  with its menu showing until copied, dismissed, or the tool changes. */
@@ -642,6 +648,10 @@ class InteractionController(
 
     /** The selected items, in the order they were picked. */
     fun selectedItems(): List<CanvasItem> = selection.map { it.item }
+
+    /** The selected items grouped by the page each sits on, so a colour drop can tell where they live. */
+    fun selectionByPage(): Map<Int, List<CanvasItem>> =
+        selection.groupBy({ it.pageIndex }, { it.item })
 
     fun configFor(t: Tool): ToolConfig = toolConfigs[t] ?: ToolDefaults.configFor(t)
 
@@ -1323,11 +1333,9 @@ class InteractionController(
         liveStroke = stroke
         strokePageIndex = pageIndex
         mode = PointerMode.DRAW
-        // Shape snap: only solid ink pens (not the highlighter or its straight-line mode) arm the
-        // "hold still → shape" timer — and never while the ruler is up (you're drawing straight lines),
-        // nor under the wand, whose strokes are ephemeral and must never commit a shape to the page.
+        // Hold-to-shape: solid ink pens only, never on the ruler or under the wand (its ink is ephemeral).
         dwellEligible = detectShapes && drawTool.isStroke && drawTool != Tool.HIGHLIGHTER && !straight &&
-            !ruler.visible && !wandMode
+            !snapEngaged && !wandMode
         if (dwellEligible) {
             dwellAnchor = downViewport
             armDwell()
@@ -1361,6 +1369,11 @@ class InteractionController(
         val pi = strokePageIndex ?: return
         if (state.pageRects.getOrNull(pi) == null) return
         val vp = magnetize(Pt(vx, vy))
+        // Once the ruler grabs the stroke it is a line, so hold-to-shape stays off until pen-up.
+        if (dwellEligible && snapEngaged) {
+            cancelDwell()
+            dwellEligible = false
+        }
         val nib = state.viewportToContent(vp)
         var t = (timeMs - strokeStartTimeMs).toDouble()
         // A steadied stroke takes the point the filter has reached and draws on to the nib as a
@@ -2290,9 +2303,7 @@ class InteractionController(
         if (!configFor(Tool.SELECT).snapToMargins) return raw
         val box = selObb?.let { Rect.bounding(it.corners()) }?.translate(raw.x, raw.y) ?: return raw
         val pi = state.pageIndexAtContent(box.center) ?: return raw
-        val page = state.document.pages[pi]
-        val text = FlowLayout.contentRectOf(PageBox(page.sourceWidth, page.sourceHeight), state.document.flow.margins, state.document.dpi)
-        val m = state.fromPageSpaceRect(pi, text)
+        val m = marginRect(pi)
         val paper = state.pageRects[pi]
         val reach = MARGIN_SNAP_PX / state.zoom
         // The closest (target - side) within reach along one axis, or null.
@@ -2305,6 +2316,13 @@ class InteractionController(
             dy?.let { Pt(paper.left, it.second) to Pt(paper.right, it.second) },
         )
         return Pt(raw.x + (dx?.first ?: 0.0), raw.y + (dy?.first ?: 0.0))
+    }
+
+    /** Page [pi]'s text margins (the box flow text is held to) in content space. */
+    private fun marginRect(pi: Int): Rect {
+        val page = state.document.pages[pi]
+        val text = FlowLayout.contentRectOf(PageBox(page.sourceWidth, page.sourceHeight), page.textMargins ?: state.document.flow.margins, state.document.dpi)
+        return state.fromPageSpaceRect(pi, text)
     }
 
     // --- RESIZE ---
@@ -5377,6 +5395,12 @@ class InteractionController(
 
             // Resize + rotate handles for the settled selection (single, multi, or mixed).
             for ((a, b) in snapGuides) r.strokePolyline(listOf(a, b), chromePen(1.0))
+            if (showMargins || marginPreview) state.visiblePageRange()?.forEach { pi ->
+                val paper = state.pageRects.getOrNull(pi) ?: return@forEach
+                val m = marginRect(pi)
+                for (x in listOf(m.left, m.right)) r.strokePolyline(listOf(Pt(x, paper.top), Pt(x, paper.bottom)), chromePen(1.0))
+                for (y in listOf(m.top, m.bottom)) r.strokePolyline(listOf(Pt(paper.left, y), Pt(paper.right, y)), chromePen(1.0))
+            }
 
             if (selection.isNotEmpty() && mode != PointerMode.BAND && mode != PointerMode.LASSO_DRAW) {
                 val side = HANDLE_SIZE / state.zoom

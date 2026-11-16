@@ -249,6 +249,8 @@ private fun PagesTab(
             .pointerInput(editor) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
+                    // Selecting and carrying pages edits the note; a reader only taps to go to a page.
+                    if (editor.readerMode) return@awaitEachGesture
                     // Only a held, near-still single finger qualifies; a lift, a scroll or a second finger ends the wait first.
                     var tapped = false
                     val longPress = try {
@@ -487,7 +489,7 @@ private fun PageThumb(
                 // Tap navigates (or toggles selection in select mode). Long-presses belong to the
                 // panel (see PagesTab), so a drag survives the row scrolling away.
                 .clickable { if (selecting) editor.togglePageSelection(index) else editor.goToPage(index) }
-                .semantics { onLongClick { editor.togglePageSelection(index); true } },
+                .semantics { if (!editor.readerMode) onLongClick { editor.togglePageSelection(index); true } },
         ) {
             bitmap?.let { Image(it, contentDescription = stringResource(R.string.page_n, index + 1), modifier = Modifier.fillMaxSize()) }
 
@@ -500,7 +502,7 @@ private fun PageThumb(
                 ) {
                     Icon(XnotesIcons.check, stringResource(R.string.selected), tint = palette.onAccent.toComposeColor(), modifier = Modifier.size(13.dp))
                 }
-            } else if (!selecting) {
+            } else if (!selecting && !editor.readerMode) {
                 // Three-dot menu, on a faint scrim so it reads over any thumbnail.
                 Box(Modifier.align(Alignment.TopEnd).padding(2.dp)) {
                     Tooltip(stringResource(R.string.page_options)) {

@@ -174,7 +174,7 @@ data class FlowMargins(
     companion object {
         const val DEFAULT_MM = 20.0
         const val MIN_MM = 0.0
-        const val MAX_MM = 80.0
+        const val MAX_MM = 100.0
     }
 }
 

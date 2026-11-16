@@ -129,13 +129,14 @@ object ReaderHtml {
      */
     fun interface MathTypeset { fun html(latex: String, display: Boolean): String? }
 
-    fun markdown(source: String, labels: Labels = Labels(), math: MathTypeset? = null): String {
+    /** [source] is the Markdown file; [image] reads a local image it links to (path as written), or null. */
+    fun markdown(source: String, labels: Labels = Labels(), math: MathTypeset? = null, image: ZipRead? = null): String {
         val text = source.removePrefix("\uFEFF").replace("\r\n", "\n")
         if (text.isBlank()) return "<p class=\"missing\">${esc(labels.empty)}</p>"
         val (front, body) = splitFrontmatter(text)
         var html = mdRenderer.render(mdParser.parse(obsidianSyntax(body, math)))
         html = callouts(html)
-        html = stripExternalImages(html, labels)
+        html = localImages(html, labels, image)
         return frontmatterHtml(front) + html
     }
 
@@ -207,7 +208,10 @@ object ReaderHtml {
         // An odd part is code only when a closing backtick follows it.
         return parts.mapIndexed { i, part ->
             if (i % 2 == 1 && i < parts.lastIndex) part else {
-                var p = wikiEmbed.replace(part) { wikiMarkdown(it.groupValues[1]) }
+                var p = wikiEmbed.replace(part) { m ->
+                    val target = m.groupValues[1].substringBefore('|').trim()
+                    if (mimeOf(target) != null) "![](<$target>)" else wikiMarkdown(m.groupValues[1])
+                }
                 p = wikiLink.replace(p) { wikiMarkdown(it.groupValues[1]) }
                 p = highlight.replace(p) { "<mark>${it.groupValues[1]}</mark>" }
                 if (math != null) mathSpans(p, math) else p
@@ -265,14 +269,26 @@ object ReaderHtml {
     private val imgTag = Regex("<img\\s[^>]*>")
     private val attr = { name: String -> Regex("\\s$name=\"([^\"]*)\"") }
 
-    /** Images the reader cannot load (not synced, or remote with the network off) become their alt text. */
-    private fun stripExternalImages(html: String, labels: Labels): String = imgTag.replace(html) { m ->
-        val src = attr("src").find(m.value)?.groupValues?.get(1).orEmpty()
-        if (src.startsWith("data:")) m.value else {
+    /** Local images are embedded through [read]; the rest (not synced, or remote with the network off) become their alt text. */
+    private fun localImages(html: String, labels: Labels, read: ZipRead?): String {
+        val images = read?.let { Images(it, labels) }
+        return imgTag.replace(html) { m ->
+            val src = attr("src").find(m.value)?.groupValues?.get(1).orEmpty()
+            val local = images != null && !src.contains("://") && mimeOf(src) != null
             val alt = attr("alt").find(m.value)?.groupValues?.get(1).orEmpty()
-            "<span class=\"missing\">[${alt.ifEmpty { labels.image }}]</span>"
+            when {
+                src.startsWith("data:") -> m.value
+                local -> images!!.tag(java.net.URLDecoder.decode(src.replace("&amp;", "&").replace("+", "%2B"), "UTF-8"), alt)
+                else -> "<span class=\"missing\">[${alt.ifEmpty { labels.image }}]</span>"
+            }
         }
     }
+
+    // --- Images ---
+
+    /** A picture file shown on its own, at any size (the embed budget is for images inside documents). */
+    fun image(bytes: ByteArray, name: String): String =
+        "<img src=\"data:${mimeOf(name)};base64,${Base64.getEncoder().encodeToString(bytes)}\" alt=\"${esc(name)}\">"
 
     // --- CSV ---
 
@@ -407,23 +423,25 @@ object ReaderHtml {
     /** Embeds images as data URIs within an overall byte budget. */
     private class Images(private val zip: ZipRead, private val labels: Labels) {
         private var spent = 0L
-        fun tag(path: String): String {
-            val mime = when (path.substringAfterLast('.').lowercase()) {
-                "png" -> "image/png"
-                "jpg", "jpeg" -> "image/jpeg"
-                "gif" -> "image/gif"
-                "bmp" -> "image/bmp"
-                "webp" -> "image/webp"
-                "svg" -> "image/svg+xml"
-                else -> null
-            }
+        fun tag(path: String, alt: String = ""): String {
+            val mime = mimeOf(path)
             val bytes = if (mime == null) null else zip.read(path)
             if (bytes == null || bytes.size > MAX_IMAGE_BYTES || spent + bytes.size > MAX_IMAGE_TOTAL) {
-                return "<span class=\"missing\">[${esc(labels.image)}]</span>"
+                return "<span class=\"missing\">[${alt.ifEmpty { esc(labels.image) }}]</span>"
             }
             spent += bytes.size
-            return "<img src=\"data:$mime;base64,${Base64.getEncoder().encodeToString(bytes)}\" alt=\"\">"
+            return "<img src=\"data:$mime;base64,${Base64.getEncoder().encodeToString(bytes)}\" alt=\"$alt\">"
         }
+    }
+
+    private fun mimeOf(path: String): String? = when (path.substringBefore('?').substringAfterLast('.').lowercase()) {
+        "png" -> "image/png"
+        "jpg", "jpeg" -> "image/jpeg"
+        "gif" -> "image/gif"
+        "bmp" -> "image/bmp"
+        "webp" -> "image/webp"
+        "svg" -> "image/svg+xml"
+        else -> null
     }
 
     private fun isOff(v: String?) = v == "0" || v == "false" || v == "off" || v == "none"

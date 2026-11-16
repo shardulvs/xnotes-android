@@ -1,5 +1,7 @@
 package com.xnotes.core.model
 
+import com.xnotes.core.text.FlowMargins
+
 /**
  * A single page (spec 02 §4). Z-order is list order: `items[0]` is at the back,
  * `items.last()` is on top. Pages are mutable and compared by **identity**.
@@ -20,6 +22,8 @@ class Page(
     var pdfTurn: Int = 0,
     /** The room Insert space opened on it, sorted (see [Rooms]). Replaced whole, never mutated, so any thread can read it. */
     @Volatile var rooms: List<Room> = emptyList(),
+    /** This page's own text margins, or null to follow the note's ([com.xnotes.core.text.TextFlow.margins]). */
+    var textMargins: FlowMargins? = null,
 ) {
     /**
      * A process-unique, stable id (not persisted). Pages compare by identity, but Compose list keys

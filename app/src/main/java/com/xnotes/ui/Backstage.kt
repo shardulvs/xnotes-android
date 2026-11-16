@@ -382,7 +382,6 @@ private fun BackstageContent(
             pinsOpen = pinsOpen,
             showFiles = prefs.sidebarFiles,
             showSync = prefs.sidebarSync,
-            showAbout = prefs.sidebarAbout,
         )
     }
     renamingColor?.let { c -> ColorNameDialog(editor, c) { renamingColor = null } }
@@ -408,7 +407,7 @@ private fun BackstageContent(
         Box(Modifier.fillMaxSize().background(palette.bg.toComposeColor())) {
             BackstageMain(
                 Modifier.fillMaxSize(), editor, view, compact, drawerOpen, { animateClose = true; drawerOpen = true }, dismissDrawer, { selectView(BackstageView.HOME) },
-                calls, createMode, { createMode = it }, onImportCodeTheme, onImportFont, onBackup, link, { selectView(BackstageView.PREFERENCES) },
+                calls, createMode, { createMode = it }, onImportCodeTheme, onImportFont, onBackup, link, { selectView(BackstageView.PREFERENCES) }, { selectView(BackstageView.ABOUT) },
                 focusSync, { focusSync = false }, syncLogOpen, { syncLogOpen = it },
             )
             AnimatedVisibility(
@@ -442,7 +441,7 @@ private fun BackstageContent(
                     layout(constraints.maxWidth, placeable.height) { placeable.place(inset, 0) }
                 },
                 editor, view, compact, true, { setRailed(false) }, { setRailed(true) }, { selectView(BackstageView.HOME) },
-                calls, createMode, { createMode = it }, onImportCodeTheme, onImportFont, onBackup, link, { selectView(BackstageView.PREFERENCES) },
+                calls, createMode, { createMode = it }, onImportCodeTheme, onImportFont, onBackup, link, { selectView(BackstageView.PREFERENCES) }, { selectView(BackstageView.ABOUT) },
                 focusSync, { focusSync = false }, syncLogOpen, { syncLogOpen = it },
             )
             // Both stay composed so a fold never pays to build one; only the current one is measured and placed.
@@ -507,7 +506,6 @@ private class SidebarNav(
     val pinsOpen: MutableState<Boolean>,
     val showFiles: Boolean,
     val showSync: Boolean,
-    val showAbout: Boolean,
 )
 
 /** The full sidebar: a pane on wide screens, a slide-over drawer on phones. */
@@ -519,7 +517,7 @@ private fun BackstageSidebar(modifier: Modifier, editor: Editor, nav: SidebarNav
             Modifier.fillMaxWidth().padding(start = 18.dp, end = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("n-notes", color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Text("sponka", color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.clickable { nav.onSelectView(BackstageView.ABOUT) })
             Spacer(Modifier.weight(1f))
             Tooltip(stringResource(R.string.collapse_sidebar)) {
                 IconButton(onClick = onCollapse) {
@@ -564,7 +562,6 @@ private fun BackstageSidebar(modifier: Modifier, editor: Editor, nav: SidebarNav
         RailDivider()
         if (nav.showSync) SyncNowCommand(nav.onSyncSettings)
         Command(XnotesIcons.sliders, stringResource(R.string.preferences), selected = nav.view == BackstageView.PREFERENCES) { nav.onSelectView(BackstageView.PREFERENCES) }
-        if (nav.showAbout) Command(XnotesIcons.info, stringResource(R.string.about), selected = nav.view == BackstageView.ABOUT) { nav.onSelectView(BackstageView.ABOUT) }
         SyncSidebarStatus()
     }
 }
@@ -602,7 +599,6 @@ private fun BackstageRail(modifier: Modifier, nav: SidebarNav, onExpand: () -> U
         }
         if (nav.showSync) SyncRailItem(nav.onSyncSettings)
         RailItem(XnotesIcons.sliders, stringResource(R.string.preferences), selected = nav.view == BackstageView.PREFERENCES) { nav.onSelectView(BackstageView.PREFERENCES) }
-        if (nav.showAbout) RailItem(XnotesIcons.info, stringResource(R.string.about), selected = nav.view == BackstageView.ABOUT) { nav.onSelectView(BackstageView.ABOUT) }
     }
 }
 
@@ -625,6 +621,7 @@ private fun BackstageMain(
     onBackup: (Boolean) -> Unit,
     link: ExplorerLink,
     onOpenPreferences: () -> Unit,
+    onOpenAbout: () -> Unit,
     focusSync: Boolean,
     onSyncFocused: () -> Unit,
     syncLogOpen: Boolean,
@@ -657,7 +654,7 @@ private fun BackstageMain(
         Box(Modifier.weight(1f).fillMaxWidth().padding(start = PANE_GUTTER, end = PANE_GUTTER, top = 4.dp, bottom = 12.dp)) {
             when (view) {
                 BackstageView.HOME -> HomePane(editor, calls, createMode, onCreateMode, sidebarOpen, onShowSidebar, onHideSidebar, link)
-                BackstageView.PREFERENCES -> PreferencesPane(editor, compact, sidebarOpen, onShowSidebar, onBackToHome, onImportCodeTheme, onImportFont, focusSync, onSyncFocused, onBackup, syncLogOpen, onSyncLog)
+                BackstageView.PREFERENCES -> PreferencesPane(editor, compact, sidebarOpen, onShowSidebar, onBackToHome, onImportCodeTheme, onImportFont, focusSync, onSyncFocused, onBackup, syncLogOpen, onSyncLog, onOpenAbout)
                 BackstageView.TRASH -> TrashPane(editor, sidebarOpen, onShowSidebar, onOpenPreferences)
                 BackstageView.ABOUT -> AboutPane()
             }
@@ -1043,7 +1040,7 @@ private fun ExplorerSection(
                         }
                     }
                     Spacer(Modifier.width(4.dp))
-                    Text("n-notes", color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                    Text("sponka", color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 20.sp)
                 }
             }
             Column(Modifier.weight(1f).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1400,6 +1397,10 @@ private fun ExplorerSection(
         val title = context.getString(R.string.convert_to_note)
         if (ReaderKind.ofName(e.name) == ReaderKind.PDF) {
             editor.requestImport(ImportKind.PDF, name, e.documentUri, e.name, "application/pdf", e.parentDocId, title)
+            return
+        }
+        if (ReaderKind.ofName(e.name) == ReaderKind.IMAGE) {
+            editor.requestImport(ImportKind.IMAGE, name, e.documentUri, e.name, "", e.parentDocId, title)
             return
         }
         converting?.cancel()

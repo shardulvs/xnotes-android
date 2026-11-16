@@ -73,6 +73,7 @@ import com.xnotes.settings.ThumbShape
 import com.xnotes.sync.SyncConflict
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
+import com.xnotes.ui.theme.WarningColor
 import com.xnotes.ui.theme.toComposeColor
 import java.time.ZoneId
 
@@ -268,7 +269,7 @@ internal fun ConflictMarked(e: BrowseEntry, name: @Composable () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(
             XnotesIcons.warning, stringResource(R.string.sync_conflict_copy),
-            tint = com.xnotes.core.model.Rgba(255, 145, 60, 255).toComposeColor(), modifier = Modifier.size(14.dp),
+            tint = WarningColor, modifier = Modifier.size(14.dp),
         )
         Spacer(Modifier.width(4.dp))
         Box(Modifier.weight(1f, fill = false)) { name() }

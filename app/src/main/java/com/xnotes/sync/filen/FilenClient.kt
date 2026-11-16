@@ -108,17 +108,16 @@ class FilenClient(private val api: FilenApi, private val session: FilenSession) 
             .put("name", fileName).put("size", size).put("mime", mime)
             .put("key", key).put("lastModified", lastModified).put("hash", hash)
             .toString()
-        api.uploadDone(
-            uuid = uuid,
-            encryptedName = FilenCrypto.encryptMetadata(fileName, key),
-            nameHashed = FilenCrypto.hashFileNameV2(fileName),
-            encryptedSize = FilenCrypto.encryptMetadata(size.toString(), key),
-            chunks = chunks,
-            encryptedMime = FilenCrypto.encryptMetadata(mime, key),
-            rm = rm,
-            metadata = FilenCrypto.encryptMetadata(metadataJson, encKey),
-            uploadKey = uploadKey,
-        )
+        val encryptedName = FilenCrypto.encryptMetadata(fileName, key)
+        val nameHashed = FilenCrypto.hashFileNameV2(fileName)
+        val encryptedSize = FilenCrypto.encryptMetadata(size.toString(), key)
+        val encryptedMime = FilenCrypto.encryptMetadata(mime, key)
+        val metadata = FilenCrypto.encryptMetadata(metadataJson, encKey)
+        if (chunks == 0) {
+            api.uploadEmpty(uuid, encryptedName, nameHashed, encryptedSize, parentUuid, encryptedMime, metadata)
+        } else {
+            api.uploadDone(uuid, encryptedName, nameHashed, encryptedSize, chunks, encryptedMime, rm, metadata, uploadKey)
+        }
         return uuid
     }
 

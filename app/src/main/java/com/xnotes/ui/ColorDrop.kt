@@ -38,8 +38,10 @@ import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.DrawStyle
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.model.TextMarkup
 import com.xnotes.core.model.TextItem
 import com.xnotes.core.model.deepCopy
+import com.xnotes.core.pal.Pen
 import com.xnotes.core.pal.Renderer
 import com.xnotes.core.pal.TextMeasurer
 import com.xnotes.platform.AndroidRenderer
@@ -75,6 +77,9 @@ sealed interface DropPreview {
 
     /** The area that would fill, as an alpha [mask] laid over [rect] in the frame's own space. */
     class Area(override val frame: Int, val mask: Bitmap, val rect: Rect) : DropPreview
+
+    /** The live selection a drop would recolour whole, outlined at [rect] in the frame's own space. */
+    class Box(override val frame: Int, val rect: Rect) : DropPreview
 }
 
 /** The editor end of a swatch's colour drag; both editors are one, so both toolbars drag alike. */
@@ -107,7 +112,16 @@ internal class DropSpot(
     val reach: Double,
     /** Closed bits up to this many cells across fill along with the area round them. */
     val smallHole: Int,
+    /** The live selection's bounds in the frame's own space, when one is out; a drop on it recolours it whole. */
+    val selection: Rect? = null,
+    /** The PDF text markup under the point, when the surface has one and nothing drawn is there. */
+    val markup: TextMarkup? = null,
+    /** That markup's bounds in the frame's own space, for the box preview. */
+    val markupBox: Rect? = null,
 )
+
+/** The bounds round [items], or null for none: the box a selection drop is aimed at. */
+internal fun boundsOf(items: List<CanvasItem>): Rect? = items.map { it.bounds() }.reduceOrNull { a, b -> a.union(b) }
 
 /** Where a colour drag lands on one editor's canvas, and what dropping there does. */
 internal interface DropSurface {
@@ -206,7 +220,13 @@ internal class ColorDropper(private val surface: DropSurface) {
             ?: ColorDrop.map(spot.items, spot.grid) { generation != ask.generation }?.also { maps[spot.key] = it }
             ?: return
         if (ask.drop) {
-            val action = ColorDrop.decide(spot.items, map, spot.at, ask.color, spot.reach, spot.smallHole)
+            var action = ColorDrop.decide(spot.items, map, spot.at, ask.color, spot.reach, spot.smallHole)
+            // The spot was read off the surface as the finger lifted, so its markup is current: a
+            // point the drawing will not take that sits on a markup takes the colour there (a drop
+            // on the live selection is the surface's to rule, before any of this).
+            if ((action == DropAction.None || action == DropAction.NotClosed) && spot.markup != null &&
+                spot.selection?.outset(spot.reach)?.contains(spot.at) != true
+            ) action = DropAction.RecolourMarkup
             post(ask.generation) { surface.applyDrop(spot, action, ask.color) }
             return
         }
@@ -232,13 +252,19 @@ internal class ColorDropper(private val surface: DropSurface) {
         d.preview = shownCopy
     }
 
-    /** What a drop at [spot] would do: recolour the line it lands on, fill the area round it, or nothing. */
+    /** What a drop at [spot] would do: recolour the whole selection, the line it lands on, fill the area round it, or nothing. */
     private fun previewAt(spot: DropSpot, map: FillMap): DropPreview? {
-        ColorDrop.lineAt(spot.items, spot.at, spot.reach)?.let { return DropPreview.Line(spot.frame, it) }
+        spot.selection?.takeIf { it.outset(spot.reach).contains(spot.at) }?.let { return DropPreview.Box(spot.frame, it) }
+        val probe = map.probe(spot.at)
+        ColorDrop.lineAt(spot.items, spot.at, spot.reach, skipHighlighters = probe is Probe.Enclosed)
+            ?.let { return DropPreview.Line(spot.frame, it) }
         val last = lastArea
         if (last != null && lastKey == spot.key && last.holds(map.cellX(spot.at), map.cellY(spot.at))) return lastPreview
-        val area = map.probe(spot.at) as? Probe.Enclosed
+        val area = probe as? Probe.Enclosed
+        // Markups paint under the ink, so only a point the drawing will not take shows the markup's box.
+        val refills = probe == Probe.Open && ColorDrop.fillAt(spot.items, spot.at) != null
         val preview = area?.let { mask(spot.frame, map.grid, it) }
+            ?: spot.markupBox?.takeIf { spot.markup != null && !refills }?.let { DropPreview.Box(spot.frame, it) }
         lastArea = area
         lastKey = spot.key
         lastPreview = preview
@@ -303,6 +329,7 @@ fun ColorDropOverlay(host: ColorDropHost) {
                             val d = p.rect
                             c.nativeCanvas.drawBitmap(p.mask, null, RectF(d.left.toFloat(), d.top.toFloat(), d.right.toFloat(), d.bottom.toFloat()), tint)
                         }
+                        is DropPreview.Box -> r.strokeRect(p.rect, Pen(drag.color, SELECTION_RING_PX))
                     }
                     r.restore()
                 }
@@ -384,6 +411,9 @@ internal const val DROP_MARGIN = 0.25
 
 /** Radius of the disc a colour drag carries, in dp. */
 private const val DISC_RADIUS = 14
+
+/** Width, in device px, of the ring drawn round a selection a drop would recolour whole. */
+private const val SELECTION_RING_PX = 2.0
 
 /** How strongly the area a drop would fill is tinted in the preview, out of 255. */
 private const val PREVIEW_ALPHA = 140
