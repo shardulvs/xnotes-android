@@ -103,11 +103,6 @@ class GlRenderer : GLSurfaceView.Renderer {
     var failure: String? = null
         private set
 
-    /** What the self check made of this context, for the debug readout. */
-    @Volatile
-    var selfCheck: String = ""
-        private set
-
     private var background: BackgroundShader? = null
     private var cursor: CursorShader? = null
 
@@ -120,31 +115,12 @@ class GlRenderer : GLSurfaceView.Renderer {
      *  surface exists, so it is asked for rather than handed over at construction. */
     var msaaSamples: () -> Int = { 0 }
 
-    /** Publish requests seen so far, written by the view and differenced per frame. */
-    @Volatile
-    var publishRequests: Int = 0
-
-    /** The panel's refresh rate, so the HUD can say whether a frame count is at the cap. */
-    @Volatile
-    var displayHz: Double = 60.0
-
     // Timestamps of recently drawn frames, so the rate is a count over a window rather than a
     // smoothed interval. A smoothed interval reads at the refresh rate whenever anything is
     // drawing at all, which says nothing about whether frames were dropped.
     private val frameStamps = LongArray(WINDOW_FRAMES)
-
-    /** Device pixels the content moved between each frame and the one before it. */
-    private val frameSteps = DoubleArray(WINDOW_FRAMES)
-    private var lastScrollX = 0.0
-    private var lastScrollY = 0.0
-    private var lastZoom = 0.0
     private var frameHead = 0
     private var frameCount = 0
-    private var frameMs = 0.0
-    private var lastRequests = 0
-    private var requestsPerFrame = 0.0
-    private var rendererName = ""
-    private var glVersionName = ""
 
     /** Invoked on the GL thread right after a context is (re)built, for host-side bookkeeping. */
     var onContextReady: ((Int) -> Unit)? = null
@@ -155,8 +131,8 @@ class GlRenderer : GLSurfaceView.Renderer {
         contextGen++
         failure = null
         FrontBufferProbe.log()
-        rendererName = GLES30.glGetString(GLES30.GL_RENDERER) ?: ""
-        glVersionName = GLES30.glGetString(GLES30.GL_VERSION) ?: ""
+        val rendererName = GLES30.glGetString(GLES30.GL_RENDERER) ?: ""
+        val glVersionName = GLES30.glGetString(GLES30.GL_VERSION) ?: ""
         frameCount = 0
         frameHead = 0
         Log.i(TAG, "context $contextGen on $rendererName, $glVersionName, ${msaaSamples()}x MSAA")
@@ -173,7 +149,6 @@ class GlRenderer : GLSurfaceView.Renderer {
         // Before the scene rebuilds anything, so a driver that gets the arithmetic or the blending
         // wrong is reported as that rather than as a canvas that looks a bit off.
         val checked = GlSelfCheck().run(contextGen)
-        selfCheck = checked.summary
         if (!checked.ok) failure = listOfNotNull(failure, checked.summary).joinToString("; ")
         scene?.onContextCreated(contextGen)
         onContextReady?.invoke(contextGen)
@@ -206,93 +181,27 @@ class GlRenderer : GLSurfaceView.Renderer {
         if (f.cursorVisible) {
             cursor?.draw(f.cursorX, f.cursorY, f.cursorRadius, cursorColor(f.paper), f.widthPx, f.heightPx)
         }
-        sampleFrame(started, f)
+        sampleFrame(started)
         // After the draw and before the swap, which is the earliest point at which this frame's
         // pixels are certain to be the next thing the compositor latches for this layer.
         for (action in after) action()
     }
 
-    /**
-     * Record one drawn frame and republish the stats.
-     *
-     * The rate is a count of frames over the last second, not a smoothed interval, because a
-     * smoothed interval is bounded by the display and so reads at the refresh rate the moment
-     * anything is drawing at all. What actually matters is whether frames were missed, so the
-     * longest gap and the count of late frames are reported alongside it, and the work inside the
-     * frame is timed separately from the wait for the display.
-     */
-    private fun sampleFrame(startedNs: Long, f: FrameState) {
+    /** Record one drawn frame and republish the stats. */
+    private fun sampleFrame(startedNs: Long) {
         val now = System.nanoTime()
-        frameMs = (now - startedNs) / 1_000_000.0
-        // How far the content actually moved on screen since the last frame. Even steps are what
-        // reads as smooth; uneven ones read as stutter however many frames were drawn.
-        val moved = if (lastZoom == f.zoom) {
-            kotlin.math.hypot(f.scrollX - lastScrollX, f.scrollY - lastScrollY) * f.zoom
-        } else {
-            -1.0 // a zoom change is not a translation, so it is not part of the pan measurement
-        }
-        lastScrollX = f.scrollX
-        lastScrollY = f.scrollY
-        lastZoom = f.zoom
-        frameSteps[frameHead] = moved
         frameStamps[frameHead] = now
         frameHead = (frameHead + 1) % WINDOW_FRAMES
         if (frameCount < WINDOW_FRAMES) frameCount++
 
-        val requests = publishRequests
-        requestsPerFrame = (requests - lastRequests).coerceAtLeast(0).toDouble()
-        lastRequests = requests
-
         // Walk the window newest first, stopping at the second boundary.
         var frames = 0
-        var worstNs = 0L
-        var jank = 0
-        val refreshNs = if (displayHz > 1.0) (1_000_000_000.0 / displayHz) else 16_666_667.0
-        val lateNs = (refreshNs * 1.5).toLong()
-        var previous = now
-        var stepSum = 0.0
-        var stepSquares = 0.0
-        var steps = 0
         for (i in 1 until frameCount) {
             val slot = (frameHead - 1 - i + WINDOW_FRAMES * 2) % WINDOW_FRAMES
-            val stamp = frameStamps[slot]
-            if (now - stamp > WINDOW_NS) break
-            val gap = previous - stamp
-            if (gap > worstNs) worstNs = gap
-            if (gap > lateNs) jank++
-            previous = stamp
+            if (now - frameStamps[slot] > WINDOW_NS) break
             frames++
-            // Still frames and zoom changes say nothing about how evenly a pan moved.
-            val step = frameSteps[slot]
-            if (step > 0.0) {
-                stepSum += step
-                stepSquares += step * step
-                steps++
-            }
         }
-        var stepMean = 0.0
-        var jitter = 0.0
-        if (steps >= 4) {
-            stepMean = stepSum / steps
-            val variance = (stepSquares / steps) - stepMean * stepMean
-            if (stepMean > 0.0 && variance > 0.0) jitter = kotlin.math.sqrt(variance) / stepMean
-        }
-
-        val base = GlStats(
-            fps = frames.toDouble(),
-            frameMs = frameMs,
-            worstFrameMs = worstNs / 1_000_000.0,
-            jankFrames = jank,
-            displayHz = displayHz,
-            requestsPerFrame = requestsPerFrame,
-            stepJitter = jitter,
-            stepPx = stepMean,
-            contextGen = contextGen,
-            msaaSamples = msaaSamples(),
-            renderer = rendererName,
-            glVersion = glVersionName,
-            selfCheck = selfCheck,
-        )
+        val base = GlStats(fps = frames.toDouble(), frameMs = (now - startedNs) / 1_000_000.0)
         stats = scene?.describe(base) ?: base
     }
 

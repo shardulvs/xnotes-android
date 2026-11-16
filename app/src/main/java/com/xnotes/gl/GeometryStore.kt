@@ -62,11 +62,6 @@ class GeometryStore {
     private var indexDirtyLo = Int.MAX_VALUE
     private var indexDirtyHi = 0
 
-    val vertexCapacity: Int get() = vertexAllocator.capacity
-    val indexCapacity: Int get() = indexAllocator.capacity
-    val usedVertices: Int get() = vertexAllocator.used
-    val usedIndices: Int get() = indexAllocator.used
-
     /** Set once a buffer could not grow, so an item was left undrawn; cleared with the store. */
     var outOfMemory = false
         private set

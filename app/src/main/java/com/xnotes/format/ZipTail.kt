@@ -55,7 +55,13 @@ internal object ZipTail {
         val record: ByteArray,
     )
 
-    class Directory(val entries: List<Entry>, val offset: Long)
+    class Directory(val entries: List<Entry>, val offset: Long) {
+
+        /** Whether [other] is the same save: every entry's record equal, so its checksum, sizes, place and time. */
+        fun sameAs(other: Directory): Boolean =
+            offset == other.offset && entries.size == other.entries.size &&
+                entries.indices.all { entries[it].record.contentEquals(other.entries[it].record) }
+    }
 
     /** Read [ch]'s central directory, or null when this is not a zip worth patching. */
     fun read(ch: FileChannel): Directory? {

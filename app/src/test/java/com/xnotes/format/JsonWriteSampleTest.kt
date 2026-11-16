@@ -16,22 +16,23 @@ class JsonWriteSampleTest {
     private fun round(v: Double, scale: Double) = Math.round(v * scale) / scale
 
     /** What the writer emitted before [JsonWrite.samplePoint] existed. */
-    private fun reference(x: Double, y: Double, p: Double, t: Double?): String {
+    private fun reference(x: Double, y: Double, p: Double, t: Double?, width: Double? = null): String {
         val w = StringWriter()
         val j = JsonWrite(w)
         j.beginArray()
         j.beginArray().value(round(x, 100.0)).value(round(y, 100.0)).value(round(p, 1000.0))
         if (t != null) j.value(t)
+        if (t != null && width != null) j.value(round(width, 1000.0))
         j.endArray()
         j.endArray()
         return w.toString()
     }
 
-    private fun fast(x: Double, y: Double, p: Double, t: Double?): String {
+    private fun fast(x: Double, y: Double, p: Double, t: Double?, width: Double? = null): String {
         val w = StringWriter()
         val j = JsonWrite(w)
         j.beginArray()
-        j.samplePoint(x, y, p, t)
+        j.samplePoint(x, y, p, t, width)
         j.endArray()
         return w.toString()
     }
@@ -64,6 +65,21 @@ class JsonWriteSampleTest {
         // A fractional time is not something the fixed-point form can print; it must fall back.
         same(1.0, 2.0, 0.5, 12.75)
         same(1.0, 2.0, 0.5, 1.0e8)
+    }
+
+    @Test fun itPrintsWhatTheGeneralPathPrintsWithKeptWidths() {
+        val r = Random(11)
+        repeat(5000) {
+            val x = (r.nextDouble() - 0.5) * 2000.0
+            val y = (r.nextDouble() - 0.5) * 2000.0
+            val t = r.nextInt(0, 600000).toDouble()
+            val width = 0.08 + r.nextDouble() * 0.92
+            assertEquals(reference(x, y, 0.5, t, width), fast(x, y, 0.5, t, width))
+        }
+        assertEquals("[[1,2,0.5,12,0.457]]", fast(1.0, 2.0, 0.5, 12.0, 0.4567))
+        assertEquals(reference(1.0, 2.0, 0.5, 12.75, 0.4567), fast(1.0, 2.0, 0.5, 12.75, 0.4567))
+        // A width only has a slot after a time, so without one it is left out rather than misplaced.
+        assertEquals("[[1,2,0.5]]", fast(1.0, 2.0, 0.5, null, 0.4567))
     }
 
     @Test fun theEdgesRoundTheSameWay() {
