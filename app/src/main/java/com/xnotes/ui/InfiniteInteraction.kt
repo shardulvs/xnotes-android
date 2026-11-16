@@ -1978,7 +1978,8 @@ class InfiniteInteraction(
     private fun extendPan(vx: Double, vy: Double) {
         trackVelocity(vx, vy)
         onUserMovedView()
-        if (singleFingerPanAllowed()) viewport.panByViewport(vx - lastPan.x, vy - lastPan.y)
+        val pan = panCfg().panDelta(vx - lastPan.x, vy - lastPan.y)
+        if (singleFingerPanAllowed()) viewport.panByViewport(pan.x, pan.y)
         lastPan = Pt(vx, vy)
         onViewChanged()
         requestRender()
@@ -1989,6 +1990,8 @@ class InfiniteInteraction(
     private fun singleFingerPanAllowed(): Boolean = !(zoomLocked && zoomLockPan != "single")
 
     private fun pinchPanAllowed(): Boolean = !(zoomLocked && zoomLockPan == "none")
+
+    private fun panCfg() = configFor(Tool.PAN)
 
     // --- pinch ---
 
@@ -2018,8 +2021,8 @@ class InfiniteInteraction(
         // A locked zoom keeps the zoom it started at, so the pinch is a pan and nothing else.
         viewport.zoom = if (zoomLocked) pinchInitZoom else pinchInitZoom * (dist / pinchInitDist)
         if (pinchPanAllowed()) {
-            viewport.scrollX = pinchAnchorContent.x - mid.x / viewport.zoom
-            viewport.scrollY = pinchAnchorContent.y - mid.y / viewport.zoom
+            if (!panCfg().lockPanX) viewport.scrollX = pinchAnchorContent.x - mid.x / viewport.zoom
+            if (!panCfg().lockPanY) viewport.scrollY = pinchAnchorContent.y - mid.y / viewport.zoom
         }
         lastPan = mid
         onViewChanged()
@@ -2045,9 +2048,10 @@ class InfiniteInteraction(
     }
 
     private fun startFling(fingerVel: Pt) {
-        if (fingerVel.length() < InteractionController.FLING_MIN_START) return
+        val vel = panCfg().panDelta(fingerVel.x, fingerVel.y)
+        if (!panCfg().panGlide || vel.length() < InteractionController.FLING_MIN_START) return
         setInteractive(true, true) // the glide is still motion, so the render thread stays up for it
-        flingVel = fingerVel
+        flingVel = vel
         flinging = true
         lastFlingMs = System.nanoTime() / 1_000_000L
         choreographer.postFrameCallback(flingFrame)

@@ -981,9 +981,9 @@ class InteractionController(
             if (effectiveTool != Tool.PAN) text.clear()
         }
 
-        // Zoom-lock pan preference: swallow a single-finger pan when locked and set to "double"/"none".
+        // Zoom-lock pan preference, or both pan axes locked: swallow a single-finger pan.
         // The pointer stays free, so a long press still picks up an item or selects text.
-        if (effectiveTool == Tool.PAN && !singleFingerPanAllowed()) {
+        if (effectiveTool == Tool.PAN && (!singleFingerPanAllowed() || panCfg().lockPanX && panCfg().lockPanY)) {
             mode = PointerMode.IDLE
             lockedPressAt = Pt(vx, vy)
             armLongPress(Pt(vx, vy), content, isFinger, free)
@@ -4759,6 +4759,7 @@ class InteractionController(
     // viewport: "single" keeps both, "double" drops the single finger, "none" freezes the page.
     private fun singleFingerPanAllowed(): Boolean = !(state.zoomLocked && zoomLockPan != "single")
     private fun pinchPanAllowed(): Boolean = !(state.zoomLocked && zoomLockPan == "none")
+    private fun panCfg() = configFor(Tool.PAN)
 
     private fun beginPan(vx: Double, vy: Double, fromPenButton: Boolean = false) {
         mode = PointerMode.PAN
@@ -4770,8 +4771,9 @@ class InteractionController(
     private fun extendPan(vx: Double, vy: Double) {
         trackVelocity(vx, vy)
         onUserMovedView?.invoke()
-        val dx = -(vx - lastPan.x)
-        var dy = -(vy - lastPan.y)
+        val pan = panCfg().panDelta(-(vx - lastPan.x), -(vy - lastPan.y))
+        val dx = pan.x
+        var dy = pan.y
         if (!state.verticalScroll) {
             extendPanPaginated(dx, dy)
             lastPan = Pt(vx, vy)
@@ -4870,7 +4872,7 @@ class InteractionController(
         val pull = state.flipOffsetX
         // A finger that stopped before lifting has no flick left, however fast it moved earlier.
         val stopped = System.nanoTime() / 1_000_000L - lastMoveMs > PaginatedFlipPolicy.RELEASE_MOTION_MAX_AGE_MS
-        val v = if (stopped) Pt.ZERO else panVel
+        val v = if (stopped) Pt.ZERO else panCfg().panDelta(panVel.x, panVel.y)
         val deliberate = PaginatedFlipPolicy.shouldCommitOnRelease(
             pull, state.viewportW, state.devicePxPerDp, v.x, v.y, state.zoom,
         )
@@ -4985,8 +4987,9 @@ class InteractionController(
     }
 
     private fun startFling(fingerVel: Pt) {
-        if (fingerVel.length() < FLING_MIN_START) return
-        flingVel = Pt(-fingerVel.x, -fingerVel.y) // scroll moves opposite the finger
+        val vel = panCfg().panDelta(-fingerVel.x, -fingerVel.y) // scroll moves opposite the finger
+        if (!panCfg().panGlide || vel.length() < FLING_MIN_START) return
+        flingVel = vel
         flinging = true
         lastFlingMs = System.nanoTime() / 1_000_000L
         choreographer.postFrameCallback(flingFrame)
@@ -5198,8 +5201,8 @@ class InteractionController(
             else if (wasFit && !nowFit) onFitWidthReleased()
         }
         if (pinchPanAllowed()) {
-            val targetX = pinchAnchorContent.x * z - mid.x
-            val targetY = pinchAnchorContent.y * z - mid.y
+            val targetX = if (panCfg().lockPanX) state.scrollX else pinchAnchorContent.x * z - mid.x
+            val targetY = if (panCfg().lockPanY) state.scrollY else pinchAnchorContent.y * z - mid.y
             state.scrollX = targetX
             state.scrollY = targetY
             state.clampScroll()

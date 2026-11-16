@@ -1,5 +1,6 @@
 package com.xnotes.core.tools
 
+import com.xnotes.core.geometry.Pt
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.TapeItem
 import com.xnotes.core.model.TapeMode
@@ -135,6 +136,14 @@ data class ToolConfig(
     val markupIntensity: Double = DEFAULT_MARKUP_INTENSITY,
     /** Eraser: also take off the PDF text markups it touches. Only used by [Tool.ERASER]. */
     val eraseMarkups: Boolean = true,
+    /** Pan: the view does not move sideways. Applies to every finger pan, whichever tool is armed. */
+    val lockPanX: Boolean = false,
+    /** Pan: the view does not move up and down. */
+    val lockPanY: Boolean = false,
+    /** Pan: how fast the view follows a finger, 1..10; 5 is the app's own rate. */
+    val panSensitivity: Int = 5,
+    /** Pan: a flick keeps the view gliding after the finger lifts. */
+    val panGlide: Boolean = true,
     /** Eraser: a pen scribbled over ink erases what it touches. Only used by [Tool.ERASER]. */
     val scribbleErase: Boolean = false,
     /** Eraser: the kinds of item it may take off the page. Only used by [Tool.ERASER]. */
@@ -154,6 +163,12 @@ data class ToolConfig(
     /** Stabilization: the speed in dp/s below which movement counts as slow and is steadied hardest. */
     val stabilizeCrossover: Double = Stabilizer.DEFAULT_CROSSOVER,
 ) {
+    /** A finger's move turned into the view's move: locked axes drop out, the rest is scaled (1 -> 0.2x, 10 -> 3x). */
+    fun panDelta(dx: Double, dy: Double): Pt {
+        val k = if (panSensitivity <= 5) panSensitivity / 5.0 else 1.0 + (panSensitivity - 5) * 0.4
+        return Pt(if (lockPanX) 0.0 else dx * k, if (lockPanY) 0.0 else dy * k)
+    }
+
     companion object {
         const val DEFAULT_MARKUP_INTENSITY = 0.9
         const val MARKUP_INTENSITY_MIN = 0.1
@@ -187,7 +202,7 @@ object ToolDefaults {
     }
 
     /** Tools whose config is persisted in settings (spec 09 §2). */
-    val persistedTools = listOf(Tool.PEN, Tool.DASHED, Tool.CALLIGRAPHY, Tool.SPEED, Tool.TAPER, Tool.HIGHLIGHTER, Tool.ERASER, Tool.SELECT, Tool.LASSO, Tool.MARKUP, Tool.TAPE)
+    val persistedTools = listOf(Tool.PEN, Tool.DASHED, Tool.CALLIGRAPHY, Tool.SPEED, Tool.TAPER, Tool.HIGHLIGHTER, Tool.ERASER, Tool.SELECT, Tool.LASSO, Tool.MARKUP, Tool.TAPE, Tool.PAN)
 }
 
 /**

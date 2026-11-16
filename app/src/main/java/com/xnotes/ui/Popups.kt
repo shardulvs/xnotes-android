@@ -111,6 +111,7 @@ import com.xnotes.core.shapes.ShapeKind
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
 import com.xnotes.core.tools.ToolConversions
+import com.xnotes.core.tools.ToolDefaults
 import com.xnotes.platform.FontCatalog
 import com.xnotes.platform.TemplateLibrary
 import com.xnotes.settings.Preferences
@@ -1119,6 +1120,36 @@ private fun ZoomLimitRow(label: String, enabled: Boolean, value: Int, onToggle: 
         }
         Spacer(Modifier.weight(1f))
         Switch(checked = enabled, onCheckedChange = onToggle)
+    }
+}
+
+/** Pan configuration popup: which axes a finger pan moves along, how fast, and whether a flick glides on. */
+@Composable
+fun PanConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
+    var cfg by remember { mutableStateOf(editor.toolConfig(Tool.PAN)) }
+    fun emit(next: ToolConfig) { cfg = next; editor.updateToolConfig(Tool.PAN, next) }
+
+    DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
+        Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
+            PopupTitle(stringResource(R.string.tool_pan))
+            StyleCaption(stringResource(R.string.caption_pan_axes))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ModeChip(stringResource(R.string.pan_axis_x), selected = !cfg.lockPanX) { emit(cfg.copy(lockPanX = !cfg.lockPanX)) }
+                ModeChip(stringResource(R.string.pan_axis_y), selected = !cfg.lockPanY) { emit(cfg.copy(lockPanY = !cfg.lockPanY)) }
+                ModeChip(stringResource(R.string.pan_axis_zoom), selected = !editor.hostZoomLocked) { editor.toggleHostZoomLock() }
+            }
+            Spacer(Modifier.size(12.dp))
+            // Snaps to whole steps without the slider's tick dots.
+            SliderRow(stringResource(R.string.caption_pan_sensitivity), cfg.panSensitivity.toFloat(), 1f..10f) { emit(cfg.copy(panSensitivity = it.roundToInt())) }
+            ToggleRow(stringResource(R.string.caption_pan_glide), cfg.panGlide) { emit(cfg.copy(panGlide = it)) }
+            Spacer(Modifier.size(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                ModeChip(stringResource(R.string.reset), false) {
+                    val d = ToolDefaults.configFor(Tool.PAN)
+                    emit(cfg.copy(lockPanX = d.lockPanX, lockPanY = d.lockPanY, panSensitivity = d.panSensitivity, panGlide = d.panGlide))
+                }
+            }
+        }
     }
 }
 

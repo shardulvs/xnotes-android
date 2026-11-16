@@ -419,6 +419,12 @@
     <string name="pan_single">Single-finger pan</string>
     <string name="pan_two">Two-finger pan</string>
     <string name="pan_none">No pan</string>
+    <string name="caption_pan_axes">Pan along</string>
+    <string name="caption_pan_sensitivity">Sensitivity</string>
+    <string name="caption_pan_glide">Glide</string>
+    <string name="pan_axis_x">X</string>
+    <string name="pan_axis_y">Y</string>
+    <string name="pan_axis_zoom">Zoom</string>
     <string name="pref_detect_shapes">Snap held strokes to shapes (hold the pen still)</string>
     <string name="pref_pen_button_hold">Stylus/Pen side button (hold)</string>
     <string name="pref_pen_button_hover">Activate during hover (no need to touch the screen)</string>

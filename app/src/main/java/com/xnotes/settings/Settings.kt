@@ -398,6 +398,10 @@ data class Settings(
             .put("erase_markups", c.eraseMarkups)
             .put("scribble_erase", c.scribbleErase)
             .put("erasable_kinds_off", kindsJson(SelectKind.ALL - c.erasableKinds))
+            .put("lock_pan_x", c.lockPanX)
+            .put("lock_pan_y", c.lockPanY)
+            .put("pan_sensitivity", c.panSensitivity)
+            .put("pan_glide", c.panGlide)
             .put("switch_back_after_select", c.switchBackAfterSelect)
             .put("select_whole_items", c.selectWholeItems)
             .put("select_kinds_off", kindsJson(SelectKind.ALL - c.selectKinds))
@@ -453,6 +457,10 @@ data class Settings(
                     ?.takeIf { it.isNotEmpty() }
                     ?: d.selectKinds,
                 snapToMargins = o.optBoolean("snap_to_margins", d.snapToMargins),
+                lockPanX = o.optBoolean("lock_pan_x", d.lockPanX),
+                lockPanY = o.optBoolean("lock_pan_y", d.lockPanY),
+                panSensitivity = o.optInt("pan_sensitivity", d.panSensitivity).coerceIn(1, 10),
+                panGlide = o.optBoolean("pan_glide", d.panGlide),
                 straightLine = o.optBoolean("straight_line", d.straightLine),
                 scale = o.optBoolean("scale", d.scale),
                 highlighterAlpha = o.optDouble("highlighter_alpha", d.highlighterAlpha),

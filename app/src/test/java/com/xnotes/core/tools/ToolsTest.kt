@@ -1,5 +1,6 @@
 package com.xnotes.core.tools
 
+import com.xnotes.core.geometry.Pt
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.shapes.ShapeKind
 import org.junit.Assert.assertEquals
@@ -135,5 +136,20 @@ class ToolsTest {
     @Test fun toolIdRoundTrip() {
         for (t in Tool.entries) assertEquals(t, Tool.fromId(t.id))
         assertEquals(16, Tool.wheelOrder.size)
+    }
+
+    @Test fun panDeltaLocksAndScales() {
+        val pan = ToolDefaults.configFor(Tool.PAN)
+        assertFalse(pan.lockPanX)
+        assertFalse(pan.lockPanY)
+        assertEquals(5, pan.panSensitivity)
+        assertTrue(pan.panGlide)
+        assertTrue(Tool.PAN in ToolDefaults.persistedTools)
+
+        assertEquals(Pt(3.0, 4.0), pan.panDelta(3.0, 4.0))
+        assertEquals(Pt(0.0, 4.0), pan.copy(lockPanX = true).panDelta(3.0, 4.0))
+        assertEquals(Pt(3.0, 0.0), pan.copy(lockPanY = true).panDelta(3.0, 4.0))
+        assertEquals(0.2, pan.copy(panSensitivity = 1).panDelta(1.0, 0.0).x, 1e-9)
+        assertEquals(3.0, pan.copy(panSensitivity = 10).panDelta(1.0, 0.0).x, 1e-9)
     }
 }

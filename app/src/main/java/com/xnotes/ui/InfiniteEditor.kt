@@ -1147,6 +1147,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         onToolStyleChanged?.invoke()
     }
 
+    override val hostZoomLocked: Boolean get() = zoomLocked
+    override fun toggleHostZoomLock() = toggleZoomLock()
+
     override var snapHeldToShapes: Boolean
         get() = detectShapes
         set(v) { detectShapes = v; onDetectShapesChanged?.invoke(v) }

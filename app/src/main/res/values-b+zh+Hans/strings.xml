@@ -354,6 +354,12 @@
     <string name="pan_single">单指平移</string>
     <string name="pan_two">双指平移</string>
     <string name="pan_none">不平移</string>
+    <string name="caption_pan_axes">平移方向</string>
+    <string name="caption_pan_sensitivity">灵敏度</string>
+    <string name="caption_pan_glide">滑行</string>
+    <string name="pan_axis_x">X</string>
+    <string name="pan_axis_y">Y</string>
+    <string name="pan_axis_zoom">缩放</string>
     <string name="pref_detect_shapes">长按笔画后转换为形状（保持笔尖不动）</string>
     <string name="pref_pen_button_hold">手写笔侧键（按住）</string>
     <string name="pref_pen_button_hover">悬停时启用（无需触碰屏幕）</string>
