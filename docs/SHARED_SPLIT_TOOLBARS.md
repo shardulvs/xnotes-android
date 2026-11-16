@@ -70,7 +70,7 @@ padding rather than the whole-workspace padding produced by `ToolbarAround`.
 
 ### Modules
 
-- `MainActivity.kt` handles lifecycle, platform requests, and activity-scoped callbacks.
+- `EditorActivity.kt` handles lifecycle, platform requests, and activity-scoped callbacks.
 - `PaneActions.kt` is the small callback contract between that activity and the split UI.
 - `SplitWorkspace.kt` arranges the panes, shared chrome, layout constraints and draggable divider.
 - `PaneSurface.kt` owns each document's stable Android surface, overlays and focus input.
@@ -81,7 +81,7 @@ padding rather than the whole-workspace padding produced by `ToolbarAround`.
 Cherry-pick the feature commit onto a branch based on upstream. A branch that already changes
 `SplitHost`, `EditorPane`, toolbar signatures or preference serialization can require conflict
 resolution. Independence means no dependency on those earlier feature commits; it does not mean
-every heavily modified `MainActivity` can accept a patch without conflicts.
+every heavily modified `EditorActivity` can accept a patch without conflicts.
 
 For multi-toolbar workspaces:
 

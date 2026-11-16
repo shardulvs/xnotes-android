@@ -8,7 +8,7 @@ import android.test.InstrumentationTestCase
 import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.accessibility.AccessibilityNodeInfo
-import com.xnotes.MainActivity
+import com.xnotes.EditorActivity
 import com.xnotes.R
 import com.xnotes.core.tools.*
 import com.xnotes.settings.*
@@ -16,7 +16,7 @@ import com.xnotes.settings.*
 /** Real split host, real surfaces and real toolbar actions. Use an isolated test application ID. */
 @Suppress("DEPRECATION")
 class SharedSplitToolbarDeviceTest : InstrumentationTestCase() {
-    private lateinit var activity: MainActivity
+    private lateinit var activity: EditorActivity
     private lateinit var editor: Editor
     private lateinit var previousPreferences: Preferences
     private lateinit var previousNoteLayout: ToolbarLayout
@@ -35,10 +35,10 @@ class SharedSplitToolbarDeviceTest : InstrumentationTestCase() {
 
     private fun show(firstCanvas: Boolean, secondCanvas: Boolean) {
         assertTrue("Use the isolated validation build", instrumentation.targetContext.packageName.endsWith(".sharedsplit"))
-        activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext, MainActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+        activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext, EditorActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as EditorActivity
         instrumentation.runOnMainSync {
-            editor = MainActivity::class.java.getDeclaredField("editor").apply { isAccessible = true }.get(activity) as Editor
+            editor = activity.javaClass.getDeclaredField("editor").apply { isAccessible = true }.get(activity) as Editor
             previousPreferences = editor.preferences
             previousNoteLayout = editor.toolbarLayout
             previousCanvasLayout = editor.canvasToolbarLayout
