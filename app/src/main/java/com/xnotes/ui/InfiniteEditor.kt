@@ -2324,6 +2324,13 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         view.publish()
     }
 
+    fun setZoom(scale: Float) {
+        if (zoomLocked) return
+        viewport.zoomAroundCenter(scale.toDouble())
+        onViewChanged()
+        view.publish()
+    }
+
     private var palette: Palette? = null
 
     /** Adopt the chrome's palette, so the paper and the selection accent match the rest of the app. */

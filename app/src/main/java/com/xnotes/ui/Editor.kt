@@ -350,6 +350,9 @@ private val searchWorker: java.util.concurrent.Executor by lazy {
 /** Recent as last set here, read only so both panes of a split recompose on a change; the list itself lives in settings. */
 private val sharedRecents = androidx.compose.runtime.mutableStateOf<List<com.xnotes.settings.RecentDoc>?>(null)
 
+/** Saved zooms as last set here, read only so both panes recompose on a change; the list lives in settings. */
+private val sharedFavoriteZooms = androidx.compose.runtime.mutableStateOf<List<Float>?>(null)
+
 /**
  * Which pane of a split view an editor drives. [PRIMARY] is the app's one editor in the ordinary
  * single-note case and the first pane of a split; [SECONDARY] is the second pane, built only when a
@@ -759,6 +762,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     fun relistTree() {
         treeVersion++
         sharedRecents.value = settings.recentDocs // a sync may have merged in another device's recents
+        sharedFavoriteZooms.value = settings.favoriteZooms
     }
 
     override var toastText by mutableStateOf<String?>(null)
@@ -7528,6 +7532,29 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     fun toggleZoomLock() {
         zoomLocked = !zoomLocked
         state.zoomLocked = zoomLocked
+    }
+
+    fun setZoom(scale: Float) {
+        if (zoomLocked) return
+        state.setZoomAnchored(state.clearCenter(), scale.toDouble())
+        afterView()
+    }
+
+    /** Saved zooms, ascending. Settings rather than note state, so every note offers the same ones. */
+    val favoriteZooms: List<Float>
+        get() { sharedFavoriteZooms.value; return settings.favoriteZooms }
+
+    val showZoomBar: Boolean
+        get() { prefsVersion; return preferences.showZoomBar }
+
+    fun setShowZoomBar(on: Boolean) = applyPreferences(preferences.copy(showZoomBar = on))
+
+    /** Save [zoom] if it is not saved yet, remove it if it is. */
+    fun toggleFavoriteZoom(zoom: Float) {
+        val next = settings.toggleFavoriteZoom(zoom).favoriteZooms
+        settings = settings.copy(favoriteZooms = next)
+        sharedFavoriteZooms.value = next
+        saveSettingsSoon()
     }
 
     fun toggleRuler() {

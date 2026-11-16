@@ -774,6 +774,10 @@
     <string name="unlock_zoom">Unlock zoom</string>
     <string name="lock_zoom_fit_width">Lock zoom at fit width</string>
     <string name="lock_zoom">Lock zoom</string>
+    <string name="zoom_save">Save %1$d%%</string>
+    <string name="caption_saved_zooms">Saved zooms</string>
+    <string name="zoom_remove_saved">Remove %1$d%%</string>
+    <string name="zoom_show_bar">Show zoom bar</string>
     <plurals name="saved_images">
         <item quantity="one">Saved %d image.</item>
         <item quantity="other">Saved %d images.</item>

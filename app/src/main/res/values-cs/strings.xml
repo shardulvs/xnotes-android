@@ -787,6 +787,10 @@
     <string name="unlock_zoom">Odemknout přiblížení</string>
     <string name="lock_zoom_fit_width">Zamknout přiblížení na šířku stránky</string>
     <string name="lock_zoom">Zamknout přiblížení</string>
+    <string name="zoom_save">Uložit %1$d %%</string>
+    <string name="caption_saved_zooms">Uložená přiblížení</string>
+    <string name="zoom_remove_saved">Odebrat %1$d %%</string>
+    <string name="zoom_show_bar">Zobrazit lištu přiblížení</string>
     <plurals name="saved_images">
         <item quantity="one">Uložen %d obrázek.</item>
         <item quantity="few">Uloženy %d obrázky.</item>

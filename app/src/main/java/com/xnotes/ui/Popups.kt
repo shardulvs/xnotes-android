@@ -116,9 +116,11 @@ import com.xnotes.platform.FontCatalog
 import com.xnotes.platform.TemplateLibrary
 import com.xnotes.settings.Preferences
 import com.xnotes.settings.SwatchRole
+import com.xnotes.settings.ZOOM_MATCH_TOLERANCE
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
@@ -1068,6 +1070,8 @@ fun ZoomMenuPopup(editor: Editor, onDismiss: () -> Unit) {
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
         Column(Modifier.width(280.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
             PopupTitle(stringResource(R.string.title_zoom))
+            ZoomSavedSection(editor, editor.zoomPercent, editor.zoomLocked, editor::toggleZoomLock, editor::setZoom)
+            Spacer(Modifier.size(8.dp))
             ZoomLimitRow(
                 stringResource(R.string.caption_min_zoom), minOn, minPct,
                 onToggle = {
@@ -1094,6 +1098,68 @@ fun ZoomMenuPopup(editor: Editor, onDismiss: () -> Unit) {
                     emit()
                 },
             )
+        }
+    }
+}
+
+/** Canvas zoom menu: the lock and saved zooms, without the paged note's zoom limits. */
+@Composable
+fun CanvasZoomPopup(canvas: InfiniteEditor, owner: Editor, onDismiss: () -> Unit) {
+    DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
+        Column(Modifier.width(280.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
+            PopupTitle(stringResource(R.string.title_zoom))
+            ZoomSavedSection(owner, canvas.zoomPercent, canvas.zoomLocked, canvas::toggleZoomLock, canvas::setZoom)
+        }
+    }
+}
+
+/** Lock and save chips for the current zoom, the zoom bar switch, then the saved zooms. */
+@Composable
+private fun ZoomSavedSection(owner: Editor, zoomPercent: Int, locked: Boolean, onToggleLock: () -> Unit, onPick: (Float) -> Unit) {
+    val current = zoomPercent / 100f
+    val favorites = owner.favoriteZooms
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        ModeChip(stringResource(if (locked) R.string.unlock_zoom else R.string.lock_zoom), locked, onToggleLock)
+        ModeChip(stringResource(R.string.zoom_save, zoomPercent), favorites.any { isSameZoom(it, current) }) { owner.toggleFavoriteZoom(current) }
+    }
+    ToggleRow(stringResource(R.string.zoom_show_bar), owner.showZoomBar, owner::setShowZoomBar)
+    if (favorites.isEmpty()) return
+    StyleCaption(stringResource(R.string.caption_saved_zooms))
+    SavedZoomChips(favorites, current, locked, onPick, owner::toggleFavoriteZoom)
+}
+
+internal fun isSameZoom(a: Float, b: Float) = abs(a - b) <= ZOOM_MATCH_TOLERANCE
+
+/** The saved zooms as chips: tap one to jump to it, its x to remove it. */
+@Composable
+internal fun SavedZoomChips(favorites: List<Float>, current: Float, locked: Boolean, onPick: (Float) -> Unit, onRemove: (Float) -> Unit) {
+    val palette = LocalPalette.current
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        favorites.forEach { zoom ->
+            val pct = (zoom * 100).roundToInt()
+            val selected = isSameZoom(zoom, current)
+            val fg = (if (selected) palette.selectionForeground else palette.text).toComposeColor()
+            Row(
+                Modifier
+                    .clip(MaterialTheme.shapes.extraSmall)
+                    .background((if (selected) palette.selectionBackground else palette.surface).toComposeColor())
+                    .border(1.dp, (if (selected) palette.accent else palette.border).toComposeColor(), MaterialTheme.shapes.extraSmall),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "$pct%",
+                    color = fg,
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 12.sp,
+                    modifier = Modifier.clickable(enabled = !locked) { onPick(zoom) }.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                )
+                Icon(
+                    XnotesIcons.close,
+                    contentDescription = stringResource(R.string.zoom_remove_saved, pct),
+                    tint = fg,
+                    modifier = Modifier.clickable { onRemove(zoom) }.padding(6.dp).size(14.dp),
+                )
+            }
         }
     }
 }
