@@ -15,6 +15,7 @@ data class ToolbarPaneInsets(val left: Double = 0.0, val top: Double = 0.0, val 
 
 fun sharedToolbarInsets(bar: ToolbarPaneBounds, pane: ToolbarPaneBounds, edge: String): ToolbarPaneInsets {
     if (pane.right <= pane.left || pane.bottom <= pane.top ||
+        bar.right <= bar.left || bar.bottom <= bar.top ||
         bar.right <= pane.left || bar.left >= pane.right || bar.bottom <= pane.top || bar.top >= pane.bottom) return ToolbarPaneInsets()
     return when (edge) {
         "left" -> ToolbarPaneInsets(left = (bar.right - pane.left).coerceIn(0.0, pane.right - pane.left))

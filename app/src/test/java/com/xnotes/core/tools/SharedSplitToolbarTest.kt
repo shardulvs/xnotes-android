@@ -39,6 +39,13 @@ class SharedSplitToolbarTest {
         assertEquals(ToolbarPaneInsets(), sharedToolbarInsets(left, ToolbarPaneBounds(0.0, 0.0, 0.0, 0.0), "top"))
     }
 
+    @Test fun unmeasuredToolbarDoesNotOccludePane() {
+        val zeroWidth = ToolbarPaneBounds(40.0, 60.0, 40.0, 110.0)
+        val zeroHeight = ToolbarPaneBounds(40.0, 60.0, 110.0, 60.0)
+        assertEquals(ToolbarPaneInsets(), sharedToolbarInsets(zeroWidth, left, "left"))
+        assertEquals(ToolbarPaneInsets(), sharedToolbarInsets(zeroHeight, left, "top"))
+    }
+
     @Test fun mixedChoiceSurvivesReloadAndUnknownValuesFallBack() {
         val pref = Preferences(mixedSplitToolbar = SplitToolbarInterface.CANVAS)
         assertEquals(SplitToolbarInterface.CANVAS, Preferences.fromJson(pref.toJson()).mixedSplitToolbar)
