@@ -55,6 +55,7 @@ import androidx.compose.ui.window.PopupProperties
 import com.xnotes.R
 import com.xnotes.core.model.DrawStyle
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.tools.ToolConversions
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
@@ -494,6 +495,7 @@ private fun SelectionStylePopup(host: SelectionMenuHost, onDismiss: () -> Unit) 
                 stringResource(R.string.caption_thickness),
                 width,
                 DrawStyle.MIN_WIDTH.toFloat()..DrawStyle.MAX_WIDTH.toFloat(),
+                step = ToolConversions.WIDTH_STEP.toFloat(),
                 onChangeFinished = { host.restyleSelection(null, null) },
             ) { w ->
                 width = w
