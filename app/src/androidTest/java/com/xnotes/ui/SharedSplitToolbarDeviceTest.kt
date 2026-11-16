@@ -33,6 +33,20 @@ class SharedSplitToolbarDeviceTest : InstrumentationTestCase() {
         super.tearDown()
     }
 
+    /** Upstream opens canvases from files now; exercise the same document activation path in tests. */
+    private fun openBlankCanvas(pane: Editor) {
+        val document = com.xnotes.core.infinite.InfiniteDocument(created = System.currentTimeMillis())
+        // Avoid restoring the old production newCanvas API solely for instrumentation.
+        val open = Editor::class.java.getDeclaredMethod(
+            "openCanvasDocument",
+            com.xnotes.core.infinite.InfiniteDocument::class.java,
+            String::class.java,
+            String::class.java,
+            Boolean::class.javaPrimitiveType,
+        ).apply { isAccessible = true }
+        open.invoke(pane, document, null, null, false)
+    }
+
     private fun show(firstCanvas: Boolean, secondCanvas: Boolean) {
         assertTrue("Use the isolated validation build", instrumentation.targetContext.packageName.endsWith(".sharedsplit"))
         activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext, EditorActivity::class.java)
@@ -46,9 +60,9 @@ class SharedSplitToolbarDeviceTest : InstrumentationTestCase() {
             editor.applyToolbarLayout(layout(ToolbarItem.PEN, ToolbarItem.SELECT, ToolbarItem.UNDO, ToolbarItem.REDO, ToolbarItem.SIDEBAR))
             editor.applyCanvasToolbarLayout(layout(ToolbarItem.PEN, ToolbarItem.SELECT, ToolbarItem.UNDO, ToolbarItem.REDO, ToolbarItem.MINIMAP))
             editor.applyHomePreferences(previousPreferences.copy(sharedSplitToolbars = true, toolbarLook = ToolbarLook(), mixedSplitToolbar = SplitToolbarInterface.NOTE))
-            if (firstCanvas) editor.newCanvas() else editor.newNote()
+            if (firstCanvas) openBlankCanvas(editor) else editor.newNote()
             val second = editor.secondaryPane()
-            if (secondCanvas) second.newCanvas() else second.newNote()
+            if (secondCanvas) openBlankCanvas(second) else second.newNote()
             editor.focusPane(Pane.PRIMARY)
         }
         settle()

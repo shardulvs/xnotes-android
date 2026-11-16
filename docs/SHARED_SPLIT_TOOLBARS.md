@@ -116,8 +116,10 @@ against upstream. No error was on a new source line; the new strings have both e
 This does not claim that a complete lint run on an untouched upstream checkout was performed.
 
 
-A fresh validation on 2026-11-16 after the extraction passed **2,429 JVM tests** with
-no failures or skips, and produced isolated x86_64 debug and instrumentation APKs.
+A fresh validation on 2026-11-16 after the extraction passed **2,515 JVM tests** with
+no failures or skips (US JVM locale), and produced isolated x86_64 debug and instrumentation APKs.
+An unrelated upstream `SteadyTraceTest` expects a dot decimal separator and fails under the
+local `pt_BR` JVM locale; use `JAVA_TOOL_OPTIONS="-Duser.language=en -Duser.country=US"` for the JVM suite.
 The 12-test instrumented suite was rerun on the `Small_Tablet` emulator.
 
 JVM tests cover floating toolbar overlap on all four edges, side-by-side and stacked panes,
