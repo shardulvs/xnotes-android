@@ -1729,6 +1729,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
             parts += OverlayTessellator.selection(
                 box, zoom, accent, StrokeTessellator.DEFAULT_TOLERANCE, devicePxPerDp,
                 handles = selection.handles(margin).map { it.content },
+                showRotateGrip = selection.rotateGrip(OverlayTessellator.GRIP_ARM_PX / zoom, margin) != null,
                 vertexDots = shape?.vertexDots()?.map { it.at }.orEmpty(),
                 edgeDots = shape?.edgeDots(OverlayTessellator.EDGE_DOT_MIN_PX / zoom)?.map { it.at }.orEmpty(),
                 knobs = shape?.knobDots().orEmpty(),

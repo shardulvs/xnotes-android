@@ -8,7 +8,6 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.text.StaticLayout
 import android.view.View
-import com.xnotes.canvas.ResizeMath
 import com.xnotes.core.infinite.CanvasSelection
 import com.xnotes.core.infinite.CanvasViewport
 import com.xnotes.core.infinite.OverlayTessellator
@@ -142,11 +141,6 @@ internal class CanvasTextPreviewView(
         paint.pathEffect = dashEffect
         canvas.drawPath(path, paint)
         paint.pathEffect = null
-        val top = viewport.contentToViewport(ResizeMath.obbTopMid(box))
-        val grip = viewport.contentToViewport(
-            ResizeMath.obbRotateGrip(box, OverlayTessellator.GRIP_ARM_PX / zoom),
-        )
-        canvas.drawLine(top.x.toFloat(), top.y.toFloat(), grip.x.toFloat(), grip.y.toFloat(), paint)
         paint.style = Paint.Style.FILL
         val half = (OverlayTessellator.HANDLE_PX / 2.0).toFloat()
         for (handle in selection.handles(margin)) {
@@ -156,9 +150,5 @@ internal class CanvasTextPreviewView(
                 pt.x.toFloat() + half, pt.y.toFloat() + half, paint,
             )
         }
-        canvas.drawCircle(
-            grip.x.toFloat(), grip.y.toFloat(),
-            (OverlayTessellator.GRIP_PX / 2.0).toFloat(), paint,
-        )
     }
 }

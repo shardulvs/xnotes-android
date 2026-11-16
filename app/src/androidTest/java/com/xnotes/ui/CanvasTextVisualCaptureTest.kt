@@ -41,6 +41,68 @@ class CanvasTextVisualCaptureTest : InstrumentationTestCase() {
         assertEquals(bounds.top + dy, box.center.y - box.halfH, 0.01)
     }
 
+    /** Full input path: 40px screen drag must map to 40/zoom content units at every zoom. */
+    fun testMoveAndChromeRemainAlignedAcrossZoomAndPan() {
+        val target = instrumentation.targetContext
+        val activity = instrumentation.startActivitySync(
+            Intent(Intent.ACTION_MAIN).setClassName(target.packageName, "com.xnotes.EditorActivity")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+        ) as Activity
+        val editor = InfiniteEditor(target)
+        try {
+            instrumentation.runOnMainSync {
+                activity.setContentView(editor.surfaces)
+                editor.armTool(Tool.TEXT_BOX)
+                CanvasTextTestInput.tap(editor, 260f, 250f)
+                editor.updateEditingText(
+                    "Long moving textbox, wrapped text and glyphs. ".repeat(14),
+                )
+                editor.commitText()
+                editor.armTool(Tool.SELECT)
+            }
+            instrumentation.waitForIdleSync()
+            for (zoom in listOf(0.5, 0.75, 1.0, 2.0, 3.0)) {
+                var before = com.xnotes.core.geometry.Pt(0.0, 0.0)
+                var downX = 0f
+                var downY = 0f
+                instrumentation.runOnMainSync {
+                    val item = editor.document.items.filterIsInstance<TextItem>().single()
+                    editor.selection.select(listOf(item))
+                    editor.viewport.zoom = zoom
+                    editor.viewport.scrollX = item.pos.x - 300.0 / zoom
+                    editor.viewport.scrollY = item.pos.y - 250.0 / zoom
+                    before = item.pos
+                    downX = (300.0 + 70.0 * zoom.coerceAtMost(1.0)).toFloat()
+                    downY = (250.0 + 28.0 * zoom.coerceAtMost(1.0)).toFloat()
+                    editor.view.publish()
+                }
+                val whenDown = SystemClock.uptimeMillis()
+                instrumentation.runOnMainSync {
+                    pointer(editor, MotionEvent.ACTION_DOWN, downX, downY, whenDown, whenDown)
+                    pointer(editor, MotionEvent.ACTION_MOVE, downX + 40f, downY + 25f,
+                        whenDown, whenDown + 60)
+                    assertDragAligned(editor)
+                    pointer(editor, MotionEvent.ACTION_UP, downX + 40f, downY + 25f,
+                        whenDown, whenDown + 100)
+                }
+                instrumentation.waitForIdleSync()
+                instrumentation.runOnMainSync {
+                    val item = editor.document.items.filterIsInstance<TextItem>().single()
+                    assertEquals("Unexpected x movement at zoom=$zoom", before.x + 40.0 / zoom, item.pos.x, 1.5)
+                    assertEquals("Unexpected y movement at zoom=$zoom", before.y + 25.0 / zoom, item.pos.y, 1.5)
+                    val box = editor.selection.box ?: throw AssertionError("Lost box at zoom=$zoom")
+                    assertEquals(item.bounds().center.x, box.center.x, 0.1)
+                    assertEquals(item.bounds().center.y, box.center.y, 0.1)
+                }
+                SystemClock.sleep(120)
+                shot("zoom-pan-" + zoom.toString().replace('.', '_'))
+                android.util.Log.i("PR428_TRANSFORMS", "zoom=$zoom geometry=aligned")
+            }
+        } finally {
+            instrumentation.runOnMainSync { activity.finish() }
+        }
+    }
+
     fun testRapidLongTextMoveVisualFrames() {
         val target = instrumentation.targetContext
         val intent = Intent(Intent.ACTION_MAIN)

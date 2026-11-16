@@ -132,7 +132,9 @@ class CanvasSelection(private val doc: InfiniteDocument) {
 
     /** The rotate grip's centre, [arm] content pixels past the box's top edge. */
     fun rotateGrip(arm: Double, screenMargin: Double = 0.0): Pt? =
-        if (items.any { it is AudioItem } || loneTapeStrip != null) null else chromeBox(screenMargin)?.let { ResizeMath.obbRotateGrip(it, arm) }
+        // TextItem has no rotation field: offering a grip would snap back after the gesture.
+        if (items.any { it is AudioItem || it is TextItem } || loneTapeStrip != null) null
+        else chromeBox(screenMargin)?.let { ResizeMath.obbRotateGrip(it, arm) }
 
     /** Which handle [p] lands on, within [tolerance] content pixels, or null. */
     fun hitHandle(p: Pt, tolerance: Double, screenMargin: Double = 0.0): HandleId? =
@@ -303,6 +305,7 @@ class CanvasSelection(private val doc: InfiniteDocument) {
      * moved, and the grip is a 22 device pixel target 34 pixels out from the box.
      */
     fun rotateLive(pointer: Pt) {
+        if (items.any { it is TextItem }) return
         val from = startBox ?: return
         val swept = sweptAngle(from, pointer)
         box = from.copy(angle = from.angle + swept)
@@ -315,6 +318,7 @@ class CanvasSelection(private val doc: InfiniteDocument) {
      * [rotateLive] then applies the whole turn once.
      */
     fun previewRotate(pointer: Pt): Double {
+        if (items.any { it is TextItem }) return 0.0
         val from = startBox ?: return 0.0
         val swept = sweptAngle(from, pointer)
         box = from.copy(angle = from.angle + swept)

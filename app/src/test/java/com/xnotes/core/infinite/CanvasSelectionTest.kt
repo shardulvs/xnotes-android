@@ -209,6 +209,85 @@ class CanvasSelectionTest {
         assertEquals(item.bounds().center.y, sel.box!!.center.y, 1e-6)
     }
 
+    @Test fun textNeverExposesUnsupportedRotationButImagesStillDo() {
+        val text = TextItem(Pt(100.0, 100.0), width = 300.0, text = "Rotate grip regression",
+            pointSize = 20.0, measurer = FakeTextMeasurer())
+        val image = box(450.0, 100.0, 100.0, 100.0)
+        val sel = CanvasSelection(docOf(text, image))
+        sel.select(listOf(text))
+        assertNull("TextItem has no rotation property", sel.rotateGrip(34.0))
+        val old = text.snapshotGeometry()
+        val oldBox = sel.box
+        sel.beginTransform()
+        assertEquals(0.0, sel.previewRotate(Pt(250.0, 30.0)), 0.0)
+        sel.rotateLive(Pt(250.0, 30.0))
+        assertEquals(old, text.snapshotGeometry())
+        assertEquals(oldBox, sel.box)
+
+        sel.select(listOf(text, image))
+        assertNull("Mixed selection cannot rotate a TextItem either", sel.rotateGrip(34.0))
+        sel.beginTransform()
+        val mixedBox = sel.box
+        assertEquals(0.0, sel.previewRotate(Pt(550.0, 80.0)), 0.0)
+        assertEquals(mixedBox, sel.box)
+
+        sel.select(listOf(image))
+        assertNotNull("Existing image rotation must remain available", sel.rotateGrip(34.0))
+    }
+
+    @Test fun textOverlayOmitsRotationChromeAtEveryZoom() {
+        val item = TextItem(Pt(100.0, 100.0), width = 300.0,
+            text = "Text cannot be rotated", pointSize = 20.0, measurer = FakeTextMeasurer())
+        val selection = CanvasSelection(docOf(item))
+        selection.select(listOf(item))
+        for (zoom in listOf(0.5, 1.0, 2.0, 3.0)) {
+            val box = selection.chromeBox(OverlayTessellator.FRAME_MARGIN_PX / zoom)!!
+            val normal = OverlayTessellator.selection(
+                box, zoom, Rgba(250, 90, 110), 0.25,
+                showRotateGrip = true,
+            )
+            val textChrome = OverlayTessellator.selection(
+                box, zoom, Rgba(250, 90, 110), 0.25,
+                showRotateGrip = selection.rotateGrip(OverlayTessellator.GRIP_ARM_PX / zoom) != null,
+            )
+            val normalTriangles = normal.sumOf { it.mesh.indices.size }
+            val textTriangles = textChrome.sumOf { it.mesh.indices.size }
+            assertTrue("Rotation stem/grip still rendered at zoom=$zoom",
+                textTriangles < normalTriangles)
+        }
+    }
+
+    @Test fun repeatedTextTransformsNeverDetachChromeOrLoseMinimumWidth() {
+        for (initialWidth in listOf(160.0, 300.0, 700.0)) {
+            val text = TextItem(Pt(100.0, 100.0), width = initialWidth,
+                text = "A paragraph that should wrap and scale predictably. ".repeat(8),
+                pointSize = 20.0, measurer = FakeTextMeasurer())
+            val sel = CanvasSelection(docOf(text))
+            sel.select(listOf(text))
+            for (index in 0 until 35) {
+                sel.beginTransform()
+                val before = text.bounds()
+                // Back-and-forth drags must not cumulatively drift or detach the selection.
+                if (index % 3 == 0) {
+                    sel.resizeLive(HandleId.R, Pt(before.left + 10.0, before.top + 10.0))
+                } else if (index % 3 == 1) {
+                    sel.resizeLive(HandleId.R, Pt(before.right + 25.0, before.top + 10.0))
+                } else {
+                    sel.moveLive(35.0, -19.0)
+                }
+                val bounds = text.bounds()
+                val chrome = sel.box ?: error("Selection disappeared")
+                assertTrue("Invalid width after transform $index", text.width >= 160.0)
+                assertTrue("Invalid font size after transform $index", text.pointSize.isFinite() && text.pointSize > 0)
+                assertEquals("X drift at transform $index", bounds.center.x, chrome.center.x, 0.001)
+                assertEquals("Y drift at transform $index", bounds.center.y, chrome.center.y, 0.001)
+                assertEquals(bounds.w / 2.0, chrome.halfW, 0.001)
+                assertEquals(bounds.h / 2.0, chrome.halfH, 0.001)
+                sel.refreshBox()
+            }
+        }
+    }
+
     @Test fun cancelledTextResizeRestoresOriginalGeometry() {
         val item = TextItem(Pt(100.0, 100.0), width = 360.0,
             text = "A long paragraph that wraps during resize. ".repeat(12),

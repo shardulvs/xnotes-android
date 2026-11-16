@@ -81,6 +81,7 @@ object OverlayTessellator {
         tolerance: Double,
         devicePxPerDp: Double = 1.0,
         handles: List<Pt>? = null,
+        showRotateGrip: Boolean = true,
         vertexDots: List<Pt> = emptyList(),
         edgeDots: List<Pt> = emptyList(),
         knobs: List<Pt> = emptyList(),
@@ -92,17 +93,20 @@ object OverlayTessellator {
 
         // The stem out to the grip, so it reads as attached rather than floating. Solid: it is a
         // join, not a boundary, and a dashed one at this length would be two ticks and a gap.
-        val arm = GRIP_ARM_PX / zoom
-        val top = com.xnotes.canvas.ResizeMath.obbTopMid(box)
-        val grip = com.xnotes.canvas.ResizeMath.obbRotateGrip(box, arm)
-        outline.polylineRibbon(listOf(top, grip), half, closed = false, tolerance = tolerance)
+        val grip = if (showRotateGrip) {
+            val arm = GRIP_ARM_PX / zoom
+            val top = com.xnotes.canvas.ResizeMath.obbTopMid(box)
+            com.xnotes.canvas.ResizeMath.obbRotateGrip(box, arm).also {
+                outline.polylineRibbon(listOf(top, it), half, closed = false, tolerance = tolerance)
+            }
+        } else null
 
         val marks = MeshBuilder()
         val handleHalf = HANDLE_PX / zoom / 2.0
         for (c in handles ?: com.xnotes.canvas.ResizeMath.obbHandles(box).map { it.content }) {
             marks.rect(c.x - handleHalf, c.y - handleHalf, handleHalf * 2, handleHalf * 2)
         }
-        marks.circle(grip.x, grip.y, GRIP_PX / zoom / 2.0, tolerance)
+        grip?.let { marks.circle(it.x, it.y, GRIP_PX / zoom / 2.0, tolerance) }
 
         val parts = ArrayList<MeshPart>(5)
         if (!outline.isEmpty) parts.add(MeshPart(outline.build(), accent, InkPass.OPAQUE))
