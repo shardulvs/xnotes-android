@@ -2956,12 +2956,6 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         return merged.size - original.size
     }
 
-    fun restoreToolbarWorkspacePreset(id: String): Boolean {
-        val preset = settings.toolbarWorkspacePresets.firstOrNull { it.id == id } ?: return false
-        applyToolbarWorkspacePreset(preset)
-        return true
-    }
-
     /** Applying to one editor changes only that editor's bars. The palette and general
      * look remain global preferences; restore them only when explicitly applying both. */
     fun applyToolbarWorkspacePreset(
