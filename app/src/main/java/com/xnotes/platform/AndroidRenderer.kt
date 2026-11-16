@@ -336,7 +336,8 @@ class AndroidRenderer(private val canvas: Canvas) : Renderer {
         val ph = p?.h ?: 1.0
         val reqW = ((if (turned) devH else devW) / pw).toInt().coerceIn(1, DECODE_CAP_PX)
         val reqH = ((if (turned) devW else devH) / ph).toInt().coerceIn(1, DECODE_CAP_PX)
-        val bmp = ImageDecoder.decodeSampledFile(image.file.path, reqW, reqH) ?: return
+        // Cached, since a lifted picture lands here every frame of a drag.
+        val bmp = ImageDecoder.cachedSampledFile(image.file.path, reqW, reqH) ?: return
         val uw = (if (turned) dest.h else dest.w).toFloat()
         val uh = (if (turned) dest.w else dest.h).toFloat()
         canvas.save()

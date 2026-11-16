@@ -8,6 +8,7 @@ import com.xnotes.core.stroke.Stabilizer
 import com.xnotes.core.stroke.StrokeEngine
 import kotlin.math.ln
 import kotlin.math.pow
+import kotlin.math.roundToInt
 
 /**
  * Eraser behaviour (spec 04 §2): STROKE removes a whole stroke on contact; AREA removes only the
@@ -214,5 +215,14 @@ object ToolConversions {
         Tool.ERASER -> 1.0..80.0
         Tool.TAPE -> TapeItem.MIN_WIDTH..TapeItem.MAX_WIDTH
         else -> 1.0..20.0
+    }
+
+    /** Every ink width slider moves in these steps, so the width its label shows is the width drawn. */
+    const val WIDTH_STEP = 0.5
+
+    /** [value] on the [WIDTH_STEP] grid, held inside the tool's own range. */
+    fun snapWidth(tool: Tool, value: Double): Double {
+        val range = widthRange(tool)
+        return ((value / WIDTH_STEP).roundToInt() * WIDTH_STEP).coerceIn(range.start, range.endInclusive)
     }
 }

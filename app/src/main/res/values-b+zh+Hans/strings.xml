@@ -109,6 +109,7 @@
     <string name="caption_vertical_scrolling">纵向滚动</string>
     <string name="caption_free_movement">页面自由移动</string>
     <string name="caption_pdf_filters">PDF 颜色滤镜</string>
+    <string name="adjust">调整</string>
     <string name="filter_contrast">对比度</string>
     <string name="filter_invert">反色</string>
     <string name="filter_brightness">亮度</string>
