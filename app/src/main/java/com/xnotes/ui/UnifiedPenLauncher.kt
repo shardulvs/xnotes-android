@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.res.stringResource
 import com.xnotes.R
 import com.xnotes.core.tools.Tool
@@ -276,13 +277,13 @@ internal fun UnifiedPenLauncher(
             }
         }
         if (detailsOpen) {
-            UnifiedPenDetails(
-                host = host,
-                items = group.items,
-                current = lastItem,
-                ink = ink,
-                onChoose = { choose(it) },
-                onSelectColor = onSelectColor,
+            ToolConfigPopup(
+                editor = host,
+                tool = Tool.fromId(lastItem.id) ?: Tool.PEN,
+                onPick = { pen ->
+                    group.items.firstOrNull { it.id == pen.id }?.let(choose)
+                    detailsOpen = true
+                },
                 onDismiss = { detailsOpen = false },
             )
         }
@@ -355,113 +356,24 @@ private fun PenFanPalette(
     }
 }
 
-/** A stable, vector-based nib shared by the compact fan, detailed panel, and editor preview. */
+/** N-Notes' stroke icon assets, shared by the launcher, gesture fan and toolbar preview. */
 @Composable
 internal fun PenSilhouette(item: ToolbarItem, ink: Color, modifier: Modifier = Modifier) {
-    // One consistent outlined icon family: dark/light adaptive strokes and a small live ink
-    // accent, without the photorealistic shaded bodies that clash with the rest of XNotes.
-    val foreground = LocalPalette.current.text.toComposeColor()
-    Canvas(modifier) {
-        val w = size.width
-        val h = size.height
-        val line = w * .075f
-        val fine = w * .052f
-        val outline = androidx.compose.ui.graphics.drawscope.Stroke(
-            width = line,
-            cap = StrokeCap.Round,
-            join = androidx.compose.ui.graphics.StrokeJoin.Round,
-        )
-        fun at(x: Float, y: Float) = Offset(w * x, h * y)
-        fun nib(path: Path) = drawPath(path, foreground, style = outline)
-        fun cap(left: Float = .24f, right: Float = .76f) {
-            drawRoundRect(
-                foreground,
-                topLeft = at(left, .77f),
-                size = Size(w * (right - left), h * .17f),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * .055f),
-                style = outline,
-            )
-            drawLine(foreground, at(left, .86f), at(right, .86f), fine, cap = StrokeCap.Round)
-        }
-
-        when (item) {
-            ToolbarItem.PEN, ToolbarItem.DASHED -> {
-                nib(Path().apply {
-                    moveTo(w * .30f, h * .76f)
-                    lineTo(w * .22f, h * .36f)
-                    quadraticBezierTo(w * .40f, h * .23f, w * .44f, h * .07f)
-                    quadraticBezierTo(w * .50f, h * .01f, w * .56f, h * .07f)
-                    quadraticBezierTo(w * .60f, h * .23f, w * .78f, h * .36f)
-                    lineTo(w * .70f, h * .76f)
-                })
-                if (item == ToolbarItem.DASHED) {
-                    for (y in listOf(.24f, .34f, .44f)) {
-                        drawCircle(foreground, w * .035f, at(.50f, y))
-                    }
-                } else {
-                    drawLine(foreground, at(.50f, .10f), at(.50f, .34f), fine, cap = StrokeCap.Round)
-                    drawCircle(ink, w * .060f, at(.50f, .39f))
-                }
-                cap()
-            }
-            ToolbarItem.CALLIGRAPHY -> {
-                nib(Path().apply {
-                    moveTo(w * .31f, h * .76f)
-                    lineTo(w * .27f, h * .29f)
-                    lineTo(w * .61f, h * .08f)
-                    lineTo(w * .75f, h * .18f)
-                    lineTo(w * .70f, h * .76f)
-                })
-                drawLine(foreground, at(.37f, .33f), at(.58f, .17f), fine, cap = StrokeCap.Round)
-                drawLine(ink, at(.42f, .42f), at(.61f, .35f), line, cap = StrokeCap.Round)
-                cap()
-            }
-            ToolbarItem.SPEED -> {
-                nib(Path().apply {
-                    moveTo(w * .30f, h * .77f)
-                    lineTo(w * .30f, h * .31f)
-                    lineTo(w * .50f, h * .07f)
-                    lineTo(w * .70f, h * .31f)
-                    lineTo(w * .70f, h * .77f)
-                })
-                drawPath(Path().apply {
-                    moveTo(w * .44f, h * .14f)
-                    lineTo(w * .50f, h * .07f)
-                    lineTo(w * .56f, h * .14f)
-                }, foreground, style = outline)
-                drawLine(foreground, at(.50f, .32f), at(.50f, .70f), fine)
-                cap(.25f, .75f)
-            }
-            ToolbarItem.TAPER -> {
-                nib(Path().apply {
-                    moveTo(w * .33f, h * .76f)
-                    lineTo(w * .34f, h * .34f)
-                    quadraticBezierTo(w * .35f, h * .17f, w * .50f, h * .05f)
-                    quadraticBezierTo(w * .65f, h * .17f, w * .66f, h * .34f)
-                    lineTo(w * .67f, h * .76f)
-                })
-                drawLine(foreground, at(.33f, .35f), at(.67f, .35f), fine, cap = StrokeCap.Round)
-                drawLine(ink, at(.50f, .11f), at(.50f, .31f), fine, cap = StrokeCap.Round)
-                cap(.27f, .73f)
-            }
-            ToolbarItem.HIGHLIGHTER -> {
-                nib(Path().apply {
-                    moveTo(w * .23f, h * .77f)
-                    lineTo(w * .23f, h * .37f)
-                    lineTo(w * .58f, h * .11f)
-                    lineTo(w * .78f, h * .20f)
-                    lineTo(w * .77f, h * .77f)
-                })
-                drawLine(foreground, at(.23f, .37f), at(.77f, .37f), fine, cap = StrokeCap.Round)
-                drawLine(ink, at(.28f, .57f), at(.72f, .57f), line * 1.5f, cap = StrokeCap.Round)
-                cap(.19f, .81f)
-            }
-            else -> {
-                drawLine(foreground, at(.50f, .12f), at(.50f, .85f), line, cap = StrokeCap.Round)
-                drawCircle(ink, w * .065f, at(.50f, .42f))
-            }
-        }
+    val icon = when (item) {
+        ToolbarItem.PEN -> R.drawable.ic_stroke_regular
+        ToolbarItem.DASHED -> R.drawable.ic_stroke_dashed
+        ToolbarItem.CALLIGRAPHY -> R.drawable.ic_stroke_calligraphy
+        ToolbarItem.SPEED -> R.drawable.ic_stroke_speed
+        ToolbarItem.TAPER -> R.drawable.ic_stroke_taper
+        ToolbarItem.HIGHLIGHTER -> R.drawable.ic_stroke_highlighter
+        else -> R.drawable.ic_stroke_regular
     }
+    androidx.compose.material3.Icon(
+        imageVector = androidx.compose.ui.graphics.vector.ImageVector.vectorResource(icon),
+        contentDescription = null,
+        modifier = modifier,
+        tint = LocalPalette.current.text.toComposeColor(),
+    )
 }
 
 @Composable
