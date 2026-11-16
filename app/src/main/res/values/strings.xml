@@ -413,7 +413,6 @@
     <string name="theme_oled">OLED</string>
     <string name="pref_accent_colour">Accent colour</string>
     <string name="pref_start_fullscreen">Start in fullscreen</string>
-    <string name="pref_show_zoom_bar">Show zoom bar</string>
     <string name="pref_input">Input</string>
     <string name="pref_finger_draws">Draw with finger (off = finger pans)</string>
     <string name="pref_zoom_lock_pan">Panning while zoom is locked</string>
@@ -775,6 +774,10 @@
     <string name="unlock_zoom">Unlock zoom</string>
     <string name="lock_zoom_fit_width">Lock zoom at fit width</string>
     <string name="lock_zoom">Lock zoom</string>
+    <string name="zoom_save">Save %1$d%%</string>
+    <string name="caption_saved_zooms">Saved zooms</string>
+    <string name="zoom_remove_saved">Remove %1$d%%</string>
+    <string name="zoom_show_bar">Show zoom bar</string>
     <plurals name="saved_images">
         <item quantity="one">Saved %d image.</item>
         <item quantity="other">Saved %d images.</item>

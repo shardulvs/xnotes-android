@@ -104,6 +104,7 @@ import com.xnotes.ui.Editor
 import com.xnotes.ui.Toolbar
 import com.xnotes.ui.ToolbarAround
 import com.xnotes.ui.icons.XnotesIcons
+import com.xnotes.ui.ZoomBar
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.XnotesTheme
 import com.xnotes.ui.theme.toComposeColor
@@ -1764,6 +1765,7 @@ private fun EditorPane(
                         onInsertAudio = { actions.onInsertAudio(editor) },
                         onRecordAudio = { actions.onRecordAudio(editor) },
                         onTakePhoto = { actions.onTakePhoto(editor) },
+                        owner = editor,
                     )
                 }
                 ToolbarAround(bar, onCover = canvas::setToolbarCover) { floatingBar ->
@@ -1787,16 +1789,10 @@ private fun EditorPane(
                         com.xnotes.ui.TextStyleBar(canvas)
                         com.xnotes.ui.LongPressMenu(canvas, onInsertImageAt = { c -> actions.onInsertCanvasImage(editor, c) })
                         com.xnotes.ui.CanvasDebugOverlay(canvas)
-                        if (editor.preferences.showZoomBar) {
-                            com.xnotes.ui.ZoomIndicator(
-                                zoomValue = canvas.zoomPercent / 100f,
-                                isZoomLocked = canvas.zoomLocked,
-                                onZoomLockToggle = { canvas.toggleZoomLock() },
-                                onFavoriteZoomSelected = { zoom -> canvas.setZoom(zoom) },
-                                favoriteZoomValues = editor.favoriteZooms,
-                                onFavoriteZoomToggled = { zoom -> editor.toggleFavoriteZoom(zoom) },
-                                onFavoriteZoomRemoved = { zoom -> editor.removeFavoriteZoom(zoom) },
-                                modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
+                        if (editor.showZoomBar) {
+                            ZoomBar(
+                                canvas.zoomPercent, canvas.zoomLocked, canvas::toggleZoomLock,
+                                editor.favoriteZooms, canvas::setZoom, editor::toggleFavoriteZoom,
                             )
                         }
                         CanvasToastPill(canvas)
@@ -1839,18 +1835,6 @@ private fun EditorPane(
                             )
                             editor.editingField?.let { field ->
                                 com.xnotes.ui.TextEditorOverlay(editor, field)
-                                if (editor.preferences.showZoomBar) {
-                                    com.xnotes.ui.ZoomIndicator(
-                                        zoomValue = editor.zoomPercent / 100f,
-                                        isZoomLocked = editor.zoomLocked,
-                                        onZoomLockToggle = { editor.toggleZoomLock() },
-                                        onFavoriteZoomSelected = { zoom -> editor.setZoom(zoom) },
-                                        favoriteZoomValues = editor.favoriteZooms,
-                                        onFavoriteZoomToggled = { zoom -> editor.toggleFavoriteZoom(zoom) },
-                                        onFavoriteZoomRemoved = { zoom -> editor.removeFavoriteZoom(zoom) },
-                                        modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
-                                    )
-                                }
                             }
                             floatingBar()
                             com.xnotes.ui.SelectionMenu(
@@ -1872,6 +1856,12 @@ private fun EditorPane(
                             com.xnotes.ui.EmojiMenu(editor)
                             com.xnotes.ui.FlowTableMenu(editor)
                             com.xnotes.ui.TableChrome(editor)
+                            if (editor.showZoomBar) {
+                                ZoomBar(
+                                    editor.zoomPercent, editor.zoomLocked, editor::toggleZoomLock,
+                                    editor.favoriteZooms, editor::setZoom, editor::toggleFavoriteZoom,
+                                )
+                            }
                             ZoomLockHint(editor)
                             LinkBackPill(editor)
                             CanvasToastPill(editor)

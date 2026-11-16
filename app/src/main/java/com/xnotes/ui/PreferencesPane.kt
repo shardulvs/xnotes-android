@@ -382,7 +382,6 @@ fun PreferencesPane(
             if (shown(PrefCategory.GENERAL)) {
                 SectionTitle(stringResource(R.string.pref_general))
                 CheckRow(stringResource(R.string.pref_start_fullscreen), editor.fullscreen) { editor.setFullscreenPref(it) }
-            CheckRow(stringResource(R.string.pref_show_zoom_bar), prefs.showZoomBar) { update(prefs.copy(showZoomBar = it)) }
                 CheckRow(stringResource(R.string.pref_keep_screen_on), prefs.keepScreenOn) { updateHome(prefs.copy(keepScreenOn = it)) }
                 if (all) HorizontalDivider(color = palette.border.toComposeColor())
                 LanguageSection()

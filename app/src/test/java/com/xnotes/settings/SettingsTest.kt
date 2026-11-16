@@ -213,14 +213,6 @@ class SettingsTest {
         assertFalse(back.pdfHeadingBookmarks)
     }
 
-    @Test fun theZoomBarIsShownUntilItIsTurnedOff() {
-        // On by default, so an install whose settings predate the switch keeps the bar it has always
-        // had rather than losing it to a missing field.
-        assertTrue(Settings.fromJson(JSONObject()).prefs.showZoomBar)
-        val back = Settings.fromJson(Settings(prefs = Preferences(showZoomBar = false)).toJson()).prefs
-        assertFalse(back.showZoomBar)
-    }
-
     @Test fun customPageSizeRoundTripsAndSizesANewPage() {
         val prefs = Preferences(
             defaultPageSize = PageSize.CUSTOM,
@@ -701,6 +693,18 @@ class SettingsTest {
     @Test fun aZoomWithinToleranceOfAStarredOneIsTheSameJump() {
         val starred = Settings(favoriteZooms = listOf(2f)).toggleFavoriteZoom(2f + ZOOM_MATCH_TOLERANCE / 2f)
         assertEquals(emptyList<Float>(), starred.favoriteZooms)
+    }
+
+    @Test fun theZoomBarIsOffUntilTurnedOn() {
+        assertFalse(Settings.fromJson(JSONObject()).prefs.showZoomBar)
+        assertTrue(Settings.fromJson(Settings(prefs = Preferences(showZoomBar = true)).toJson()).prefs.showZoomBar)
+    }
+
+    @Test fun savingPastTheCapKeepsTheNewZoom() {
+        val full = Settings(favoriteZooms = (1..MAX_FAVORITE_ZOOMS).map { it * 0.25f })
+        val saved = full.toggleFavoriteZoom(8f).favoriteZooms
+        assertEquals(MAX_FAVORITE_ZOOMS, saved.size)
+        assertEquals(8f, saved.last())
     }
 
 }

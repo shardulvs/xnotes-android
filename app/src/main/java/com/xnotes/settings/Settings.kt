@@ -27,13 +27,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.abs
 
-/** The zooms the bar stars until the user stars their own. */
+/** Saved zooms offered until the user saves their own. */
 val DEFAULT_FAVORITE_ZOOMS = listOf(2f, 4f, 6f)
 
 /** How far apart two zooms may sit and still count as the same jump to the user. */
 const val ZOOM_MATCH_TOLERANCE = 0.005f
 
-/** How many starred zooms the bar holds; the oldest is dropped past this. */
+/** How many zooms can be saved; past this the largest other one is dropped. */
 const val MAX_FAVORITE_ZOOMS = 12
 
 /**
@@ -103,10 +103,7 @@ data class Settings(
     val prefs: Preferences = Preferences(),
     /** One-shot flag: the first-run stylus check (which may auto-enable finger-draw) has run. */
     val fingerDrawAutoChecked: Boolean = false,
-    /**
-     * The zoom levels the zoom bar has starred, ascending. They outlive the note so the same
-     * set of jumps is offered the next time any note or canvas is opened.
-     */
+    /** Saved zooms from the zoom menu, ascending, shared by every note and canvas. */
     val favoriteZooms: List<Float> = DEFAULT_FAVORITE_ZOOMS,
 ) {
     fun configFor(tool: Tool): ToolConfig = tools[tool] ?: ToolDefaults.configFor(tool)
@@ -125,17 +122,13 @@ data class Settings(
         return copy(swatches = swatches + (role to current.toMutableList().also { it[index] = color }))
     }
 
-    /**
-     * [zoom] starred if it was not, unstarred if it was, keeping the list ascending and within
-     * [ZOOM_MATCH_TOLERANCE] de-duped, since two nearly equal zooms are one entry to the user.
-     */
+    /** [zoom] saved if it was not, removed if it was; zooms within [ZOOM_MATCH_TOLERANCE] count as one. */
     fun toggleFavoriteZoom(zoom: Float): Settings {
         val held = favoriteZooms.any { abs(it - zoom) <= ZOOM_MATCH_TOLERANCE }
         val kept = favoriteZooms.filterNot { abs(it - zoom) <= ZOOM_MATCH_TOLERANCE }
         if (held) return copy(favoriteZooms = kept)
-        // Past the cap the most zoomed-in jump goes, as the least useful of a long menu.
-        val capped = (kept + zoom).sorted().dropLast((kept.size + 1 - MAX_FAVORITE_ZOOMS).coerceAtLeast(0))
-        return copy(favoriteZooms = capped)
+        val room = kept.sorted().take(MAX_FAVORITE_ZOOMS - 1)
+        return copy(favoriteZooms = (room + zoom).sorted())
     }
 
     fun toJson(): JSONObject {
@@ -252,13 +245,9 @@ data class Settings(
             }.toMap()
         }
 
-        /**
-         * The starred zooms, in the order written. A settings file that never had the key falls
-         * back to the defaults; an empty list is the user's own doing and is left empty.
-         */
+        /** Only a file that never had the key gets the defaults; a list the user emptied stays empty. */
         private fun favoriteZooms(a: JSONArray?): List<Float> {
             if (a == null) return DEFAULT_FAVORITE_ZOOMS
-            // A list the user emptied stays empty; only a file that never had the key gets defaults.
             return (0 until a.length()).mapNotNull { i ->
                 a.optDouble(i, Double.NaN).takeIf { it.isFinite() }?.toFloat()
             }.take(MAX_FAVORITE_ZOOMS)

@@ -645,6 +645,10 @@
     <string name="unlock_zoom">解锁缩放</string>
     <string name="lock_zoom_fit_width">在适应宽度时锁定缩放</string>
     <string name="lock_zoom">锁定缩放</string>
+    <string name="zoom_save">保存 %1$d%%</string>
+    <string name="caption_saved_zooms">已保存的缩放</string>
+    <string name="zoom_remove_saved">移除 %1$d%%</string>
+    <string name="zoom_show_bar">显示缩放栏</string>
     <plurals name="saved_images">
         <item quantity="other">已保存 %d 张图片。</item>
     </plurals>
