@@ -1,6 +1,4 @@
-<p align="center"><img src="app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" width="96" alt="sponka icon" /></p>
-
-<h1 align="center">sponka</h1>
+<p align="center"><img src="docs/banner.png" height="96" alt="Sponka" /></p>
 
 <p align="center">
   A handwriting-first notebook for Android, built for pen and stylus. A customized fork of xnotes.<br />

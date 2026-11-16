@@ -558,7 +558,7 @@
     <string name="search_settings">Buscar en ajustes</string>
     <string name="search_keywords_port">Migrar notas antiguas formas ejes recta numérica curva función gráfica actualizar comprobar</string>
     <string name="pref_port">Migrar notas antiguas</string>
-    <string name="pref_port_help">Reescribe las notas que aún guardan ejes, rectas numéricas, curvas o gráficas de versiones antiguas de sponka. Se hace copia de seguridad de las versiones antiguas y se omiten las notas abiertas.</string>
+    <string name="pref_port_help">Reescribe las notas que aún guardan ejes, rectas numéricas, curvas o gráficas de versiones antiguas de Sponka. Se hace copia de seguridad de las versiones antiguas y se omiten las notas abiertas.</string>
     <string name="port_scan">Analizar</string>
     <string name="port_run">Migrar</string>
     <string name="port_scanning">Analizando...</string>
@@ -1411,7 +1411,7 @@
     <string name="working">Procesando...</string>
     <string name="download">Descargar</string>
     <string name="failed_reason">Error: %1$s</string>
-    <string name="update_intro">Busca en GitHub una versión más reciente de sponka.</string>
+    <string name="update_intro">Busca en GitHub una versión más reciente de Sponka.</string>
     <string name="update_check_on_startup">Buscar actualizaciones al iniciar la app</string>
     <string name="update_check_failed">No se pudieron buscar actualizaciones</string>
     <string name="update_check">Buscar actualizaciones</string>
@@ -1422,7 +1422,7 @@
     <string name="update_download_failed">La descarga falló</string>
     <string name="update_view_release">Ver versión</string>
     <string name="update_available">Actualización disponible</string>
-    <string name="update_is_out">Ya está disponible sponka %1$s.</string>
+    <string name="update_is_out">Ya está disponible Sponka %1$s.</string>
     <string name="update_later">Más tarde</string>
     <string name="update_turn_off">Desactivar</string>
     <string name="sync_syncing_progress">Sincronizando %1$s</string>
@@ -1439,8 +1439,8 @@
     <string name="close">Cerrar</string>
     <string name="sync_found_by">Detectado por %1$s el %2$s</string>
     <string name="about_fork_tagline">Una versión personalizada de xnotes, una app de notas a mano y bocetos para Android. Antes n-notes.</string>
-    <string name="help_make_n_notes_better">Ayuda a mejorar sponka</string>
-    <string name="enjoying_n_notes">"¿Te gusta sponka? "</string>
+    <string name="help_make_n_notes_better">Ayuda a mejorar Sponka</string>
+    <string name="enjoying_n_notes">"¿Te gusta Sponka? "</string>
     <string name="ocr_recognizing_handwriting">Reconociendo escritura a mano...</string>
     <string name="ocr_handwriting_failed">Error en el reconocimiento de escritura a mano: %1$s</string>
     <string name="ocr_no_text">No se reconoció ningún texto</string>

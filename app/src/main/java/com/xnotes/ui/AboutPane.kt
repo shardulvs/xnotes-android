@@ -104,7 +104,7 @@ fun AboutPane() {
                 colorFilter = ColorFilter.tint(palette.accent.toComposeColor()),
             )
             Spacer(Modifier.height(12.dp))
-            Text("sponka", color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 24.sp)
+            Text("Sponka", color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 24.sp)
             Spacer(Modifier.height(5.dp))
             Text(
                 stringResource(R.string.about_fork_tagline),
@@ -220,7 +220,7 @@ private fun RowScope.AboutButton(icon: ImageVector, label: String, onClick: () -
 private fun copyVersion(ctx: Context, version: String) {
     runCatching {
         val clip = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clip.setPrimaryClip(ClipData.newPlainText("sponka version", "sponka $version"))
+        clip.setPrimaryClip(ClipData.newPlainText("sponka version", "Sponka $version"))
         Toast.makeText(ctx, ctx.getString(R.string.version_copied), Toast.LENGTH_SHORT).show()
     }
 }
@@ -239,7 +239,7 @@ private fun bugReportUrl(issuesUrl: String, version: String): String {
 
 
         ---
-        sponka ${version.ifEmpty { "(unknown)" }}
+        Sponka ${version.ifEmpty { "(unknown)" }}
         ${Build.MANUFACTURER} ${Build.MODEL}
         Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})
     """.trimIndent()

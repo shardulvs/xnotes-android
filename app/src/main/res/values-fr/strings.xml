@@ -558,7 +558,7 @@
     <string name="search_settings">Rechercher dans les réglages</string>
     <string name="search_keywords_port">Convertir anciennes notes formes axes droite graduée courbe fonction graphique mise à niveau vérifier</string>
     <string name="pref_port">Convertir les anciennes notes</string>
-    <string name="pref_port_help">Réécrit les notes qui stockent encore des axes, des droites graduées, des courbes ou des graphiques issus d\'anciennes versions de sponka. Les anciennes copies sont sauvegardées, les notes ouvertes sont ignorées.</string>
+    <string name="pref_port_help">Réécrit les notes qui stockent encore des axes, des droites graduées, des courbes ou des graphiques issus d\'anciennes versions de Sponka. Les anciennes copies sont sauvegardées, les notes ouvertes sont ignorées.</string>
     <string name="port_scan">Analyser</string>
     <string name="port_run">Convertir</string>
     <string name="port_scanning">Analyse...</string>
@@ -1390,7 +1390,7 @@
     <string name="working">Traitement en cours...</string>
     <string name="download">Télécharger</string>
     <string name="failed_reason">Échec : %1$s</string>
-    <string name="update_intro">Rechercher sur GitHub une version plus récente de sponka.</string>
+    <string name="update_intro">Rechercher sur GitHub une version plus récente de Sponka.</string>
     <string name="update_check_on_startup">Rechercher des mises à jour au démarrage de l\'application</string>
     <string name="update_check_failed">Échec de la recherche de mises à jour</string>
     <string name="update_check">Rechercher des mises à jour</string>
@@ -1401,7 +1401,7 @@
     <string name="update_download_failed">Échec du téléchargement</string>
     <string name="update_view_release">Voir la version</string>
     <string name="update_available">Mise à jour disponible</string>
-    <string name="update_is_out">sponka %1$s est disponible.</string>
+    <string name="update_is_out">Sponka %1$s est disponible.</string>
     <string name="update_later">Plus tard</string>
     <string name="update_turn_off">Désactiver</string>
     <string name="sync_syncing_progress">Synchronisation de %1$s</string>
@@ -1417,8 +1417,8 @@
     <string name="close">Fermer</string>
     <string name="sync_found_by">Trouvé par %1$s sur %2$s</string>
     <string name="about_fork_tagline">Un fork personnalisé de xnotes, une application de prise de notes manuscrites et de croquis pour Android. Anciennement n-notes.</string>
-    <string name="help_make_n_notes_better">Aidez à améliorer sponka</string>
-    <string name="enjoying_n_notes">"Vous aimez sponka ? "</string>
+    <string name="help_make_n_notes_better">Aidez à améliorer Sponka</string>
+    <string name="enjoying_n_notes">"Vous aimez Sponka ? "</string>
     <string name="ocr_recognizing_handwriting">Reconnaissance de l\'écriture...</string>
     <string name="ocr_handwriting_failed">Échec de la reconnaissance de l\'écriture : %1$s</string>
     <string name="ocr_no_text">Aucun texte reconnu</string>
