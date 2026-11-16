@@ -9,6 +9,7 @@ import com.xnotes.core.model.ConnectorItem
 import com.xnotes.core.model.EraseRule
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.Stroke
+import com.xnotes.core.tools.SelectKind
 import java.util.IdentityHashMap
 
 /**
@@ -49,17 +50,16 @@ class EraseSession(private val doc: InfiniteDocument) {
      * Pass the eraser over ([cx], [cy]) with [radius], in content space. Returns the region that
      * changed, or null when nothing was under it.
      *
-     * Images and text are left alone in both modes, matching the paged canvas: they are placed
-     * deliberately and are deleted through a selection instead. So is anything locked, which is
-     * what a lock is for. A fill it touches at all goes whole, in both modes; a filled shape it
+     * Only the [kinds] the eraser tool is set to take are touched, and nothing locked. A fill, tape,
+     * text box, image, table or audio it touches at all goes whole, in both modes; a filled shape it
      * touches inside but not on its outline loses just its fill (see [EraseRule]).
      */
-    fun erase(cx: Double, cy: Double, radius: Double, area: Boolean): Rect? {
+    fun erase(cx: Double, cy: Double, radius: Double, area: Boolean, kinds: Set<SelectKind>): Rect? {
         val box = Rect(cx - radius, cy - radius, radius * 2, radius * 2)
         var dirty: Rect? = null
         for (item in doc.itemsIn(box)) {
-            if (!EraseRule.erasable(item)) continue
-            if (EraseRule.takesFill(item, cx, cy, radius)) {
+            if (!EraseRule.erasable(item, kinds)) continue
+            if (EraseRule.takesFill(item, cx, cy, radius, kinds)) {
                 val shape = item as ShapeItem
                 unfilled.add(RefillShapes.Entry(shape, shape.fillRgba, null))
                 shape.fillRgba = null
@@ -77,7 +77,7 @@ class EraseSession(private val doc: InfiniteDocument) {
                     else -> continue
                 }
             } else {
-                if (!EraseRule.takes(item, cx, cy, radius)) continue
+                if (!EraseRule.takes(item, cx, cy, radius, kinds)) continue
                 emptyList()
             }
             for (f in fragments) {

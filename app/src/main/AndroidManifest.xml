@@ -7,7 +7,10 @@
 
     <!-- Filen cloud backup/sync (opt-in, off by default). -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Lets cloud sync ask, with the system dialog, to run in the background without battery limits. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Recording a note's audio: the microphone, asked for the first time Record is chosen, and a
          foreground service so a recording carries on with the screen off or another app in front.
          Android 13 and later also ask whether that service may show its notification. -->

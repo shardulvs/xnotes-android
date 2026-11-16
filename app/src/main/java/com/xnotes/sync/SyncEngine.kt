@@ -318,7 +318,7 @@ class SyncEngine(
     private fun doDownload(path: String, rem: CloudStorage.RemoteFile, state: SyncState, summary: Summary) = Temps(tmpDir).use { t ->
         val file = t.file()
         storage.download(rem, file)
-        val uri = LocalNoteStore.writeNote(context, treeUri, path, file) ?: throw IllegalStateException("cannot write local file")
+        val uri = LocalNoteStore.writeNote(context, treeUri, path, file)
         localUris[path] = uri
         val localMod = LocalNoteStore.modifiedOf(context, uri)
         state.put(path, withFingerprints(path, file, SyncState.Entry(rem.id, rem.lastModified, localMod, file.length())))
@@ -365,22 +365,23 @@ class SyncEngine(
             return@use
         }
         val merged = outcome as XnoteBundle.Merged
-        // Uploaded before anything is written here, so a failed upload leaves no trace and the next run starts over.
+        val clashed = merged.clashedPages
+        // The other version is kept here before the remote one is trashed; a failed upload after it only leaves a spare copy.
+        if (clashed.isNotEmpty()) LocalNoteStore.writeNote(context, treeUri, copyPath, remoteFile)
+        // Uploaded before the note is written here, so a failed upload leaves it as it was and the next run starts over.
         val sent = storage.upload(remoteParent(path), name, mergedFile, System.currentTimeMillis())
         runCatching { storage.trashFile(rem.id) }
-        val uri = LocalNoteStore.writeNote(context, treeUri, path, mergedFile) ?: throw IllegalStateException("cannot write local file")
+        val uri = LocalNoteStore.writeNote(context, treeUri, path, mergedFile)
         localUris[path] = uri
         val localMod = LocalNoteStore.modifiedOf(context, uri)
         val f = merged.fingerprints
         state.put(path, SyncState.Entry(sent.id, sent.lastModified, localMod, mergedFile.length(), f.pages, f.doc))
-        val clashed = merged.clashedPages
         if (clashed.isEmpty()) {
             summary.uploaded++
             summary.downloaded++
             log("Merged $path: changed here and on another device, on different pages")
             return@use
         }
-        LocalNoteStore.writeNote(context, treeUri, copyPath, remoteFile)
         records[copyPath] = SyncConflict.Record(path, System.currentTimeMillis(), deviceName, Reason.SAME_PAGES, clashed)
         val pages = if (clashed.size == 1) "page ${clashed[0]}" else "pages ${clashed.joinToString(", ")}"
         note(summary, path, "was also changed on another device, on $pages too; the rest was merged and the other version of $pages is in \"$copyName\"")
@@ -395,7 +396,7 @@ class SyncEngine(
                     t.file().takeIf { LocalNoteStore.copyTo(context, uri, it) }?.readText()
                 }
                 val out = t.file().apply { writeText(SyncConflict.withRecords(existing, records)) }
-                val uri = LocalNoteStore.writeNote(context, treeUri, SyncConflict.RECORDS_PATH, out) ?: error("cannot write it")
+                val uri = LocalNoteStore.writeNote(context, treeUri, SyncConflict.RECORDS_PATH, out)
                 localUris[SyncConflict.RECORDS_PATH] = uri
             }
         } catch (e: Exception) {
@@ -411,7 +412,7 @@ class SyncEngine(
         // Uploaded first, as with a merged note, so a failed upload leaves this device as it was.
         val sent = storage.upload(remoteParent(path), path.substringAfterLast('/'), merged, System.currentTimeMillis())
         runCatching { storage.trashFile(rem.id) }
-        val uri = LocalNoteStore.writeNote(context, treeUri, path, merged) ?: throw IllegalStateException("cannot write local file")
+        val uri = LocalNoteStore.writeNote(context, treeUri, path, merged)
         state.put(path, SyncState.Entry(sent.id, sent.lastModified, LocalNoteStore.modifiedOf(context, uri), merged.length()))
         summary.uploaded++
         summary.downloaded++

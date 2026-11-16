@@ -938,8 +938,8 @@ class InfiniteInteraction(
         val path = List(stroke.sampleCount) { Pt(stroke.xAt(it), stroke.yAt(it)) }
         val passes = Scribble.passes(path, dpPerUnit) ?: return false
         val radius = stroke.config.baseWidth / 2.0 + Scribble.TOUCH_DP / dpPerUnit
-        // Images, text and anything locked are spared, as the eraser spares them; a scribble is ink, so it takes only lines.
-        val candidates = itemsIn(Rect.bounding(path).outset(radius)).filter { EraseRule.erasable(it) }
+        // Only what the eraser may take; a scribble is ink, so it takes only lines.
+        val candidates = itemsIn(Rect.bounding(path).outset(radius)).filter { EraseRule.erasable(it, configFor(Tool.ERASER).erasableKinds) }
         val taken = Scribble.taken(passes, radius, candidates) { c, x, y, r -> EraseRule.touchesLine(c, x, y, r) }
         if (taken.isEmpty()) return false
         onWetStroke(null)
@@ -1919,7 +1919,7 @@ class InfiniteInteraction(
         val session = eraseSession ?: return
         onEraserCursor(Pt(vx, vy), eraserRadius() * viewport.zoom)
         val content = viewport.viewportToContent(Pt(vx, vy))
-        session.erase(content.x, content.y, eraserRadius(), areaErase())
+        session.erase(content.x, content.y, eraserRadius(), areaErase(), configFor(Tool.ERASER).erasableKinds)
         requestRender()
     }
 
@@ -1978,7 +1978,8 @@ class InfiniteInteraction(
     private fun extendPan(vx: Double, vy: Double) {
         trackVelocity(vx, vy)
         onUserMovedView()
-        if (singleFingerPanAllowed()) viewport.panByViewport(vx - lastPan.x, vy - lastPan.y)
+        val pan = panCfg().panDelta(vx - lastPan.x, vy - lastPan.y)
+        if (singleFingerPanAllowed()) viewport.panByViewport(pan.x, pan.y)
         lastPan = Pt(vx, vy)
         onViewChanged()
         requestRender()
@@ -1989,6 +1990,8 @@ class InfiniteInteraction(
     private fun singleFingerPanAllowed(): Boolean = !(zoomLocked && zoomLockPan != "single")
 
     private fun pinchPanAllowed(): Boolean = !(zoomLocked && zoomLockPan == "none")
+
+    private fun panCfg() = configFor(Tool.PAN)
 
     // --- pinch ---
 
@@ -2018,8 +2021,8 @@ class InfiniteInteraction(
         // A locked zoom keeps the zoom it started at, so the pinch is a pan and nothing else.
         viewport.zoom = if (zoomLocked) pinchInitZoom else pinchInitZoom * (dist / pinchInitDist)
         if (pinchPanAllowed()) {
-            viewport.scrollX = pinchAnchorContent.x - mid.x / viewport.zoom
-            viewport.scrollY = pinchAnchorContent.y - mid.y / viewport.zoom
+            if (!panCfg().lockPanX) viewport.scrollX = pinchAnchorContent.x - mid.x / viewport.zoom
+            if (!panCfg().lockPanY) viewport.scrollY = pinchAnchorContent.y - mid.y / viewport.zoom
         }
         lastPan = mid
         onViewChanged()
@@ -2045,9 +2048,10 @@ class InfiniteInteraction(
     }
 
     private fun startFling(fingerVel: Pt) {
-        if (fingerVel.length() < InteractionController.FLING_MIN_START) return
+        val vel = panCfg().panDelta(fingerVel.x, fingerVel.y)
+        if (!panCfg().panGlide || vel.length() < InteractionController.FLING_MIN_START) return
         setInteractive(true, true) // the glide is still motion, so the render thread stays up for it
-        flingVel = fingerVel
+        flingVel = vel
         flinging = true
         lastFlingMs = System.nanoTime() / 1_000_000L
         choreographer.postFrameCallback(flingFrame)

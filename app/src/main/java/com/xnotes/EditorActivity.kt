@@ -94,6 +94,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.IntentCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.lifecycleScope
 import com.xnotes.R
 import com.xnotes.platform.PdfOpenError
 import com.xnotes.sync.SyncManager
@@ -168,6 +169,22 @@ class EditorActivity : ComponentActivity() {
         // or from Recents after the process died or the app was updated; it was handled the first time.
         val rebuilt = savedInstanceState != null || (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
         if (!rebuilt) pendingImport = importUri(intent)
+        // An editor that a destroyed activity left behind may still be saving. This activity's is
+        // built once that is done; on a cold start nothing is pending and the content is set at once.
+        lifecycleScope.launch {
+            com.xnotes.ui.RetiredEditors.inProcess.await()
+            compose(rebuilt)
+        }
+        val content = findViewById<View>(android.R.id.content)
+        content.viewTreeObserver.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                if (launched) content.viewTreeObserver.removeOnPreDrawListener(this)
+                return launched
+            }
+        })
+    }
+
+    private fun compose(rebuilt: Boolean) {
         setContent {
             val context = LocalContext.current
             val ed = remember { Editor(context).also { editor = it } }
@@ -204,15 +221,40 @@ class EditorActivity : ComponentActivity() {
                         SyncStrip(ed)
                     }
                     update?.let { u ->
+                        var downloadProgress by remember { mutableStateOf<Float?>(null) }
+                        var downloadFailed by remember { mutableStateOf(false) }
                         com.xnotes.ui.AlertDialog(
                             onDismissRequest = { update = null },
                             title = { androidx.compose.material3.Text(stringResource(R.string.update_available)) },
-                            text = { androidx.compose.material3.Text(stringResource(R.string.update_is_out, u.version)) },
+                            text = {
+                                val progress = downloadProgress
+                                androidx.compose.material3.Text(
+                                    when {
+                                        progress != null -> stringResource(R.string.update_downloading, (progress * 100).toInt())
+                                        downloadFailed -> stringResource(R.string.update_download_failed)
+                                        else -> stringResource(R.string.update_is_out, u.version)
+                                    }
+                                )
+                            },
                             confirmButton = {
-                                androidx.compose.material3.TextButton(onClick = {
-                                    update = null
-                                    runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(u.apkUrl ?: u.releaseUrl))) }
-                                }) { androidx.compose.material3.Text(stringResource(R.string.download)) }
+                                androidx.compose.material3.TextButton(
+                                    onClick = {
+                                        val apkUrl = u.apkUrl
+                                        if (apkUrl == null) {
+                                            update = null
+                                            runCatching { startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(u.releaseUrl))) }
+                                            return@TextButton
+                                        }
+                                        downloadFailed = false
+                                        downloadProgress = 0f
+                                        lifecycleScope.launch {
+                                            val result = com.xnotes.update.UpdateInstaller.downloadAndInstall(this@EditorActivity, apkUrl) { downloadProgress = it }
+                                            downloadProgress = null
+                                            if (result.isSuccess) update = null else downloadFailed = true
+                                        }
+                                    },
+                                    enabled = downloadProgress == null,
+                                ) { androidx.compose.material3.Text(stringResource(R.string.download)) }
                             },
                             dismissButton = {
                                 androidx.compose.foundation.layout.Row {
@@ -228,13 +270,6 @@ class EditorActivity : ComponentActivity() {
                 }
             }
         }
-        val content = findViewById<View>(android.R.id.content)
-        content.viewTreeObserver.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
-            override fun onPreDraw(): Boolean {
-                if (launched) content.viewTreeObserver.removeOnPreDrawListener(this)
-                return launched
-            }
-        })
     }
 
     // Stylus side-button keys (Bluetooth/USI pens report the button only this way) are caught here,
@@ -247,6 +282,9 @@ class EditorActivity : ComponentActivity() {
         return super.dispatchKeyEvent(event)
     }
 
+    private val eyedropperTouch by lazy { com.xnotes.ui.EyedropperTouch(window) }
+    private val superTouch: (MotionEvent) -> Boolean = { super.dispatchTouchEvent(it) }
+
     // Older Samsung builds (seen on a Tab S6 Lite, Android 13; gone by Android 15) tag a stylus
     // stroke made with the S-Pen button held with proprietary action codes instead of DOWN/MOVE/UP,
     // so the view tree never opens a touch target and the whole stroke is dropped. Rewrite them
@@ -255,12 +293,12 @@ class EditorActivity : ComponentActivity() {
         StylusButtonLatch.clicks.onTouch(ev) // a side-button press with the pen tip down is a hold, never a click
         val standard = standardPenAction(ev.actionMasked)
         if (standard < 0 || ev.getToolType(0) != MotionEvent.TOOL_TYPE_STYLUS) {
-            return super.dispatchTouchEvent(ev)
+            return eyedropperTouch.dispatch(ev, superTouch)
         }
         val rewritten = MotionEvent.obtain(ev)
         rewritten.action = standard
         try {
-            return super.dispatchTouchEvent(rewritten)
+            return eyedropperTouch.dispatch(rewritten, superTouch)
         } finally {
             rewritten.recycle()
         }
@@ -307,19 +345,26 @@ class EditorActivity : ComponentActivity() {
         editor?.persist()
     }
 
+    override fun onDestroy() {
+        editor?.retire() // the next activity waits for the saves this one began on pause
+        super.onDestroy()
+    }
+
     // Playback never goes on with xnotes off screen; a split window that only lost focus is still on it.
     override fun onStop() {
         super.onStop()
         com.xnotes.ui.AudioPlayback.pause()
+        if (!isChangingConfigurations) SyncManager.syncOnAppClose(this)
     }
 
     @Suppress("DEPRECATION") // RUNNING_* still arrive below Android 14
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        // The canvas keeps its rendered pages, so PDFium's pages and glyph caches can go while the
-        // UI is hidden; they load again when something new is drawn.
+        // The canvas keeps its rendered pages, so PDFium's pages and glyph caches and the decoded
+        // images can go while the UI is hidden; they load again when something new is drawn.
         if (level >= TRIM_MEMORY_UI_HIDDEN || level == TRIM_MEMORY_RUNNING_LOW || level == TRIM_MEMORY_RUNNING_CRITICAL) {
             com.xnotes.platform.PdfiumDocument.trimAll()
+            com.xnotes.platform.ImageDecoder.trim()
         }
     }
 
@@ -1114,7 +1159,7 @@ private fun EditorScreen(
                 onImportCodeTheme = { importCodeThemeLauncher.launch(arrayOf("*/*")) },
                 onImportFont = { importFontLauncher.launch(arrayOf("*/*")) },
                 onBackup = { export ->
-                    if (export) exportSettingsLauncher.launch("n-notes-settings-${java.time.LocalDate.now()}.zip")
+                    if (export) exportSettingsLauncher.launch("sponka-settings-${java.time.LocalDate.now()}.zip")
                     else importSettingsLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
                 },
                 onImportPdf = { importPdfLauncher.launch(importMimeTypes) },

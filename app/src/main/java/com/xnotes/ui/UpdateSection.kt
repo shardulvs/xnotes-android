@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xnotes.update.UpdateChecker
+import com.xnotes.update.UpdateInstaller
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
 import kotlinx.coroutines.launch
@@ -42,6 +43,7 @@ fun UpdateSection(checkOnStartup: Boolean, onCheckOnStartup: (Boolean) -> Unit) 
     var busy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<UpdateChecker.Status?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var downloadProgress by remember { mutableStateOf<Float?>(null) }
 
     fun open(url: String) {
         runCatching {
@@ -85,8 +87,24 @@ fun UpdateSection(checkOnStartup: Boolean, onCheckOnStartup: (Boolean) -> Unit) 
                     color = palette.accent.toComposeColor(), fontSize = 13.sp, fontWeight = FontWeight.Medium,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    s.apkUrl?.let { url -> TextButton(onClick = { open(url) }) { Text(stringResource(R.string.update_download_apk), fontSize = 13.sp) } }
+                    s.apkUrl?.let { url ->
+                        TextButton(
+                            onClick = {
+                                error = null
+                                downloadProgress = 0f
+                                scope.launch {
+                                    UpdateInstaller.downloadAndInstall(ctx, url) { downloadProgress = it }
+                                        .onFailure { error = it.message ?: ctx.getString(R.string.update_download_failed) }
+                                    downloadProgress = null
+                                }
+                            },
+                            enabled = downloadProgress == null,
+                        ) { Text(stringResource(R.string.update_download_apk), fontSize = 13.sp) }
+                    }
                     TextButton(onClick = { open(s.releaseUrl) }) { Text(stringResource(R.string.update_view_release), fontSize = 13.sp) }
+                }
+                downloadProgress?.let {
+                    Text(stringResource(R.string.update_downloading, (it * 100).toInt()), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
                 }
             }
             null -> {}

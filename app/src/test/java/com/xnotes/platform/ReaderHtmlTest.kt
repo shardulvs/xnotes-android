@@ -162,4 +162,14 @@ class ReaderHtmlTest {
         assertEquals("ppt/media/image1.png", ReaderHtml.resolvePath("ppt/slides", "../media/image1.png"))
         assertEquals("word/media/a.png", ReaderHtml.resolvePath("word", "media/a.png"))
     }
+
+    @Test
+    fun markdownEmbedsLocalImagesAndObsidianEmbeds() {
+        val read = ReaderHtml.ZipRead { path -> if (path == "img/a b.png" || path == "pic.jpg") byteArrayOf(1, 2, 3) else null }
+        val html = ReaderHtml.markdown("![alt](<img/a b.png>)\n\n![[pic.jpg|300]]\n\n![gone](none.png)\n\n![web](https://x.org/a.png)", image = read)
+        assertTrue(html, html.contains("<img src=\"data:image/png;base64,AQID\" alt=\"alt\">"))
+        assertTrue(html, html.contains("<img src=\"data:image/jpeg;base64,AQID\""))
+        assertTrue(html, html.contains("<span class=\"missing\">[gone]</span>"))
+        assertTrue(html, html.contains("<span class=\"missing\">[web]</span>"))
+    }
 }

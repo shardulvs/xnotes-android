@@ -1,5 +1,6 @@
 package com.xnotes.core.tools
 
+import com.xnotes.core.geometry.Pt
 import com.xnotes.core.model.Rgba
 import com.xnotes.core.shapes.ShapeKind
 import org.junit.Assert.assertEquals
@@ -90,6 +91,20 @@ class ToolsTest {
         assertEquals(1.0..20.0, ToolConversions.widthRange(Tool.PEN))
     }
 
+    @Test fun widthSnapsToHalfPixels() {
+        // The label shows the width drawn, so two strokes labelled alike are alike.
+        assertEquals(2.0, ToolConversions.snapWidth(Tool.PEN, 2.2), 0.0)
+        assertEquals(2.5, ToolConversions.snapWidth(Tool.PEN, 2.4), 0.0)
+        assertEquals(2.5, ToolConversions.snapWidth(Tool.PEN, 2.6), 0.0)
+        assertEquals(3.0, ToolConversions.snapWidth(Tool.PEN, 2.8), 0.0)
+        assertEquals(2.0, ToolConversions.snapWidth(Tool.PEN, 2.0), 0.0)
+        // and stays inside the tool's own range
+        assertEquals(20.0, ToolConversions.snapWidth(Tool.PEN, 20.7), 0.0)
+        assertEquals(1.0, ToolConversions.snapWidth(Tool.PEN, 0.2), 0.0)
+        assertEquals(4.0, ToolConversions.snapWidth(Tool.HIGHLIGHTER, 1.0), 0.0)
+        assertEquals(120.0, ToolConversions.snapWidth(Tool.HIGHLIGHTER, 500.0), 0.0)
+    }
+
     @Test fun strokeToolsAndAlpha() {
         assertTrue(Tool.CALLIGRAPHY.isStroke)
         assertTrue(Tool.DASHED.isStroke)
@@ -121,5 +136,20 @@ class ToolsTest {
     @Test fun toolIdRoundTrip() {
         for (t in Tool.entries) assertEquals(t, Tool.fromId(t.id))
         assertEquals(16, Tool.wheelOrder.size)
+    }
+
+    @Test fun panDeltaLocksAndScales() {
+        val pan = ToolDefaults.configFor(Tool.PAN)
+        assertFalse(pan.lockPanX)
+        assertFalse(pan.lockPanY)
+        assertEquals(5, pan.panSensitivity)
+        assertTrue(pan.panGlide)
+        assertTrue(Tool.PAN in ToolDefaults.persistedTools)
+
+        assertEquals(Pt(3.0, 4.0), pan.panDelta(3.0, 4.0))
+        assertEquals(Pt(0.0, 4.0), pan.copy(lockPanX = true).panDelta(3.0, 4.0))
+        assertEquals(Pt(3.0, 0.0), pan.copy(lockPanY = true).panDelta(3.0, 4.0))
+        assertEquals(0.2, pan.copy(panSensitivity = 1).panDelta(1.0, 0.0).x, 1e-9)
+        assertEquals(3.0, pan.copy(panSensitivity = 10).panDelta(1.0, 0.0).x, 1e-9)
     }
 }

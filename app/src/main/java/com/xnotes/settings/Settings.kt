@@ -70,6 +70,7 @@ data class Settings(
     val activeColor: Int = 0,
     /** The tool armed when the app was last paused, re-armed on the next launch. */
     val lastTool: Tool = Tool.DEFAULT,
+    val lastCanvasTool: Tool = Tool.PEN,
     val recentColors: List<Rgba> = emptyList(),
     /** The colour circles of each [SwatchRole] the user recoloured; the rest keep their defaults. */
     val swatches: Map<SwatchRole, List<Rgba>> = emptyMap(),
@@ -152,6 +153,7 @@ data class Settings(
             .put("canvas_toolbar_layout", toolbarLayoutJson(canvasToolbarLayout))
             .put("active_color", activeColor)
             .put("last_tool", lastTool.id)
+            .put("last_canvas_tool", lastCanvasTool.id)
             .put("recent_colors", JSONArray().apply { recentColors.forEach { put(rgbaArr(it)) } })
             .apply {
                 if (swatches.isNotEmpty()) put("swatches", JSONObject().apply {
@@ -179,6 +181,9 @@ data class Settings(
     }
 
     companion object {
+        /** The tools the canvas bar can arm; a transient one restored there would show a tool never picked. */
+        private val CANVAS_TOOLS = Tool.PENS + Tool.SELECTIONS + listOf(Tool.HIGHLIGHTER, Tool.ERASER, Tool.PAN, Tool.SHAPE, Tool.TAPE)
+
         fun fromJson(o: JSONObject): Settings {
             val toolsObj = o.optJSONObject("tools")
             val tools = HashMap<Tool, ToolConfig>()
@@ -211,6 +216,8 @@ data class Settings(
                 // leave the bar showing a tool the user never picked.
                 lastTool = Tool.fromId(o.optString("last_tool", ""))
                     ?.takeIf { it in Tool.wheelOrder } ?: Tool.DEFAULT,
+                lastCanvasTool = Tool.fromId(o.optString("last_canvas_tool", ""))
+                    ?.takeIf { it in CANVAS_TOOLS } ?: Tool.PEN,
                 recentColors = rgbaList(o.optJSONArray("recent_colors")).take(24),
                 swatches = swatches(o.optJSONObject("swatches")),
                 browseRoot = o.optString("browse_root", "").ifEmpty { null },
@@ -432,9 +439,14 @@ data class Settings(
             .put("switch_back_after_erase", c.switchBackAfterErase)
             .put("erase_markups", c.eraseMarkups)
             .put("scribble_erase", c.scribbleErase)
+            .put("erasable_kinds_off", kindsJson(SelectKind.ALL - c.erasableKinds))
+            .put("lock_pan_x", c.lockPanX)
+            .put("lock_pan_y", c.lockPanY)
+            .put("pan_sensitivity", c.panSensitivity)
+            .put("pan_glide", c.panGlide)
             .put("switch_back_after_select", c.switchBackAfterSelect)
             .put("select_whole_items", c.selectWholeItems)
-            .put("select_kinds", JSONArray(c.selectKinds.map { it.id }))
+            .put("select_kinds_off", kindsJson(SelectKind.ALL - c.selectKinds))
             .put("snap_to_margins", c.snapToMargins)
             .put("straight_line", c.straightLine)
             .put("scale", c.scale)
@@ -446,6 +458,13 @@ data class Settings(
             .put("tape_pattern", c.tapePattern.id)
             .put("rgba", rgbaArr(c.rgba))
             .apply { c.colorOverride?.let { put("color_override", rgbaArr(it)) } }
+
+        private fun kindsJson(kinds: Set<SelectKind>) = JSONArray(kinds.map { it.id })
+
+        private fun kinds(o: JSONObject, key: String): Set<SelectKind>? =
+            o.optJSONArray(key)?.let { a -> (0 until a.length()).mapNotNull { SelectKind.fromId(a.optString(it)) }.toSet() }
+
+        private fun kindsOff(o: JSONObject, key: String): Set<SelectKind>? = kinds(o, key)?.let { SelectKind.ALL - it }
 
         private fun toolConfig(o: JSONObject, tool: Tool): ToolConfig {
             val d = ToolDefaults.configFor(tool)
@@ -471,10 +490,19 @@ data class Settings(
                 switchBackAfterErase = o.optBoolean("switch_back_after_erase", d.switchBackAfterErase),
                 eraseMarkups = o.optBoolean("erase_markups", d.eraseMarkups),
                 scribbleErase = o.optBoolean("scribble_erase", d.scribbleErase),
+                erasableKinds = (kindsOff(o, "erasable_kinds_off") ?: kinds(o, "erasable_kinds"))?.takeIf { it.isNotEmpty() } ?: d.erasableKinds,
                 switchBackAfterSelect = o.optBoolean("switch_back_after_select", d.switchBackAfterSelect),
                 selectWholeItems = o.optBoolean("select_whole_items", d.selectWholeItems),
-                selectKinds = o.optJSONArray("select_kinds")?.let { a -> (0 until a.length()).mapNotNull { SelectKind.fromId(a.optString(it)) }.toSet() } ?: d.selectKinds,
+                selectKinds = (kindsOff(o, "select_kinds_off") ?: kinds(o, "select_kinds")
+                    // Saved before highlighter strokes had a kind of their own, they were lines.
+                    ?.let { if (!o.has("select_kinds_v2") && SelectKind.INK in it) it + SelectKind.HIGHLIGHTER else it })
+                    ?.takeIf { it.isNotEmpty() }
+                    ?: d.selectKinds,
                 snapToMargins = o.optBoolean("snap_to_margins", d.snapToMargins),
+                lockPanX = o.optBoolean("lock_pan_x", d.lockPanX),
+                lockPanY = o.optBoolean("lock_pan_y", d.lockPanY),
+                panSensitivity = o.optInt("pan_sensitivity", d.panSensitivity).coerceIn(1, 10),
+                panGlide = o.optBoolean("pan_glide", d.panGlide),
                 straightLine = o.optBoolean("straight_line", d.straightLine),
                 scale = o.optBoolean("scale", d.scale),
                 highlighterAlpha = o.optDouble("highlighter_alpha", d.highlighterAlpha),

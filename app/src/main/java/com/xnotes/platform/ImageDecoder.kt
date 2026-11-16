@@ -25,7 +25,8 @@ import kotlin.math.max
  * size buckets (so a drag, a repeated sharpen, or a small zoom step is a plain bitmap blit).
  * On-screen draws go through [renderVectorSlice], which rasterizes only the region the caller can
  * actually show, so a deep zoom paints a viewport-sized bitmap instead of the whole document.
- * Safe to call from any thread; both caches are thread-safe and memory-capped.
+ * On-screen rasters share the rasterized-SVG cache through [cachedSampledFile], for the same reason.
+ * Safe to call from any thread; every cache is thread-safe and memory-capped.
  */
 object ImageDecoder {
 
@@ -74,31 +75,39 @@ object ImageDecoder {
         return scaled
     }
 
-    /**
-     * Like [decodeSampledFile] but returns a **shared, cached** bitmap the caller must never recycle
-     * or mutate. Decoded at the power-of-two sample-size bucket for the box (the renderer scales it
-     * into place), so a selected image being dragged or resized reuses one decode across frames
-     * instead of re-reading the file every frame. Raster only; vectors fall back to the plain decode.
-     */
-    fun decodeSharedForDraw(path: String, maxWidth: Int, maxHeight: Int): Bitmap? {
+    /** [decodeSampledFile] from the cache, kept at its sample step (up to twice the box); never recycle it. */
+    fun cachedSampledFile(path: String, maxWidth: Int, maxHeight: Int): Bitmap? {
         val mw = maxWidth.coerceAtLeast(1)
         val mh = maxHeight.coerceAtLeast(1)
-        if (isVector(path)) return decodeSampledFile(path, mw, mh)
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(path, bounds)
-        val sw = bounds.outWidth
-        val sh = bounds.outHeight
-        if (sw <= 0 || sh <= 0) return null
-        val ss = sampleSize(sw, sh, mw, mh)
-        val key = "$path|${runCatching { File(path).lastModified() }.getOrDefault(0L)}|$ss"
-        rasterCache.get(key)?.let { if (!it.isRecycled) return it }
+        if (isVector(path)) return renderSvg(path, mw, mh)
+        val size = rasterSize(path) ?: return null
+        val ss = sampleSize(size.width, size.height, mw, mh)
+        val key = "$path@$ss"
+        bitmapCache.get(key)?.let { return it }
         val opts = BitmapFactory.Options().apply {
             inSampleSize = ss
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        val bmp = BitmapFactory.decodeFile(path, opts) ?: return null
-        rasterCache.put(key, bmp)
+        val bmp = BitmapFactory.decodeFile(path, opts)?.let(::fitRasterCap) ?: return null
+        bitmapCache.put(key, bmp)
         return bmp
+    }
+
+    // A whole 50 MP photo is past the hardware canvas's 100 MB draw limit, so the cap holds it to 64 MB.
+    private fun fitRasterCap(bmp: Bitmap): Bitmap {
+        if (bmp.width <= RASTER_CAP_PX && bmp.height <= RASTER_CAP_PX) return bmp
+        val s = RASTER_CAP_PX.toDouble() / max(bmp.width, bmp.height)
+        val w = (bmp.width * s).toInt().coerceAtLeast(1)
+        val h = (bmp.height * s).toInt().coerceAtLeast(1)
+        val scaled = Bitmap.createScaledBitmap(bmp, w, h, true)
+        if (scaled !== bmp) bmp.recycle()
+        return scaled
+    }
+
+    /** Drops the decoded and parsed images; they come back when next drawn. */
+    fun trim() {
+        bitmapCache.evictAll()
+        svgCache.evictAll()
     }
 
     /** True when [path] holds a vector (SVG) source with no native pixel resolution.
@@ -215,7 +224,7 @@ object ImageDecoder {
         if (last.bucket != bucket) return null
         if (wx0 < last.x0 || wy0 < last.y0 || wx1 > last.x1 || wy1 > last.y1) return null
         val key = sliceKey(path, bucket, last.x0, last.y0, last.x1 - last.x0, last.y1 - last.y0, last.docW, last.docH)
-        val bmp = svgBitmapCache.get(key) ?: return null
+        val bmp = bitmapCache.get(key) ?: return null
         return VectorSlice(
             bmp,
             last.x0.toDouble() / last.docW, last.y0.toDouble() / last.docH,
@@ -243,7 +252,7 @@ object ImageDecoder {
         docH: Int,
     ): Bitmap? {
         val key = sliceKey(path, bucket, x0, y0, w, h, docW, docH)
-        svgBitmapCache.get(key)?.let { return it }
+        bitmapCache.get(key)?.let { return it }
         val mpx = (w.toDouble() * h) / 1e6
         val cost = renderCost(path)
         var bmp: Bitmap? = null
@@ -259,7 +268,7 @@ object ImageDecoder {
             }.getOrNull() ?: return null
             cost.software = elapsedPerMpx(t, mpx, cost.software)
         }
-        svgBitmapCache.put(key, bmp)
+        bitmapCache.put(key, bmp)
         return bmp
     }
 
@@ -312,6 +321,10 @@ object ImageDecoder {
         return if (o.outWidth > 0 && o.outHeight > 0) ImageSize(o.outWidth, o.outHeight) else null
     }
 
+    // Memoized like [isVector], so a cache hit in [cachedSampledFile] never touches the disk.
+    private fun rasterSize(path: String): ImageSize? =
+        rasterSizes.get(path) ?: probeRaster(path)?.also { rasterSizes.put(path, it) }
+
     // Parsed SVG documents by path: parsing a big flowchart's XML can dwarf painting it, and image
     // files are immutable temp files, so the path alone is a sound key. Count-bounded (a parsed DOM
     // has no cheap byte size); stale entries for deleted temp files just age out.
@@ -320,23 +333,16 @@ object ImageDecoder {
     // Vector-ness by path: the sniff opens the file, and image files are immutable temp files.
     private val vectorFlags = LruCache<String, Boolean>(64)
 
-    // Rasterized SVGs by path + bucket. Byte-bounded against the heap; entries are never recycled
-    // (callers may still be drawing them), eviction leaves them to the GC.
-    private val svgBitmapCache = object : LruCache<String, Bitmap>(
+    // Rasterized SVGs by path#bucket and decoded rasters by path@step. Byte-bounded against the heap;
+    // entries are never recycled (callers may still be drawing them), eviction leaves them to the GC.
+    private val bitmapCache = object : LruCache<String, Bitmap>(
         ((Runtime.getRuntime().maxMemory() / 6).coerceAtMost(96L shl 20) shr 10).toInt(),
     ) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount / 1024
     }
 
-    // Decoded raster bitmaps by path + mtime + sample-size bucket. A lifted (selected) image is
-    // redrawn every frame while it's moved or resized; without this each frame re-decoded the whole
-    // JPEG from disk, so a drag lagged and the image trailed its transform box. Same byte-bounded,
-    // never-recycled discipline as [svgBitmapCache] (a cached bitmap may still be mid-draw).
-    private val rasterCache = object : LruCache<String, Bitmap>(
-        ((Runtime.getRuntime().maxMemory() / 6).coerceAtMost(96L shl 20) shr 10).toInt(),
-    ) {
-        override fun sizeOf(key: String, value: Bitmap) = value.byteCount / 1024
-    }
+    // Native raster sizes by path, for the same reason as [vectorFlags].
+    private val rasterSizes = LruCache<String, ImageSize>(64)
 
     private fun cachedSvg(path: String): SVG? {
         svgCache.get(path)?.let { return it }
@@ -377,14 +383,14 @@ object ImageDecoder {
         val longSide = (max(size.width, size.height) * fit).toInt().coerceAtLeast(1)
         val bucket = pow2AtLeast(longSide).coerceAtMost(VECTOR_RENDER_CAP_PX)
         val key = "$path#$bucket"
-        svgBitmapCache.get(key)?.let { return it }
+        bitmapCache.get(key)?.let { return it }
         val s = bucket.toDouble() / max(size.width, size.height)
         val bw = (size.width * s).toInt().coerceAtLeast(1)
         val bh = (size.height * s).toInt().coerceAtLeast(1)
         val bmp = runCatching {
             Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888).also { paintSlice(Canvas(it), svg, 0, 0, bw, bh) }
         }.getOrNull() ?: return null
-        svgBitmapCache.put(key, bmp)
+        bitmapCache.put(key, bmp)
         return bmp
     }
 
@@ -394,18 +400,14 @@ object ImageDecoder {
         return p
     }
 
-    /** Largest power-of-two sample step that keeps the decoded size at or above the requested box. */
-    private fun sampleSize(w: Int, h: Int, reqW: Int, reqH: Int): Int {
-        var ss = 1
-        while (w / (ss * 2) >= reqW && h / (ss * 2) >= reqH) ss *= 2
-        return ss
-    }
-
     private const val DEFAULT_SVG_SIZE = 512f
 
     // Matches the raster decode caps used by the screen renderer and PDF export. On screen the
     // slice render keeps every bitmap viewport-bounded, so this only governs export/thumbnails.
     private const val VECTOR_RENDER_CAP_PX = 4096
+
+    // The screen renderer's decode cap; a cached raster is never larger on either side.
+    private const val RASTER_CAP_PX = 4096
 
     // Slices snap outward to this grid so panning re-uses one rasterization for a while.
     private const val SLICE_GRID = 128
@@ -423,4 +425,11 @@ object ImageDecoder {
     // Below this the CPU already paints faster than the GPU can hand the pixels back (a megapixel
     // of ARGB is 4 MiB across the bus), so the GPU path is never even measured.
     private const val HW_WORTH_MS_PER_MPX = 6.0
+}
+
+/** Largest power-of-two sample step that keeps the decode at or above the box; top level for JVM tests. */
+internal fun sampleSize(w: Int, h: Int, reqW: Int, reqH: Int): Int {
+    var ss = 1
+    while (w / (ss * 2) >= reqW && h / (ss * 2) >= reqH) ss *= 2
+    return ss
 }

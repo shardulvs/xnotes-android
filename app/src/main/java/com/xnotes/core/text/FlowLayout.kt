@@ -497,8 +497,8 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
         pass++
         math?.beginLayout()
         pruneCaches(flow)
-        val contentRects = pageBoxes.map { contentRectOf(it, flow.margins, dpi) }
-        val spare = addedPage?.let { contentRectOf(it, flow.margins, dpi) } ?: contentRects.last()
+        val contentRects = pageBoxes.map { contentRectOf(it, it.margins ?: flow.margins, dpi) }
+        val spare = addedPage?.let { contentRectOf(it, it.margins ?: flow.margins, dpi) } ?: contentRects.last()
         val pageLines = List(pageBoxes.size) { mutableListOf<PlacedLine>() }
         val pageTables = List(pageBoxes.size) { mutableListOf<TableFrag>() }
         val pageBreaks = List(pageBoxes.size) { mutableListOf<BreakMark>() }

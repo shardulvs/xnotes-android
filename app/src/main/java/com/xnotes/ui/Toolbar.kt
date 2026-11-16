@@ -338,7 +338,7 @@ private fun ToolButton(
 ) {
     if (icon == null) return
     val armed = editor.tool == tool
-    val configurable = tool.isStroke || tool == Tool.SHAPE || tool == Tool.ERASER || tool == Tool.SELECT || tool == Tool.LASSO || tool == Tool.TEXT || tool == Tool.TABLE || tool == Tool.MARKUP || tool == Tool.TAPE
+    val configurable = tool.isStroke || tool == Tool.SHAPE || tool == Tool.ERASER || tool == Tool.SELECT || tool == Tool.LASSO || tool == Tool.TEXT || tool == Tool.TABLE || tool == Tool.MARKUP || tool == Tool.TAPE || tool == Tool.PAN
     Box {
         ToolbarIcon(
             icon,
@@ -364,6 +364,7 @@ private fun ToolButton(
                 tool == Tool.TEXT -> TextToolConfigPopup(editor) { setConfigForTool(null) }
                 tool == Tool.MARKUP -> MarkupToolPopup(editor) { setConfigForTool(null) }
                 tool == Tool.TAPE -> TapeConfigPopup(editor) { setConfigForTool(null) }
+                tool == Tool.PAN -> PanConfigPopup(editor) { setConfigForTool(null) }
                 else -> ToolConfigPopup(editor, tool, onPick = { editor.selectTool(it); setConfigForTool(it) }) { setConfigForTool(null) }
             }
         }
@@ -426,7 +427,7 @@ private fun StylesButton(editor: Editor, onImportTemplate: () -> Unit) {
     }
 }
 
-/** Opens the page-margins popup (extra paper on any edge, for the document or the current page). */
+/** Opens the text-margins popup (the margins text flows in and selections snap to). */
 @Composable
 private fun MarginsButton(editor: Editor) {
     var open by remember { mutableStateOf(false) }

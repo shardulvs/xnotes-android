@@ -1147,6 +1147,9 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         onToolStyleChanged?.invoke()
     }
 
+    override val hostZoomLocked: Boolean get() = zoomLocked
+    override fun toggleHostZoomLock() = toggleZoomLock()
+
     override var snapHeldToShapes: Boolean
         get() = detectShapes
         set(v) { detectShapes = v; onDetectShapesChanged?.invoke(v) }
@@ -1211,10 +1214,16 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     private var dropWindow: Rect? = null
     private var dropItems: List<CanvasItem> = emptyList()
 
+    /** The selection as the drag began: a drop on it recolours the selection whole. */
+    private var dropSelection: List<CanvasItem> = emptyList()
+
     private val colorDropper = ColorDropper(object : DropSurface {
         override fun beginDrop() {
             if (editingLabel != null) commitText()
-            interaction.clearSelection()
+            // A selection stays out through the drag (the canvas is never touched), so dropping the
+            // colour back on it recolours all of it. Only a drag without one clears what was there.
+            if (selection.isEmpty) interaction.clearSelection()
+            dropSelection = selection.items.toList()
             val seen = viewport.visibleContentRect()
             val window = seen.outset(maxOf(seen.w, seen.h) * DROP_MARGIN)
             dropWindow = window
@@ -1234,10 +1243,11 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
                 grid = grid,
                 reach = DROP_REACH_DP * devicePxPerDp / zoom,
                 smallHole = (DROP_SMALL_HOLE_MM / 25.4 * appContext.resources.displayMetrics.xdpi / zoom * grid.scale).toInt(),
+                selection = boundsOf(dropSelection),
             )
         }
 
-        override fun applyDrop(spot: DropSpot, action: DropAction, color: Rgba) = applyColorDrop(action, color)
+        override fun applyDrop(spot: DropSpot, action: DropAction, color: Rgba) = applyColorDrop(spot, action, color)
 
         override fun viewInWindow(): Offset {
             val at = IntArray(2).also { view.getLocationInWindow(it) }
@@ -1271,7 +1281,14 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     var onSay: ((String) -> Unit)? = null
 
     /** Carry out a colour drop as one undo step, or say why nothing happened. */
-    private fun applyColorDrop(action: DropAction, color: Rgba) {
+    private fun applyColorDrop(spot: DropSpot, action: DropAction, color: Rgba) {
+        // A drop inside the selection's bounds recolours all of it as one undo step, but only while
+        // the selection is still the one the drag began with: undo or a sync may have changed it.
+        val unchanged = selection.items.size == dropSelection.size && dropSelection.all { d -> selection.items.any { it === d } }
+        if (unchanged && spot.selection?.outset(spot.reach)?.contains(spot.at) == true) {
+            restyleSelection(color, null)
+            return
+        }
         val command: Command = when (action) {
             is DropAction.Recolour -> {
                 val item = action.item.takeIf { document.containsRef(it) } ?: return
@@ -1293,6 +1310,8 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
                 onSay?.invoke(appContext.getString(R.string.colour_drop_not_closed))
                 return
             }
+            // The canvas has no markups; the surface never hands this in, but the when is exhaustive.
+            DropAction.RecolourMarkup -> return
             DropAction.None -> return
         }
         command.redo()

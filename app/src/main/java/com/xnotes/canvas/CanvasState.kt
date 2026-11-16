@@ -447,6 +447,8 @@ class CanvasState(
     var zoomLocked: Boolean = false
     /** Paginated only: pages move up and down freely and pinches never snap to a fit (the View menu toggle). */
     var freeMovement: Boolean = false
+    /** Continuous only: the page slides sideways until just [FREE_SCROLL_EDGE_DP] of it stays on screen. */
+    var freeHorizontalScroll: Boolean = false
 
     /**
      * True while the view is sitting at fit-to-width. Set when a pinch snaps to fit-width (or
@@ -765,7 +767,7 @@ class CanvasState(
         val ch = contentH * zoom
         // Paginated: the row clamp centres the row when it fits, so the scroll always wins; the
         // whole strip must never be centred (a spread or a taller page would push a page off centre).
-        val ox = (if (!verticalScroll || cw >= clearW) -scrollX else insetLeft + (clearW - cw) / 2.0) - flipOffsetX
+        val ox = (if (!verticalScroll || cw >= clearW || freeHorizontalScroll) -scrollX else insetLeft + (clearW - cw) / 2.0) - flipOffsetX
         val oy = (if (!verticalScroll || ch >= clearH) -scrollY else insetTop + (clearH - ch) / 2.0) - overscrollY
         return Pt(ox, oy)
     }
@@ -798,8 +800,16 @@ class CanvasState(
             scrollY = c.y
             return
         }
-        scrollX = scrollX.coerceIn(minScrollX(), maxScrollX())
+        scrollX = if (freeHorizontalScroll) freeScrollX(scrollX) else scrollX.coerceIn(minScrollX(), maxScrollX())
         scrollY = scrollY.coerceIn(minScrollY(), maxScrollY())
+    }
+
+    // shortcut: bounds come from the widest page, so a much narrower page in a mixed note can leave the screen.
+    private fun freeScrollX(sx: Double): Double {
+        val left = sideMargin * zoom
+        val right = (contentW - sideMargin) * zoom
+        val edge = min(FREE_SCROLL_EDGE_DP * devicePxPerDp, (right - left) / 2.0)
+        return sx.coerceIn(left - viewportW + insetRight + edge, right - insetLeft - edge)
     }
 
     /** ([sx], [sy]) clamped into [rowIndex]'s paginated scroll window, without mutating state. */
@@ -2055,7 +2065,7 @@ class CanvasState(
     internal fun originFor(sx: Double, sy: Double, z: Double): Pt {
         val cw = contentW * z
         val ch = contentH * z
-        val ox = if (!verticalScroll || cw >= clearW) -sx else insetLeft + (clearW - cw) / 2.0
+        val ox = if (!verticalScroll || cw >= clearW || freeHorizontalScroll) -sx else insetLeft + (clearW - cw) / 2.0
         val oy = if (!verticalScroll || ch >= clearH) -sy else insetTop + (clearH - ch) / 2.0
         return Pt(ox, oy)
     }
@@ -2162,6 +2172,8 @@ class CanvasState(
 
         /** Gap (viewport px) left above the page top so nothing hides behind the toolbar. */
         const val TOP_GAP = 16.0
+        /** About 1 cm: how much of the page free horizontal scroll keeps on screen. */
+        const val FREE_SCROLL_EDGE_DP = 64.0
         val TRANSPARENT = Rgba(0, 0, 0, 0)
     }
 }

@@ -32,6 +32,8 @@ data class ViewSettings(
     val verticalScroll: Boolean = true,
     /** Paginated only: pages move up and down freely and pinches never snap to a fit. */
     val freeMovement: Boolean = false,
+    /** Continuous only: the page can slide sideways until just its edge stays on screen. */
+    val freeHorizontalScroll: Boolean = false,
     val contrast: Int = 100, // 0..200, 100 = untouched
     val invert: Int = 0, // 0..100
     val brightness: Int = 100, // 0..200, 100 = untouched
@@ -66,6 +68,7 @@ data class ViewOverrides(
     val mode: ViewingMode? = null,
     val verticalScroll: Boolean? = null,
     val freeMovement: Boolean? = null,
+    val freeHorizontalScroll: Boolean? = null,
     val contrast: Int? = null,
     val invert: Int? = null,
     val brightness: Int? = null,
@@ -81,6 +84,7 @@ data class ViewOverrides(
         mode = mode ?: defaults.mode,
         verticalScroll = verticalScroll ?: defaults.verticalScroll,
         freeMovement = freeMovement ?: defaults.freeMovement,
+        freeHorizontalScroll = freeHorizontalScroll ?: defaults.freeHorizontalScroll,
         contrast = contrast ?: defaults.contrast,
         invert = invert ?: defaults.invert,
         brightness = brightness ?: defaults.brightness,

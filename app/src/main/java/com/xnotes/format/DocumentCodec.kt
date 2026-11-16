@@ -22,6 +22,7 @@ import com.xnotes.core.model.PageTemplates
 import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.PageSizeChoice
 import com.xnotes.core.model.PageMargins
+import com.xnotes.core.text.FlowMargins
 import com.xnotes.core.model.PageStyle
 import com.xnotes.core.model.PageTurn
 import com.xnotes.core.model.Rgba
@@ -369,6 +370,7 @@ class DocumentCodec(
         j.endArray()
         writeStyle(j, page.style)
         writeMargins(j, page.margins)
+        page.textMargins?.let { writeTextMargins(j, it) }
         writeRooms(j, page.rooms)
         j.endObject()
     }
@@ -773,6 +775,16 @@ class DocumentCodec(
         j.endObject()
     }
 
+    /** A page's own text margins in mm, written only when it has them. */
+    private fun writeTextMargins(j: JsonWrite, m: FlowMargins) {
+        j.name("text_margins").beginObject()
+        j.name("left").value(m.leftMm)
+        j.name("top").value(m.topMm)
+        j.name("right").value(m.rightMm)
+        j.name("bottom").value(m.bottomMm)
+        j.endObject()
+    }
+
     /** How many shapes the last [read] took from the fork's own kinds onto upstream's. */
     var forkShapesRead = 0
         private set
@@ -1116,6 +1128,7 @@ class DocumentCodec(
             var cover = false
             var style = PageStyle()
             var margins = PageMargins()
+            var textMargins: FlowMargins? = null
             var rooms = emptyList<Room>()
             val items = mutableListOf<CanvasItem>()
             val pending = ArrayList<Pending>()
@@ -1130,6 +1143,7 @@ class DocumentCodec(
                     "cover" -> cover = boolOr(p, false)
                     "style" -> style = parseStyle(p)
                     "margins" -> margins = parseMargins(p)
+                    "text_margins" -> textMargins = parseTextMargins(p)
                     "rooms" -> rooms = parseRooms(p)
                     "items" -> parseItems(p, items, pending, glue)
                     else -> p.skipValue()
@@ -1146,7 +1160,7 @@ class DocumentCodec(
             val page = Page(
                 width = width, height = height, items = items, pdfPage = pdfPage, style = style, margins = margins,
                 pdfTurn = if (pdfPage == null) 0 else PageTurn.normalize(pdfTurn),
-                rooms = roomsWithin(rooms, width, height),
+                rooms = roomsWithin(rooms, width, height), textMargins = textMargins,
             )
             // Only the first page can be the cover; a flag anywhere else is dropped.
             page.cover = cover && m.pages.isEmpty()
@@ -1745,6 +1759,27 @@ class DocumentCodec(
         }
         p.endObject()
         return out.takeIf { it.isNotEmpty() }
+    }
+
+    private fun parseTextMargins(p: JsonPull): FlowMargins? {
+        if (p.peek() != JsonPull.Token.BEGIN_OBJECT) {
+            p.skipValue()
+            return null
+        }
+        var m = FlowMargins()
+        fun mm(): Double = (doubleOrNull(p) ?: FlowMargins.DEFAULT_MM).coerceIn(FlowMargins.MIN_MM, FlowMargins.MAX_MM)
+        p.beginObject()
+        while (p.hasNext()) {
+            when (p.nextName()) {
+                "left" -> m = m.copy(leftMm = mm())
+                "top" -> m = m.copy(topMm = mm())
+                "right" -> m = m.copy(rightMm = mm())
+                "bottom" -> m = m.copy(bottomMm = mm())
+                else -> p.skipValue()
+            }
+        }
+        p.endObject()
+        return m
     }
 
     private fun parseMargins(p: JsonPull): PageMargins {

@@ -1,5 +1,6 @@
 package com.xnotes.core.model
 
+import com.xnotes.core.tools.SelectKind
 import com.xnotes.canvas.SelectionMath
 import com.xnotes.core.fill.ColorDrop
 import com.xnotes.core.geometry.Affine
@@ -117,10 +118,10 @@ class TapeItemTest {
     @Test fun erasersTakeATapeWhole() {
         val t = tape()
         assertTrue(EraseRule.whole(t))
-        assertTrue(EraseRule.takes(t, 50.0, 0.0, 2.0))
-        assertTrue("even at its edge", EraseRule.takes(t, 50.0, 13.0, 4.0))
-        assertFalse(EraseRule.takes(t, 50.0, 30.0, 4.0))
-        assertFalse(EraseRule.takes(tape().also { it.locked = true }, 50.0, 0.0, 2.0))
+        assertTrue(EraseRule.takes(t, 50.0, 0.0, 2.0, SelectKind.ALL))
+        assertTrue("even at its edge", EraseRule.takes(t, 50.0, 13.0, 4.0, SelectKind.ALL))
+        assertFalse(EraseRule.takes(t, 50.0, 30.0, 4.0, SelectKind.ALL))
+        assertFalse(EraseRule.takes(tape().also { it.locked = true }, 50.0, 0.0, 2.0, SelectKind.ALL))
     }
 
     @Test fun exportsLeaveTapeOut() {
@@ -206,9 +207,9 @@ class TapeItemTest {
         assertTrue(t.contains(Pt(50.0, 0.0)))
         t.peeled = true
         assertFalse("what shows through it stays reachable", t.contains(Pt(50.0, 0.0)))
-        assertFalse(EraseRule.takes(t, 50.0, 0.0, 4.0))
+        assertFalse(EraseRule.takes(t, 50.0, 0.0, 4.0, SelectKind.ALL))
         assertTrue(t.contains(Pt(50.0, 19.0)))
-        assertTrue(EraseRule.takes(t, 50.0, 23.0, 4.0))
+        assertTrue(EraseRule.takes(t, 50.0, 23.0, 4.0, SelectKind.ALL))
         assertTrue("a tap inside still covers it again", t.under(Pt(50.0, 0.0)))
     }
 }

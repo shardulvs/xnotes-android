@@ -100,7 +100,7 @@ class RecordingIdsTest {
 
     @Test fun erasersPassOverAPillAndExportsLeaveItOut() {
         val p = pill(1)
-        assertFalse(EraseRule.erasable(p))
+        assertFalse(EraseRule.erasable(p, com.xnotes.core.tools.SelectKind.ERASER_DEFAULT))
         val items = listOf(ink(null), p)
         assertEquals(1, items.forExport().size)
         val noPills = listOf(ink(null))

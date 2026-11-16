@@ -126,18 +126,27 @@ object LocalNoteStore {
         )?.use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else 0L } ?: 0L
     }.getOrDefault(0L)
 
-    /** Create or overwrite a note at [relativePath] (folders created as needed). Returns the document uri, or null. */
-    fun writeNote(context: Context, treeUri: String, relativePath: String, from: java.io.File): String? {
+    /** Create or overwrite a note at [relativePath] (folders created as needed). Returns the document uri; throws saying which step failed. */
+    fun writeNote(context: Context, treeUri: String, relativePath: String, from: java.io.File): String {
         val tree = Uri.parse(treeUri)
         val segments = relativePath.split("/")
         var parentId = DocumentsContract.getTreeDocumentId(tree)
         for (i in 0 until segments.size - 1) {
             parentId = findChild(context, tree, parentId, segments[i], dir = true)
-                ?: createDir(context, tree, parentId, segments[i]) ?: return null
+                ?: createDir(context, tree, parentId, segments[i]) ?: error("cannot create folder ${segments[i]}")
         }
         val fileName = segments.last()
         val resolver = context.contentResolver
         val doc = { id: String -> DocumentsContract.buildDocumentUriUsingTree(tree, id) }
+        // The first failed step, so the sync log can say what went wrong.
+        var why: String? = null
+        fun write(uri: Uri): Boolean = try {
+            (resolver.openOutputStream(uri, "wt")?.use { out -> from.inputStream().use { it.copyTo(out) } } != null)
+                .also { if (!it) why = why ?: "write: no output stream" }
+        } catch (e: Exception) { why = why ?: "write: ${e.message}"; false }
+        fun move(uri: Uri, name: String): Uri? = try {
+            DocumentsContract.renameDocument(resolver, uri, name).also { if (it == null) why = why ?: "rename to $name failed" }
+        } catch (e: Exception) { why = why ?: "rename to $name: ${e.message}"; null }
         val existing = findChild(context, tree, parentId, fileName, dir = false)?.let(doc)
         val tempName = fileName + TEMP_SUFFIX
         val folderKey = "$treeUri|$parentId"
@@ -150,24 +159,28 @@ object LocalNoteStore {
             if (temp != null) noSwap.add(folderKey)
             temp?.let { runCatching { DocumentsContract.deleteDocument(resolver, it) } }
             // shortcut: such providers are overwritten in place, so a crash mid-write can still truncate the note there.
-            val uri = existing ?: runCatching {
+            val uri = existing ?: try {
                 DocumentsContract.createDocument(resolver, doc(parentId), "application/octet-stream", fileName)
-            }.getOrNull() ?: return null
-            return uri.toString().takeIf { copyInto(context, uri, from) }
+            } catch (e: Exception) { error("cannot create $fileName: ${e.message}") } ?: error("cannot create $fileName")
+            if (!write(uri)) error("cannot write local file: $why")
+            return uri.toString()
         }
-        val placed = if (!copyInto(context, temp, from)) null else if (existing == null) {
-            rename(context, temp, fileName)
+        val placed = if (!write(temp)) null else if (existing == null) {
+            move(temp, fileName)
         } else {
             // The original is only moved aside, never deleted, until the new copy is in place.
-            val backup = rename(context, existing, fileName + BACKUP_SUFFIX)
-            val swapped = backup?.let { rename(context, temp, fileName) }
+            val backup = move(existing, fileName + BACKUP_SUFFIX)
+            val swapped = backup?.let { move(temp, fileName) }
             if (backup != null) {
-                if (swapped != null) runCatching { DocumentsContract.deleteDocument(resolver, backup) } else rename(context, backup, fileName)
+                if (swapped != null) runCatching { DocumentsContract.deleteDocument(resolver, backup) } else move(backup, fileName)
             }
             swapped
         }
-        if (placed == null) runCatching { DocumentsContract.deleteDocument(resolver, temp) }
-        return placed?.toString()
+        if (placed == null) {
+            runCatching { DocumentsContract.deleteDocument(resolver, temp) }
+            error("cannot write local file: $why")
+        }
+        return placed.toString()
     }
 
     private const val TEMP_SUFFIX = ".synctmp"
@@ -175,10 +188,6 @@ object LocalNoteStore {
 
     /** Folders found unable to swap, so they are not probed with a throwaway temp on every write. */
     private val noSwap: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
-
-    private fun copyInto(context: Context, uri: Uri, from: java.io.File): Boolean = runCatching {
-        context.contentResolver.openOutputStream(uri, "wt")?.use { out -> from.inputStream().use { it.copyTo(out) } } != null
-    }.getOrDefault(false)
 
     private fun rename(context: Context, uri: Uri, name: String): Uri? =
         runCatching { DocumentsContract.renameDocument(context.contentResolver, uri, name) }.getOrNull()

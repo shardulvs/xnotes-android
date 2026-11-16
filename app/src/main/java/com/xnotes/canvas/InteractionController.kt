@@ -91,6 +91,7 @@ import com.xnotes.core.tools.EraseMode
 import com.xnotes.core.tools.InkPalette
 import com.xnotes.core.tools.ShapeConfig
 import com.xnotes.core.shapes.ShapeKind
+import com.xnotes.core.tools.SelectKind
 import com.xnotes.core.tools.MarkupMode
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
@@ -413,6 +414,12 @@ class InteractionController(
     /** Content-space guide lines (from, to) shown while a move is snapped to the margins or centre. */
     private var snapGuides: List<Pair<Pt, Pt>> = emptyList()
 
+    /** Draw every visible page's text margins as dashed lines: the "Show margins" preference. */
+    var showMargins = false
+
+    /** Same lines, shown only while the margins popup's slider is held. */
+    var marginPreview = false
+
     // SCREENSHOT (drag a rectangle; on release it stays frozen and offers "copy as image")
     /** The capture rectangle in content space: live while dragging (mode == SHOT), then frozen
      *  with its menu showing until copied, dismissed, or the tool changes. */
@@ -641,6 +648,10 @@ class InteractionController(
 
     /** The selected items, in the order they were picked. */
     fun selectedItems(): List<CanvasItem> = selection.map { it.item }
+
+    /** The selected items grouped by the page each sits on, so a colour drop can tell where they live. */
+    fun selectionByPage(): Map<Int, List<CanvasItem>> =
+        selection.groupBy({ it.pageIndex }, { it.item })
 
     fun configFor(t: Tool): ToolConfig = toolConfigs[t] ?: ToolDefaults.configFor(t)
 
@@ -970,9 +981,9 @@ class InteractionController(
             if (effectiveTool != Tool.PAN) text.clear()
         }
 
-        // Zoom-lock pan preference: swallow a single-finger pan when locked and set to "double"/"none".
+        // Zoom-lock pan preference, or both pan axes locked: swallow a single-finger pan.
         // The pointer stays free, so a long press still picks up an item or selects text.
-        if (effectiveTool == Tool.PAN && !singleFingerPanAllowed()) {
+        if (effectiveTool == Tool.PAN && (!singleFingerPanAllowed() || panCfg().lockPanX && panCfg().lockPanY)) {
             mode = PointerMode.IDLE
             lockedPressAt = Pt(vx, vy)
             armLongPress(Pt(vx, vy), content, isFinger, free)
@@ -1322,11 +1333,9 @@ class InteractionController(
         liveStroke = stroke
         strokePageIndex = pageIndex
         mode = PointerMode.DRAW
-        // Shape snap: only solid ink pens (not the highlighter or its straight-line mode) arm the
-        // "hold still → shape" timer — and never while the ruler is up (you're drawing straight lines),
-        // nor under the wand, whose strokes are ephemeral and must never commit a shape to the page.
+        // Hold-to-shape: solid ink pens only, never on the ruler or under the wand (its ink is ephemeral).
         dwellEligible = detectShapes && drawTool.isStroke && drawTool != Tool.HIGHLIGHTER && !straight &&
-            !ruler.visible && !wandMode
+            !snapEngaged && !wandMode
         if (dwellEligible) {
             dwellAnchor = downViewport
             armDwell()
@@ -1360,6 +1369,11 @@ class InteractionController(
         val pi = strokePageIndex ?: return
         if (state.pageRects.getOrNull(pi) == null) return
         val vp = magnetize(Pt(vx, vy))
+        // Once the ruler grabs the stroke it is a line, so hold-to-shape stays off until pen-up.
+        if (dwellEligible && snapEngaged) {
+            cancelDwell()
+            dwellEligible = false
+        }
         val nib = state.viewportToContent(vp)
         var t = (timeMs - strokeStartTimeMs).toDouble()
         // A steadied stroke takes the point the filter has reached and draws on to the nib as a
@@ -1670,7 +1684,7 @@ class InteractionController(
         val radius = stroke.config.baseWidth / 2.0 + Scribble.TOUCH_DP / dpPerUnit
         val reach = Rect.bounding(path).outset(radius)
         val candidates = ArrayList<Any>()
-        page.items.filterTo(candidates) { EraseRule.erasable(it) && it.paintBounds().intersects(reach) }
+        page.items.filterTo(candidates) { EraseRule.erasable(it, eraser.erasableKinds) && it.paintBounds().intersects(reach) }
         if (eraser.eraseMarkups) candidates.addAll(page.markups)
         val ptPerPx = 72.0 / state.document.dpi
         // A scribble is ink, so it takes only lines, never a fill.
@@ -1741,8 +1755,9 @@ class InteractionController(
             val local = state.toPageSpace(pi, content)
             val cx = local.x
             val cy = local.y
-            val dirty = if (area) eraseAreaFromPage(page, cx, cy, radius)
-            else eraseStrokesFromPage(page, cx, cy, radius)
+            val kinds = configFor(Tool.ERASER).erasableKinds
+            val dirty = if (area) eraseAreaFromPage(page, cx, cy, radius, kinds)
+            else eraseStrokesFromPage(page, cx, cy, radius, kinds)
             if (dirty != null) {
                 // Repaint only the erased area in place; fall back to a full
                 // rebuild only when the page has no live cache yet.
@@ -1769,12 +1784,11 @@ class InteractionController(
         return true
     }
 
-    /** STROKE mode: remove every stroke/shape the eraser circle touches, and every fill it touches at
-     *  all. Images and text boxes are deliberately-placed and protected (delete those via select +
-     *  delete). Returns the repaint region, or null if nothing changed. */
-    private fun eraseStrokesFromPage(page: Page, cx: Double, cy: Double, radius: Double): Rect? {
-        var dirty = unfillOnPage(page, cx, cy, radius)
-        val toRemove = page.items.filter { EraseRule.takes(it, cx, cy, radius) }
+    /** STROKE mode: remove every item of [kinds] the eraser circle touches, and every fill it touches
+     *  at all. Returns the repaint region, or null if nothing changed. */
+    private fun eraseStrokesFromPage(page: Page, cx: Double, cy: Double, radius: Double, kinds: Set<SelectKind>): Rect? {
+        var dirty = unfillOnPage(page, cx, cy, radius, kinds)
+        val toRemove = page.items.filter { EraseRule.takes(it, cx, cy, radius, kinds) }
         if (toRemove.isEmpty()) return dirty
         for (item in toRemove) {
             page.items.remove(item)
@@ -1786,18 +1800,18 @@ class InteractionController(
     }
 
     /** AREA mode: replace each touched stroke or shape with the fragments that survive the eraser
-     *  circle, spliced in at the original's z-position. Text and images are left untouched. Returns
+     *  circle, spliced in at the original's z-position. Anything else of [kinds] goes whole. Returns
      *  the repaint region, or null if nothing changed. */
-    private fun eraseAreaFromPage(page: Page, cx: Double, cy: Double, radius: Double): Rect? {
-        var dirty = unfillOnPage(page, cx, cy, radius)
+    private fun eraseAreaFromPage(page: Page, cx: Double, cy: Double, radius: Double, kinds: Set<SelectKind>): Rect? {
+        var dirty = unfillOnPage(page, cx, cy, radius, kinds)
         var i = 0
         while (i < page.items.size) {
             val item = page.items[i]
-            val frags: List<CanvasItem>? = if (!EraseRule.erasable(item)) {
+            val frags: List<CanvasItem>? = if (!EraseRule.erasable(item, kinds)) {
                 null
             } else if (EraseRule.whole(item)) {
-                // A fill or a tape is never cut: whatever the eraser touches of it, it takes whole.
-                if (EraseRule.takes(item, cx, cy, radius)) emptyList() else null
+                // Only lines are cut: whatever the eraser touches of anything else, it takes whole.
+                if (EraseRule.takes(item, cx, cy, radius, kinds)) emptyList() else null
             } else {
                 when (item) {
                     is Stroke -> item.erasedBy(cx, cy, radius)
@@ -1828,10 +1842,10 @@ class InteractionController(
     }
 
     /** Take the fill alone off the filled shapes the eraser touches inside but not on their outline; the repaint region, or null. */
-    private fun unfillOnPage(page: Page, cx: Double, cy: Double, radius: Double): Rect? {
+    private fun unfillOnPage(page: Page, cx: Double, cy: Double, radius: Double, kinds: Set<SelectKind>): Rect? {
         var dirty: Rect? = null
         for (item in page.items) {
-            if (!EraseRule.takesFill(item, cx, cy, radius)) continue
+            if (!EraseRule.takesFill(item, cx, cy, radius, kinds)) continue
             val shape = item as ShapeItem
             eraseUnfilled += RefillShapes.Entry(shape, shape.fillRgba, null)
             shape.fillRgba = null
@@ -2289,9 +2303,7 @@ class InteractionController(
         if (!configFor(Tool.SELECT).snapToMargins) return raw
         val box = selObb?.let { Rect.bounding(it.corners()) }?.translate(raw.x, raw.y) ?: return raw
         val pi = state.pageIndexAtContent(box.center) ?: return raw
-        val page = state.document.pages[pi]
-        val text = FlowLayout.contentRectOf(PageBox(page.sourceWidth, page.sourceHeight), state.document.flow.margins, state.document.dpi)
-        val m = state.fromPageSpaceRect(pi, text)
+        val m = marginRect(pi)
         val paper = state.pageRects[pi]
         val reach = MARGIN_SNAP_PX / state.zoom
         // The closest (target - side) within reach along one axis, or null.
@@ -2304,6 +2316,13 @@ class InteractionController(
             dy?.let { Pt(paper.left, it.second) to Pt(paper.right, it.second) },
         )
         return Pt(raw.x + (dx?.first ?: 0.0), raw.y + (dy?.first ?: 0.0))
+    }
+
+    /** Page [pi]'s text margins (the box flow text is held to) in content space. */
+    private fun marginRect(pi: Int): Rect {
+        val page = state.document.pages[pi]
+        val text = FlowLayout.contentRectOf(PageBox(page.sourceWidth, page.sourceHeight), page.textMargins ?: state.document.flow.margins, state.document.dpi)
+        return state.fromPageSpaceRect(pi, text)
     }
 
     // --- RESIZE ---
@@ -4740,6 +4759,7 @@ class InteractionController(
     // viewport: "single" keeps both, "double" drops the single finger, "none" freezes the page.
     private fun singleFingerPanAllowed(): Boolean = !(state.zoomLocked && zoomLockPan != "single")
     private fun pinchPanAllowed(): Boolean = !(state.zoomLocked && zoomLockPan == "none")
+    private fun panCfg() = configFor(Tool.PAN)
 
     private fun beginPan(vx: Double, vy: Double, fromPenButton: Boolean = false) {
         mode = PointerMode.PAN
@@ -4751,8 +4771,9 @@ class InteractionController(
     private fun extendPan(vx: Double, vy: Double) {
         trackVelocity(vx, vy)
         onUserMovedView?.invoke()
-        val dx = -(vx - lastPan.x)
-        var dy = -(vy - lastPan.y)
+        val pan = panCfg().panDelta(-(vx - lastPan.x), -(vy - lastPan.y))
+        val dx = pan.x
+        var dy = pan.y
         if (!state.verticalScroll) {
             extendPanPaginated(dx, dy)
             lastPan = Pt(vx, vy)
@@ -4851,7 +4872,7 @@ class InteractionController(
         val pull = state.flipOffsetX
         // A finger that stopped before lifting has no flick left, however fast it moved earlier.
         val stopped = System.nanoTime() / 1_000_000L - lastMoveMs > PaginatedFlipPolicy.RELEASE_MOTION_MAX_AGE_MS
-        val v = if (stopped) Pt.ZERO else panVel
+        val v = if (stopped) Pt.ZERO else panCfg().panDelta(panVel.x, panVel.y)
         val deliberate = PaginatedFlipPolicy.shouldCommitOnRelease(
             pull, state.viewportW, state.devicePxPerDp, v.x, v.y, state.zoom,
         )
@@ -4966,8 +4987,9 @@ class InteractionController(
     }
 
     private fun startFling(fingerVel: Pt) {
-        if (fingerVel.length() < FLING_MIN_START) return
-        flingVel = Pt(-fingerVel.x, -fingerVel.y) // scroll moves opposite the finger
+        val vel = panCfg().panDelta(-fingerVel.x, -fingerVel.y) // scroll moves opposite the finger
+        if (!panCfg().panGlide || vel.length() < FLING_MIN_START) return
+        flingVel = vel
         flinging = true
         lastFlingMs = System.nanoTime() / 1_000_000L
         choreographer.postFrameCallback(flingFrame)
@@ -5179,8 +5201,8 @@ class InteractionController(
             else if (wasFit && !nowFit) onFitWidthReleased()
         }
         if (pinchPanAllowed()) {
-            val targetX = pinchAnchorContent.x * z - mid.x
-            val targetY = pinchAnchorContent.y * z - mid.y
+            val targetX = if (panCfg().lockPanX) state.scrollX else pinchAnchorContent.x * z - mid.x
+            val targetY = if (panCfg().lockPanY) state.scrollY else pinchAnchorContent.y * z - mid.y
             state.scrollX = targetX
             state.scrollY = targetY
             state.clampScroll()
@@ -5373,6 +5395,12 @@ class InteractionController(
 
             // Resize + rotate handles for the settled selection (single, multi, or mixed).
             for ((a, b) in snapGuides) r.strokePolyline(listOf(a, b), chromePen(1.0))
+            if (showMargins || marginPreview) state.visiblePageRange()?.forEach { pi ->
+                val paper = state.pageRects.getOrNull(pi) ?: return@forEach
+                val m = marginRect(pi)
+                for (x in listOf(m.left, m.right)) r.strokePolyline(listOf(Pt(x, paper.top), Pt(x, paper.bottom)), chromePen(1.0))
+                for (y in listOf(m.top, m.bottom)) r.strokePolyline(listOf(Pt(paper.left, y), Pt(paper.right, y)), chromePen(1.0))
+            }
 
             if (selection.isNotEmpty() && mode != PointerMode.BAND && mode != PointerMode.LASSO_DRAW) {
                 val side = HANDLE_SIZE / state.zoom

@@ -31,6 +31,7 @@ import java.time.Month
 val SelectKind.labelRes: Int
     get() = when (this) {
         SelectKind.INK -> R.string.select_kind_lines
+        SelectKind.HIGHLIGHTER -> R.string.select_kind_highlighter
         SelectKind.SHAPES -> R.string.select_kind_shapes
         SelectKind.TEXT -> R.string.select_kind_text_boxes
         SelectKind.IMAGES -> R.string.select_kind_images

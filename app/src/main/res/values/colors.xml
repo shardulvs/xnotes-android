@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="window_bg">#0A0A0A</color>
-    <color name="ic_launcher_background">#000000</color>
+    <color name="ic_launcher_background">#FFFFFF</color>
     <!-- The launch screen behind the icon: the default theme's light background; values-night has the dark one. -->
     <color name="launch_stage">#FFE6E1E9</color>
 </resources>

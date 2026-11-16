@@ -14,9 +14,11 @@ import com.xnotes.core.model.TextStyle
 import com.xnotes.core.pal.FontFace
 import com.xnotes.core.shapes.ShapeKind
 import com.xnotes.core.stroke.Sample
+import com.xnotes.core.tools.SelectKind
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolDefaults
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -51,7 +53,7 @@ class EraseSessionTest {
             val fill = ShapeItem.fill(listOf(square(-50.0, -50.0, 300.0)), sky)
             val ink = line(100.0)
             val doc = docOf(fill, ink)
-            EraseSession(doc).erase(50.0, 0.0, 8.0, area)
+            EraseSession(doc).erase(50.0, 0.0, 8.0, area, kinds = SelectKind.ALL)
             assertTrue("the fill goes whole (area=$area)", doc.items.none { it === fill })
             assertTrue("and the ink with it (area=$area)", doc.items.none { it === ink })
         }
@@ -62,8 +64,8 @@ class EraseSessionTest {
             val fill = ShapeItem.fill(listOf(square(0.0, 0.0, 200.0)), sky)
             val doc = docOf(fill)
             val session = EraseSession(doc)
-            assertNull(session.erase(-20.0, 100.0, 8.0, area))
-            assertNotNull(session.erase(-5.0, 100.0, 8.0, area))
+            assertNull(session.erase(-20.0, 100.0, 8.0, area, kinds = SelectKind.ALL))
+            assertNotNull(session.erase(-5.0, 100.0, 8.0, area, kinds = SelectKind.ALL))
             assertEquals("area=$area", 0, doc.itemCount)
         }
     }
@@ -72,7 +74,7 @@ class EraseSessionTest {
         val box = ShapeItem(ShapeKind.RECTANGLE, Pt(0.0, 0.0), Pt(200.0, 200.0), Rgba(1, 1, 1, 255), 3.0, sky)
         val doc = docOf(box)
         val session = EraseSession(doc)
-        session.erase(100.0, 100.0, 8.0, area = true)
+        session.erase(100.0, 100.0, 8.0, area = true, kinds = SelectKind.ALL)
         assertSame(box, doc.items.single())
         assertNull(box.fillRgba)
         val undo = session.buildCommand()!!
@@ -86,7 +88,7 @@ class EraseSessionTest {
         val box = ShapeItem(ShapeKind.RECTANGLE, Pt(-50.0, -50.0), Pt(200.0, 200.0), Rgba(1, 1, 1, 255), 3.0, sky)
         val ink = line(100.0)
         val doc = docOf(box, ink)
-        EraseSession(doc).erase(50.0, 0.0, 8.0, area = false)
+        EraseSession(doc).erase(50.0, 0.0, 8.0, area = false, kinds = SelectKind.ALL)
         assertSame(box, doc.items.single())
         assertNull(box.fillRgba)
     }
@@ -95,8 +97,8 @@ class EraseSessionTest {
         val box = ShapeItem(ShapeKind.RECTANGLE, Pt(0.0, 0.0), Pt(200.0, 200.0), Rgba(1, 1, 1, 255), 3.0, sky)
         val doc = docOf(box)
         val session = EraseSession(doc)
-        session.erase(100.0, 100.0, 8.0, area = true)
-        session.erase(100.0, 0.0, 8.0, area = true) // then across its top edge
+        session.erase(100.0, 100.0, 8.0, area = true, kinds = SelectKind.ALL)
+        session.erase(100.0, 0.0, 8.0, area = true, kinds = SelectKind.ALL) // then across its top edge
         assertTrue(doc.items.none { it === box })
         session.buildCommand()!!.undo()
         assertSame(box, doc.items.single())
@@ -111,25 +113,52 @@ class EraseSessionTest {
         val doc = docOf(hit, miss)
         val session = EraseSession(doc)
 
-        assertNotNull(session.erase(50.0, 0.0, 8.0, area = false))
+        assertNotNull(session.erase(50.0, 0.0, 8.0, area = false, kinds = SelectKind.ALL))
         assertEquals(listOf<CanvasItem>(miss), doc.items)
     }
 
     @Test fun wholeStrokeModeMissesWhatIsOutOfReach() {
         val doc = docOf(line(100.0))
         val session = EraseSession(doc)
-        assertNull(session.erase(50.0, 400.0, 8.0, area = false))
+        assertNull(session.erase(50.0, 400.0, 8.0, area = false, kinds = SelectKind.ALL))
         assertEquals(1, doc.itemCount)
         assertTrue(session.isEmpty)
     }
 
-    @Test fun imagesSurviveBothModes() {
-        val img = image(0.0, 0.0)
-        val doc = docOf(img)
-        val session = EraseSession(doc)
-        assertNull(session.erase(5.0, 5.0, 20.0, area = false))
-        assertNull(session.erase(5.0, 5.0, 20.0, area = true))
-        assertEquals(listOf<CanvasItem>(img), doc.items)
+    /**
+     * The eraser's own filter narrows what a drag takes, in both modes. A switched-off kind is
+     * skipped even though the circle is right over it; no filter means everything it would
+     * otherwise take.
+     */
+    @Test fun theFilterNarrowsBothModes() {
+        for (area in listOf(false, true)) {
+            val ink = line(100.0)
+            val doc = docOf(ink)
+            val session = EraseSession(doc)
+            assertNull(
+                "area=$area: ink was taken while its kind was off",
+                session.erase(50.0, 0.0, 8.0, area, setOf(SelectKind.SHAPES)),
+            )
+            assertEquals(1, doc.itemCount)
+
+            assertNotNull(session.erase(50.0, 0.0, 8.0, area, setOf(SelectKind.INK)))
+            // Whole mode takes the stroke outright; area mode cuts a hole in it and leaves
+            // fragments, so what is pinned is that the eraser reached it at all once its kind was on.
+            assertFalse(doc.items.any { it === ink })
+        }
+    }
+
+    /** Images are off by default, and go whole in either mode once their kind is on. */
+    @Test fun anImageGoesOnlyWhenItsKindIsOn() {
+        for (area in listOf(false, true)) {
+            val img = image(0.0, 0.0)
+            val doc = docOf(img)
+            val session = EraseSession(doc)
+            assertNull(session.erase(5.0, 5.0, 20.0, area, SelectKind.ERASER_DEFAULT))
+            assertEquals(listOf<CanvasItem>(img), doc.items)
+            assertNotNull(session.erase(5.0, 5.0, 20.0, area, setOf(SelectKind.IMAGES)))
+            assertEquals(0, doc.itemCount)
+        }
     }
 
     @Test fun aDragThatRemovesSeveralStrokesIsOneEdit() {
@@ -137,7 +166,7 @@ class EraseSessionTest {
         val b = line(60.0, y = 6.0)
         val doc = docOf(a, b)
         val session = EraseSession(doc)
-        session.erase(30.0, 3.0, 20.0, area = false)
+        session.erase(30.0, 3.0, 20.0, area = false, kinds = SelectKind.ALL)
         assertTrue(doc.isEmpty)
 
         val cmd = session.buildCommand()!!
@@ -154,7 +183,7 @@ class EraseSessionTest {
         val doc = docOf(stroke)
         val session = EraseSession(doc)
 
-        assertNotNull(session.erase(50.0, 0.0, 8.0, area = true))
+        assertNotNull(session.erase(50.0, 0.0, 8.0, area = true, kinds = SelectKind.ALL))
         assertEquals("a mid-stroke hole leaves two fragments", 2, doc.itemCount)
         assertTrue(doc.items.all { it is Stroke && it !== stroke })
         val left = doc.items[0] as Stroke
@@ -170,7 +199,7 @@ class EraseSessionTest {
         val doc = docOf(under, cut, over)
         val session = EraseSession(doc)
 
-        session.erase(50.0, 0.0, 8.0, area = true)
+        session.erase(50.0, 0.0, 8.0, area = true, kinds = SelectKind.ALL)
         assertEquals(4, doc.itemCount)
         assertSame("the item below must stay below", under, doc.items.first())
         assertSame("the item above must stay above", over, doc.items.last())
@@ -179,7 +208,7 @@ class EraseSessionTest {
     @Test fun trimmingAnEndLeavesOneFragment() {
         val stroke = line(100.0)
         val doc = docOf(stroke)
-        EraseSession(doc).erase(0.0, 0.0, 8.0, area = true)
+        EraseSession(doc).erase(0.0, 0.0, 8.0, area = true, kinds = SelectKind.ALL)
         assertEquals(1, doc.itemCount)
         assertTrue((doc.items[0] as Stroke).samples.first().x > 0.0)
     }
@@ -188,7 +217,7 @@ class EraseSessionTest {
         val stroke = line(20.0)
         val doc = docOf(stroke)
         val session = EraseSession(doc)
-        session.erase(10.0, 0.0, 60.0, area = true)
+        session.erase(10.0, 0.0, 60.0, area = true, kinds = SelectKind.ALL)
         assertTrue(doc.isEmpty)
 
         // Nothing is left to find the stroke by, so the recorded slot is what brings it back.
@@ -200,7 +229,7 @@ class EraseSessionTest {
         val before = listOf(line(20.0, 100.0), line(100.0), line(20.0, 200.0))
         val doc = InfiniteDocument().apply { addAll(before) }
         val session = EraseSession(doc)
-        session.erase(50.0, 0.0, 8.0, area = true)
+        session.erase(50.0, 0.0, 8.0, area = true, kinds = SelectKind.ALL)
         val cmd = session.buildCommand()!!
 
         cmd.undo()
@@ -216,9 +245,9 @@ class EraseSessionTest {
         val doc = docOf(stroke)
         val session = EraseSession(doc)
 
-        session.erase(60.0, 0.0, 8.0, area = true) // splits into two
+        session.erase(60.0, 0.0, 8.0, area = true, kinds = SelectKind.ALL) // splits into two
         assertEquals(2, doc.itemCount)
-        session.erase(140.0, 0.0, 8.0, area = true) // cuts the right-hand fragment again
+        session.erase(140.0, 0.0, 8.0, area = true, kinds = SelectKind.ALL) // cuts the right-hand fragment again
         assertEquals(3, doc.itemCount)
 
         val cmd = session.buildCommand()!!
@@ -234,8 +263,8 @@ class EraseSessionTest {
         val doc = docOf(a, b)
         val session = EraseSession(doc)
 
-        session.erase(60.0, 0.0, 8.0, area = true)
-        session.erase(60.0, 60.0, 8.0, area = true)
+        session.erase(60.0, 0.0, 8.0, area = true, kinds = SelectKind.ALL)
+        session.erase(60.0, 60.0, 8.0, area = true, kinds = SelectKind.ALL)
         assertEquals(4, doc.itemCount)
 
         session.buildCommand()!!.undo()
@@ -251,8 +280,8 @@ class EraseSessionTest {
         val doc = docOf(a, b, c)
         val session = EraseSession(doc)
 
-        session.erase(60.0, 0.0, 8.0, area = true)   // splits a, shifting b and c along
-        session.erase(60.0, 120.0, 8.0, area = true) // then splits c
+        session.erase(60.0, 0.0, 8.0, area = true, kinds = SelectKind.ALL)   // splits a, shifting b and c along
+        session.erase(60.0, 120.0, 8.0, area = true, kinds = SelectKind.ALL) // then splits c
         session.buildCommand()!!.undo()
         assertEquals(listOf<CanvasItem>(a, b, c), doc.items)
     }
@@ -262,14 +291,14 @@ class EraseSessionTest {
     @Test fun aDragThatCutsNothingProducesNoEdit() {
         val doc = docOf(line(100.0))
         val session = EraseSession(doc)
-        session.erase(50.0, 900.0, 8.0, area = true)
+        session.erase(50.0, 900.0, 8.0, area = true, kinds = SelectKind.ALL)
         assertTrue(session.isEmpty)
         assertNull(session.buildCommand())
     }
 
     @Test fun theSpatialIndexTracksTheFragments() {
         val doc = docOf(line(100.0))
-        EraseSession(doc).erase(50.0, 0.0, 8.0, area = true)
+        EraseSession(doc).erase(50.0, 0.0, 8.0, area = true, kinds = SelectKind.ALL)
         assertEquals(doc.itemCount, doc.index.size)
         assertEquals(2, doc.itemsIn(Rect(-20.0, -20.0, 160.0, 40.0)).size)
         // The hole is really a hole: nothing is indexed where the eraser passed.
@@ -280,7 +309,7 @@ class EraseSessionTest {
         val stroke = line(100.0)
         val doc = docOf(stroke)
         val session = EraseSession(doc)
-        session.erase(50.0, 0.0, 8.0, area = true)
+        session.erase(50.0, 0.0, 8.0, area = true, kinds = SelectKind.ALL)
         session.buildCommand()!!.undo()
         assertEquals(1, doc.index.size)
         assertSame(stroke, doc.itemsIn(Rect(40.0, -10.0, 20.0, 20.0)).single())
@@ -291,14 +320,14 @@ class EraseSessionTest {
         val near = line(40.0)
         val far = line(40.0, y = 50_000.0)
         val doc = docOf(near, far)
-        EraseSession(doc).erase(20.0, 0.0, 10.0, area = false)
+        EraseSession(doc).erase(20.0, 0.0, 10.0, area = false, kinds = SelectKind.ALL)
         assertEquals(listOf<CanvasItem>(far), doc.items)
     }
 
     @Test fun contentBoundsFollowTheCut() {
         val doc = docOf(line(100.0))
         val wide = doc.contentBounds()!!.w
-        EraseSession(doc).erase(95.0, 0.0, 20.0, area = true)
+        EraseSession(doc).erase(95.0, 0.0, 20.0, area = true, kinds = SelectKind.ALL)
         assertTrue("trimming the end must shrink the extent", doc.contentBounds()!!.w < wide)
     }
 
@@ -308,7 +337,7 @@ class EraseSessionTest {
         box.label = ShapeLabel("Go", TextStyle(ink, 10.0, FontFace.SANS), FakeTextMeasurer())
         val doc = docOf(box)
         val session = EraseSession(doc)
-        assertNotNull(session.erase(100.0, 0.0, 10.0, area = true))
+        assertNotNull(session.erase(100.0, 0.0, 10.0, area = true, kinds = SelectKind.ALL))
         val shapes = doc.items.filterIsInstance<ShapeItem>()
         assertEquals("the outline is ink, the label drawn text", 1, shapes.size)
         assertSame(ShapeKind.GLYPHS, shapes.single().shape)
@@ -332,7 +361,7 @@ class EraseSessionTest {
     @Test fun theAreaEraserCutsAConnectorIntoInkAndLeavesItsLabelAsDrawnText() {
         val c = labelledConnector()
         val doc = docOf(c)
-        EraseSession(doc).erase(40.0, 0.0, 10.0, area = true)
+        EraseSession(doc).erase(40.0, 0.0, 10.0, area = true, kinds = SelectKind.ALL)
         assertTrue(doc.items.none { it is com.xnotes.core.model.ConnectorItem })
         // The label's gap already parts the line in two, and the cut parts one piece again.
         assertEquals(3, doc.items.count { it is Stroke })
@@ -343,7 +372,7 @@ class EraseSessionTest {
     @Test fun theStrokeEraserTakesAConnectorWhole() {
         val c = labelledConnector()
         val doc = docOf(c)
-        EraseSession(doc).erase(40.0, 0.0, 10.0, area = false)
+        EraseSession(doc).erase(40.0, 0.0, 10.0, area = false, kinds = SelectKind.ALL)
         assertTrue(doc.items.isEmpty())
     }
 }
