@@ -49,6 +49,18 @@ class PenFanGestureTest {
         assertNull(penFanVisibleTarget(Offset(Float.NaN, 120f), shifted, 6, 44f))
     }
 
+    @Test fun visibleHitTestPicksNearestAndPreservesFirstOnEqualDistance() {
+        val centers = linkedMapOf(
+            0 to Offset(10f, 10f),
+            1 to Offset(20f, 10f),
+            2 to Offset(30f, 10f),
+        )
+        assertEquals(1, penFanVisibleTarget(Offset(19f, 10f), centers, 3, 10f))
+        assertEquals(0, penFanVisibleTarget(Offset(15f, 10f), centers, 3, 10f))
+        assertEquals(2, penFanVisibleTarget(Offset(30f, 20f), centers, 3, 10f))
+        assertNull(penFanVisibleTarget(Offset(30f, 20.01f), centers, 3, 10f))
+    }
+
     @Test fun tapAndWrongDirectionDoNotCommitAccidentally() {
         assertNull(penFanTarget(Offset.Zero, PenFanDirection.DOWN, 6, 18f))
         assertNull(penFanTarget(Offset(0f, -120f), PenFanDirection.DOWN, 6, 18f))

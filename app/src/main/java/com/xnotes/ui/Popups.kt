@@ -154,25 +154,18 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onPick: ((Tool) -> Unit)?
         )
     }
 
+    val penItems = remember { com.xnotes.core.tools.ToolbarToolGroup.defaultWritingGroup().items }
     DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
         Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
             PopupTitle(stringResource(tool.labelRes))
             // Pen family switcher adapted from N-Notes' ToolConfigPopup.
-            if (onPick != null && com.xnotes.core.tools.ToolbarToolGroup.defaultWritingGroup().items.any { it.id == tool.id }) {
+            if (onPick != null && penItems.any { it.id == tool.id }) {
                 Row(
                     Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    for (pen in com.xnotes.core.tools.ToolbarToolGroup.defaultWritingGroup().items.mapNotNull { Tool.fromId(it.id) }) {
-                        val iconRes = when (pen) {
-                            Tool.PEN -> R.drawable.ic_stroke_regular
-                            Tool.DASHED -> R.drawable.ic_stroke_dashed
-                            Tool.CALLIGRAPHY -> R.drawable.ic_stroke_calligraphy
-                            Tool.SPEED -> R.drawable.ic_stroke_speed
-                            Tool.TAPER -> R.drawable.ic_stroke_taper
-                            Tool.HIGHLIGHTER -> R.drawable.ic_stroke_highlighter
-                            else -> R.drawable.ic_stroke_regular
-                        }
+                    for (pen in penItems.mapNotNull { Tool.fromId(it.id) }) {
+                        val iconRes = penStrokeIcon(pen)
                         KindChip(
                             ImageVector.vectorResource(iconRes),
                             stringResource(pen.labelRes),

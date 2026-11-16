@@ -56,13 +56,21 @@ internal fun penFanVisibleTarget(
     if (!pointerOnScreen.x.isFinite() || !pointerOnScreen.y.isFinite() ||
         !maxDistance.isFinite() || maxDistance <= 0f
     ) return null
-    return centersOnScreen.entries
-        .asSequence()
-        .filter { (index, center) -> index in 0 until count && center.x.isFinite() && center.y.isFinite() }
-        .map { (index, center) -> index to (pointerOnScreen - center).getDistance() }
-        .filter { (_, distance) -> distance <= maxDistance }
-        .minByOrNull { (_, distance) -> distance }
-        ?.first
+    // This runs on every pointer move; avoid sequences, pairs and square roots.
+    val maxDistanceSquared = maxDistance * maxDistance
+    var nearest: Int? = null
+    var nearestDistance = maxDistanceSquared
+    for ((index, center) in centersOnScreen) {
+        if (index !in 0 until count || !center.x.isFinite() || !center.y.isFinite()) continue
+        val dx = pointerOnScreen.x - center.x
+        val dy = pointerOnScreen.y - center.y
+        val squared = dx * dx + dy * dy
+        if (squared <= maxDistanceSquared && (nearest == null || squared < nearestDistance)) {
+            nearestDistance = squared
+            nearest = index
+        }
+    }
+    return nearest
 }
 
 /**

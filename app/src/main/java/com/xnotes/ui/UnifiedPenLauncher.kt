@@ -1,23 +1,14 @@
 package com.xnotes.ui
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -31,12 +22,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -46,18 +33,15 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
-import androidx.compose.ui.res.vectorResource
-import androidx.compose.ui.res.stringResource
 import com.xnotes.R
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolbarItem
 import com.xnotes.core.tools.ToolbarToolGroup
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
-import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Pinterest-style radial shortcut: a tap arms the last pen, a second tap opens the full
@@ -144,79 +128,20 @@ internal fun UnifiedPenLauncher(
                     contentDescription = label
                     onClick { tap(); true }
                 }
-                .pointerInput(direction, group.items) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        down.consume() // The pen owns its hold; the whole toolbar must not move.
-                        val quickRelease = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
-                            var result: Boolean? = null
-                            while (result == null) {
-                                val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id }
-                                result = when {
-                                    change == null -> false
-                                    !change.pressed -> true
-                                    change.isConsumed -> false
-                                    (change.position - down.position).getDistance() > viewConfiguration.touchSlop -> false
-                                    else -> null
-                                }
-                            }
-                            result
-                        }
-                        when (quickRelease) {
-                            true -> tap()
-                            false -> Unit
-                            null -> {
-                                fanOpen = true
-                                detailsOpen = false
-                                hoveredIndex = -1
-                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                val minDistance = 32.dp.toPx()
-                                // Compute from the palette's actual center, not the pressed
-                                // point. A press near the launcher edge otherwise skews the
-                                // narrow first/last sectors (especially on side rails).
-                                val fanOrigin = penFanGestureOrigin(
-                                    metrics.button.toPx(), direction, 35.dp.toPx(),
-                                )
-                                var tracking = true
-                                while (tracking) {
-                                    val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id }
-                                    if (change == null) {
-                                        tracking = false
-                                    } else {
-                                        // Hit-test the *drawn* circles first. A side-rail popup
-                                        // can be shifted by the window edge, so its visual position
-                                        // is more reliable than an angle from the button.
-                                        val target = penFanVisibleTarget(
-                                            pointerOnScreen = launcherOnScreen + change.position,
-                                            centersOnScreen = penCentersOnScreen,
-                                            count = group.items.size,
-                                            maxDistance = 44.dp.toPx(),
-                                        ) ?: penFanTarget(
-                                            displacement = change.position - fanOrigin,
-                                            direction = direction,
-                                            count = group.items.size,
-                                            minDistance = minDistance,
-                                        )
-                                        val next = target ?: -1
-                                        if (next != hoveredIndex && next >= 0) {
-                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        }
-                                        hoveredIndex = next
-                                        if (!change.pressed) {
-                                            target?.let { choose(group.items[it]) }
-                                            tracking = false
-                                        } else {
-                                            change.consume()
-                                        }
-                                    }
-                                }
-                                // No sticky fan: a release at the origin also closes it.
-                                fanOpen = false
-                                hoveredIndex = -1
-                            }
-                        }
-                    }
-                },
+                .penFanGestures(
+                    direction = direction,
+                    items = group.items,
+                    buttonSize = metrics.button,
+                    screenOrigin = { launcherOnScreen },
+                    centersOnScreen = penCentersOnScreen,
+                    hoveredIndex = { hoveredIndex },
+                    onTap = { tap() },
+                    onOpen = { fanOpen = true; detailsOpen = false; hoveredIndex = -1 },
+                    onHover = { hoveredIndex = it },
+                    onChoose = { choose(it) },
+                    onDismiss = { fanOpen = false; hoveredIndex = -1 },
+                    onHaptic = { haptics.performHapticFeedback(it) },
+                ),
             contentAlignment = Alignment.Center,
         ) {
             // Match the native toolbar icon scale; the ink is shown in the settings panel,
@@ -276,89 +201,4 @@ internal fun UnifiedPenLauncher(
             )
         }
     }
-}
-
-@Composable
-private fun PenFanPalette(
-    items: List<ToolbarItem>,
-    direction: PenFanDirection,
-    selected: Int,
-    active: ToolbarItem,
-    progress: Float,
-    onItemPosition: (Int, Offset) -> Unit,
-) {
-    val horizontal = direction == PenFanDirection.DOWN || direction == PenFanDirection.UP
-    val width = if (horizontal) 260.dp else 185.dp
-    val height = if (horizontal) 185.dp else 260.dp
-    val originX = if (horizontal) width / 2 else if (direction == PenFanDirection.RIGHT) 35.dp else width - 35.dp
-    val originY = if (!horizontal) height / 2 else if (direction == PenFanDirection.DOWN) 35.dp else height - 35.dp
-    val palette = LocalPalette.current
-    val surface = palette.panel.toComposeColor()
-    val stroke = palette.border.toComposeColor()
-
-    Box(Modifier.width(width).height(height)) {
-        items.forEachIndexed { index, item ->
-            // 110 dp radius provides clear spacing, even when the hovered circle grows.
-            val displacement = penFanOffset(index, items.size, direction, 110f)
-            val reveal = progress.coerceIn(0f, 1f)
-            val x = originX + (displacement.x * reveal).dp - 23.dp
-            val y = originY + (displacement.y * reveal).dp - 23.dp
-            val hovered = index == selected
-            val scale by animateFloatAsState(
-                targetValue = if (hovered) 1.17f else 1f,
-                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
-                label = "pen-fan-hover",
-            )
-            Box(
-                Modifier
-                    .offset(x = x, y = y)
-                    .size(46.dp)
-                    .onGloballyPositioned { coords ->
-                        val center = Offset(coords.size.width / 2f, coords.size.height / 2f)
-                        onItemPosition(index, coords.localToScreen(center))
-                    }
-                    .graphicsLayer {
-                        alpha = reveal
-                        scaleX = (0.65f + 0.35f * reveal) * scale
-                        scaleY = (0.65f + 0.35f * reveal) * scale
-                    }
-                    .clip(CircleShape)
-                    .background(if (hovered) palette.selectionBackground.toComposeColor() else surface)
-                    .border(
-                        if (hovered) 2.5.dp else 1.2.dp,
-                        if (hovered || item == active) palette.accent.toComposeColor() else stroke,
-                        CircleShape,
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                PenSilhouette(item, Modifier.width(18.dp).height(27.dp))
-            }
-        }
-        if (selected in items.indices) {
-            val name = stringResource(items[selected].labelRes)
-            Box(Modifier.align(Alignment.Center).padding(4.dp), contentAlignment = Alignment.Center) {
-                Text(name, color = palette.text.toComposeColor(), fontSize = 12.sp)
-            }
-        }
-    }
-}
-
-/** N-Notes' stroke icon assets, shared by the launcher, gesture fan and toolbar preview. */
-@Composable
-internal fun PenSilhouette(item: ToolbarItem, modifier: Modifier = Modifier) {
-    val icon = when (item) {
-        ToolbarItem.PEN -> R.drawable.ic_stroke_regular
-        ToolbarItem.DASHED -> R.drawable.ic_stroke_dashed
-        ToolbarItem.CALLIGRAPHY -> R.drawable.ic_stroke_calligraphy
-        ToolbarItem.SPEED -> R.drawable.ic_stroke_speed
-        ToolbarItem.TAPER -> R.drawable.ic_stroke_taper
-        ToolbarItem.HIGHLIGHTER -> R.drawable.ic_stroke_highlighter
-        else -> R.drawable.ic_stroke_regular
-    }
-    androidx.compose.material3.Icon(
-        imageVector = androidx.compose.ui.graphics.vector.ImageVector.vectorResource(icon),
-        contentDescription = null,
-        modifier = modifier,
-        tint = LocalPalette.current.text.toComposeColor(),
-    )
 }
