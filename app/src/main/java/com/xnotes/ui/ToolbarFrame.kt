@@ -169,9 +169,9 @@ internal fun ColumnScope.ToolbarAround(
 ) {
     val look = LocalToolbarLook.current
     val rest = Modifier.weight(1f).fillMaxWidth()
-    // Multi-dock occupies genuine document space on all four edges. The same plan drives
-    // the miniature preview; floating bars remain in the content's overlay layer.
-    if (workspace != null && dockedContent != null && workspace.hasMultiDock(look)) {
+    // Keep one document subtree for every docked placement, including a legacy
+    // primary. Switching layouts on its first move would recreate the native canvas.
+    if (workspace != null && dockedContent != null && workspace.hasDockedToolbar(look)) {
         SideEffect { onCover(0.0, 0.0, 0.0, 0.0) }
         val reorder = remember { ToolbarWorkspaceReorderController() }
         ToolbarReorderRecoveryEffect(reorder)

@@ -179,13 +179,8 @@ private fun packToolbarLanes(
     return packed.copy(rejected = packed.rejected + unplaced)
 }
 
-internal fun ToolbarWorkspace.hasMultiDock(look: ToolbarLook): Boolean =
-    bars.withIndex().any { (index, bar) ->
-        bar.visible && toolbarDockEdge(bar, index, look) != null &&
-            (index > 0 || bar.geometry.dockEdge != null ||
-                bar.geometry.dockLane != 0 ||
-                bar.geometry.dockAlignment != ToolbarDockAlignment.CENTER)
-    }
+internal fun ToolbarWorkspace.hasDockedToolbar(look: ToolbarLook): Boolean =
+    bars.withIndex().any { (index, bar) -> bar.visible && toolbarDockEdge(bar, index, look) != null }
 
 /** A legacy primary uses ToolbarLook.floating rather than geometry.floating. When
  * another visible bar is present, both must be rendered in the SAME floating
