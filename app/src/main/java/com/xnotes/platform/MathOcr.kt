@@ -53,7 +53,7 @@ object MathOcr {
     private class AddonFile(val name: String, val url: String, val size: Long, val sha256: String, val installedSize: Long = size)
 
     /** The math-addon pre-release in this app's repo, mirroring pix2text-mfr 1.5 (Hugging Face revision 1cef9f0) and ONNX Runtime 1.30.0. */
-    private const val ADDON = "https://github.com/NeDDy3z/n-notes/releases/download/math-addon/"
+    private const val ADDON = "https://github.com/NeDDy3z/Sponka/releases/download/math-addon/"
     private const val RUNTIME_LIB = "libonnxruntime.so"
 
     private val MODEL_FILES = listOf(

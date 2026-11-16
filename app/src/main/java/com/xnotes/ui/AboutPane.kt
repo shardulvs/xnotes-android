@@ -60,8 +60,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // n-notes: this fork. xnotes: the original project it's built on.
-private const val N_REPO_URL = "https://github.com/NeDDy3z/n-notes"
-private const val N_ISSUES_URL = "https://github.com/NeDDy3z/n-notes/issues/new"
+private const val N_REPO_URL = "https://github.com/NeDDy3z/Sponka"
+private const val N_ISSUES_URL = "https://github.com/NeDDy3z/Sponka/issues/new"
 private const val SPONSOR_URL = "https://github.com/sponsors/shardulvs"
 private const val ISSUES_URL = "https://github.com/shardulvs/xnotes-android/issues/new"
 private const val MIN_FILL_MS = 120L

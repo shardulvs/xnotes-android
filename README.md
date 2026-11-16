@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/NeDDy3z/n-notes/releases/latest"><img src="https://img.shields.io/github/v/release/NeDDy3z/n-notes?style=flat-square&label=release&color=blue" alt="Release" /></a>
+  <a href="https://github.com/NeDDy3z/Sponka/releases/latest"><img src="https://img.shields.io/github/v/release/NeDDy3z/Sponka?style=flat-square&label=release&color=blue" alt="Release" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-orange?style=flat-square" alt="License" /></a>
   <img src="https://img.shields.io/badge/Android-8.0%2B-3ddc84?style=flat-square&logo=android&logoColor=white" alt="Android 8.0+" />
 </p>
@@ -17,7 +17,7 @@
 
 Xnotes is a great app, and I'm grateful that the developer puts so much work into it and shares it openly. However, in my day to day use I noticed a few missing features and some details that bothered me. Above all, I really wanted some kind of cloud sync, so I made this fork. I do my best to keep it in sync with the original repository, and I almost always prefer the original developer's changes over mine, since they are much better implemented.
 
-[Long term support question](https://github.com/NeDDy3z/n-notes/issues/13)
+[Long term support question](https://github.com/NeDDy3z/Sponka/issues/13)
 
 ## Additions to the original xnotes
 
@@ -31,14 +31,14 @@ Releases are named `{xnotes version}-{sponka version}`, for example `0.9.7-0.48`
 
 | Channel | |
 |---|---|
-| [GitHub Releases](https://github.com/NeDDy3z/n-notes/releases/latest) | Signed APK |
+| [GitHub Releases](https://github.com/NeDDy3z/Sponka/releases/latest) | Signed APK |
 
 ### Build it yourself
 
 Requires **JDK 17** (the project pins Java 17):
 
 ```bash
-git clone https://github.com/NeDDy3z/n-notes.git
+git clone https://github.com/NeDDy3z/Sponka.git
 cd n-notes
 JAVA_HOME=/path/to/jdk-17 ./gradlew assembleDebug
 ```
@@ -53,7 +53,7 @@ When reporting bugs, issues or ideas, please split them into multiple smaller is
 
 I use LLMs during development mainly for research, code review and translations. Any and every change an LLM makes, I manually review/test before it goes into a release.
 
-Translations are fully LLM-generated and get fixed over time based on user reports. If you spot a translation issue, please report it [here](https://github.com/NeDDy3z/n-notes/issues/new?title=Incorrect%20Translation&labels=translation&assignees=NeDDy3z&body=Language:%0ALocation:%0AIncorrect:%0AFix:).
+Translations are fully LLM-generated and get fixed over time based on user reports. If you spot a translation issue, please report it [here](https://github.com/NeDDy3z/Sponka/issues/new?title=Incorrect%20Translation&labels=translation&assignees=NeDDy3z&body=Language:%0ALocation:%0AIncorrect:%0AFix:).
 
 ## License
 

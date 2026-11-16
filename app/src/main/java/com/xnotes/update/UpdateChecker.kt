@@ -13,8 +13,8 @@ import java.net.URL
  * against the installed versionName.
  */
 object UpdateChecker {
-    private const val LATEST_RELEASE_API = "https://api.github.com/repos/NeDDy3z/n-notes/releases/latest"
-    const val RELEASES_URL = "https://github.com/NeDDy3z/n-notes/releases/latest"
+    private const val LATEST_RELEASE_API = "https://api.github.com/repos/NeDDy3z/Sponka/releases/latest"
+    const val RELEASES_URL = "https://github.com/NeDDy3z/Sponka/releases/latest"
 
     sealed interface Status {
         data class UpToDate(val version: String) : Status
