@@ -4771,6 +4771,28 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             source.close()
             return null
         }
+        // An xnotes PDF made into a note is the note inside it, ink still editable, not its pages with the ink baked in.
+        if (source.attachmentNames().any { com.xnotes.platform.PdfNote.isNote(it) }) {
+            source.close()
+            noteCarriedBy(pdfFile)?.let { note ->
+                try {
+                    val name = uniqueDocumentName(treeUri, parentDocId, rawName, com.xnotes.core.util.DocumentKind.NOTE)
+                    return createNoteFile(treeUri, parentDocId, name) { out -> java.io.FileInputStream(note).use { it.copyTo(out, copyBuffer) } }
+                } finally {
+                    note.delete()
+                }
+            }
+            // The attachment would not read as a note: the pages are taken, without it riding along inside them.
+            val plain = java.io.File.createTempFile("plain", ".pdf", pdfDir)
+            try {
+                com.xnotes.platform.PdfNote.strip(pdfFile, plain, exportMemory())
+                return createPdfNoteFile(treeUri, parentDocId, rawName, plain)
+            } catch (e: Exception) {
+                return null
+            } finally {
+                plain.delete()
+            }
+        }
         val doc = com.xnotes.platform.PdfImporter.import(source, state.document.dpi) // doc.pdfFile = pdfFile
         stampNewNoteDefaults(doc)
         doc.created = System.currentTimeMillis()
@@ -4778,6 +4800,51 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val uri = createNoteFile(treeUri, parentDocId, name) { codec.write(doc, it) { importCancelled.get() } }
         source.close()
         return uri
+    }
+
+    /**
+     * The note the PDF in [pdf] carries, as a bundle in a temp file the caller deletes; null when it
+     * carries none that reads as one. A PDF that is ours, or ours underneath, gives it straight from
+     * its bytes; one another app wrote out whole gives it through PdfBox.
+     */
+    private fun noteCarriedBy(pdf: java.io.File): java.io.File? {
+        val note = java.io.File.createTempFile("carried", ".xnote", saveTmpDir)
+        val found = runCatching {
+            val direct = java.io.RandomAccessFile(pdf, "r").use { raf ->
+                val ch = raf.channel
+                val inside = when (val seen = XnotesPdf.inspect(ch)) {
+                    is XnotesPdf.Inspection.Ours -> XnotesPdf.embedded(ch, seen)
+                    is XnotesPdf.Inspection.Appended -> XnotesPdf.embedded(FileWindow(ch, 0L, seen.ownLength), seen.own)
+                    is XnotesPdf.Inspection.Torn -> XnotesPdf.embedded(FileWindow(ch, 0L, seen.ownLength), seen.own)
+                    else -> null
+                } ?: return@use false
+                java.io.FileOutputStream(note).use { out ->
+                    var at = 0L
+                    while (at < inside.size()) at += inside.transferTo(at, inside.size() - at, out.channel).also { if (it <= 0L) throw java.io.IOException("short read") }
+                }
+                true
+            }
+            (direct || com.xnotes.platform.PdfNote.extract(pdf, note, exportMemory())) &&
+                java.io.FileInputStream(note).use { codec.peek(it.channel) } != null
+        }.getOrDefault(false)
+        if (!found) note.delete()
+        return note.takeIf { found }
+    }
+
+    /**
+     * Keeps the PDF in [pdfFile] as a PDF: a copy named after [rawName] under [parentDocId].
+     * Returns its URI, or null, with [lastImportError] saying why when the PDF would not open.
+     */
+    fun createPdfCopy(treeUri: String, parentDocId: String, rawName: String, pdfFile: java.io.File): String? {
+        val source = com.xnotes.platform.PdfSource.open(pdfFile)
+        lastImportError = source.openError
+        val opens = source.pageCount > 0
+        source.close()
+        if (!opens) return null
+        val name = uniqueDocumentName(treeUri, parentDocId, rawName, DocumentKind.PDF)
+        return createNoteFile(treeUri, parentDocId, name, PDF_MIME) { out ->
+            java.io.FileInputStream(pdfFile).use { copyStream(it, out) { importCancelled.get() } }
+        }
     }
 
     /**
@@ -4866,18 +4933,21 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      *  Copies the picked file to a local temp first (the slow part, shown under the import loader), then
      *  builds the note and drops the temp. Clears the request on success or cancel; keeps it on a genuine
      *  failure so the user can retry the name. IO — call off-thread. */
-    fun commitImport(treeUri: String, parentDocId: String, rawName: String): String? {
+    fun commitImport(treeUri: String, parentDocId: String, rawName: String, asPdf: Boolean = false): String? {
         val pending = pendingImport ?: return null
         importCancelled.set(false)
         val uri = if (pending.markdown) {
             lastImportError = null
             readMarkdown(pending.uri)?.let { createMarkdownNoteFile(treeUri, parentDocId, rawName, it) }
+        } else if (asPdf && isUnderTree(pending.uri, treeUri)) {
+            lastImportError = null
+            pending.uri // already a PDF in the folder: there is nothing to copy
         } else {
             val staged = runCatching {
                 appContext.contentResolver.openInputStream(android.net.Uri.parse(pending.uri))?.let { stageImport(it) }
             }.getOrNull()
             if (staged == null) null else try {
-                createPdfNoteFile(treeUri, parentDocId, rawName, staged)
+                if (asPdf) createPdfCopy(treeUri, parentDocId, rawName, staged) else createPdfNoteFile(treeUri, parentDocId, rawName, staged)
             } finally {
                 staged.delete()
             }
@@ -4892,11 +4962,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      *  [importing]. Returns the new note's URI, or null on failure/cancel. On cancel [pendingImport]
      *  is cleared (dialog dismisses); on a genuine failure it's kept so the caller can show an error
      *  and let the user retry. */
-    suspend fun commitImportAsync(treeUri: String, parentDocId: String, rawName: String): String? {
+    suspend fun commitImportAsync(treeUri: String, parentDocId: String, rawName: String, asPdf: Boolean = false): String? {
         importing = true
         return try {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                commitImport(treeUri, parentDocId, rawName)
+                commitImport(treeUri, parentDocId, rawName, asPdf)
             }
         } finally {
             importing = false
@@ -4913,9 +4983,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      *  so a batch costs the same memory as a single import however long the list is. Names come from
      *  the source files. Cancel stops after the file in flight, discarding only that one; whatever
      *  already landed stays. [importProgress] drives the dialog's count. IO — runs off-thread. */
-    suspend fun commitImportsAsync(treeUri: String, parentDocId: String): Int {
+    suspend fun commitImportsAsync(treeUri: String, parentDocId: String, asPdf: Boolean = false): Int {
         val items = pendingImports
-        if (items.isEmpty()) return 0
+        if (items.isEmpty() || importing) return 0 // a second tap while the first lot is landing
         importCancelled.set(false)
         importing = true
         importProgress = ImportProgress(0, items.size)
@@ -4924,14 +4994,19 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 var done = 0
                 for (item in items) {
                     if (importCancelled.get()) break
-                    val staged = runCatching {
-                        appContext.contentResolver.openInputStream(android.net.Uri.parse(item.uri))?.let { stageImport(it) }
-                    }.getOrNull()
-                    if (staged != null) {
-                        try {
-                            if (createPdfNoteFile(treeUri, parentDocId, item.defaultName, staged) != null) done++
-                        } finally {
-                            staged.delete()
+                    if (asPdf && isUnderTree(item.uri, treeUri)) {
+                        done++ // already a PDF in the folder: there is nothing to copy
+                    } else {
+                        val staged = runCatching {
+                            appContext.contentResolver.openInputStream(android.net.Uri.parse(item.uri))?.let { stageImport(it) }
+                        }.getOrNull()
+                        if (staged != null) {
+                            try {
+                                val made = if (asPdf) createPdfCopy(treeUri, parentDocId, item.defaultName, staged) else createPdfNoteFile(treeUri, parentDocId, item.defaultName, staged)
+                                if (made != null) done++
+                            } finally {
+                                staged.delete()
+                            }
                         }
                     }
                     importProgress = ImportProgress(done, items.size)
@@ -7500,10 +7575,18 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val extra = com.xnotes.platform.PdfSource.open(staged)
         val sizes = extra.allPageSizePoints()?.takeIf { it.isNotEmpty() }
         lastImportError = extra.openError
+        val carries = sizes != null && extra.attachmentNames().any { com.xnotes.platform.PdfNote.isNote(it) }
         extra.close()
         if (sizes == null) {
             staged.delete()
             return null
+        }
+        // An xnotes PDF goes in as its pages: the note it carries would only ride along inside this one's source.
+        if (carries) {
+            val plain = java.io.File.createTempFile("plain", ".pdf", pdfDir)
+            val stripped = runCatching { com.xnotes.platform.PdfNote.strip(staged, plain, exportMemory()) }.isSuccess
+            if (stripped) plain.copyTo(staged, overwrite = true)
+            plain.delete()
         }
         if (base == null) return JoinedPdf(staged, 0, sizes) // a plain note takes the PDF as it is
         try {

@@ -1849,12 +1849,26 @@ private fun ExplorerSection(
     // at a time, taking each note's name from its source. This runs here because the explorer is
     // where the target folder is known. Cancelling keeps whatever already landed.
     val pendingImports = editor.pendingImports
-    LaunchedEffect(pendingImports) {
-        if (pendingImports.isNotEmpty()) {
-            val n = editor.commitImportsAsync(root, currentDocId)
-            refreshKey++
-            if (n > 0) editor.message = context.resources.getQuantityString(R.plurals.imported_pdfs, n, n)
+    if (pendingImports.isNotEmpty() && !editor.importing) {
+        // Asked once for all of them: each stays a PDF, or each becomes a note.
+        fun land(asPdf: Boolean) {
+            scope.launch {
+                val n = editor.commitImportsAsync(root, currentDocId, asPdf)
+                refreshKey++
+                if (n > 0) editor.message = context.resources.getQuantityString(R.plurals.imported_pdfs, n, n)
+            }
         }
+        AlertDialog(
+            onDismissRequest = { editor.requestImports(emptyList()) },
+            title = { Text(pluralStringResource(R.plurals.import_pdfs_title, pendingImports.size, pendingImports.size)) },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { land(asPdf = true) }) { Text(stringResource(R.string.keep_as_pdf)) }
+                    TextButton(onClick = { land(asPdf = false) }) { Text(stringResource(R.string.make_a_note)) }
+                }
+            },
+            dismissButton = { TextButton(onClick = { editor.requestImports(emptyList()) }) { Text(stringResource(R.string.cancel)) } },
+        )
     }
 
     val pendingImport = editor.pendingImport
@@ -1907,7 +1921,24 @@ private fun ExplorerSection(
                 else -> stringResource(R.string.new_note)
             },
             initial = default,
-            confirmLabel = if (pendingImport != null) stringResource(R.string.save) else stringResource(R.string.create),
+            confirmLabel = when {
+                pendingImport == null -> stringResource(R.string.create)
+                pendingImport.markdown -> stringResource(R.string.save)
+                else -> stringResource(R.string.make_a_note)
+            },
+            // A PDF coming in stays a PDF or becomes a note, asked every time; text only ever becomes a note.
+            secondLabel = if (pendingImport != null && !pendingImport.markdown) stringResource(R.string.keep_as_pdf) else null,
+            onSecond = { n ->
+                scope.launch {
+                    val uri = editor.commitImportAsync(root, currentDocId, n, asPdf = true)
+                    when {
+                        uri != null -> refreshKey++
+                        editor.pendingImport != null -> fieldError = context.getString(
+                            if (editor.lastImportError == PdfOpenError.PASSWORD) R.string.err_pdf_password else R.string.err_save_that_note,
+                        )
+                    }
+                }
+            },
             placeholder = if (isFolder) stringResource(R.string.folder_name) else null,
             allowEmpty = !isFolder, // a folder needs a name; a blank note name becomes "untitled_N"
             error = fieldError,
@@ -2280,6 +2311,9 @@ private fun NameDialog(
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
     onRemove: (() -> Unit)? = null,
+    /** A second way to confirm, beside [confirmLabel], for a name that can be put to two uses. */
+    secondLabel: String? = null,
+    onSecond: (String) -> Unit = {},
 ) {
     val palette = LocalPalette.current
     var text by remember { mutableStateOf(TextFieldValue(initial, selection = TextRange(0, initial.length))) }
@@ -2287,7 +2321,8 @@ private fun NameDialog(
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     val confirm = {
         val n = text.text.trim()
-        if (allowEmpty || n.isNotEmpty()) onConfirm(n)
+        // With two ways to confirm, the keyboard's Done picks neither: the choice is the user's to make.
+        if (secondLabel == null && (allowEmpty || n.isNotEmpty())) onConfirm(n)
     }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -2315,7 +2350,11 @@ private fun NameDialog(
             )
         },
         confirmButton = {
-            TextButton(onClick = { confirm() }, enabled = allowEmpty || text.text.isNotBlank()) { Text(confirmLabel) }
+            val ready = allowEmpty || text.text.isNotBlank()
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (secondLabel != null) TextButton(onClick = { onSecond(text.text.trim()) }, enabled = ready) { Text(secondLabel) }
+                TextButton(onClick = { onConfirm(text.text.trim()) }, enabled = ready) { Text(confirmLabel) }
+            }
         },
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
