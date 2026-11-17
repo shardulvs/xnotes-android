@@ -445,7 +445,7 @@ class CanvasState(
 
     /** When true, zoom is fixed (pinch pans only, zoom buttons/fit are no-ops). */
     var zoomLocked: Boolean = false
-    /** The View menu toggle: vertical scroll lets any page edge reach the clear centre; paginated frees up and down and pinches never snap to a fit. */
+    /** The View menu toggle: pinches never snap to a fit; vertical scroll lets any page edge reach the clear centre, paginated frees up and down. */
     var freeMovement: Boolean = false
 
     /**
@@ -1127,7 +1127,7 @@ class CanvasState(
      * zoom the caller applies; the false→true transition of either flag surfaces the lock hint.
      */
     fun snapZoomToFit(raw: Double): Double {
-        if (!verticalScroll && freeMovement) { // free movement pinches straight past both magnets
+        if (freeMovement) { // free movement pinches straight past both magnets
             fitWidthActive = false
             fitHeightActive = false
             return raw

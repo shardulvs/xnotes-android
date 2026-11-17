@@ -6346,11 +6346,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 refreshView()
             }
         } else if (prev.freeMovement != new.freeMovement && state.didInitialFit) {
+            if (new.freeMovement) {
+                state.fitWidthActive = false // free pinches never hold a fit
+                state.fitHeightActive = false
+            }
             if (!new.verticalScroll) {
-                if (new.freeMovement) {
-                    state.fitWidthActive = false // free pinches never hold a fit
-                    state.fitHeightActive = false
-                }
                 state.goToPage(state.currentPageIndex()) // the page lands where the new rules put it
             } else {
                 if (new.freeMovement) {

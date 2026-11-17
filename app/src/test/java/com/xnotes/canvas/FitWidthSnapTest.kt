@@ -55,7 +55,7 @@ class FitWidthSnapTest {
         assertFalse(st.fitWidthActive)
     }
 
-    @Test fun freeMovementCanBeTurnedOnWithoutAffectingVerticalMode() {
+    @Test fun freeMovementPinchesPastTheMagnetsInBothModes() {
         val st = state()
         st.verticalScroll = false
         st.relayout()
@@ -69,8 +69,11 @@ class FitWidthSnapTest {
 
         st.verticalScroll = true
         st.relayout()
-        val verticalFit = st.fitWidthZoom()
-        assertEquals(verticalFit, st.snapZoomToFit(verticalFit * 1.01), 1e-9)
+        val near = st.fitWidthZoom() * 1.01
+        assertEquals(near, st.snapZoomToFit(near), 1e-9)
+        assertFalse(st.fitWidthActive)
+        st.freeMovement = false
+        assertEquals(st.fitWidthZoom(), st.snapZoomToFit(near), 1e-9)
         assertTrue(st.fitWidthActive)
     }
 
