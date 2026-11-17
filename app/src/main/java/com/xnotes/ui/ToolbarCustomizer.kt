@@ -31,14 +31,12 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.xnotes.R
@@ -338,7 +336,7 @@ private fun ChipFace(item: ToolbarItem, visible: Boolean, modifier: Modifier = M
             .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(itemIcon(item), null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(14.dp))
+        Icon(toolbarItemIcon(item), null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(14.dp))
         Spacer(Modifier.width(4.dp))
         Text(stringResource(item.labelRes), color = palette.text.toComposeColor(), fontSize = 12.sp)
     }
@@ -357,7 +355,7 @@ fun ToolbarDragGhost(item: ToolbarItem) {
             .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(itemIcon(item), null, tint = palette.accent.toComposeColor(), modifier = Modifier.size(14.dp))
+        Icon(toolbarItemIcon(item), null, tint = palette.accent.toComposeColor(), modifier = Modifier.size(14.dp))
         Spacer(Modifier.width(4.dp))
         Text(stringResource(item.labelRes), color = palette.accent.toComposeColor(), fontSize = 12.sp)
     }
@@ -429,44 +427,4 @@ private fun InsertionCaret() {
 @Composable
 private fun SectionCaret() {
     Box(Modifier.width(3.dp).height(56.dp).clip(RoundedCornerShape(2.dp)).background(LocalPalette.current.accent.toComposeColor()))
-}
-
-@Composable
-private fun itemIcon(item: ToolbarItem): ImageVector = when (item) {
-    ToolbarItem.HOME -> XnotesIcons.home
-    ToolbarItem.TITLE -> XnotesIcons.edit
-    ToolbarItem.SIDEBAR -> XnotesIcons.sidebar
-    ToolbarItem.PEN -> ImageVector.vectorResource(R.drawable.ic_stroke_regular)
-    ToolbarItem.DASHED -> ImageVector.vectorResource(R.drawable.ic_stroke_dashed)
-    ToolbarItem.CALLIGRAPHY -> ImageVector.vectorResource(R.drawable.ic_stroke_calligraphy)
-    ToolbarItem.SPEED -> ImageVector.vectorResource(R.drawable.ic_stroke_speed)
-    ToolbarItem.TAPER -> ImageVector.vectorResource(R.drawable.ic_stroke_taper)
-    ToolbarItem.HIGHLIGHTER -> ImageVector.vectorResource(R.drawable.ic_stroke_highlighter)
-    ToolbarItem.ERASER -> XnotesIcons.eraser
-    ToolbarItem.PAN -> XnotesIcons.pan
-    ToolbarItem.SELECT -> XnotesIcons.select
-    ToolbarItem.LASSO -> XnotesIcons.lasso
-    ToolbarItem.INSERT_SPACE -> XnotesIcons.insertSpace
-    ToolbarItem.SCREENSHOT -> XnotesIcons.scissors
-    ToolbarItem.WAND -> XnotesIcons.magicWand
-    ToolbarItem.TAPE -> XnotesIcons.tape
-    ToolbarItem.SHAPE -> XnotesIcons.shape
-    ToolbarItem.RULER -> XnotesIcons.ruler
-    ToolbarItem.TEXT -> XnotesIcons.text
-    ToolbarItem.TEXT_BOX -> XnotesIcons.textBox
-    ToolbarItem.MARKUP -> XnotesIcons.markup
-    ToolbarItem.IMAGE -> XnotesIcons.paperclip
-    ToolbarItem.UNDO -> XnotesIcons.undo
-    ToolbarItem.REDO -> XnotesIcons.redo
-    ToolbarItem.PAGE_NAV -> XnotesIcons.prev
-    ToolbarItem.STYLES -> XnotesIcons.sliders
-    ToolbarItem.MARGINS -> XnotesIcons.margins
-    ToolbarItem.VIEW -> XnotesIcons.view
-    ToolbarItem.ZOOM -> XnotesIcons.zoomIn
-    ToolbarItem.FIT -> XnotesIcons.fit
-    ToolbarItem.ZOOM_LOCK -> XnotesIcons.lock
-    ToolbarItem.FULLSCREEN -> XnotesIcons.fullscreen
-    ToolbarItem.COLORS -> XnotesIcons.more
-    ToolbarItem.WAYPOINTS -> XnotesIcons.bookmark
-    ToolbarItem.MINIMAP -> XnotesIcons.map
 }

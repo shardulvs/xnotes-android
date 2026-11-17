@@ -22,6 +22,8 @@ data class Preferences(
     val materialSurfaceSeed: Rgba = DEFAULT_MATERIAL_SURFACE,
     val cornerStyle: CornerStyle = CornerStyle.ROUNDED,
     val toolbarLook: ToolbarLook = ToolbarLook(),
+    val sharedSplitToolbars: Boolean = true,
+    val mixedSplitToolbar: com.xnotes.core.tools.SplitToolbarInterface = com.xnotes.core.tools.SplitToolbarInterface.NOTE,
     val hideWindowDecoration: Boolean = false,
     val pageColor: Rgba? = null, // null ⇒ follow theme paper
     val pageTemplatePdf: String? = null,
@@ -176,6 +178,8 @@ data class Preferences(
             if (cornerStyle != CornerStyle.ROUNDED) put("corner_style", cornerStyle.id)
             if (toolbarLook.position != ToolbarPosition.TOP) put("toolbar_position", toolbarLook.position.id)
             if (toolbarLook.size != ToolbarSize.REGULAR) put("toolbar_size", toolbarLook.size.id)
+            if (!sharedSplitToolbars) put("shared_split_toolbars", false)
+            if (mixedSplitToolbar != com.xnotes.core.tools.SplitToolbarInterface.NOTE) put("mixed_split_toolbar", mixedSplitToolbar.id)
             if (toolbarLook.floating) put("toolbar_floating", true)
             startFullscreen?.let { put("start_fullscreen", it) }
             codeThemePath?.let { put("code_theme_path", it) }
@@ -253,6 +257,8 @@ data class Preferences(
                 materialContrast = o.optDouble("material_contrast", 0.0).takeIf { it in -1.0..1.0 } ?: 0.0,
                 materialSurfaceSeed = surfaceSeed,
                 cornerStyle = CornerStyle.fromId(o.optString("corner_style")),
+                sharedSplitToolbars = o.optBoolean("shared_split_toolbars", true),
+                mixedSplitToolbar = com.xnotes.core.tools.SplitToolbarInterface.fromId(o.optString("mixed_split_toolbar", "note")),
                 toolbarLook = ToolbarLook(
                     position = ToolbarPosition.fromId(o.optString("toolbar_position")),
                     size = ToolbarSize.fromId(o.optString("toolbar_size")),

@@ -19,29 +19,18 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -49,8 +38,6 @@ import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -59,36 +46,22 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.foundation.focusable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerEventType
-import androidx.compose.ui.input.pointer.PointerType
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.IntentCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -96,9 +69,8 @@ import androidx.lifecycle.lifecycleScope
 import com.xnotes.R
 import com.xnotes.canvas.StylusButtonLatch
 import com.xnotes.ui.Editor
-import com.xnotes.ui.Toolbar
-import com.xnotes.ui.ToolbarAround
-import com.xnotes.ui.icons.XnotesIcons
+import com.xnotes.ui.PaneActions
+import com.xnotes.ui.SplitHost
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.XnotesTheme
 import com.xnotes.ui.theme.toComposeColor
@@ -1249,63 +1221,6 @@ private class ExportProgress(val done: Int, val total: Int, val counting: String
     }
 }
 
-/**
- * A tap here, or any pen stroke, lets the side panel's page selection go; a finger that scrolls or
- * pinches keeps it. Watched on the way in and never consumed, so whatever is under it still acts.
- */
-private fun Modifier.endsPageSelection(editor: Editor): Modifier = pointerInput(editor) {
-    awaitEachGesture {
-        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-        if (!editor.inPageSelectionMode) return@awaitEachGesture
-        if (down.type == PointerType.Stylus || down.type == PointerType.Eraser) {
-            editor.clearPageSelection()
-            return@awaitEachGesture
-        }
-        while (true) {
-            val e = awaitPointerEvent(PointerEventPass.Initial)
-            if (e.changes.any { it.id != down.id && it.pressed }) return@awaitEachGesture
-            val c = e.changes.firstOrNull { it.id == down.id } ?: return@awaitEachGesture
-            if ((c.position - down.position).getDistance() > viewConfiguration.touchSlop) return@awaitEachGesture
-            if (!c.pressed) {
-                editor.clearPageSelection()
-                return@awaitEachGesture
-            }
-        }
-    }
-}
-
-/**
- * What a pane can ask the screen around it to do: open a SAF picker, run an export, or change the
- * window. Each callback takes the pane it is acting for, because in a split there are two of them
- * and a picker's result has to come back to the one that opened it.
- */
-private class PaneActions(
-    val onToggleFullscreen: () -> Unit,
-    /** Leave for the backstage, closing every open pane. */
-    val onOpenBackstage: () -> Unit,
-    /** Close just this pane, leaving the other one to fill the window. */
-    val onClosePane: (Editor) -> Unit,
-    val onInsertImage: (Editor, com.xnotes.core.geometry.Pt?) -> Unit,
-    val onInsertCanvasImage: (Editor, com.xnotes.core.geometry.Pt?) -> Unit,
-    /** Take a photo with the camera app and place it like an inserted picture, on the canvas when [Editor.canvasOpen]. */
-    val onTakePhoto: (Editor) -> Unit,
-    val onAddStickers: () -> Unit,
-    val onInsertAudio: (Editor) -> Unit,
-    val onRecordAudio: (Editor) -> Unit,
-    val onSaveAudio: (Editor, com.xnotes.core.model.AudioItem) -> Unit,
-    val onShareAudio: (Editor, com.xnotes.core.model.AudioItem) -> Unit,
-    /** Hand a PNG the pane rendered (a selection or a capture) to the share sheet. */
-    val onShareImage: (java.io.File) -> Unit,
-    /** Open a stored note in [Editor]'s pane, as a tap on it in the explorer would. */
-    val onOpenFile: (Editor, String) -> Unit,
-    val onImportTemplate: () -> Unit,
-    val onTemplateFromImage: (com.xnotes.core.template.TemplateKind) -> Unit,
-    val onSharePages: (Editor, List<Int>, Boolean) -> Unit,
-    val onSavePagesAsPdf: (Editor, List<Int>) -> Unit,
-    val onSavePagesAsImages: (Editor, List<Int>) -> Unit,
-    val onInsertPdf: (Editor, Int) -> Unit,
-)
-
 /** A recording's file name when it leaves the app: its name, made safe for any folder, and its format. */
 private fun audioFileName(item: com.xnotes.core.model.AudioItem): String {
     val stem = item.name.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), " ").trim().ifEmpty { "recording" }.take(96)
@@ -1326,326 +1241,6 @@ private fun audioMime(ext: String): String = when (ext.lowercase()) {
     "webm" -> "audio/webm"
     else -> "audio/*"
 }
-
-/** Neither pane of a split may be squeezed below this share of the split axis. */
-private const val MIN_PANE_RATIO = 0.18f
-
-/** How wide the divider is to a finger. Mostly empty around the line, so it is easy to catch. */
-private val DIVIDER = 16.dp
-
-/** The accent line drawn down the middle of the divider, the same weight as a pane's focus line. */
-private val DIVIDER_LINE = 2.dp
-
-/**
- * Makes the open panes opaque to touch. Compose stops hit-testing lower siblings once a higher one
- * is hit, so this node — hit anywhere over the panes — keeps a tap that no child handled from
- * reaching the backstage composed underneath. It never consumes, so children still see every event.
- */
-private val SwallowTouches = Modifier.pointerInput(Unit) {
-    awaitPointerEventScope {
-        while (true) awaitPointerEvent(PointerEventPass.Initial)
-    }
-}
-
-/**
- * Lays the open panes over the backstage. Both open is a split: side by side in landscape, stacked
- * in portrait, with a draggable divider between them. One open is that pane full-screen, and none
- * leaves the backstage showing.
- *
- * The panes are placed by offset and size inside one Box rather than by a Row that becomes a Column,
- * so a pane keeps its composition node — and with it its canvas view, raster caches and GL context —
- * when the split opens, closes or the device turns.
- */
-@Composable
-private fun SplitHost(editor: Editor, actions: PaneActions) {
-    val second = editor.secondary
-    val split = editor.noteOpen && second?.noteOpen == true
-    // A pane that closed on its own leaves the other one full-screen; once neither is open the
-    // second editor is released, freeing its canvas and GL surfaces.
-    LaunchedEffect(editor.noteOpen, second?.noteOpen) {
-        if (second != null && !second.noteOpen) editor.releaseClosedSecondary()
-    }
-    if (!editor.noteOpen && second?.noteOpen != true) return
-
-    val sideBySide = LocalConfiguration.current.orientation ==
-        android.content.res.Configuration.ORIENTATION_LANDSCAPE
-    val ratio = editor.splitRatio.coerceIn(MIN_PANE_RATIO, 1f - MIN_PANE_RATIO)
-    BoxWithConstraints(Modifier.fillMaxSize().then(SwallowTouches).imePadding()) {
-        val fullW = maxWidth
-        val fullH = maxHeight
-        val full = if (sideBySide) fullW else fullH
-        // The panes meet along the split axis and take all of it; the divider is not a gap between
-        // them but a handle floating over the seam, so there is no strip of its own colour to show
-        // beside the toolbars. Across the axis both run full.
-        val firstExtent = if (split) full * ratio else full
-        val secondExtent = if (split) full - firstExtent else full
-
-        /** Sizes a pane to [extent] along the split axis and the whole window across it. */
-        fun paneSize(extent: Dp) = Modifier.size(
-            if (sideBySide) extent else fullW,
-            if (sideBySide) fullH else extent,
-        )
-
-        /** Offsets a pane [along] the split axis from the top-left of the editor area. */
-        fun paneOffset(along: Dp) = Modifier.offset(
-            x = if (sideBySide) along else 0.dp,
-            y = if (sideBySide) 0.dp else along,
-        )
-
-        if (editor.noteOpen) {
-            EditorPane(
-                editor = editor,
-                app = editor,
-                actions = actions,
-                closable = split,
-                modifier = paneSize(firstExtent),
-            )
-        }
-        if (second?.noteOpen == true) {
-            EditorPane(
-                editor = second,
-                app = editor,
-                actions = actions,
-                closable = split,
-                modifier = paneOffset(if (split) firstExtent else 0.dp).then(paneSize(secondExtent)),
-            )
-        }
-        // Composed last so it sits over both panes and catches the drag before either of them.
-        if (split) {
-            SplitDivider(
-                sideBySide = sideBySide,
-                extentPx = with(LocalDensity.current) { full.toPx() },
-                ratio = editor.splitRatio,
-                onRatio = { editor.splitRatio = it },
-                modifier = paneOffset((firstExtent - DIVIDER / 2).coerceAtLeast(0.dp))
-                    .then(paneSize(DIVIDER)),
-            )
-        }
-    }
-}
-
-/**
- * One pane: its toolbar over its canvas, with the menus and overlays that belong to that document.
- * A paged note and an infinite canvas get different chrome, since the paged toolbar is mostly pages,
- * viewing modes and text, none of which mean anything on a canvas.
- *
- * [app] is the primary editor, which owns the split; [editor] is this pane's own. Touching anywhere
- * in the pane gives it the focus, so the keyboard and the file actions follow the pen.
- */
-@Composable
-private fun EditorPane(
-    editor: Editor,
-    app: Editor,
-    actions: PaneActions,
-    closable: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    val palette = LocalPalette.current
-    val focusRequester = remember { FocusRequester() }
-    val focused = app.active === editor
-    SideEffect { editor.openInPane = { uri -> actions.onOpenFile(editor, uri) } }
-    // This pane owns the keyboard while it is the focused one; (re)grab it as that changes.
-    LaunchedEffect(focused, editor.noteOpen) {
-        if (focused && editor.noteOpen) runCatching { focusRequester.requestFocus() }
-    }
-    val takeFocus = Modifier.pointerInput(editor) {
-        awaitPointerEventScope {
-            while (true) {
-                // Initial pass and never consumed: the pane notices the touch, the canvas still gets it.
-                val event = awaitPointerEvent(PointerEventPass.Initial)
-                if (event.type == PointerEventType.Press) app.focusPane(editor.pane)
-            }
-        }
-    }
-    // The colour a swatch drag carries rides over the whole pane, toolbar and page alike.
-    Box(modifier) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(palette.bg.toComposeColor())
-                .then(takeFocus)
-                .focusRequester(focusRequester)
-                .focusable()
-                .onPreviewKeyEvent { ke ->
-                    ke.type == KeyEventType.KeyDown && editor.handleKeyDown(ke.nativeKeyEvent)
-                },
-        ) {
-            val onClose = if (closable) ({ actions.onClosePane(editor) }) else null
-            // In a split, a hairline over the toolbar marks the pane the pen and the keyboard are in.
-            if (closable) {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(2.dp)
-                        .background((if (focused) palette.accent else palette.border).toComposeColor()),
-                )
-            }
-            if (editor.canvasOpen) {
-                val canvas = editor.infinite
-                val bar: @Composable () -> Unit = {
-                    com.xnotes.ui.InfiniteToolbar(
-                        canvas,
-                        onOpenBackstage = actions.onOpenBackstage,
-                        onInsertImage = { actions.onInsertCanvasImage(editor, null) },
-                        onClosePane = onClose,
-                        onInsertAudio = { actions.onInsertAudio(editor) },
-                        onRecordAudio = { actions.onRecordAudio(editor) },
-                        onTakePhoto = { actions.onTakePhoto(editor) },
-                    )
-                }
-                ToolbarAround(bar, onCover = canvas::setToolbarCover) { floatingBar ->
-                    Box(modifier = Modifier.fillMaxSize().clipToBounds()) {
-                        AndroidView(
-                            factory = { detached(canvas.surfaces) },
-                            modifier = Modifier.fillMaxSize(),
-                            update = { canvas.view.publish() },
-                        )
-                        canvas.editingField?.let { field ->
-                            com.xnotes.ui.TextEditorOverlay(canvas, field)
-                        }
-                        floatingBar()
-                        com.xnotes.ui.SelectionMenu(
-                            canvas,
-                            onSaveAudio = { actions.onSaveAudio(editor, it) },
-                            onShareAudio = { actions.onShareAudio(editor, it) },
-                            onShareImage = actions.onShareImage,
-                        )
-                        com.xnotes.ui.CropOverlay(canvas)
-                        com.xnotes.ui.TextStyleBar(canvas)
-                        com.xnotes.ui.LongPressMenu(canvas, onInsertImageAt = { c -> actions.onInsertCanvasImage(editor, c) })
-                        com.xnotes.ui.CanvasDebugOverlay(canvas)
-                    }
-                }
-            } else {
-                val bar: @Composable () -> Unit = {
-                    Box(Modifier.endsPageSelection(editor)) { Toolbar(
-                        editor,
-                        onToggleFullscreen = actions.onToggleFullscreen,
-                        onOpenBackstage = actions.onOpenBackstage,
-                        onInsertImage = { actions.onInsertImage(editor, null) },
-                        onAddStickers = actions.onAddStickers,
-                        onClosePane = onClose,
-                        onImportTemplate = actions.onImportTemplate,
-                        onInsertAudio = { actions.onInsertAudio(editor) },
-                        onRecordAudio = { actions.onRecordAudio(editor) },
-                        onTakePhoto = { actions.onTakePhoto(editor) },
-                    ) }
-                }
-                ToolbarAround(bar, onCover = editor::setToolbarCover) { floatingBar ->
-                    Row(modifier = Modifier.fillMaxSize()) {
-                        if (editor.sidebarVisible) {
-                            com.xnotes.ui.SidePanel(
-                                editor,
-                                onSharePages = { pages, asPdf -> actions.onSharePages(editor, pages, asPdf) },
-                                onSavePagesAsPdf = { pages -> actions.onSavePagesAsPdf(editor, pages) },
-                                onSavePagesAsImages = { pages -> actions.onSavePagesAsImages(editor, pages) },
-                                onInsertPdf = { after -> actions.onInsertPdf(editor, after) },
-                                onImportTemplate = actions.onImportTemplate,
-                                onTemplateFromImage = actions.onTemplateFromImage,
-                            )
-                        }
-                        Box(modifier = Modifier.weight(1f).fillMaxHeight().clipToBounds().endsPageSelection(editor)) {
-                            AndroidView(
-                                factory = { detached(editor.surfaces) },
-                                modifier = Modifier.fillMaxSize(),
-                                update = { editor.view.requestRender() }, // repaint on (re)attach so a push never flashes blank
-                            )
-                            editor.editingField?.let { field ->
-                                com.xnotes.ui.TextEditorOverlay(editor, field)
-                            }
-                            floatingBar()
-                            com.xnotes.ui.SelectionMenu(
-                                editor,
-                                onSaveAudio = { actions.onSaveAudio(editor, it) },
-                                onShareAudio = { actions.onShareAudio(editor, it) },
-                                onShareImage = actions.onShareImage,
-                            )
-                            com.xnotes.ui.CropOverlay(editor)
-                            com.xnotes.ui.ScreenshotMenu(editor, onShare = actions.onShareImage)
-                            com.xnotes.ui.TextStyleBar(editor)
-                            com.xnotes.ui.LongPressMenu(editor, onInsertImageAt = { c -> actions.onInsertImage(editor, c) })
-                            com.xnotes.ui.FlowEditMenu(editor)
-                            com.xnotes.ui.PdfSelectionMenu(editor)
-                            com.xnotes.ui.MarkupNotePeek(editor)
-                            com.xnotes.ui.MarkupMenu(editor)
-                            com.xnotes.ui.MarkupNoteDialog(editor)
-                            com.xnotes.ui.SlashMenu(editor)
-                            com.xnotes.ui.EmojiMenu(editor)
-                            com.xnotes.ui.FlowTableMenu(editor)
-                            com.xnotes.ui.TableChrome(editor)
-                            ZoomLockHint(editor)
-                        }
-                    }
-                }
-                // Last child of the resized column: rides directly above the soft keyboard.
-                com.xnotes.ui.TextFormatBar(editor)
-            }
-        }
-        com.xnotes.ui.ColorDropOverlay(if (editor.canvasOpen) editor.infinite else editor)
-    }
-}
-
-/**
- * The handle over the seam between two split panes. Dragging it moves the boundary along the split
- * axis, keeping both panes at least [MIN_PANE_RATIO] of it; double-tapping puts it back in the
- * middle. Only the line is painted — the margin either side of it is what the finger catches, and it
- * stays transparent so the panes it lies over show through.
- */
-@Composable
-private fun SplitDivider(
-    sideBySide: Boolean,
-    extentPx: Float,
-    ratio: Float,
-    onRatio: (Float) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val palette = LocalPalette.current
-    // Read inside the long-lived drag gesture, which does not restart as the ratio moves.
-    val ratioNow = rememberUpdatedState(ratio)
-    val onRatioNow = rememberUpdatedState(onRatio)
-    var dragged by remember { mutableStateOf(0f) }
-    Box(
-        modifier = modifier
-            .pointerInput(sideBySide, extentPx) {
-                detectDragGestures(
-                    onDragStart = { dragged = ratioNow.value },
-                    onDrag = { change, drag ->
-                        change.consume()
-                        if (extentPx <= 0f) return@detectDragGestures
-                        val along = if (sideBySide) drag.x else drag.y
-                        dragged = (dragged + along / extentPx).coerceIn(MIN_PANE_RATIO, 1f - MIN_PANE_RATIO)
-                        onRatioNow.value(dragged)
-                    },
-                )
-            }
-            .pointerInput(Unit) {
-                detectTapGestures(onDoubleTap = { onRatioNow.value(0.5f) })
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        // The line itself: thin, accent, and running the whole way, so it closes the frame the two
-        // panes' focus lines start along their toolbars. The empty margin either side of it is what
-        // the finger actually catches.
-        Box(
-            Modifier
-                .fillMaxSize()
-                .padding(
-                    horizontal = if (sideBySide) (DIVIDER - DIVIDER_LINE) / 2 else 0.dp,
-                    vertical = if (sideBySide) 0.dp else (DIVIDER - DIVIDER_LINE) / 2,
-                )
-                .clip(RoundedCornerShape(DIVIDER_LINE / 2))
-                .background(palette.accent.toComposeColor()),
-        )
-    }
-}
-
-/**
- * Hands a reused View back to [AndroidView]. A pane's canvas can move to a fresh composition node
- * when the split opens or closes, and the new node parents the view itself, so it has to leave the
- * old parent first rather than throw.
- */
-private fun <T : android.view.View> detached(view: T): T =
-    view.also { (it.parent as? android.view.ViewGroup)?.removeView(it) }
 
 /**
  * "Exporting to PDF…" dialog shown while a (possibly large) note is flattened to a PDF off the main
@@ -1914,66 +1509,6 @@ private fun PdfBatchExportDialog(p: com.xnotes.platform.PdfBatch.Progress, onCan
             androidx.compose.material3.TextButton(onClick = onCancel) {
                 Text(stringResource(R.string.cancel), color = palette.accent.toComposeColor())
             }
-        }
-    }
-}
-
-/**
- * Transient zoom-lock affordance, centred just below the toolbar. Appears when a pinch snaps to
- * fit-to-width ([Editor.zoomLockHint] bumps) and auto-dismisses after a moment. Tapping toggles the
- * zoom lock, so the same chip both locks and unlocks; each tap re-arms the dismiss timer so it
- * lingers long enough to tap again.
- */
-@Composable
-private fun BoxScope.ZoomLockHint(editor: Editor) {
-    val palette = LocalPalette.current
-    var visible by remember { mutableStateOf(false) }
-    // Bumped on the initial fit-width snap and on every tap; (re)starts the auto-dismiss timer below.
-    var armToken by remember { mutableStateOf(0) }
-    LaunchedEffect(editor.zoomLockHint) {
-        if (editor.zoomLockHint > 0) {
-            visible = true
-            armToken++
-        }
-    }
-    LaunchedEffect(armToken) {
-        if (armToken > 0) {
-            delay(2500)
-            visible = false
-        }
-    }
-    // Breaking past the fit-width magnet dismisses the hint at once.
-    LaunchedEffect(editor.zoomLockHintDismiss) {
-        if (editor.zoomLockHintDismiss > 0) visible = false
-    }
-    val locked = editor.zoomLocked
-    AnimatedVisibility(
-        visible = visible,
-        modifier = Modifier.align(Alignment.TopCenter).padding(com.xnotes.ui.LocalToolbarCover.current).padding(top = 8.dp),
-        enter = fadeIn(),
-        exit = fadeOut(),
-    ) {
-        Row(
-            modifier = Modifier
-                .clip(MaterialTheme.shapes.small)
-                .background(palette.surface.toComposeColor())
-                .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.small)
-                .clickable { editor.toggleZoomLock(); armToken++ }
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                if (locked) XnotesIcons.lock else XnotesIcons.unlock,
-                contentDescription = if (locked) stringResource(R.string.unlock_zoom) else stringResource(R.string.lock_zoom_fit_width),
-                tint = (if (locked) palette.accent else palette.textDim).toComposeColor(),
-                modifier = Modifier.size(18.dp),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                if (locked) stringResource(R.string.unlock_zoom) else stringResource(R.string.lock_zoom),
-                color = palette.text.toComposeColor(),
-                fontSize = 13.sp,
-            )
         }
     }
 }
