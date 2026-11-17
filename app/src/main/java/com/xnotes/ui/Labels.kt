@@ -162,6 +162,7 @@ val ExplorerLayout.labelRes: Int
         ExplorerLayout.GALLERY -> R.string.layout_gallery
         ExplorerLayout.LIST -> R.string.layout_list
         ExplorerLayout.COLUMNS -> R.string.layout_columns
+        ExplorerLayout.TREE -> R.string.layout_tree
         ExplorerLayout.TIMELINE -> R.string.layout_timeline
     }
 
