@@ -204,8 +204,12 @@ object PdfExporter {
         altImage = context.getString(R.string.pdf_alt_image),
     )
 
-    private fun loadSource(file: File, mem: MemoryUsageSetting): PDDocument? = try {
-        PDDocument.load(file, mem) // file-backed + scratch-capped: never reads the whole PDF into RAM
+    internal fun loadSource(file: File, mem: MemoryUsageSetting): PDDocument? = try {
+        // file-backed + scratch-capped: never reads the whole PDF into RAM
+        PDDocument.load(file, mem).also {
+            // One under an owner password opens like any other, but PdfBox will not save it as it is.
+            if (it.isEncrypted) it.isAllSecurityToBeRemoved = true
+        }
     } catch (_: Throwable) {
         null
     }
