@@ -115,8 +115,6 @@
     <string name="template_too_large">it is larger than 1 MiB</string>
     <string name="default_for_new_notes">Default for new notes</string>
     <string name="reset">Reset</string>
-    <string name="caption_new_page_size">New page size</string>
-    <string name="same_as_previous">Same as previous</string>
     <string name="title_margins">Margins</string>
     <string name="margin_settings">Margin settings</string>
     <string name="expand_page">Expand page</string>

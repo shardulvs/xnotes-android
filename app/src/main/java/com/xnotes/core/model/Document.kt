@@ -105,11 +105,8 @@ class Document(
         return PageMarks(taken, breaks)
     }
 
-    /** The size of a blank page added after [previous]: [newPageSize] if set, else [previous]'s, else A4 portrait. */
-    fun blankPageSize(previous: Page?): Pair<Double, Double> =
-        newPageSize?.pixels(dpi)
-            ?: previous?.let { it.width to it.height }
-            ?: PageSize.A4.pixels(Orientation.PORTRAIT, dpi)
+    /** The size of an added blank page: [newPageSize] if set, else [fallback] (the Preferences default). */
+    fun blankPageSize(fallback: PageSizeChoice): Pair<Double, Double> = (newPageSize ?: fallback).pixels(dpi)
 
     companion object {
         const val DEFAULT_NEW_PAGES = 1

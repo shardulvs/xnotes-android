@@ -27,15 +27,13 @@ class NewPageSizeTest {
         assertEquals(1500.0 to 750.0, odd.pixels(150).let { (x, y) -> Math.round(x).toDouble() to Math.round(y).toDouble() })
     }
 
-    @Test fun aBlankPageTakesTheNotesNewPageSizeElseThePageBefore() {
+    @Test fun aBlankPageTakesTheNotesNewPageSizeElseTheDefault() {
         val doc = Document(dpi = 150)
-        val before = Page(800.0, 600.0)
-        assertEquals(800.0 to 600.0, doc.blankPageSize(before))
-        assertEquals(PageSize.A4.pixels(Orientation.PORTRAIT, 150), doc.blankPageSize(null))
+        val default = PageSizeChoice(PageSize.A4, Orientation.PORTRAIT)
+        assertEquals(PageSize.A4.pixels(Orientation.PORTRAIT, 150), doc.blankPageSize(default))
 
         doc.newPageSize = PageSizeChoice(PageSize.LETTER, Orientation.LANDSCAPE)
-        assertEquals(PageSize.LETTER.pixels(Orientation.LANDSCAPE, 150), doc.blankPageSize(before))
-        assertEquals(PageSize.LETTER.pixels(Orientation.LANDSCAPE, 150), doc.blankPageSize(null))
+        assertEquals(PageSize.LETTER.pixels(Orientation.LANDSCAPE, 150), doc.blankPageSize(default))
     }
 
     @Test fun copiesKeepTheNewPageSize() {

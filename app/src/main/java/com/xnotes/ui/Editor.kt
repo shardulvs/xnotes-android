@@ -1147,6 +1147,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         flow = { state.document.flow },
         frame = { publishedFlow?.frame },
         slotHeight = { flowLayout.defaultSlotHeight(state.document.flow) },
+        blankPageSize = { state.document.blankPageSize(preferences.defaultPageChoice) },
         onChanged = { live -> onFlowChanged(live) },
         onFlushed = { onFlowFlushed() },
         onSessionChanged = { active -> onFlowSessionChanged(active) },
@@ -2574,7 +2575,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val doc = state.document
         val oldFlow = publishedFlow
         val oldPages = publishedPageList
-        val (addedW, addedH) = doc.blankPageSize(doc.pages.lastOrNull())
+        val (addedW, addedH) = doc.blankPageSize(preferences.defaultPageChoice)
         val frame = flowLayout.layout(
             doc.flow, doc.pages.map { PageBox(it.sourceWidth, it.sourceHeight, it.textMargins) }, doc.dpi,
             firstPage = flowStart(doc), addedPage = PageBox(addedW, addedH),
@@ -4871,7 +4872,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         var passes = 0
         while (extra > 0 && passes++ < MARKDOWN_PAGE_PASSES) {
             repeat(extra) {
-                val (w, h) = doc.blankPageSize(doc.pages.lastOrNull())
+                val (w, h) = doc.blankPageSize(preferences.defaultPageChoice)
                 doc.pages.add(Page(w, h))
             }
             extra = frame().extraPagesNeeded
@@ -7582,13 +7583,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /**
      * Insert a blank page at [index] (clamped into range), at the note's new page size or else the
-     * size of the page at [refIndex]. Undoable; relayouts and refreshes. Returns the new page's
-     * final index.
+     * Preferences default. Undoable; relayouts and refreshes. Returns the new page's final index.
      */
-    private fun insertBlankPageAt(index: Int, refIndex: Int): Int {
+    private fun insertBlankPageAt(index: Int): Int {
         val pages = state.document.pages
-        val ref = pages.getOrNull(refIndex) ?: pages.getOrNull(index) ?: pages.lastOrNull()
-        val (w, h) = state.document.blankPageSize(ref)
+        val (w, h) = state.document.blankPageSize(preferences.defaultPageChoice)
         val at = index.coerceIn(0, pages.size)
         val page = Page(w, h)
         controller.clearSelection() // inserting shifts later page indices; drop any stale item selection
@@ -7658,10 +7657,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         view.requestRender()
     }
 
-    /** Toolbar "Add page": insert a blank page right after the current one (sized from it) and go to it. */
+    /** Toolbar "Add page": insert a blank page right after the current one and go to it. */
     fun addPage() {
         val current = state.currentPageIndex()
-        val at = insertBlankPageAt(current + 1, current)
+        val at = insertBlankPageAt(current + 1)
         goToPage(at)
     }
 
@@ -7670,7 +7669,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * current scroll position so the user is not yanked to the new page; they can scroll to it.
      */
     fun addPageAtEnd() {
-        insertBlankPageAt(state.document.pages.size, state.document.pages.lastIndex)
+        insertBlankPageAt(state.document.pages.size)
     }
 
     fun deleteCurrentPage() {
@@ -7691,9 +7690,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     // --- side-panel page operations (operate on explicit page indices) ---
 
-    /** Insert a blank page right after [index] (sized from it) and reveal it. */
+    /** Insert a blank page right after [index] and reveal it. */
     fun insertPageAfter(index: Int) {
-        goToPage(insertBlankPageAt(index + 1, index))
+        goToPage(insertBlankPageAt(index + 1))
     }
 
     /** A PDF joined onto the note's source: the source to keep, where its pages start in it, and their sizes. */
@@ -8203,6 +8202,17 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
         history.push(ReshapePages(pages, before, pages.map { PageShape.of(it) }))
         afterReshape(pages)
+    }
+
+    /** The current page's size, as Page size... offers it. */
+    val currentPageSizeChoice: PageSizeChoice? get() = pageSizeChoice(state.currentPageIndex())
+
+    fun resizeCurrentPage(choice: PageSizeChoice) = resizePages(listOf(state.currentPageIndex()), choice)
+
+    /** Styles "All Pages": every page takes [choice], and so do the pages added after. */
+    fun setPageFormat(choice: PageSizeChoice) {
+        setNewPageSize(choice)
+        resizePages(state.document.pages.indices.toList(), choice)
     }
 
     /** Lay the note out again round [pages], whose shape changed, and repaint them whole. */

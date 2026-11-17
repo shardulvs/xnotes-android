@@ -290,8 +290,8 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onPick: ((Tool) -> Unit)?
  * nothing. Like [ToolConfigPopup], the popup holds the edited style locally and pushes each
  * change to the [Editor] (which persists, but never undoes). The All Pages tab also offers making
  * its style the default stamped onto new notes, plus a Reset back to all-Default, which forgets
- * that memory too. Below both tabs sits the note's new page size, which neither tab nor Reset
- * touches.
+ * that memory too. Each tab also sets the page size: All Pages resizes every page and the pages
+ * added after, Current Page only that one.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -301,6 +301,8 @@ fun StylesPopup(editor: Editor, onImportTemplate: () -> Unit = {}, onDismiss: ()
     var docStyle by remember { mutableStateOf(editor.documentStyle) }
     var pageStyle by remember { mutableStateOf(editor.currentPageStyle) }
     var textColor by remember { mutableStateOf(editor.flowConfigValue().color) }
+    var pageFormat by remember { mutableStateOf(editor.newPageSize ?: editor.preferences.defaultPageChoice) }
+    var currentSize by remember { mutableStateOf(editor.currentPageSizeChoice) }
     val style = if (tab == 0) docStyle else pageStyle
     // "Default for new notes" shows once the All Pages style differs from the saved new-note
     // default, and stays for the rest of the popup session (so it doesn't vanish when checked).
@@ -344,6 +346,15 @@ fun StylesPopup(editor: Editor, onImportTemplate: () -> Unit = {}, onDismiss: ()
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ModeChip(stringResource(R.string.all_pages), tab == 0) { tab = 0 }
                 ModeChip(stringResource(R.string.current_page), tab == 1) { tab = 1 }
+            }
+
+            Spacer(Modifier.size(12.dp))
+            StyleCaption(stringResource(R.string.page_size))
+            Spacer(Modifier.size(6.dp))
+            if (tab == 0) {
+                PageFormatControls(pageFormat) { editor.setPageFormat(it); pageFormat = it; currentSize = editor.currentPageSizeChoice }
+            } else {
+                currentSize?.let { c -> PageFormatControls(c) { editor.resizeCurrentPage(it); currentSize = editor.currentPageSizeChoice } }
             }
 
             Spacer(Modifier.size(12.dp))
@@ -450,50 +461,29 @@ fun StylesPopup(editor: Editor, onImportTemplate: () -> Unit = {}, onDismiss: ()
                     }
                 }
             }
-
-            HorizontalDivider(Modifier.padding(vertical = 12.dp), color = LocalPalette.current.border.toComposeColor())
-            NewPageSizeControls(editor)
         }
     }
 }
 
-/** The size of pages added to the note: the page before's, a named size turned either way, or Custom's sides. */
+/** A named page size turned either way; picking Custom asks for its sides in [PageSizeDialog]. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun NewPageSizeControls(editor: Editor) {
-    var choice by remember { mutableStateOf(editor.newPageSize) }
-    fun apply(next: PageSizeChoice?) {
-        choice = next
-        editor.setNewPageSize(next)
+private fun PageFormatControls(choice: PageSizeChoice, onChange: (PageSizeChoice) -> Unit) {
+    var customizing by remember { mutableStateOf(false) }
+    SizeDropdown(choice.size) { size ->
+        if (size == PageSize.CUSTOM) customizing = true else size?.let { onChange(choice.copy(size = it)) }
     }
-
-    StyleCaption(stringResource(R.string.caption_new_page_size))
-    Spacer(Modifier.size(6.dp))
-    // A first pick starts from the Preferences size, so Custom opens on the sides typed there.
-    SizeDropdown(choice?.size, stringResource(R.string.same_as_previous)) { size ->
-        apply(size?.let { (choice ?: editor.preferences.defaultPageChoice).copy(size = it) })
+    if (customizing) {
+        PageSizeDialog(choice.copy(size = PageSize.CUSTOM), onApply = { customizing = false; onChange(it) }) { customizing = false }
     }
-    val c = choice
-    if (c != null) {
+    if (choice.size != PageSize.CUSTOM) {
         Spacer(Modifier.size(8.dp))
-        if (c.size == PageSize.CUSTOM) {
-            // The fields keep the callback they were built with, so it reads the choice as it is now.
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SideField(stringResource(R.string.width_mm), c.customWidthMm, Modifier.weight(1f)) { mm ->
-                    choice?.let { apply(it.copy(customWidthMm = mm)) }
-                }
-                SideField(stringResource(R.string.height_mm), c.customHeightMm, Modifier.weight(1f)) { mm ->
-                    choice?.let { apply(it.copy(customHeightMm = mm)) }
-                }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            ModeChip(stringResource(R.string.orientation_portrait), choice.orientation == Orientation.PORTRAIT) {
+                onChange(choice.copy(orientation = Orientation.PORTRAIT))
             }
-        } else {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                ModeChip(stringResource(R.string.orientation_portrait), c.orientation == Orientation.PORTRAIT) {
-                    apply(c.copy(orientation = Orientation.PORTRAIT))
-                }
-                ModeChip(stringResource(R.string.orientation_landscape), c.orientation == Orientation.LANDSCAPE) {
-                    apply(c.copy(orientation = Orientation.LANDSCAPE))
-                }
+            ModeChip(stringResource(R.string.orientation_landscape), choice.orientation == Orientation.LANDSCAPE) {
+                onChange(choice.copy(orientation = Orientation.LANDSCAPE))
             }
         }
     }

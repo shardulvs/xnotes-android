@@ -114,8 +114,6 @@
     <string name="template_too_large">je větší než 1 MiB</string>
     <string name="default_for_new_notes">Výchozí pro nové poznámky</string>
     <string name="reset">Obnovit</string>
-    <string name="caption_new_page_size">Velikost nové stránky</string>
-    <string name="same_as_previous">Stejná jako předchozí</string>
     <string name="title_margins">Okraje</string>
     <string name="margin_settings">Nastavení okrajů</string>
     <string name="expand_page">Rozšířit stránku</string>

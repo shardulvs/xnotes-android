@@ -101,8 +101,6 @@
     <string name="caption_pattern_colour">纹理颜色</string>
     <string name="default_for_new_notes">新笔记的默认值</string>
     <string name="reset">重置</string>
-    <string name="caption_new_page_size">新页面大小</string>
-    <string name="same_as_previous">与上一页相同</string>
     <string name="title_margins">页边距</string>
     <string name="margin_settings">页边距设置</string>
     <string name="expand_page">扩展页面</string>

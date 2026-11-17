@@ -41,6 +41,7 @@ class FlowTextController(
     private val flow: () -> TextFlow,
     private val frame: () -> FlowFrame?,
     private val slotHeight: () -> Double,
+    private val blankPageSize: () -> Pair<Double, Double>,
     /** A mutation landed; republish the layout ([live] = a caret session is open). */
     private val onChanged: (live: Boolean) -> Unit,
     /** A coalesced burst (one undo step) was pushed: refresh chrome/autosave/stream. */
@@ -574,7 +575,8 @@ class FlowTextController(
         val doc = state.document
         val out = mutableListOf<Command>()
         repeat(need) {
-            val (w, h) = doc.blankPageSize(doc.pages.lastOrNull() ?: return out)
+            if (doc.pages.isEmpty()) return out
+            val (w, h) = blankPageSize()
             out += AddPageAuto(doc, Page(w, h), doc.pages.size).also { it.redo() }
         }
         state.relayout()

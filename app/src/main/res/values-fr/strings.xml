@@ -114,8 +114,6 @@
     <string name="template_too_large">il dépasse 1 Mio</string>
     <string name="default_for_new_notes">Par défaut pour les nouvelles notes</string>
     <string name="reset">Réinitialiser</string>
-    <string name="caption_new_page_size">Taille des nouvelles pages</string>
-    <string name="same_as_previous">Identique à la précédente</string>
     <string name="title_margins">Marges</string>
     <string name="margin_settings">Réglages des marges</string>
     <string name="expand_page">Agrandir la page</string>
