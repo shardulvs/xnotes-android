@@ -788,16 +788,19 @@ class CanvasState(
 
     // A floating bar lets the scroll run past the content's edges by as much as it covers;
     // free vertical movement lets any page edge reach the middle of the clear area.
+    // At deep zoom a margin outgrows half the screen, so free movement keeps whichever reach is longer.
     fun minScrollX(): Double =
-        if (freeVertical()) sideMargin * zoom - clearCenter().x else -insetLeft
+        if (freeVertical()) min(-insetLeft, sideMargin * zoom - clearCenter().x) else -insetLeft
     fun minScrollY(): Double =
-        if (freeVertical()) vertMargin * zoom - clearCenter().y else -insetTop
-    fun maxScrollX(): Double =
-        if (freeVertical()) max(minScrollX(), (contentW - sideMargin) * zoom - clearCenter().x)
-        else max(minScrollX(), ceil(contentW * zoom - viewportW + insetRight))
-    fun maxScrollY(): Double =
-        if (freeVertical()) max(minScrollY(), (contentH - vertMargin) * zoom - clearCenter().y)
-        else max(minScrollY(), ceil(contentH * zoom - viewportH + insetBottom))
+        if (freeVertical()) min(-insetTop, vertMargin * zoom - clearCenter().y) else -insetTop
+    fun maxScrollX(): Double {
+        val edge = ceil(contentW * zoom - viewportW + insetRight)
+        return if (freeVertical()) max(edge, (contentW - sideMargin) * zoom - clearCenter().x) else max(-insetLeft, edge)
+    }
+    fun maxScrollY(): Double {
+        val edge = ceil(contentH * zoom - viewportH + insetBottom)
+        return if (freeVertical()) max(edge, (contentH - vertMargin) * zoom - clearCenter().y) else max(-insetTop, edge)
+    }
 
     fun clampScroll() {
         if (!verticalScroll && pageRects.isNotEmpty()) {
