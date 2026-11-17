@@ -362,6 +362,11 @@
     <string name="pdf_changed_keep_theirs_detail">Your ink, shapes and text stay on the pages, but you can no longer edit or erase them.</string>
     <string name="pdf_changed_keep_ours">Keep editing in xnotes</string>
     <string name="pdf_changed_keep_ours_detail">The other app\'s changes are removed the next time xnotes saves this PDF.</string>
+    <string name="pdf_changed_some_title">Some of these PDFs were changed in another app</string>
+    <string name="pdf_changed_note_body">Another app has changed this PDF since you last edited it in xnotes. Choose which version the note is made from.</string>
+    <string name="pdf_changed_notes_body">Another app has changed them since you last edited them in xnotes. Choose which version their notes are made from.</string>
+    <string name="pdf_changed_note_ours">Keep the xnotes version</string>
+    <string name="pdf_changed_note_ours_detail">Everything stays editable, and the other app\'s changes are left out of the note.</string>
     <string name="pdf_export_saving">Saving PDF</string>
     <string name="recording_chip">Recording, %1$s</string>
     <string name="err_mic_needed">Recording needs the microphone.</string>

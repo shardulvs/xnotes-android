@@ -1214,6 +1214,25 @@ private fun EditorScreen(
                 },
             )
         }
+        // The same of a PDF being made into a note: which version the note is made from.
+        pane.pdfVersionQuestion?.let { asked ->
+            com.xnotes.ui.AlertDialog(
+                onDismissRequest = { pane.answerPdfVersion(null) },
+                title = { androidx.compose.material3.Text(stringResource(if (asked.several) R.string.pdf_changed_some_title else R.string.pdf_changed_title)) },
+                text = {
+                    androidx.compose.foundation.layout.Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
+                        androidx.compose.material3.Text(stringResource(if (asked.several) R.string.pdf_changed_notes_body else R.string.pdf_changed_note_body))
+                        PdfVersionChoice(R.string.pdf_changed_keep_theirs, R.string.pdf_changed_keep_theirs_detail) { pane.answerPdfVersion(com.xnotes.ui.PdfVersion.THEIRS) }
+                        PdfVersionChoice(R.string.pdf_changed_note_ours, R.string.pdf_changed_note_ours_detail) { pane.answerPdfVersion(com.xnotes.ui.PdfVersion.OURS) }
+                    }
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = { pane.answerPdfVersion(null) }) {
+                        androidx.compose.material3.Text(stringResource(R.string.cancel))
+                    }
+                },
+            )
+        }
     }
     if (showShareChooser) {
         val shareUri = pendingShareUri
@@ -1300,7 +1319,8 @@ private fun EditorScreen(
     editor.batchExport?.let { p -> PdfBatchExportDialog(p) { editor.cancelBatchExport() } }
     // Either pane may be importing: a PDF inserted into its note.
     val importer = editor.takeIf { it.importing } ?: editor.secondary?.takeIf { it.importing }
-    if (importer != null) {
+    // Not while it waits on which version of a changed PDF to take: that dialog stands alone.
+    if (importer != null && importer.pdfVersionQuestion == null) {
         // A batch counts files, so it gets a determinate ring; a single import has nothing to count.
         val batch = importer.importProgress
         if (batch != null) PdfImportBatchDialog(batch.done, batch.total) { importer.cancelImportInProgress() }
