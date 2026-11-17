@@ -2,14 +2,19 @@ package com.xnotes.platform
 
 import android.graphics.Bitmap
 import com.tom_roush.pdfbox.cos.COSArray
+import com.tom_roush.pdfbox.cos.COSDictionary
 import com.tom_roush.pdfbox.cos.COSInteger
+import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
+import com.tom_roush.pdfbox.pdmodel.PDResources
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.tom_roush.pdfbox.pdmodel.interactive.action.PDActionURI
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink
 import com.tom_roush.pdfbox.pdmodel.graphics.blend.BlendMode
+import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject
+import com.tom_roush.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState
 import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
 import com.tom_roush.pdfbox.util.Matrix
 import com.xnotes.core.geometry.Affine
@@ -26,6 +31,7 @@ import com.xnotes.core.pal.RasterSurface
 import com.xnotes.core.pal.Renderer
 import com.xnotes.core.pal.TextFlags
 import com.xnotes.core.pdf.GlyphPlacement
+import com.xnotes.core.pdf.InkRuns
 import com.xnotes.core.pdf.LinkFinder
 import com.xnotes.core.pdf.PdfNumbers
 import com.xnotes.core.pdf.PlacedLink
@@ -48,14 +54,14 @@ import com.xnotes.core.pal.BlendMode as PalBlend
  * source page turned by /Rotate that is an upright frame, which the stream's one `cm` ([turn])
  * takes into user space, so ink, text and images sit upright on the page as displayed.
  *
- * Only the primitives the *vectorizable* items use are meaningful here (fills, strokes, images,
- * text). Effect-heavy items (neon glow, highlighter multiply, translucent ink) are rasterized by the
- * exporter and handed back as bitmaps via [drawItemBitmap]; the glow methods here are inert, so they
- * never silently flatten anything to a crisp-but-wrong vector shape. When the export is tagged,
- * every primitive first tells the page's [PageTagger] what it is about to draw.
+ * A layer is a PDF transparency group, so translucent ink and the highlighter's multiply stay vector.
+ * Only neon, whose glow is a blur, is rasterized by the exporter and handed back via
+ * [drawItemBitmap]; the glow methods here are inert, so they never silently flatten anything to a
+ * crisp-but-wrong vector shape. When the export is tagged, every primitive first tells the page's
+ * [PageTagger] what it is about to draw.
  */
 internal class PdfBoxRenderer(
-    private val cs: PDPageContentStream,
+    pageStream: PDPageContentStream,
     private val ctx: PdfExportContext,
     private val page: PDPage,
     ox: Double,
@@ -66,7 +72,13 @@ internal class PdfBoxRenderer(
 
     private val doc: PDDocument get() = ctx.doc
 
-    private val tagger: PageTagger? = ctx.tags?.page(page, cs)
+    /** Where drawing goes: the page's stream, or the group of the innermost open layer. */
+    private var cs: PDPageContentStream = pageStream
+
+    private val tagger: PageTagger? = ctx.tags?.page(page, pageStream)
+
+    /** Open layers; their content is tagged as a whole where the group is painted, never inside it. */
+    private var layers = 0
 
     init {
         if (turn != Affine.IDENTITY) cs.transform(Matrix(turn.a.toFloat(), turn.b.toFloat(), turn.c.toFloat(), turn.d.toFloat(), turn.e.toFloat(), turn.f.toFloat()))
@@ -78,52 +90,83 @@ internal class PdfBoxRenderer(
     private var sx = s
     private var sy = -s
 
-    // The opacity a saveLayerAlpha put in force; a translucent colour inside it multiplies with it.
-    private var layerAlpha = 1.0
-    private val stack = ArrayDeque<DoubleArray>()
+    private val stack = ArrayDeque<Frame>()
     private val scaleAbs get() = (abs(sx) + abs(sy)) / 2.0
+
+    private class Frame(val ox: Double, val oy: Double, val sx: Double, val sy: Double, val layer: Layer?)
+
+    /** An open layer: its group, the stream it is painted into, and the opacity and blend it is painted with. */
+    private class Layer(val form: PDFormXObject, val outer: PDPageContentStream, val state: PDExtendedGraphicsState)
 
     private fun ux(x: Double): Float = (ox + x * sx).toFloat()
     private fun uy(y: Double): Float = (oy + y * sy).toFloat()
 
     // --- transform stack ---
     override fun save() {
-        stack.addLast(doubleArrayOf(ox, oy, sx, sy, layerAlpha))
+        stack.addLast(Frame(ox, oy, sx, sy, null))
         cs.saveGraphicsState()
     }
 
     override fun restore() {
-        tagger?.restoring(stack.size - 1)
-        cs.restoreGraphicsState()
-        stack.removeLastOrNull()?.let { ox = it[0]; oy = it[1]; sx = it[2]; sy = it[3]; layerAlpha = it[4] }
-    }
-
-    override fun saveLayerAlpha(bounds: Rect, alpha: Double) {
-        save()
-        layerAlpha *= alpha.coerceIn(0.0, 1.0)
-        cs.setGraphicsStateParameters(ctx.graphicsState(layerAlpha))
-    }
-
-    override fun saveLayerBlended(bounds: Rect, alpha: Double, blend: PalBlend) {
-        save()
-        val pdfBlend = when (blend) {
-            PalBlend.MULTIPLY -> BlendMode.MULTIPLY
-            PalBlend.SCREEN -> BlendMode.SCREEN
-            PalBlend.SRC_OVER -> null
+        val frame = stack.removeLastOrNull()
+        frame?.layer?.let { layer ->
+            cs.close()
+            cs = layer.outer
+            layers--
+            cs.setGraphicsStateParameters(layer.state)
+            cs.drawForm(layer.form)
         }
-        layerAlpha *= alpha.coerceIn(0.0, 1.0)
-        cs.setGraphicsStateParameters(ctx.graphicsState(layerAlpha, pdfBlend))
+        tagger?.restoring(stack.size)
+        cs.restoreGraphicsState()
+        frame?.let { ox = it.ox; oy = it.oy; sx = it.sx; sy = it.sy }
+    }
+
+    override fun saveLayerAlpha(bounds: Rect, alpha: Double) = saveLayer(bounds, alpha, null)
+
+    override fun saveLayerBlended(bounds: Rect, alpha: Double, blend: PalBlend) = saveLayer(bounds, alpha, when (blend) {
+        PalBlend.MULTIPLY -> BlendMode.MULTIPLY
+        PalBlend.SCREEN -> BlendMode.SCREEN
+        PalBlend.SRC_OVER -> null
+    })
+
+    /**
+     * Open a layer as an isolated transparency group, drawn into until the matching [restore] paints
+     * it at [alpha] with [blend]: the whole layer composites once, as on screen, so overlapping
+     * shapes inside it never compound.
+     */
+    private fun saveLayer(bounds: Rect, alpha: Double, blend: BlendMode?) {
+        tag()
+        cs.saveGraphicsState()
+        val form = PDFormXObject(doc)
+        form.resources = PDResources()
+        form.bBox = userBox(bounds.outset(LAYER_MARGIN_PX))
+        form.cosObject.setItem(COSName.GROUP, COSDictionary().apply {
+            setItem(COSName.S, COSName.TRANSPARENCY)
+            setBoolean(COSName.I, true)
+        })
+        stack.addLast(Frame(ox, oy, sx, sy, Layer(form, cs, ctx.graphicsState(alpha, blend))))
+        cs = PDPageContentStream(doc, form, form.contentStream.createOutputStream(COSName.FLATE_DECODE))
+        layers++
+    }
+
+    /** [rect] (content space) in the space this renderer writes in, before [turn]. */
+    private fun userBox(rect: Rect): PDRectangle {
+        val x0 = ux(rect.left)
+        val x1 = ux(rect.right)
+        val y0 = uy(rect.top)
+        val y1 = uy(rect.bottom)
+        return PDRectangle(minOf(x0, x1), minOf(y0, y1), abs(x1 - x0), abs(y1 - y0))
     }
 
     /**
      * Run [paint] at [color]'s own opacity. PDF keeps opacity in the graphics state rather than
-     * the colour, and a state set later replaces it instead of multiplying, so a translucent
-     * colour gets a state of its own, scoped by q/Q so the layer's opacity is back afterwards.
+     * the colour, so a translucent colour gets a state of its own, scoped by q/Q. Inside a layer
+     * the group carries the layer's opacity, so this one is the colour's alone.
      */
     private inline fun translucent(color: Rgba, paint: () -> Unit) {
         if (color.a >= 255) return paint()
         cs.saveGraphicsState()
-        cs.setGraphicsStateParameters(ctx.graphicsState(layerAlpha * color.a / 255.0))
+        cs.setGraphicsStateParameters(ctx.graphicsState(color.a / 255.0))
         paint()
         cs.restoreGraphicsState()
     }
@@ -177,6 +220,15 @@ internal class PdfBoxRenderer(
 
     override fun fillCircle(center: Pt, radius: Double, color: Rgba) =
         fillEllipse(center, radius, radius, color)
+
+    // Ink as round-capped strokes: the swept disc it is on screen, at a fraction of the bytes.
+    override fun fillDiskRibbon(centers: FloatArray, radii: FloatArray, from: Int, count: Int, color: Rgba) {
+        val sb = StringBuilder(count * 24 + 64)
+        val rgb = doubleArrayOf(color.r / 255.0, color.g / 255.0, color.b / 255.0)
+        if (!InkRuns.append(sb, centers, radii, from, count, ox, oy, sx, sy, scaleAbs, rgb)) return
+        tag()
+        translucent(color) { cs.appendRawCommands(sb.toString()) }
+    }
 
     override fun fillEllipse(center: Pt, rx: Double, ry: Double, color: Rgba) {
         if (rx <= 0.0 || ry <= 0.0) return
@@ -254,7 +306,7 @@ internal class PdfBoxRenderer(
         val bmp = (raster as? AndroidRasterSurface)?.bitmap ?: return
         if (bmp.isRecycled) return
         tag()
-        placeBitmap(bmp, dest, multiply = false)
+        placeBitmap(bmp, dest)
     }
 
     // Inserted images embed as XObjects: decode the source (capped for file size/memory), apply the
@@ -293,7 +345,7 @@ internal class PdfBoxRenderer(
             bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
         }
         tag()
-        if (angle == 0.0) placeBitmap(bmp, dest, multiply = false) else placeTurnedBitmap(bmp, dest, angle)
+        if (angle == 0.0) placeBitmap(bmp, dest) else placeTurnedBitmap(bmp, dest, angle)
     }
 
     /**
@@ -320,14 +372,10 @@ internal class PdfBoxRenderer(
         cs.drawImage(img, matrix)
     }
 
-    /**
-     * Place a pre-rendered item bitmap (an effect/text item the exporter rasterized) at its content
-     * rect. [multiply] composites it with the page beneath via the Multiply blend mode — used for the
-     * highlighter, so it tints the PDF/ink underneath instead of painting a flat translucent block.
-     */
-    fun drawItemBitmap(bmp: Bitmap, dest: Rect, multiply: Boolean) {
+    /** Place a pre-rendered item bitmap (an effect item the exporter rasterized) at its content rect. */
+    fun drawItemBitmap(bmp: Bitmap, dest: Rect) {
         tag()
-        placeBitmap(bmp, dest, multiply)
+        placeBitmap(bmp, dest)
     }
 
     /**
@@ -426,7 +474,7 @@ internal class PdfBoxRenderer(
     }
 
     private fun tag(kind: PageTagger.Kind = PageTagger.Kind.GRAPHIC, latex: String? = null) {
-        tagger?.draw(kind, stack.size, latex)
+        if (layers == 0) tagger?.draw(kind, stack.size, latex)
     }
 
     // A bullet is a glyph of its own, so selecting a list copies "•" where the dot is.
@@ -580,21 +628,14 @@ internal class PdfBoxRenderer(
         cs.endText()
     }
 
-    private fun placeBitmap(bmp: Bitmap, dest: Rect, multiply: Boolean) {
+    private fun placeBitmap(bmp: Bitmap, dest: Rect) {
         if (bmp.isRecycled || dest.w <= 0.0 || dest.h <= 0.0) return
         val img = LosslessFactory.createFromImage(doc, bmp)
         val llx = ux(dest.left)
         val lly = uy(dest.bottom) // largest content-y maps to the smallest user-y → lower-left corner
         val w = (dest.w * abs(sx)).toFloat()
         val h = (dest.h * abs(sy)).toFloat()
-        if (multiply) {
-            cs.saveGraphicsState()
-            cs.setGraphicsStateParameters(ctx.graphicsState(layerAlpha, BlendMode.MULTIPLY))
-            cs.drawImage(img, llx, lly, w, h)
-            cs.restoreGraphicsState()
-        } else {
-            cs.drawImage(img, llx, lly, w, h)
-        }
+        cs.drawImage(img, llx, lly, w, h)
     }
 
     // --- helpers ---
@@ -666,5 +707,8 @@ internal class PdfBoxRenderer(
 
         // Vector images rasterize at 4 px per PDF point (288 dpi), a print-quality density.
         private const val VECTOR_EXPORT_SCALE = 4.0
+
+        // Room round a layer's group beyond the bounds it was opened with, for round caps reaching past them.
+        private const val LAYER_MARGIN_PX = 4.0
     }
 }

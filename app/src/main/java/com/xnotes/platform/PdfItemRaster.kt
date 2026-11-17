@@ -14,9 +14,9 @@ import kotlin.math.ceil
 /**
  * The part of a PDF export that cannot stay vector.
  *
- * [PdfBoxRenderer] turns plain ink, shapes, images and text into real PDF objects, but a few looks
- * have no vector equivalent (a neon glow, the highlighter's multiply blend, translucent ink), so
- * those are drawn into a bitmap cropped to their own box and dropped back in at the right z-order.
+ * [PdfBoxRenderer] turns ink, shapes, images and text into real PDF objects, but a neon glow is a
+ * blur with no vector equivalent, so neon items are drawn into a bitmap cropped to their own box and
+ * dropped back in at the right z-order.
  *
  * Shared by the paged [PdfExporter] and [CanvasPdfExporter] rather than written twice, so the two can
  * never disagree about which items those are: the same stroke vectorized on one surface and
@@ -30,13 +30,12 @@ internal object PdfItemRaster {
     /** Supersample factor for rasterized effect items (×150 dpi content ⇒ ~300 dpi). */
     private const val ITEM_SCALE = 2.0
 
-    class Raster(val bmp: Bitmap, val rect: Rect, val multiply: Boolean)
+    class Raster(val bmp: Bitmap, val rect: Rect)
 
     /** Items whose look can't be reproduced as plain vector and so are rasterized in place. */
     fun needsRaster(item: CanvasItem): Boolean = when (item) {
-        is Stroke -> item.tool == Tool.HIGHLIGHTER ||
-            (item.config.neon && item.tool != Tool.HIGHLIGHTER) ||
-            item.renderColor.a < 255
+        // Translucent ink and the highlighter are transparency groups in the PDF, so only the glow stays a picture.
+        is Stroke -> item.config.neon && item.tool != Tool.HIGHLIGHTER
         // A shape's fill and outline are single paths, so PDF transparency draws them as on screen.
         is ShapeItem -> item.neon
         is ConnectorItem -> item.neon
@@ -45,9 +44,8 @@ internal object PdfItemRaster {
 
     /** Render a single item, cropped to its [cover]-clamped paint bounds, into a transparent bitmap. */
     fun item(item: CanvasItem, cover: Rect): Raster? {
-        val multiply = item is Stroke && item.tool == Tool.HIGHLIGHTER
         // A shape's label stays out of its picture: the exporter writes it on top as real text.
-        return region(item.paintBounds(), cover, multiply) { r, _ ->
+        return region(item.paintBounds(), cover) { r, _ ->
             when (item) {
                 is ShapeItem -> item.paintBody(r)
                 is ConnectorItem -> item.paintBody(r)
@@ -61,7 +59,7 @@ internal object PdfItemRaster {
      * bitmap. [paint] is handed the crop it actually got, which the flow-text layer needs to lay out
      * the right slice. Null when the crop is empty or falls outside the page entirely.
      */
-    fun region(want: Rect, cover: Rect, multiply: Boolean, paint: (Renderer, Rect) -> Unit): Raster? {
+    fun region(want: Rect, cover: Rect, paint: (Renderer, Rect) -> Unit): Raster? {
         val left = want.left.coerceAtLeast(cover.left)
         val top = want.top.coerceAtLeast(cover.top)
         val right = want.right.coerceAtMost(cover.right)
@@ -77,7 +75,7 @@ internal object PdfItemRaster {
         canvas.translate(-left.toFloat(), -top.toFloat())
         val crop = Rect(left, top, cw, ch)
         paint(AndroidRenderer(canvas), crop)
-        return Raster(bmp, crop, multiply)
+        return Raster(bmp, crop)
     }
 
     /**
