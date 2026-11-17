@@ -108,6 +108,7 @@ internal class EntryActions(
     val share: (BrowseEntry) -> Unit,
     val saveCopy: (BrowseEntry) -> Unit,
     val exportPdf: (BrowseEntry) -> Unit,
+    val convert: (BrowseEntry) -> Unit,
     val preview: (BrowseEntry) -> Unit,
 )
 
@@ -301,7 +302,14 @@ private fun EntryMenuButton(b: ExplorerBody, e: BrowseEntry, tint: Color, size: 
     }
 }
 
-/** An entry's overflow menu, with the file-only block for notes and canvases and the pin toggle for folders. */
+/** What converting [e] is called: a note becomes a PDF and a PDF a note, and nothing else converts. */
+internal fun convertLabel(e: BrowseEntry): Int? = if (e.isDir) null else when (DocumentKind.ofName(e.name)) {
+    DocumentKind.NOTE -> R.string.convert_to_pdf
+    DocumentKind.PDF -> R.string.convert_to_note
+    else -> null
+}
+
+/** An entry's overflow menu, with the file-only block for notes, PDFs and canvases and the pin toggle for folders. */
 @Composable
 internal fun EntryMenuFor(b: ExplorerBody, e: BrowseEntry, expanded: Boolean, onDismiss: () -> Unit) {
     val m = b.host.menu
@@ -311,6 +319,8 @@ internal fun EntryMenuFor(b: ExplorerBody, e: BrowseEntry, expanded: Boolean, on
         onShare = if (e.isDir) null else ({ m.share(e) }),
         onSaveCopy = { m.saveCopy(e) },
         onExportPdf = { m.exportPdf(e) },
+        convertLabel = convertLabel(e),
+        onConvert = { m.convert(e) },
         onColor = { c -> m.color(e, c) },
         pinned = e.isDir && b.host.isPinned(e),
         onTogglePin = if (e.isDir) ({ m.togglePin(e) }) else null,

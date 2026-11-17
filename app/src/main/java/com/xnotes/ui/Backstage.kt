@@ -1289,6 +1289,7 @@ private fun ExplorerSection(
                 share = { callsNow.value.shareFile(it.documentUri) },
                 saveCopy = { callsNow.value.saveCopyFile(it.documentUri) },
                 exportPdf = { callsNow.value.exportFilePdf(it.documentUri) },
+                convert = { e -> editor.convertDocument(e.documentUri) { refreshKey++ } },
                 preview = { previewing = it },
             ),
         )
@@ -1816,6 +1817,13 @@ private fun ExplorerSection(
                                 if (one != null && !one.isDir) {
                                     DropdownMenuItem(text = { Text(stringResource(R.string.save_copy_ellipsis)) }, onClick = { moreOpen = false; selection.clear(); calls.saveCopyFile(one.documentUri) })
                                     DropdownMenuItem(text = { Text(stringResource(R.string.export_pdf)) }, onClick = { moreOpen = false; selection.clear(); calls.exportFilePdf(one.documentUri) })
+                                    convertLabel(one)?.let { label ->
+                                        DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = {
+                                            moreOpen = false
+                                            selection.clear()
+                                            editor.convertDocument(one.documentUri) { refreshKey++ }
+                                        })
+                                    }
                                 }
                                 // Notes and PDFs merge: a canvas has no pages, a folder no one order.
                                 val notes = selection.filter { !it.isDir && com.xnotes.core.util.DocumentKind.ofName(it.name).let { k -> k == com.xnotes.core.util.DocumentKind.NOTE || k == com.xnotes.core.util.DocumentKind.PDF } }
@@ -2185,6 +2193,8 @@ internal fun EntryMenu(
     onShare: (() -> Unit)? = null,
     onSaveCopy: (() -> Unit)? = null,
     onExportPdf: (() -> Unit)? = null,
+    convertLabel: Int? = null,
+    onConvert: (() -> Unit)? = null,
     onColor: ((Rgba?) -> Unit)? = null,
     pinned: Boolean = false,
     onTogglePin: (() -> Unit)? = null,
@@ -2223,6 +2233,7 @@ internal fun EntryMenu(
                 DropdownMenuItem(text = { Text(stringResource(R.string.share)) }, onClick = { onDismiss(); onShare() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.save_copy_ellipsis)) }, onClick = { onDismiss(); onSaveCopy?.invoke() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.export_pdf)) }, onClick = { onDismiss(); onExportPdf?.invoke() })
+                if (convertLabel != null) DropdownMenuItem(text = { Text(stringResource(convertLabel)) }, onClick = { onDismiss(); onConvert?.invoke() })
             }
         }
     }

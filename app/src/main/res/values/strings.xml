@@ -529,6 +529,11 @@
     <string name="folder_empty">This folder has no notes.</string>
     <string name="import_title">Import</string>
     <string name="keep_as_pdf">Keep as PDF</string>
+    <string name="convert_to_pdf">Convert to PDF</string>
+    <string name="convert_to_note">Convert to note</string>
+    <string name="converting_to_pdf">Converting to PDF…</string>
+    <string name="converting_to_note">Converting to note…</string>
+    <string name="err_convert">Couldn’t convert that file.</string>
     <string name="make_a_note">Make a note</string>
     <string name="folder_name">Folder name</string>
     <string name="delete_confirm_title">Delete?</string>

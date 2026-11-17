@@ -4314,6 +4314,19 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
     }
 
+    /** A converted file shows the first page it showed before: its cached tile goes with it to the new file. */
+    private fun carryTileAcross(oldUri: String, oldName: String, oldModified: Long, newUri: String, newName: String) {
+        val generation = thumbnailGeneration
+        val newModified = stampOf(newUri)?.modified ?: return
+        val old = thumbKey(oldUri, oldName, oldModified)
+        val new = thumbKey(newUri, newName, newModified)
+        for ((from, to) in listOf(old to new, pageThumbKey(old) to pageThumbKey(new))) {
+            val bmp = runCatching { thumbCache.load(from, generation) }.getOrNull() ?: continue
+            thumbCache.store(to, bmp, generation)
+            publishThumbnail(to, bmp, generation)
+        }
+    }
+
     /** The key a document's whole-page thumbnail is cached under, beside its square tile's, [tile]. */
     private fun pageThumbKey(tile: String): String = "$tile#page"
 
@@ -5022,6 +5035,114 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** Aborts an in-flight import (the dialog's Cancel) so its stream-copy stops at the next buffer. */
     fun cancelImportInProgress() { importCancelled.set(true) }
+
+    /**
+     * Convert the stored file at [uri] in place: a note into an xnotes PDF, or a PDF into a note.
+     * The new file takes the old one's place in its folder under the other extension, and all that
+     * is remembered about the old one goes with it. Runs behind the progress dialog, which can
+     * cancel it until the new file is written; [onDone] gets the new file's uri, or null.
+     */
+    fun convertDocument(uri: String, onDone: (String?) -> Unit = {}) {
+        val root = browseRoot ?: return onDone(null)
+        autosaveScope.launch {
+            importCancelled.set(false)
+            val name = withContext(Dispatchers.IO) { queryDisplayName(android.net.Uri.parse(uri)) }.orEmpty()
+            val toPdf = when (DocumentKind.ofName(name)) {
+                DocumentKind.NOTE -> true
+                DocumentKind.PDF -> false
+                else -> return@launch onDone(null)
+            }
+            noteWriteJob?.join() // a save of this very file may still be going out
+            busyWith = if (toPdf) R.string.converting_to_pdf else R.string.converting_to_note
+            importing = true
+            val made = try {
+                withContext(Dispatchers.IO) { runCatching { convertFile(root, uri, name, toPdf) }.getOrNull() }
+            } finally {
+                importing = false
+                busyWith = null
+            }
+            if (made == null && !importCancelled.get()) message = appContext.getString(R.string.err_convert)
+            onDone(made)
+        }
+    }
+
+    /** [convertDocument]'s work. IO. */
+    private fun convertFile(root: String, uri: String, name: String, toPdf: Boolean): String? {
+        val parentId = parentDocIdOf(uri) ?: return null
+        val kind = if (toPdf) DocumentKind.PDF else DocumentKind.NOTE
+        val newName = uniqueDocumentName(root, parentId, DocumentKind.stripSuffix(name), kind)
+        val made = java.io.File.createTempFile("convert", kind.suffix, saveTmpDir)
+        var newUri: String? = null
+        try {
+            // The new file's bytes first, in private storage: nothing in the folder changes until they are whole.
+            val whole = if (toPdf) {
+                val note = java.io.File.createTempFile("note", ".xnote", saveTmpDir)
+                try {
+                    java.io.FileOutputStream(note).use { copyFileTo(uri, it) }
+                    exportNoteFile(note, newName, made, isCancelled = { importCancelled.get() })
+                } finally {
+                    note.delete()
+                }
+            } else {
+                com.xnotes.platform.PdfExports.hold(uri) // no export of it while its note is read out
+                com.xnotes.platform.PdfExports.locked(uri) { noteOfPdf(uri, made) }
+            }
+            if (!whole || importCancelled.get()) return null
+            val oldModified = stampOf(uri)?.modified ?: -1L
+            newUri = createNoteFile(root, parentId, newName, if (toPdf) PDF_MIME else "application/octet-stream") { out ->
+                java.io.FileInputStream(made).use { it.copyTo(out, copyBuffer) }
+            } ?: return null
+            // All that is remembered about the file goes to the new one, and then the old one goes.
+            runCatching { moveItemColor(root, parentId, name, newName) }
+            carryTileAcross(uri, name, oldModified, newUri, newName)
+            if (state.document.path == uri) {
+                state.document.path = newUri
+                state.document.displayName = newName
+                if (autosaveUri == uri) autosaveUri = newUri
+            }
+            onDocumentMoved(uri, newUri, newName)
+            com.xnotes.platform.PdfExports.fresh(newUri) // a new PDF's pages are level with its note; a note has none to draw
+            runCatching { android.provider.DocumentsContract.deleteDocument(appContext.contentResolver, android.net.Uri.parse(uri)) }
+            return newUri
+        } finally {
+            made.delete()
+            if (!toPdf) {
+                com.xnotes.platform.PdfExports.release(uri)
+                newUri?.let { com.xnotes.platform.PdfExports.release(it) }
+            }
+        }
+    }
+
+    /**
+     * Write the note the PDF at [uri] stands for into [to]: the one it carries, or for a plain PDF
+     * a new one of its pages, as Make a note makes. False when the PDF cannot be read.
+     */
+    private fun noteOfPdf(uri: String, to: java.io.File): Boolean {
+        val staged = appContext.contentResolver.openInputStream(android.net.Uri.parse(uri))?.let { stageImport(it) } ?: return false
+        try {
+            noteCarriedBy(staged)?.let { note ->
+                try {
+                    note.copyTo(to, overwrite = true)
+                } finally {
+                    note.delete()
+                }
+                return true
+            }
+            val source = com.xnotes.platform.PdfSource.open(staged)
+            try {
+                lastImportError = source.openError
+                if (source.pageCount == 0) return false
+                val doc = stampNewNoteDefaults(com.xnotes.platform.PdfImporter.import(source, state.document.dpi))
+                doc.created = createdStore.get(documentKey(uri)) ?: System.currentTimeMillis()
+                java.io.FileOutputStream(to).use { codec.write(doc, it) { importCancelled.get() } }
+                return true
+            } finally {
+                source.close()
+            }
+        } finally {
+            staged.delete()
+        }
+    }
 
     /** Renames a document (file or folder) to [newName]; follows the open note. IO, call off-thread. */
     fun renameDocument(docUri: String, newName: String): Boolean {
