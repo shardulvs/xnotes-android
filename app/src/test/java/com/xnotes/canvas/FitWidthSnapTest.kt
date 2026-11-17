@@ -216,6 +216,21 @@ class FitWidthSnapTest {
         assertTrue(st.zoom < wide)
     }
 
+    @Test fun resizeUnderAZoomFloorKeepsTheLeftEdgeUnlessFreeVertical() {
+        for (free in listOf(false, true)) {
+            val st = state(viewportW = 1000)
+            st.insetLeft = 80.0
+            st.freeMovement = free
+            st.minZoom = st.fitWidthZoom() * 1.5 // the page stays wider than the screen at "fit width"
+            st.fitWidth()
+            st.viewportW = 900
+            st.relayout()
+            st.reflowFitWidthForResize()
+            if (free) assertEquals(st.clearCenter().x, st.contentToViewport(Pt(st.contentW / 2.0, 0.0)).x, 1e-6)
+            else assertEquals(-st.insetLeft, st.scrollX, 1e-9)
+        }
+    }
+
     @Test fun resizeRefitsEvenWhenZoomLocked() {
         val st = state(viewportW = 1000)
         st.fitWidth()

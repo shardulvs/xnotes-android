@@ -1168,7 +1168,7 @@ class CanvasState(
         val center = clearCenter()
         val centerContentY = viewportToContent(center).y
         zoom = fitWidthZoom()
-        scrollX = if (verticalScroll) (contentW / 2.0) * zoom - center.x else rowTargetScroll(currentRow).x
+        scrollX = if (freeVertical()) (contentW / 2.0) * zoom - center.x else minScrollX()
         scrollY = centerContentY * zoom - center.y
         invalidateCachesForZoom()
         clampScroll()
