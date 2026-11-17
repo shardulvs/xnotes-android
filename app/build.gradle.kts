@@ -138,6 +138,12 @@ dependencies {
     implementation(libs.bundles.commonmark)
     debugImplementation(libs.androidx.ui.tooling)
 
+    // The platform instrumentation runner provides these libraries on the device.
+    androidTestCompileOnly(files(
+        android.sdkDirectory.resolve("platforms/android-36/optional/android.test.runner.jar"),
+        android.sdkDirectory.resolve("platforms/android-36/optional/android.test.base.jar"),
+    ))
+
     testImplementation(libs.junit)
     testImplementation(libs.json)
 }

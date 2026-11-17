@@ -1,11 +1,18 @@
 package com.xnotes.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -14,9 +21,15 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -72,6 +85,17 @@ internal val LocalMenuOffset = compositionLocalOf { DpOffset.Zero }
 /** How far a floating bar sits in from the canvas edge. */
 private val FLOAT_MARGIN = 8.dp
 
+/** Optional document navigation slot supplied by the workspace, without coupling toolbar tools to tabs. */
+internal class ToolbarTabExtension(
+    val expanded: Boolean,
+    val onToggle: () -> Unit,
+    val content: @Composable () -> Unit,
+    val showToggle: Boolean = true,
+)
+
+internal val LocalToolbarTabExtension = compositionLocalOf<ToolbarTabExtension?> { null }
+internal val LocalGroupedToolbarSurface = compositionLocalOf { false }
+
 /** What a floating bar covers of the canvas, for overlays that must stay out from under it. */
 internal val LocalToolbarCover = compositionLocalOf { PaddingValues(0.dp) }
 
@@ -84,6 +108,7 @@ internal val LocalToolbarCover = compositionLocalOf { PaddingValues(0.dp) }
 internal fun ColumnScope.ToolbarAround(
     bar: @Composable () -> Unit,
     onCover: (Double, Double, Double, Double) -> Unit,
+    tabExtension: ToolbarTabExtension? = null,
     content: @Composable (floatingBar: @Composable BoxScope.() -> Unit) -> Unit,
 ) {
     val look = LocalToolbarLook.current
@@ -119,7 +144,37 @@ internal fun ColumnScope.ToolbarAround(
         ToolbarPosition.RIGHT -> PaddingValues.Absolute(right = depth) to AbsoluteAlignment.CenterRight
     }
     CompositionLocalProvider(LocalToolbarCover provides cover) {
-        Box(rest) { content { Box(Modifier.align(edge).padding(FLOAT_MARGIN)) { bar() } } }
+        BoxWithConstraints(rest) {
+            val availableTabWidth = (maxWidth - FLOAT_MARGIN * 2).coerceAtLeast(120.dp)
+            content {
+                if (position == ToolbarPosition.TOP && tabExtension != null) {
+                    val shape = MaterialTheme.shapes.extraLarge
+                    val palette = LocalPalette.current
+                    Box(Modifier.align(edge).padding(FLOAT_MARGIN)) {
+                        Column(
+                            Modifier.shadow(6.dp, shape).clip(shape)
+                                .background(palette.panel.toComposeColor())
+                                .border(1.dp, palette.border.toComposeColor(), shape),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            AnimatedVisibility(
+                                visible = tabExtension.expanded,
+                                enter = expandVertically(animationSpec = tween(200)) + fadeIn(tween(150)),
+                                exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(tween(120)),
+                            ) {
+                                Box(Modifier.width(availableTabWidth)) { tabExtension.content() }
+                            }
+                            CompositionLocalProvider(
+                                LocalToolbarTabExtension provides tabExtension,
+                                LocalGroupedToolbarSurface provides true,
+                            ) { bar() }
+                        }
+                    }
+                } else {
+                    Box(Modifier.align(edge).padding(FLOAT_MARGIN)) { bar() }
+                }
+            }
+        }
     }
 }
 
@@ -138,9 +193,13 @@ internal fun ToolbarFrame(
     val bar = barMetrics(look.size).copy(vertical = look.position.vertical)
     val glide = remember { ToolGlide() }
     val palette = LocalPalette.current
+    val tabExtension = LocalToolbarTabExtension.current
+    val groupedSurface = LocalGroupedToolbarSurface.current
     val shape = MaterialTheme.shapes.extraLarge
-    // Docked, the strip fills its edge; floating, a pill only as long as its tools, up to that edge.
-    val surface = if (!look.floating) {
+    // The grouped floating host paints a single shared surface around tabs and tools.
+    val surface = if (groupedSurface) {
+        Modifier
+    } else if (!look.floating) {
         Modifier.background(palette.panel.toComposeColor())
     } else {
         Modifier
@@ -193,6 +252,15 @@ internal fun ToolbarFrame(
                     verticalAlignment = Alignment.CenterVertically,
                 ) { content() }
                 trailing?.invoke()
+                if (tabExtension?.showToggle == true) {
+                    IconButton(onClick = tabExtension.onToggle, modifier = Modifier.size(bar.button)) {
+                        Icon(
+                            if (tabExtension.expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                            contentDescription = if (tabExtension.expanded) "Hide document tabs" else "Show document tabs",
+                            tint = palette.text.toComposeColor(),
+                        )
+                    }
+                }
             }
         }
     }
