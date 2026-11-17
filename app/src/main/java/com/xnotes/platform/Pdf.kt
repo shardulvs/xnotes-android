@@ -46,6 +46,8 @@ import com.xnotes.core.text.FlowPainter
 import com.xnotes.core.text.TextFlow
 import java.io.BufferedOutputStream
 import java.io.File
+import java.io.FileOutputStream
+import java.io.InterruptedIOException
 import java.io.OutputStream
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -158,6 +160,8 @@ object PdfExporter {
      * is polled per page so a long export can show a dialog and abort before [out] is written. A
      * plain note is written tagged, titled [title]; a PDF-backed one keeps its source's own make-up.
      * The source's bookmarks are kept, and [headingBookmarks] adds one per heading of the flow.
+     * [note] is attached to make it an xnotes PDF, its marker left open for [PdfNote.seal] once the
+     * bytes are in a file ([exportWithNote]).
      */
     fun export(
         context: Context,
@@ -171,6 +175,7 @@ object PdfExporter {
         flow: FlowExport = FlowExport.NONE,
         title: String = doc.title,
         headingBookmarks: Boolean = true,
+        note: PdfNote? = null,
     ) {
         // Text fonts read PdfBox's glyph list, which only loads once the resource loader is set up.
         PDFBoxResourceLoader.init(context.applicationContext)
@@ -183,17 +188,85 @@ object PdfExporter {
         val srcDoc = if (file != null) loadSource(file, mem) else null
         // A PDF background we can't parse with PdfBox: keep the working framework rasterizer.
         if (file != null && srcDoc == null) {
-            exportRasterized(doc, source, sink, paperColor, paintRuling, onProgress, isCancelled, flow)
+            if (note == null) {
+                exportRasterized(doc, source, sink, paperColor, paintRuling, onProgress, isCancelled, flow)
+            } else {
+                rasterizedWithNote(context, doc, source, sink, paperColor, paintRuling, onProgress, isCancelled, flow, mem, note)
+            }
             sink.flush()
             return
         }
         val tags = if (file == null) tagSetup(context, title) else null
         try {
-            exportVector(doc, srcDoc, sink, paperColor, paintRuling, onProgress, isCancelled, mem, flow, tags, headingBookmarks)
+            exportVector(doc, srcDoc, sink, paperColor, paintRuling, onProgress, isCancelled, mem, flow, tags, headingBookmarks, note)
         } finally {
             srcDoc?.runCatching { close() }
         }
         sink.flush()
+    }
+
+    /**
+     * [export] as an xnotes PDF: the pages in [to] with [note] inside and the marker stamped. False
+     * when [isCancelled] stopped it. [to] is deleted unless it holds the whole file.
+     */
+    fun exportWithNote(
+        context: Context,
+        doc: Document,
+        source: PdfSource?,
+        to: File,
+        note: PdfNote,
+        paperColor: (Page) -> Rgba,
+        paintRuling: (Page, Renderer) -> Unit = { _, _ -> },
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+        isCancelled: () -> Boolean = { false },
+        flow: FlowExport = FlowExport.NONE,
+        title: String = doc.title,
+        headingBookmarks: Boolean = true,
+    ): Boolean {
+        var whole = false
+        try {
+            FileOutputStream(to).use { file ->
+                // The save is one PdfBox call, and only a stream that throws stops it part way.
+                val out = CancellableOutputStream(file, isCancelled)
+                export(context, doc, source, out, paperColor, paintRuling, onProgress, isCancelled, flow, title, headingBookmarks, note)
+            }
+            if (isCancelled()) return false
+            note.seal(to)
+            whole = true
+            return true
+        } catch (e: InterruptedIOException) {
+            if (isCancelled()) return false
+            throw e
+        } finally {
+            if (!whole) to.delete()
+        }
+    }
+
+    /** [exportRasterized] with [note] attached: PdfBox reads the framework's PDF back and writes it out with the note. */
+    private fun rasterizedWithNote(
+        context: Context,
+        doc: Document,
+        source: PdfSource?,
+        out: OutputStream,
+        paperColor: (Page) -> Rgba,
+        paintRuling: (Page, Renderer) -> Unit,
+        onProgress: (Int, Int) -> Unit,
+        isCancelled: () -> Boolean,
+        flow: FlowExport,
+        mem: MemoryUsageSetting,
+        note: PdfNote,
+    ) {
+        val pages = File.createTempFile("raster", ".pdf", context.cacheDir)
+        try {
+            FileOutputStream(pages).use { exportRasterized(doc, source, it, paperColor, paintRuling, onProgress, isCancelled, flow) }
+            if (isCancelled()) return
+            PDDocument.load(pages, mem).use { pdf ->
+                note.attachTo(pdf)
+                pdf.save(out)
+            }
+        } finally {
+            pages.delete()
+        }
     }
 
     /** How a tagged export of [title] reads to a screen reader, in the device's language. */
@@ -226,6 +299,7 @@ object PdfExporter {
         flow: FlowExport,
         tags: PdfTags.Setup?,
         headingBookmarks: Boolean,
+        note: PdfNote?,
     ) {
         val s = 72.0 / doc.dpi
         val total = doc.pages.size
@@ -264,10 +338,11 @@ object PdfExporter {
             ctx.finish()
             PdfBands.moveDestinations(srcDoc, roomPages(doc, srcDoc, frames))
             PdfBookmarks.write(srcDoc, emptyList(), headingAnchors(doc, flow, ctx, frames, headingBookmarks))
+            note?.attachTo(srcDoc)
             // Page work is near-instant on this path, so all the time is in writing the PDF — one
             // opaque PdfBox call. Report it as byte progress (output ≈ the source PDF's size) so the
             // dialog keeps moving instead of freezing at "done". total = -1 marks the writing phase.
-            val est = doc.pdfFile?.length() ?: 0L
+            val est = (doc.pdfFile?.length() ?: 0L) + (note?.file?.length() ?: 0L)
             if (est > 0) {
                 onProgress(0, -1) // enter the writing phase at 0% right away (no spinner flash)
                 srcDoc.save(ProgressOutputStream(out, est) { p -> onProgress(p, -1) })
@@ -308,6 +383,7 @@ object PdfExporter {
             PdfBookmarks.write(outDoc, sources, emptyList())
             PdfBands.moveDestinations(outDoc, roomPages(doc, outDoc, frames))
             PdfBookmarks.write(outDoc, emptyList(), headingAnchors(doc, flow, ctx, frames, headingBookmarks))
+            note?.attachTo(outDoc)
             outDoc.save(out)
         } finally {
             outDoc.runCatching { close() }
