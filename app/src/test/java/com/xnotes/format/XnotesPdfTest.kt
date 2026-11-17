@@ -13,6 +13,7 @@ import com.xnotes.core.tools.ToolDefaults
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -111,9 +112,10 @@ class XnotesPdfTest {
         assertNull(appendTail(pdf, note("x")))
     }
 
-    @Test fun whatIsNotAPdfIsPlain() {
-        for (bytes in listOf(ByteArray(0), "hello".toByteArray(), ByteArray(9000) { 7 }, "startxref\n99999\n%%EOF\n".toByteArray())) {
-            assertTrue(temp(bytes).rw { XnotesPdf.inspect(it) } is XnotesPdf.Inspection.Plain)
+    @Test fun whatDoesNotEndLikeAPdfIsUnreadable() {
+        val withOurWords = "junk\n%xnotes-tail\nmore junk".toByteArray() + ByteArray(5000) { 7 }
+        for (bytes in listOf(ByteArray(0), "hello".toByteArray(), ByteArray(9000) { 7 }, "startxref\n99999\n%%EOF\n".toByteArray(), withOurWords)) {
+            assertTrue(temp(bytes).rw { XnotesPdf.inspect(it) } is XnotesPdf.Inspection.Unreadable)
         }
     }
 
@@ -205,7 +207,7 @@ class XnotesPdfTest {
         // The same file with a byte gone from its middle: the marker's length no longer fits it.
         val damaged = temp(stamped.copyOfRange(0, 40) + stamped.copyOfRange(41, stamped.size))
 
-        assertTrue(damaged.rw { XnotesPdf.inspect(it) } is XnotesPdf.Inspection.Plain)
+        assertTrue(damaged.rw { XnotesPdf.inspect(it) } is XnotesPdf.Inspection.Unreadable)
     }
 
     // --- tails ---
@@ -306,6 +308,124 @@ class XnotesPdfTest {
         assertArrayEquals(note, back)
     }
 
+    // --- a write that stopped part way ---
+
+    private fun torn(pdf: File): XnotesPdf.Inspection.Torn = pdf.rw { XnotesPdf.inspect(it) } as XnotesPdf.Inspection.Torn
+
+    private fun noteUnder(pdf: File, found: XnotesPdf.Inspection.Torn): ByteArray =
+        pdf.rw { ch -> readAll(XnotesPdf.embedded(FileWindow(ch, 0L, found.ownLength), found.own)!!) }
+
+    @Test fun aTailCutShortAnywhereLeavesTheNoteUnderItReadable() {
+        val older = note("exported")
+        val whole = temp(exported(older))
+        stamp(whole)
+        val export = whole.length()
+        val tail = appendTail(whole, note("never finished", 9000))!!
+        val full = whole.readBytes()
+
+        // In its first line, in its head, in the note, in the closing bytes, and one byte short of done.
+        for (cut in listOf(export + 5, export + 20, tail.zipStart + 4000, tail.zipStart + tail.zipLength + 30, tail.end - 1)) {
+            val pdf = temp(full.copyOfRange(0, cut.toInt()))
+
+            val found = torn(pdf)
+            assertEquals("cut at $cut", export, found.ownLength)
+            assertFalse(found.own.stale)
+            assertArrayEquals(older, noteUnder(pdf, found))
+
+            // Cut back to what is whole, it is ours again and takes the next save.
+            pdf.rw { it.truncate(found.ownLength) }
+            assertFalse(ours(pdf)!!.stale)
+            assertNotNull(appendTail(pdf, note("saved after all")))
+            assertArrayEquals(note("saved after all"), noteIn(pdf))
+        }
+    }
+
+    @Test fun aLaterTailCutShortFallsBackToTheTailBeforeIt() {
+        val pdf = temp(exported(note("exported")))
+        stamp(pdf)
+        val first = appendTail(pdf, note("first session", 1500))!!
+        val second = appendTail(pdf, note("second session", 2500))!!
+        pdf.rw { it.truncate(second.zipStart + 700) }
+
+        val found = torn(pdf)
+        assertEquals(first.end, found.ownLength)
+        assertTrue(found.own.stale)
+        assertArrayEquals(note("first session", 1500), noteUnder(pdf, found))
+    }
+
+    @Test fun aTailOpenForSplicingHasNoEndUntilItIsClosed() {
+        val older = note("exported")
+        val pdf = temp(exported(older))
+        stamp(pdf)
+        val tail = appendTail(pdf, note("saved", 3000))!!
+
+        pdf.rw { XnotesPdf.openTail(it, tail) }
+
+        // A crash here must not leave a file that reads as whole around a half-spliced note.
+        val found = torn(pdf)
+        assertEquals(tail.start, found.ownLength)
+        assertArrayEquals(older, noteUnder(pdf, found))
+
+        val closed = pdf.rw { XnotesPdf.closeTail(it, tail, tail.zipLength) }!!
+        assertEquals(pdf.length(), closed.end)
+        assertArrayEquals(note("saved", 3000), noteIn(pdf))
+    }
+
+    @Test fun aRewriteThatFailsLeavesTheFileAsItWasBeforeTheTailOrTorn() {
+        val older = note("exported")
+        val pdf = temp(exported(older))
+        stamp(pdf)
+        val export = pdf.length()
+        val tail = appendTail(pdf, note("saved", 3000))!!
+        val next = zipFile(note("too short a source", 2000))
+
+        // A source that runs dry part way, as a failing read would.
+        val threw = pdf.rw { ch ->
+            FileInputStream(next).use { zip ->
+                runCatching { XnotesPdf.rewriteTail(ch, tail, FileWindow(zip.channel, 0L, 2500L)) }.isFailure
+            }
+        }
+
+        assertTrue(threw)
+        val found = torn(pdf)
+        assertEquals(export, found.ownLength)
+        assertArrayEquals(older, noteUnder(pdf, found))
+    }
+
+    @Test fun theEndingTellsOneSaveFromAnother() {
+        val pdf = temp(exported(note("exported")))
+        stamp(pdf)
+        val fresh = pdf.rw { XnotesPdf.ending(it) }
+        assertTrue(pdf.setLastModified(pdf.lastModified() - 3_600_000L))
+        assertArrayEquals("a new modified time alone changes nothing", fresh, pdf.rw { XnotesPdf.ending(it) })
+
+        var tail = appendTail(pdf, note("one", 800))!!
+        val one = pdf.rw { XnotesPdf.ending(it) }
+        assertFalse(fresh.contentEquals(one))
+
+        // The same length of note with other bytes in it is another save.
+        tail = pdf.rw { ch -> FileInputStream(zipFile(note("two", 800))).use { XnotesPdf.rewriteTail(ch, tail, it.channel) } }!!
+        assertFalse(one.contentEquals(pdf.rw { XnotesPdf.ending(it) }))
+        assertEquals(pdf.length(), tail.end)
+    }
+
+    @Test fun readingAndWritingGoThroughTheTwoHalvesOfADescriptor() {
+        val pdf = temp(exported(note("exported")))
+        stamp(pdf)
+        val newer = note("through two channels", 2600)
+
+        RandomAccessFile(pdf, "rw").use { raf ->
+            // What Android gives for a provider's file: a channel that only reads and one that only writes.
+            val ch = ReadWriteChannel(FileInputStream(raf.fd).channel, FileOutputStream(raf.fd).channel)
+            val tail = FileInputStream(zipFile(newer)).use { XnotesPdf.appendTail(ch, it.channel) }!!
+            assertEquals(ch.size(), tail.end)
+            val ours = XnotesPdf.inspect(ch) as XnotesPdf.Inspection.Ours
+            assertTrue(ours.stale)
+            assertArrayEquals(newer, readAll(XnotesPdf.embedded(ch, ours)!!))
+        }
+        assertArrayEquals(newer, noteIn(pdf))
+    }
+
     @Test fun anEncryptedPdfTakesNoTail() {
         val pdf = temp(exported(note("locked"), encrypt = true))
         stamp(pdf)
@@ -338,9 +458,9 @@ class XnotesPdfTest {
 
     /** The editor's in-place save, on the note inside [pdf]: its manifest replaced, then the tail closed again. */
     private fun splice(pdf: File, tail: XnotesPdf.Tail, doc: Document): XnotesPdf.Tail = pdf.rw { ch ->
-        val window = tail.window(ch)
         val assets = codec.imageAssets(doc)
-        val ordered = ZipTail.read(window)!!.entries.sortedBy { it.localOffset }
+        val ordered = ZipTail.read(tail.window(ch))!!.entries.sortedBy { it.localOffset }
+        val window = XnotesPdf.openTail(ch, tail)
         val tailStart = ordered[assets.size].localOffset
         val tmp = File.createTempFile("tail", ".zip").apply { deleteOnExit() }
         FileOutputStream(tmp).use { out ->

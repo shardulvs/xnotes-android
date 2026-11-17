@@ -116,3 +116,83 @@ internal class FileWindow(private val base: FileChannel, val start: Long, length
 
     override fun implCloseChannel() = Unit
 }
+
+/**
+ * One channel over a descriptor that Android only hands out as two: [reader] for what is read and
+ * [writer] for what is written, at positions given outright. Closing it leaves both open.
+ */
+internal class ReadWriteChannel(private val reader: FileChannel, private val writer: FileChannel) : FileChannel() {
+
+    private var pos = 0L
+
+    override fun size(): Long = writer.size()
+
+    override fun position(): Long = pos
+
+    override fun position(newPosition: Long): FileChannel {
+        require(newPosition >= 0L)
+        pos = newPosition
+        return this
+    }
+
+    override fun read(dst: ByteBuffer): Int {
+        val n = reader.read(dst, pos)
+        if (n > 0) pos += n
+        return n
+    }
+
+    override fun read(dst: ByteBuffer, position: Long): Int = reader.read(dst, position)
+
+    override fun read(dsts: Array<ByteBuffer>, offset: Int, length: Int): Long {
+        var total = 0L
+        for (i in offset until offset + length) {
+            if (!dsts[i].hasRemaining()) continue
+            val n = read(dsts[i])
+            if (n < 0) return if (total == 0L) -1L else total
+            total += n
+            if (dsts[i].hasRemaining()) break
+        }
+        return total
+    }
+
+    override fun write(src: ByteBuffer): Int {
+        val n = writer.write(src, pos)
+        pos += n
+        return n
+    }
+
+    override fun write(src: ByteBuffer, position: Long): Int = writer.write(src, position)
+
+    override fun write(srcs: Array<ByteBuffer>, offset: Int, length: Int): Long {
+        var total = 0L
+        for (i in offset until offset + length) {
+            while (srcs[i].hasRemaining()) total += write(srcs[i])
+        }
+        return total
+    }
+
+    override fun truncate(size: Long): FileChannel {
+        writer.truncate(size)
+        if (pos > size) pos = size
+        return this
+    }
+
+    override fun force(metaData: Boolean) = writer.force(metaData)
+
+    override fun transferTo(position: Long, count: Long, target: WritableByteChannel): Long =
+        reader.transferTo(position, count, target)
+
+    override fun transferFrom(src: ReadableByteChannel, position: Long, count: Long): Long =
+        writer.transferFrom(src, position, count)
+
+    override fun map(mode: MapMode, position: Long, size: Long): MappedByteBuffer =
+        throw UnsupportedOperationException()
+
+    override fun lock(position: Long, size: Long, shared: Boolean): FileLock =
+        throw UnsupportedOperationException()
+
+    override fun tryLock(position: Long, size: Long, shared: Boolean): FileLock =
+        throw UnsupportedOperationException()
+
+    override fun implCloseChannel() = Unit
+}

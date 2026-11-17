@@ -378,6 +378,20 @@ private fun EditorScreen(
         }
     }
 
+    // "Save as" for a note that is a PDF: the copy is an xnotes PDF too, exported off the main thread.
+    val createPdfLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/pdf"),
+    ) { uri ->
+        uri?.let {
+            runCatching { resolver.takePersistableUriPermission(it, rwFlags) }
+            savePane.savePdfAs(it.toString(), displayNameOf(resolver, it)) { ok ->
+                val p = pendingAfterSave
+                pendingAfterSave = null
+                if (ok) p?.invoke()
+            }
+        }
+    }
+
     // "Import PDF" takes one file or many. One keeps the old flow: remember the pick and show the name
     // dialog at once, with the (possibly large) copy happening at Save under the "Importing PDF…" loader.
     // Many skips naming altogether (each note takes its source file's name) and the explorer imports
@@ -604,7 +618,7 @@ private fun EditorScreen(
     /** Open the "Save as" picker for [target], remembering which pane its result belongs to. */
     fun launchSaveAs(target: Editor) {
         savePane = target
-        createLauncher.launch("${target.title}.xnote")
+        if (target.openIsPdf) createPdfLauncher.launch("${target.title}.pdf") else createLauncher.launch("${target.title}.xnote")
     }
 
     fun saveOrPrompt() {

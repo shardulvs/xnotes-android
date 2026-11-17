@@ -20,6 +20,11 @@ import java.nio.channels.FileChannel
  * A PDF becomes ours only through an export, and an export always ends in a cross-reference
  * table. A tail follows nothing but a file that is ours, so it is a table too: readers do not all
  * follow a chain that mixes tables and cross-reference streams.
+ *
+ * **A write that stops part way must never leave a file that reads as whole.** A tail is only
+ * ever written past the end of what was whole before it, and its closing bytes go last, so until
+ * they land the file has no readable end. [inspect] then finds where the unfinished tail began
+ * and answers [Inspection.Torn]: the note underneath is intact, and the next save cuts the rest.
  */
 internal object XnotesPdf {
 
@@ -38,6 +43,8 @@ internal object XnotesPdf {
     private const val MAX_SECTIONS = 64
     private const val ENTRY = 20
     private const val MAX_TABLE_STEPS = 100_000
+    private const val SCAN_CHUNK = 1 shl 20
+    private const val MAX_TORN_TRIES = 16
     private const val MAX_TABLE_OFFSET = 9_999_999_999L
 
     /** What a PDF's cross-reference chain says about it. */
@@ -45,11 +52,20 @@ internal object XnotesPdf {
         /** Nothing of ours marks it: a plain PDF, or one another app has rewritten whole. */
         object Plain : Inspection()
 
+        /** Its end does not read as a PDF's, and nothing of ours is found under it. Not a file to write into. */
+        object Unreadable : Inspection()
+
         /** Ours and untouched. [stale] when it ends in a tail, so its pages are behind its note. */
-        class Ours internal constructor(val stale: Boolean, internal val end: Section) : Inspection()
+        class Ours internal constructor(val stale: Boolean, internal val end: Section) : Inspection() {
+            /** Where the tail it ends in starts, or null when it ends in an export. */
+            val tailStart: Long? get() = end.mark?.tail
+        }
 
         /** Ours for its first [ownLength] bytes, [own], with another app's bytes appended after. */
         class Appended internal constructor(val ownLength: Long, val own: Ours) : Inspection()
+
+        /** Ours for its first [ownLength] bytes, [own], then a tail of ours that was never finished. */
+        class Torn internal constructor(val ownLength: Long, val own: Ours) : Inspection()
     }
 
     /** A tail this session wrote, as it needs to be known to be rewritten. */
@@ -103,12 +119,12 @@ internal object XnotesPdf {
     fun inspect(ch: FileChannel): Inspection = try {
         inspect(ch, nested = false)
     } catch (_: Malformed) {
-        Inspection.Plain
+        Inspection.Unreadable
     }
 
     private fun inspect(ch: FileChannel, nested: Boolean): Inspection {
         val size = ch.size()
-        var section = lastSection(ch) ?: return Inspection.Plain
+        var section = lastSection(ch) ?: return if (nested) Inspection.Unreadable else torn(ch)
         val seen = HashSet<Long>()
         var first = true
         while (seen.add(section.at) && seen.size <= MAX_SECTIONS) {
@@ -121,7 +137,10 @@ internal object XnotesPdf {
                 // A marker that stops short of the end: ours up to there, if that much still reads as ours.
                 if (!nested && mark.length in 1 until size) {
                     val own = inspect(FileWindow(ch, 0L, mark.length), nested = true)
-                    if (own is Inspection.Ours) return Inspection.Appended(mark.length, own)
+                    if (own is Inspection.Ours) {
+                        // What follows says whose it is: a tail of ours opens with its own line, however little of it landed.
+                        return if (tailBegins(ch, mark.length)) Inspection.Torn(mark.length, own) else Inspection.Appended(mark.length, own)
+                    }
                 }
             }
             if (nested) break
@@ -130,6 +149,45 @@ internal object XnotesPdf {
             first = false
         }
         return Inspection.Plain
+    }
+
+    /**
+     * What lies under an end that does not read: the latest place a tail of ours begins with a
+     * whole file of ours before it. The search runs back through the file, which only a file
+     * without a readable end pays for.
+     */
+    private fun torn(ch: FileChannel): Inspection {
+        val head = TAIL_HEAD.toByteArray(Charsets.ISO_8859_1)
+        var before = ch.size()
+        repeat(MAX_TORN_TRIES) {
+            val at = lastIndexBefore(ch, head, before) ?: return Inspection.Unreadable
+            val own = inspect(FileWindow(ch, 0L, at), nested = true)
+            if (own is Inspection.Ours) return Inspection.Torn(at, own)
+            before = at + head.size - 1
+        }
+        return Inspection.Unreadable
+    }
+
+    /** Where [word] last starts in [ch] so that it ends before [before], or null. */
+    private fun lastIndexBefore(ch: FileChannel, word: ByteArray, before: Long): Long? {
+        var end = before
+        while (end >= word.size) {
+            val start = maxOf(0L, end - SCAN_CHUNK)
+            val chunk = read(ch, start, (end - start).toInt())
+            for (i in chunk.size - word.size downTo 0) {
+                if (word.indices.all { chunk[i + it] == word[it] }) return start + i
+            }
+            if (start == 0L) return null
+            end = start + word.size - 1 // a match may straddle two chunks
+        }
+        return null
+    }
+
+    /** Whether the bytes of [ch] from [at] on are the start of a tail, or as much of that start as there is. */
+    private fun tailBegins(ch: FileChannel, at: Long): Boolean {
+        val head = TAIL_HEAD.toByteArray(Charsets.ISO_8859_1)
+        val there = read(ch, at, minOf(ch.size() - at, head.size.toLong()).toInt())
+        return there.indices.all { there[it] == head[it] }
     }
 
     private fun tailIsThere(ch: FileChannel, mark: Mark): Boolean {
@@ -185,11 +243,33 @@ internal object XnotesPdf {
         return writeTail(ch, ch.size(), frame, zip)
     }
 
-    /** Replace [tail], the tail this session wrote and nothing has written past, with one holding [zip]. */
-    fun rewriteTail(ch: FileChannel, tail: Tail, zip: FileChannel): Tail? = writeTail(ch, tail.start, tail.frame, zip)
+    /**
+     * Replace [tail], the tail this session wrote and nothing has written past, with one holding
+     * [zip]. The old tail is cut off first, which leaves the file whole as it was before the tail.
+     */
+    fun rewriteTail(ch: FileChannel, tail: Tail, zip: FileChannel): Tail? {
+        ch.truncate(tail.start)
+        return writeTail(ch, tail.start, tail.frame, zip)
+    }
 
     /**
-     * Close [tail] again after its note was spliced through [Tail.window] and now is [zipLength]
+     * Open [tail] for its note to be spliced in place: its closing bytes are cut off, so the file
+     * has no readable end until [closeTail] writes them again, and returns the note.
+     */
+    fun openTail(ch: FileChannel, tail: Tail): FileWindow {
+        ch.truncate(tail.zipStart + tail.zipLength)
+        return tail.window(ch)
+    }
+
+    /** The last bytes of [ch], which with its length tell one save of a PDF from another. */
+    fun ending(ch: FileChannel): ByteArray {
+        val size = ch.size()
+        val span = minOf(size, END_SCAN.toLong()).toInt()
+        return read(ch, size - span, span)
+    }
+
+    /**
+     * Close [tail] again after its note was spliced through [openTail] and now is [zipLength]
      * bytes: everything after the note is written anew and the file ends there.
      */
     fun closeTail(ch: FileChannel, tail: Tail, zipLength: Long): Tail? {
