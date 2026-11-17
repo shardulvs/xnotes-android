@@ -1097,7 +1097,7 @@ private fun ExplorerSection(
             metaTick++
         }
     }
-    val kindOf: (BrowseEntry) -> EntryKind = { entryKind(it, editor.cachedMeta(it)) }
+    val kindOf: (BrowseEntry) -> EntryKind = { entryKind(it) }
     val withCreated: (BrowseEntry) -> BrowseEntry = { e -> editor.createdOf(e).let { if (it == e.created) e else e.copy(created = it) } }
     val arrange: (List<BrowseEntry>) -> List<BrowseEntry> = remember(view.sortKey, view.descending, view.folders, kindFilter, metaTick) {
         { list ->
@@ -1289,6 +1289,7 @@ private fun ExplorerSection(
                 share = { callsNow.value.shareFile(it.documentUri) },
                 saveCopy = { callsNow.value.saveCopyFile(it.documentUri) },
                 exportPdf = { callsNow.value.exportFilePdf(it.documentUri) },
+                convert = { e -> editor.convertDocument(e.documentUri) { refreshKey++ } },
                 preview = { previewing = it },
             ),
         )
@@ -1816,9 +1817,16 @@ private fun ExplorerSection(
                                 if (one != null && !one.isDir) {
                                     DropdownMenuItem(text = { Text(stringResource(R.string.save_copy_ellipsis)) }, onClick = { moreOpen = false; selection.clear(); calls.saveCopyFile(one.documentUri) })
                                     DropdownMenuItem(text = { Text(stringResource(R.string.export_pdf)) }, onClick = { moreOpen = false; selection.clear(); calls.exportFilePdf(one.documentUri) })
+                                    convertLabel(one)?.let { label ->
+                                        DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = {
+                                            moreOpen = false
+                                            selection.clear()
+                                            editor.convertDocument(one.documentUri) { refreshKey++ }
+                                        })
+                                    }
                                 }
-                                // Only notes merge: a canvas has no pages, a folder no one order.
-                                val notes = selection.filter { !it.isDir && com.xnotes.core.util.DocumentKind.ofName(it.name) == com.xnotes.core.util.DocumentKind.NOTE }
+                                // Notes and PDFs merge: a canvas has no pages, a folder no one order.
+                                val notes = selection.filter { !it.isDir && com.xnotes.core.util.DocumentKind.ofName(it.name).let { k -> k == com.xnotes.core.util.DocumentKind.NOTE || k == com.xnotes.core.util.DocumentKind.PDF } }
                                 if (notes.size >= 2 && notes.size == selection.size) {
                                     DropdownMenuItem(text = { Text(stringResource(R.string.merge_ellipsis)) }, onClick = {
                                         moreOpen = false
@@ -1849,12 +1857,26 @@ private fun ExplorerSection(
     // at a time, taking each note's name from its source. This runs here because the explorer is
     // where the target folder is known. Cancelling keeps whatever already landed.
     val pendingImports = editor.pendingImports
-    LaunchedEffect(pendingImports) {
-        if (pendingImports.isNotEmpty()) {
-            val n = editor.commitImportsAsync(root, currentDocId)
-            refreshKey++
-            if (n > 0) editor.message = context.resources.getQuantityString(R.plurals.imported_pdfs, n, n)
+    if (pendingImports.isNotEmpty() && !editor.importing) {
+        // Asked once for all of them: each stays a PDF, or each becomes a note.
+        fun land(asPdf: Boolean) {
+            scope.launch {
+                val n = editor.commitImportsAsync(root, currentDocId, asPdf)
+                refreshKey++
+                if (n > 0) editor.message = context.resources.getQuantityString(R.plurals.imported_pdfs, n, n)
+            }
         }
+        AlertDialog(
+            onDismissRequest = { editor.requestImports(emptyList()) },
+            title = { Text(pluralStringResource(R.plurals.import_pdfs_title, pendingImports.size, pendingImports.size)) },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { land(asPdf = true) }) { Text(stringResource(R.string.keep_as_pdf)) }
+                    TextButton(onClick = { land(asPdf = false) }) { Text(stringResource(R.string.make_a_note)) }
+                }
+            },
+            dismissButton = { TextButton(onClick = { editor.requestImports(emptyList()) }) { Text(stringResource(R.string.cancel)) } },
+        )
     }
 
     val pendingImport = editor.pendingImport
@@ -1907,7 +1929,24 @@ private fun ExplorerSection(
                 else -> stringResource(R.string.new_note)
             },
             initial = default,
-            confirmLabel = if (pendingImport != null) stringResource(R.string.save) else stringResource(R.string.create),
+            confirmLabel = when {
+                pendingImport == null -> stringResource(R.string.create)
+                pendingImport.markdown -> stringResource(R.string.save)
+                else -> stringResource(R.string.make_a_note)
+            },
+            // A PDF coming in stays a PDF or becomes a note, asked every time; text only ever becomes a note.
+            secondLabel = if (pendingImport != null && !pendingImport.markdown) stringResource(R.string.keep_as_pdf) else null,
+            onSecond = { n ->
+                scope.launch {
+                    val uri = editor.commitImportAsync(root, currentDocId, n, asPdf = true)
+                    when {
+                        uri != null -> refreshKey++
+                        editor.pendingImport != null -> fieldError = context.getString(
+                            if (editor.lastImportError == PdfOpenError.PASSWORD) R.string.err_pdf_password else R.string.err_save_that_note,
+                        )
+                    }
+                }
+            },
             placeholder = if (isFolder) stringResource(R.string.folder_name) else null,
             allowEmpty = !isFolder, // a folder needs a name; a blank note name becomes "untitled_N"
             error = fieldError,
@@ -2154,6 +2193,8 @@ internal fun EntryMenu(
     onShare: (() -> Unit)? = null,
     onSaveCopy: (() -> Unit)? = null,
     onExportPdf: (() -> Unit)? = null,
+    convertLabel: Int? = null,
+    onConvert: (() -> Unit)? = null,
     onColor: ((Rgba?) -> Unit)? = null,
     pinned: Boolean = false,
     onTogglePin: (() -> Unit)? = null,
@@ -2192,6 +2233,7 @@ internal fun EntryMenu(
                 DropdownMenuItem(text = { Text(stringResource(R.string.share)) }, onClick = { onDismiss(); onShare() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.save_copy_ellipsis)) }, onClick = { onDismiss(); onSaveCopy?.invoke() })
                 DropdownMenuItem(text = { Text(stringResource(R.string.export_pdf)) }, onClick = { onDismiss(); onExportPdf?.invoke() })
+                if (convertLabel != null) DropdownMenuItem(text = { Text(stringResource(convertLabel)) }, onClick = { onDismiss(); onConvert?.invoke() })
             }
         }
     }
@@ -2239,7 +2281,7 @@ private fun DragPreview(editor: Editor, items: List<BrowseEntry>, sizePx: IntSiz
 @Composable
 private fun StackedNoteCard(editor: Editor, entry: BrowseEntry, modifier: Modifier) {
     val palette = LocalPalette.current
-    val thumb = editor.cachedNoteTile(entry.documentUri)
+    val thumb = editor.cachedNoteTile(entry.documentUri, entry.name, entry.modified)
     val shape = MaterialTheme.shapes.medium
     Column(modifier.clip(shape).background(palette.bg.toComposeColor()).border(1.dp, palette.accent.toComposeColor(), shape)) {
         Box(Modifier.fillMaxWidth().weight(1f).background(palette.paper.toComposeColor())) {
@@ -2280,6 +2322,9 @@ private fun NameDialog(
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
     onRemove: (() -> Unit)? = null,
+    /** A second way to confirm, beside [confirmLabel], for a name that can be put to two uses. */
+    secondLabel: String? = null,
+    onSecond: (String) -> Unit = {},
 ) {
     val palette = LocalPalette.current
     var text by remember { mutableStateOf(TextFieldValue(initial, selection = TextRange(0, initial.length))) }
@@ -2287,7 +2332,8 @@ private fun NameDialog(
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     val confirm = {
         val n = text.text.trim()
-        if (allowEmpty || n.isNotEmpty()) onConfirm(n)
+        // With two ways to confirm, the keyboard's Done picks neither: the choice is the user's to make.
+        if (secondLabel == null && (allowEmpty || n.isNotEmpty())) onConfirm(n)
     }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -2315,7 +2361,11 @@ private fun NameDialog(
             )
         },
         confirmButton = {
-            TextButton(onClick = { confirm() }, enabled = allowEmpty || text.text.isNotBlank()) { Text(confirmLabel) }
+            val ready = allowEmpty || text.text.isNotBlank()
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (secondLabel != null) TextButton(onClick = { onSecond(text.text.trim()) }, enabled = ready) { Text(secondLabel) }
+                TextButton(onClick = { onConfirm(text.text.trim()) }, enabled = ready) { Text(confirmLabel) }
+            }
         },
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

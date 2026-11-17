@@ -11,8 +11,8 @@ import kotlin.math.roundToInt
  */
 internal class PdfExportContext(val doc: PDDocument) {
 
-    /** The export's text fonts, filled as pages set text and written out by [finish]. */
-    val text = PdfText(doc)
+    /** The export's text fonts, filled as pages set text and written out by [finish]; built at first use. */
+    val text by lazy { PdfText(doc) }
 
     /** The document's logical structure when the export is tagged; set before the first page. */
     var tags: PdfTags? = null

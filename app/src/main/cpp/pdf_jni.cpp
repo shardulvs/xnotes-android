@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "public/fpdf_attachment.h"
 #include "public/fpdf_doc.h"
 #include "public/fpdf_edit.h"
 #include "public/fpdf_formfill.h"
@@ -738,5 +739,31 @@ Java_com_xnotes_platform_PdfiumNative_nativePageChars(JNIEnv* env, jclass, jlong
     env->SetByteArrayRegion(jflags, 0, n, flags.data());
     env->SetObjectArrayElement(out, 0, jcodepoints);
     env->SetObjectArrayElement(out, 1, jflags);
+    return out;
+}
+
+// The names of the files attached to the document, as their file specifications give them.
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_com_xnotes_platform_PdfiumNative_nativeAttachmentNames(JNIEnv* env, jclass, jlong handle) {
+    Doc* doc = FromHandle(handle);
+    const jsize count = std::clamp(FPDFDoc_GetAttachmentCount(doc->pdf), 0, 256);
+    jobjectArray out = env->NewObjectArray(count, env->FindClass("java/lang/String"), nullptr);
+    if (!out) return nullptr;
+    for (jsize i = 0; i < count; ++i) {
+        std::u16string name;
+        if (FPDF_ATTACHMENT attachment = FPDFDoc_GetAttachment(doc->pdf, i)) {
+            // The length is in bytes, the terminating NUL included.
+            const unsigned long bytes = FPDFAttachment_GetName(attachment, nullptr, 0);
+            name.assign(bytes / 2, u'\0');
+            if (!name.empty()) {
+                FPDFAttachment_GetName(attachment, reinterpret_cast<FPDF_WCHAR*>(name.data()), bytes);
+                name.pop_back();
+            }
+        }
+        jstring jname = env->NewString(reinterpret_cast<const jchar*>(name.data()), static_cast<jsize>(name.size()));
+        if (!jname) return nullptr;
+        env->SetObjectArrayElement(out, i, jname);
+        env->DeleteLocalRef(jname);
+    }
     return out;
 }

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Saving PDF notification's small icon: a page with its corner folded, white on transparent as the status bar wants. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M14,3H7a2,2 0 0,0 -2,2v14a2,2 0 0,0 2,2h10a2,2 0 0,0 2,-2V8zM14,3v5h5M9,13h6M9,17h4" />
+</vector>

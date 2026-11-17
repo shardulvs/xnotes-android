@@ -355,6 +355,19 @@
     <string name="recording_other_pane">The other pane is recording</string>
     <string name="recording_in_progress">A recording is in progress</string>
     <string name="recording_channel">Recordings</string>
+    <string name="pdf_export_channel">Saving PDFs</string>
+    <string name="pdf_changed_title">This PDF was changed in another app</string>
+    <string name="pdf_changed_body">Another app has changed this PDF since you last edited it in xnotes. Choose which version to keep.</string>
+    <string name="pdf_changed_keep_theirs">Keep the other app\'s changes</string>
+    <string name="pdf_changed_keep_theirs_detail">Your ink, shapes and text stay on the pages, but you can no longer edit or erase them.</string>
+    <string name="pdf_changed_keep_ours">Keep editing in xnotes</string>
+    <string name="pdf_changed_keep_ours_detail">The other app\'s changes are removed the next time xnotes saves this PDF.</string>
+    <string name="pdf_changed_some_title">Some of these PDFs were changed in another app</string>
+    <string name="pdf_changed_note_body">Another app has changed this PDF since you last edited it in xnotes. Choose which version the note is made from.</string>
+    <string name="pdf_changed_notes_body">Another app has changed them since you last edited them in xnotes. Choose which version their notes are made from.</string>
+    <string name="pdf_changed_note_ours">Keep the xnotes version</string>
+    <string name="pdf_changed_note_ours_detail">Everything stays editable, and the other app\'s changes are left out of the note.</string>
+    <string name="pdf_export_saving">Saving PDF</string>
     <string name="recording_chip">Recording, %1$s</string>
     <string name="err_mic_needed">Recording needs the microphone.</string>
     <string name="mic_settings">Settings</string>
@@ -520,6 +533,13 @@
     <string name="loading">Loading…</string>
     <string name="folder_empty">This folder has no notes.</string>
     <string name="import_title">Import</string>
+    <string name="keep_as_pdf">Keep as PDF</string>
+    <string name="convert_to_pdf">Convert to PDF</string>
+    <string name="convert_to_note">Convert to note</string>
+    <string name="converting_to_pdf">Converting to PDF…</string>
+    <string name="converting_to_note">Converting to note…</string>
+    <string name="err_convert">Couldn’t convert that file.</string>
+    <string name="make_a_note">Make a note</string>
     <string name="folder_name">Folder name</string>
     <string name="delete_confirm_title">Delete?</string>
     <string name="search_notes">Search notes</string>
@@ -566,7 +586,7 @@
     <string name="nothing_this_colour">Nothing has this colour.</string>
     <string name="recent_empty">Nothing opened yet. Notes and canvases you open show up here.</string>
     <string name="nothing_to_show">Nothing to show here.</string>
-    <string name="no_pdf_notes_here">No PDF notes here.</string>
+    <string name="no_pdf_notes_here">No PDFs here.</string>
     <string name="include_subfolders">Include subfolders</string>
     <string name="opened_on_device">opened on this device</string>
     <string name="clear">Clear</string>
@@ -701,6 +721,10 @@
     <string name="err_paste_pages">Couldn’t paste the pages.</string>
     <string name="importing_markdown">Importing Markdown…</string>
     <string name="import_progress">%1$d of %2$d imported</string>
+    <plurals name="import_pdfs_title">
+        <item quantity="one">Import %d PDF</item>
+        <item quantity="other">Import %d PDFs</item>
+    </plurals>
     <plurals name="imported_pdfs">
         <item quantity="one">Imported %d PDF</item>
         <item quantity="other">Imported %d PDFs</item>
@@ -938,7 +962,7 @@
     <string name="opened_ago">Opened %1$s</string>
     <string name="kind_folders">Folders</string>
     <string name="kind_notes">Notes</string>
-    <string name="kind_pdf_notes">PDF notes</string>
+    <string name="kind_pdf_notes">PDFs</string>
     <string name="kind_canvases">Canvases</string>
     <string name="hue_black">Black</string>
     <string name="hue_white">White</string>
@@ -1051,7 +1075,7 @@
     <string name="modified">Modified</string>
     <string name="created">Created</string>
     <string name="kind_note">Note</string>
-    <string name="kind_pdf_note">PDF note</string>
+    <string name="kind_pdf_note">PDF</string>
     <string name="kind_canvas">Canvas</string>
     <string name="more_for">More for %1$s</string>
     <string name="pinned_to_sidebar">Pinned to sidebar</string>
