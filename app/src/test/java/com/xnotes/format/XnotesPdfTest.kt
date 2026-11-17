@@ -1,0 +1,504 @@
+package com.xnotes.format
+
+import com.xnotes.core.FakeImageCodec
+import com.xnotes.core.FakeTextMeasurer
+import com.xnotes.core.geometry.Rect
+import com.xnotes.core.model.Document
+import com.xnotes.core.model.ImageData
+import com.xnotes.core.model.ImageItem
+import com.xnotes.core.model.Stroke
+import com.xnotes.core.stroke.Sample
+import com.xnotes.core.tools.Tool
+import com.xnotes.core.tools.ToolDefaults
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.RandomAccessFile
+import java.nio.ByteBuffer
+import java.nio.channels.Channels
+import java.nio.channels.FileChannel
+import java.nio.file.Files
+import java.util.zip.Deflater
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
+
+/**
+ * The bytes of an xnotes PDF, on PDFs built by hand the way PdfBox and other writers lay them out.
+ * What these protect is a note that reopens: every case ends by reading the note back out of the file.
+ */
+class XnotesPdfTest {
+
+    private val latin = Charsets.ISO_8859_1
+
+    private fun temp(bytes: ByteArray): File =
+        File.createTempFile("xnotes", ".pdf").apply { writeBytes(bytes); deleteOnExit() }
+
+    private fun <T> File.rw(block: (FileChannel) -> T): T = RandomAccessFile(this, "rw").use { block(it.channel) }
+
+    private fun zipFile(bytes: ByteArray): File =
+        File.createTempFile("note", ".xnote").apply { writeBytes(bytes); deleteOnExit() }
+
+    private fun appendTail(pdf: File, note: ByteArray): XnotesPdf.Tail? =
+        pdf.rw { ch -> FileInputStream(zipFile(note)).use { XnotesPdf.appendTail(ch, it.channel) } }
+
+    private fun readAll(w: FileWindow): ByteArray {
+        val buf = ByteBuffer.allocate(w.size().toInt())
+        while (buf.hasRemaining()) if (w.read(buf, buf.position().toLong()) < 0) break
+        return buf.array()
+    }
+
+    /** The note inside [pdf], which has to be ours. */
+    private fun noteIn(pdf: File): ByteArray = pdf.rw { ch ->
+        val ours = XnotesPdf.inspect(ch) as XnotesPdf.Inspection.Ours
+        readAll(XnotesPdf.embedded(ch, ours)!!)
+    }
+
+    private fun ours(pdf: File): XnotesPdf.Inspection.Ours? = pdf.rw { XnotesPdf.inspect(it) as? XnotesPdf.Inspection.Ours }
+
+    private fun stamp(pdf: File): Boolean = pdf.rw { XnotesPdf.stamp(it) }
+
+    /** Bytes that read like the inside of a PDF, which a stored `source.pdf` puts in the middle of the note. */
+    private fun note(tag: String, size: Int = 600): ByteArray {
+        val seed = "PK $tag 1 0 obj << /Length 9 >> stream\nendstream endobj xref trailer startxref 9 %%EOF\n".toByteArray(latin)
+        return ByteArray(size) { seed[it % seed.size] }
+    }
+
+    // --- PDFs by hand ---
+
+    private class Writer {
+        val out = ByteArrayOutputStream()
+        val at = HashMap<Int, Int>()
+
+        fun put(s: String) = out.write(s.toByteArray(Charsets.ISO_8859_1))
+
+        fun obj(n: Int, body: String) {
+            at[n] = out.size()
+            put("$n 0 obj\n$body\nendobj\n")
+        }
+
+        fun stream(n: Int, dict: String, data: ByteArray) {
+            at[n] = out.size()
+            put("$n 0 obj\n<<\n/Length ${data.size}\n$dict>>\nstream\r\n")
+            out.write(data)
+            put("\r\nendstream\nendobj\n")
+        }
+
+        /** A table of objects 0 until [size], PdfBox's way: one subsection, entries ending in CR LF. */
+        fun table(size: Int): Int {
+            val xref = out.size()
+            put("xref\n0 $size\n0000000000 65535 f\r\n")
+            for (n in 1 until size) put("%010d 00000 n\r\n".format(at.getValue(n)))
+            return xref
+        }
+
+        fun end(xref: Int) = put("startxref\n$xref\n%%EOF\n")
+    }
+
+    private val openMarker = "/XNotes <<\n/V 1\n/Obj 7 0 R\n/Len (0000000000000)\n>>\n"
+
+    /** A page and the attachment, as far as the last object. */
+    private fun body(note: ByteArray, extraObjects: Int = 0): Writer = Writer().apply {
+        put("%PDF-1.4\n%öäüß\n")
+        obj(1, "<<\n/Type /Catalog\n/Pages 2 0 R\n/Names 4 0 R\n>>")
+        obj(2, "<<\n/Type /Pages\n/Kids [3 0 R]\n/Count 1\n>>")
+        obj(3, "<<\n/Type /Page\n/Parent 2 0 R\n/MediaBox [0.0 0.0 595.27563 841.8898]\n>>")
+        obj(4, "<<\n/EmbeddedFiles 5 0 R\n>>")
+        obj(5, "<<\n/Names [(note.xnote) 6 0 R]\n>>")
+        obj(6, "<<\n/Type /Filespec\n/F (note.xnote)\n/UF (note.xnote)\n/EF <<\n/F 7 0 R\n>>\n/AFRelationship /Source\n>>")
+        stream(7, "/Type /EmbeddedFile\n", note)
+        repeat(extraObjects) { obj(8 + it, "<<\n/Filler $it\n>>") }
+    }
+
+    /** An export as PdfBox saves one: a table, and the marker in the trailer still to be stamped. */
+    private fun exported(note: ByteArray, marker: Boolean = true, extraObjects: Int = 0, encrypt: Boolean = false): ByteArray {
+        val w = body(note, extraObjects)
+        val size = 8 + extraObjects
+        val xref = w.table(size)
+        w.put("trailer\n<<\n/Root 1 0 R\n/ID [<554A400BB9E303F3409BC3B2BE8837B9> <9F09EBAA9D7E05D849D824E5AEA53B0B>]\n/Size $size\n")
+        if (encrypt) w.put("/Encrypt 2 0 R\n")
+        if (marker) w.put(openMarker)
+        w.put(">>\n")
+        w.end(xref)
+        return w.out.toByteArray()
+    }
+
+    /** A PDF that ends in a cross-reference stream with its rows deflated, as PdfBox leaves one it loaded that way. */
+    private fun endingInAStream(note: ByteArray): ByteArray {
+        val w = body(note)
+        val rows = ByteArrayOutputStream()
+        rows.write(byteArrayOf(0, 0, 0))
+        for (n in 1..7) {
+            val at = w.at.getValue(n)
+            rows.write(byteArrayOf(1, (at ushr 8).toByte(), at.toByte()))
+        }
+        val packed = ByteArrayOutputStream()
+        val deflater = Deflater()
+        deflater.setInput(rows.toByteArray())
+        deflater.finish()
+        val buf = ByteArray(256)
+        while (!deflater.finished()) packed.write(buf, 0, deflater.deflate(buf))
+        val xref = w.out.size()
+        w.put("8 0 obj\n<<\n/Length ${packed.size()}\n/Root 1 0 R\n/ID [<554A400BB9E303F3409BC3B2BE8837B9> <95ED4FB1DF76AD0EDC5D53C19293E748>]\n")
+        w.put("/Type /XRef\n/Size 9\n/Index [0 8]\n/W [1 2 0]\n/Filter /FlateDecode\n>>\nstream\r\n")
+        w.out.write(packed.toByteArray())
+        w.put("\r\nendstream\nendobj\n")
+        w.end(xref)
+        return w.out.toByteArray()
+    }
+
+    private fun contains(bytes: ByteArray, word: String, from: Int = 0): Boolean {
+        val w = word.toByteArray(latin)
+        return (from..bytes.size - w.size).any { i -> w.indices.all { bytes[i + it] == w[it] } }
+    }
+
+    // --- the marker ---
+
+    @Test fun anExportIsOursOnceItsLengthIsStamped() {
+        val note = note("first")
+        val pdf = temp(exported(note))
+        val before = pdf.readBytes()
+
+        assertNull("an open marker proves nothing yet", ours(pdf))
+        assertTrue(stamp(pdf))
+
+        val found = ours(pdf)!!
+        assertFalse(found.stale)
+        assertArrayEquals(note, noteIn(pdf))
+        assertEquals("stamping moves no byte", before.size.toLong(), pdf.length())
+        val digits = "%013d".format(before.size)
+        assertTrue(contains(pdf.readBytes(), "/Len ($digits)"))
+    }
+
+    @Test fun aPdfWithoutTheMarkerIsPlain() {
+        val pdf = temp(exported(note("plain"), marker = false))
+
+        assertTrue(pdf.rw { XnotesPdf.inspect(it) } is XnotesPdf.Inspection.Plain)
+        assertFalse(stamp(pdf))
+        assertNull(appendTail(pdf, note("x")))
+    }
+
+    @Test fun whatIsNotAPdfIsPlain() {
+        for (bytes in listOf(ByteArray(0), "hello".toByteArray(), ByteArray(9000) { 7 }, "startxref\n99999\n%%EOF\n".toByteArray())) {
+            assertTrue(temp(bytes).rw { XnotesPdf.inspect(it) } is XnotesPdf.Inspection.Plain)
+        }
+    }
+
+    @Test fun theNoteIsFoundBehindALongTable() {
+        val note = note("far")
+        val pdf = temp(exported(note, extraObjects = 3000)) // a table far longer than the stretch read from the end
+        assertTrue(stamp(pdf))
+
+        assertArrayEquals(note, noteIn(pdf))
+    }
+
+    @Test fun aTrailerWrittenTightReadsTheSame() {
+        val note = note("tight")
+        val w = body(note)
+        val xref = w.table(8)
+        w.put("trailer<</Size 8/Root 1 0 R/Info 3 0 R % a comment\r/XNotes<</V 1/Obj 7 0 R/Len(0000000000000)>>/ID[(a\\)b)<0A>]>>\r\n")
+        w.end(xref)
+        val pdf = temp(w.out.toByteArray())
+
+        assertTrue(stamp(pdf))
+        assertArrayEquals(note, noteIn(pdf))
+    }
+
+    // --- another app ---
+
+    @Test fun bytesAppendedByAnotherAppAreNoticed() {
+        val note = note("mine")
+        val pdf = temp(exported(note))
+        stamp(pdf)
+        val own = pdf.length()
+        FileOutputStream(pdf, true).use { it.write("\n% touched\n".toByteArray()) }
+
+        val found = pdf.rw { XnotesPdf.inspect(it) } as XnotesPdf.Inspection.Appended
+        assertEquals(own, found.ownLength)
+        val back = pdf.rw { ch -> readAll(XnotesPdf.embedded(FileWindow(ch, 0L, found.ownLength), found.own)!!) }
+        assertArrayEquals(note, back)
+    }
+
+    /** An incremental update by another app: one more object, a table, and a trailer pointing back at ours. */
+    private fun updateBy(pdf: File, keepsOurKey: Boolean) {
+        val prev = String(pdf.readBytes(), latin).let { it.substring(it.lastIndexOf("startxref") + 9).trim().lines().first().toInt() }
+        val base = pdf.length().toInt()
+        val w = Writer()
+        w.put("\n")
+        val at = base + w.out.size()
+        w.put("9 0 obj\n<<\n/Type /Annot\n/Subtype /Highlight\n>>\nendobj\n")
+        val xref = base + w.out.size()
+        w.put("xref\n9 1\n%010d 00000 n\r\n".format(at))
+        w.put("trailer\n<<\n/Root 1 0 R\n/Size 10\n/Prev $prev\n")
+        if (keepsOurKey) w.put(String(pdf.readBytes(), latin).let { it.substring(it.lastIndexOf("/XNotes"), it.lastIndexOf(">>\nstartxref")) })
+        w.put(">>\n")
+        w.end(xref)
+        FileOutputStream(pdf, true).use { it.write(w.out.toByteArray()) }
+    }
+
+    @Test fun anotherAppsUpdateIsNoticedWhetherOrNotItKeepsOurKey() {
+        for (keeps in listOf(false, true)) {
+            val note = note("mine")
+            val pdf = temp(exported(note))
+            stamp(pdf)
+            val own = pdf.length()
+            updateBy(pdf, keepsOurKey = keeps)
+
+            val found = pdf.rw { XnotesPdf.inspect(it) } as XnotesPdf.Inspection.Appended
+            assertEquals(own, found.ownLength)
+            assertFalse(found.own.stale)
+        }
+    }
+
+    @Test fun anUpdateAfterATailLeavesTheTailsNoteReadable() {
+        val pdf = temp(exported(note("old")))
+        stamp(pdf)
+        val newer = note("newer", 900)
+        val tail = appendTail(pdf, newer)!!
+        updateBy(pdf, keepsOurKey = false)
+
+        val found = pdf.rw { XnotesPdf.inspect(it) } as XnotesPdf.Inspection.Appended
+        assertEquals(tail.end, found.ownLength)
+        assertTrue(found.own.stale)
+        val back = pdf.rw { ch -> readAll(XnotesPdf.embedded(FileWindow(ch, 0L, found.ownLength), found.own)!!) }
+        assertArrayEquals(newer, back)
+    }
+
+    @Test fun aFileCutShortIsNotOurs() {
+        val bytes = exported(note("cut"))
+        val pdf = temp(bytes)
+        stamp(pdf)
+        val stamped = pdf.readBytes()
+        // The same file with a byte gone from its middle: the marker's length no longer fits it.
+        val damaged = temp(stamped.copyOfRange(0, 40) + stamped.copyOfRange(41, stamped.size))
+
+        assertTrue(damaged.rw { XnotesPdf.inspect(it) } is XnotesPdf.Inspection.Plain)
+    }
+
+    // --- tails ---
+
+    @Test fun aTailCarriesTheNewerNoteAndLeavesTheExportUntouched() {
+        val pdf = temp(exported(note("old")))
+        stamp(pdf)
+        val export = pdf.readBytes()
+        val newer = note("newer", 2500)
+
+        val tail = appendTail(pdf, newer)!!
+
+        val now = pdf.readBytes()
+        assertEquals(export.size.toLong(), tail.start)
+        assertEquals(now.size.toLong(), tail.end)
+        assertArrayEquals(export, now.copyOfRange(0, export.size))
+        assertTrue(String(now, latin).endsWith("%%EOF\n"))
+        assertTrue(ours(pdf)!!.stale)
+        assertArrayEquals(newer, noteIn(pdf))
+        assertArrayEquals(newer, pdf.rw { readAll(tail.window(it)) })
+    }
+
+    @Test fun aTailIsCutAndWrittenAgainLongerOrShorter() {
+        val pdf = temp(exported(note("old")))
+        stamp(pdf)
+        val export = pdf.length()
+        var tail = appendTail(pdf, note("one", 2000))!!
+
+        for (size in listOf(5000, 300, 2000)) {
+            val next = note("size $size", size)
+            tail = pdf.rw { ch -> FileInputStream(zipFile(next)).use { XnotesPdf.rewriteTail(ch, tail, it.channel) } }!!
+
+            assertEquals(export, tail.start)
+            assertEquals(pdf.length(), tail.end)
+            assertTrue(String(pdf.readBytes(), latin).endsWith("%%EOF\n"))
+            assertTrue(ours(pdf)!!.stale)
+            assertArrayEquals(next, noteIn(pdf))
+        }
+    }
+
+    @Test fun aLaterSessionAppendsAfterAnEarlierTail() {
+        val pdf = temp(exported(note("old")))
+        stamp(pdf)
+        val first = appendTail(pdf, note("first session", 1200))!!
+        val second = appendTail(pdf, note("second session", 700))!!
+
+        assertEquals("the earlier tail is not cut", first.end, second.start)
+        assertArrayEquals(note("second session", 700), noteIn(pdf))
+        // What the first session left is still a whole file of ours underneath.
+        val under = pdf.rw { ch ->
+            val w = FileWindow(ch, 0L, first.end)
+            readAll(XnotesPdf.embedded(w, XnotesPdf.inspect(w) as XnotesPdf.Inspection.Ours)!!)
+        }
+        assertArrayEquals(note("first session", 1200), under)
+    }
+
+    @Test fun aTailIsATableLikeTheExportItFollows() {
+        val pdf = temp(exported(note("old")))
+        stamp(pdf)
+        val tail = appendTail(pdf, note("newer"))!!
+
+        val after = pdf.readBytes()
+        assertTrue(contains(after, "trailer", tail.start.toInt() + 700))
+        assertFalse("a chain that mixes tables and streams is one some readers refuse", contains(after, "/XRef", tail.start.toInt()))
+    }
+
+    @Test fun onlyAFileThatIsOursTakesATail() {
+        val unstamped = temp(exported(note("open marker")))
+        val stream = temp(endingInAStream(note("stream")))
+        val touched = temp(exported(note("touched"))).also { stamp(it); FileOutputStream(it, true).use { o -> o.write(10) } }
+
+        for (pdf in listOf(unstamped, stream, touched)) {
+            val before = pdf.readBytes()
+            assertNull(appendTail(pdf, note("x")))
+            assertArrayEquals(before, pdf.readBytes())
+        }
+        assertTrue(stream.rw { XnotesPdf.inspect(it) } is XnotesPdf.Inspection.Plain)
+    }
+
+    @Test fun anotherAppsUpdateWrittenAsAStreamIsNoticed() {
+        val note = note("mine")
+        val pdf = temp(exported(note))
+        stamp(pdf)
+        val own = pdf.length()
+        val prev = String(pdf.readBytes(), latin).let { it.substring(it.lastIndexOf("startxref") + 9).trim().lines().first().toInt() }
+        val w = Writer()
+        w.put("\n")
+        val xref = own.toInt() + w.out.size()
+        w.put("9 0 obj\n<<\n/Type /XRef\n/Size 10\n/W [1 2 0]\n/Index [9 1]\n/Root 1 0 R\n/Prev $prev\n/Filter /FlateDecode\n/Length 5\n>>\nstream\r\n")
+        w.out.write(byteArrayOf(120, 1, 3, 0, 0)) // rows this never has to read
+        w.put("\r\nendstream\nendobj\n")
+        w.end(xref)
+        FileOutputStream(pdf, true).use { it.write(w.out.toByteArray()) }
+
+        val found = pdf.rw { XnotesPdf.inspect(it) } as XnotesPdf.Inspection.Appended
+        assertEquals(own, found.ownLength)
+        val back = pdf.rw { ch -> readAll(XnotesPdf.embedded(FileWindow(ch, 0L, found.ownLength), found.own)!!) }
+        assertArrayEquals(note, back)
+    }
+
+    @Test fun anEncryptedPdfTakesNoTail() {
+        val pdf = temp(exported(note("locked"), encrypt = true))
+        stamp(pdf)
+        val before = pdf.readBytes()
+
+        assertNull(appendTail(pdf, note("x")))
+        assertArrayEquals(before, pdf.readBytes())
+    }
+
+    // --- the note spliced in place, as the editor saves ---
+
+    private val codec = DocumentCodec(FakeImageCodec(), FakeTextMeasurer())
+
+    private fun docWith(strokes: Int, image: File): Document {
+        val doc = Document.blank(count = 1)
+        doc.pages[0].items.add(ImageItem(ImageData(image, 8, 8), Rect(0.0, 0.0, 8.0, 8.0)))
+        repeat(strokes) { i ->
+            doc.pages[0].items.add(
+                Stroke(
+                    Tool.PEN,
+                    ToolDefaults.configFor(Tool.PEN),
+                    mutableListOf(Sample(i + 1.5, 2.25, 1.0), Sample(i + 3.5, 4.75, 0.5)),
+                ),
+            )
+        }
+        return doc
+    }
+
+    private fun bundle(doc: Document): ByteArray = ByteArrayOutputStream().also { codec.write(doc, it) }.toByteArray()
+
+    /** The editor's in-place save, on the note inside [pdf]: its manifest replaced, then the tail closed again. */
+    private fun splice(pdf: File, tail: XnotesPdf.Tail, doc: Document): XnotesPdf.Tail = pdf.rw { ch ->
+        val window = tail.window(ch)
+        val assets = codec.imageAssets(doc)
+        val ordered = ZipTail.read(window)!!.entries.sortedBy { it.localOffset }
+        val tailStart = ordered[assets.size].localOffset
+        val tmp = File.createTempFile("tail", ".zip").apply { deleteOnExit() }
+        FileOutputStream(tmp).use { out ->
+            ZipOutputStream(out).use { zos ->
+                zos.setLevel(Deflater.BEST_SPEED)
+                codec.writeTail(zos, doc, assets)
+            }
+        }
+        val length = FileInputStream(tmp).use { t ->
+            ZipTail.splice(window, tailStart, ordered.subList(0, assets.size), t.channel, ZipTail.read(t.channel)!!)
+        }
+        assertTrue(length > 0)
+        XnotesPdf.closeTail(ch, tail, length)!!
+    }
+
+    private fun readBack(bytes: ByteArray): Document {
+        val imageDir = Files.createTempDirectory("xnotes-pdf-img").toFile()
+        return codec.read(ByteArrayInputStream(bytes), imageDir = imageDir)
+    }
+
+    @Test fun aSaveSplicesOnlyTheManifestInsideTheTail() {
+        val pixels = ByteArray(4096) { (it % 251).toByte() }
+        val image = File.createTempFile("img", null).apply { writeBytes(pixels); deleteOnExit() }
+        val pdf = temp(exported(bundle(docWith(strokes = 1, image = image))))
+        stamp(pdf)
+        var tail = appendTail(pdf, bundle(docWith(strokes = 2, image = image)))!!
+        val assetsEnd = pdf.rw { ch -> tail.zipStart + ZipTail.read(tail.window(ch))!!.entries.sortedBy { it.localOffset }[1].localOffset }
+        val untouched = pdf.readBytes().copyOfRange(0, assetsEnd.toInt())
+
+        for (strokes in listOf(40, 3, 12)) {
+            tail = splice(pdf, tail, docWith(strokes = strokes, image = image))
+
+            assertEquals(pdf.length(), tail.end)
+            assertArrayEquals("nothing ahead of the manifest moves", untouched, pdf.readBytes().copyOfRange(0, assetsEnd.toInt()))
+            assertTrue(ours(pdf)!!.stale)
+            val inside = noteIn(pdf)
+            assertEquals(tail.zipLength, inside.size.toLong())
+            val back = readBack(inside)
+            assertEquals(strokes + 1, back.pages[0].items.size)
+            assertArrayEquals(pixels, (back.pages[0].items[0] as ImageItem).image.file.readBytes())
+            // Taken out of the PDF, the note is an ordinary bundle with nothing odd about its offsets.
+            val names = ArrayList<String>()
+            ZipInputStream(ByteArrayInputStream(inside)).use { zis ->
+                var e = zis.nextEntry
+                while (e != null) {
+                    names += e.name
+                    e = zis.nextEntry
+                }
+            }
+            assertEquals(listOf("assets/image-000.png", "manifest.json"), names)
+        }
+    }
+
+    @Test fun theCodecReadsTheNoteThroughTheWindow() {
+        val image = File.createTempFile("img", null).apply { writeBytes(ByteArray(2048) { 5 }); deleteOnExit() }
+        val pdf = temp(exported(bundle(docWith(strokes = 6, image = image))))
+        stamp(pdf)
+
+        pdf.rw { ch ->
+            val window = XnotesPdf.embedded(ch, XnotesPdf.inspect(ch) as XnotesPdf.Inspection.Ours)!!
+            assertEquals(1, codec.peek(window)!!.pages)
+            val imageDir = Files.createTempDirectory("xnotes-pdf-img").toFile()
+            val doc = codec.read(Channels.newInputStream(window.position(0L)), imageDir = imageDir)
+            assertEquals(7, doc.pages[0].items.size)
+        }
+    }
+
+    // --- the window ---
+
+    @Test fun aWindowReadsAndWritesOnlyItsStretch() {
+        val file = temp(ByteArray(100) { it.toByte() })
+        file.rw { ch ->
+            val w = FileWindow(ch, 40L, 20L)
+            assertEquals(20L, w.size())
+            val buf = ByteBuffer.allocate(64)
+            assertEquals(20, w.read(buf, 0L))
+            assertEquals(40.toByte(), buf.get(0))
+            assertEquals(-1, w.read(ByteBuffer.allocate(4), 20L))
+
+            w.write(ByteBuffer.wrap(byteArrayOf(1, 2, 3)), 18L) // one byte past its end: it grows
+            assertEquals(21L, w.size())
+            w.truncate(5L) // and cutting it cuts the file there
+            assertEquals(5L, w.size())
+        }
+        assertEquals(45L, file.length())
+    }
+}
