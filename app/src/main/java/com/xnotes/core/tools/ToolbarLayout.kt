@@ -55,7 +55,10 @@ enum class ToolbarItem(val id: String) {
     MINIMAP("minimap"),
 
     /** Notes only: opens and closes room on a page. Last, so a stored bar missing older items too still gets it right after select. */
-    INSERT_SPACE("insert_space");
+    INSERT_SPACE("insert_space"),
+
+    /** Notes only: adds a blank page below the current one. Off by default. */
+    ADD_PAGE("add_page");
 
     companion object {
         fun fromId(id: String?): ToolbarItem? = entries.firstOrNull { it.id == id }
@@ -142,13 +145,13 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
             sections.forEachIndexed { si, sec ->
                 val i = sec.entries.indexOfFirst { it.item == anchor }
                 if (i >= 0) {
-                    val entries = sec.entries.toMutableList().also { it.add(i + 1, ToolbarEntry(item)) }
+                    val entries = sec.entries.toMutableList().also { it.add(i + 1, ToolbarEntry(item, item !in HIDDEN_BY_DEFAULT)) }
                     return copy(sections = sections.toMutableList().also { it[si] = sec.copy(entries = entries) })
                 }
             }
         }
         val last = sections.last()
-        return copy(sections = sections.dropLast(1) + last.copy(entries = last.entries + ToolbarEntry(item)))
+        return copy(sections = sections.dropLast(1) + last.copy(entries = last.entries + ToolbarEntry(item, item !in HIDDEN_BY_DEFAULT)))
     }
 
     companion object {
@@ -164,7 +167,11 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
             ToolbarItem.INSERT_SPACE to ToolbarItem.SELECT,
             ToolbarItem.MARKUP to ToolbarItem.TEXT_BOX,
             ToolbarItem.READER to ToolbarItem.PAN,
+            ToolbarItem.ADD_PAGE to ToolbarItem.VIEW,
         )
+
+        /** Items that join the bar hidden, both in [DEFAULT] and when added to a stored layout. */
+        private val HIDDEN_BY_DEFAULT = setOf(ToolbarItem.ADD_PAGE)
 
         /**
          * The two bars hold different things, so each has its own set and neither can be handed the
@@ -196,7 +203,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
             listOf(ToolbarItem.IMAGE, ToolbarItem.TABLE),
             listOf(ToolbarItem.COLORS),
             listOf(ToolbarItem.UNDO, ToolbarItem.REDO),
-            listOf(ToolbarItem.PAGE_NAV, ToolbarItem.SEARCH, ToolbarItem.STYLES, ToolbarItem.MARGINS, ToolbarItem.VIEW),
+            listOf(ToolbarItem.PAGE_NAV, ToolbarItem.SEARCH, ToolbarItem.STYLES, ToolbarItem.MARGINS, ToolbarItem.VIEW, ToolbarItem.ADD_PAGE),
             listOf(ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK),
             listOf(ToolbarItem.FULLSCREEN),
         )
@@ -215,7 +222,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
         )
 
         private fun of(vararg groups: List<ToolbarItem>): ToolbarLayout =
-            ToolbarLayout(groups.map { g -> ToolbarSection(g.map { ToolbarEntry(it) }) })
+            ToolbarLayout(groups.map { g -> ToolbarSection(g.map { ToolbarEntry(it, it !in HIDDEN_BY_DEFAULT) }) })
 
         /**
          * Build from raw (id, visible) pairs per section as read from storage: ids outside [among]

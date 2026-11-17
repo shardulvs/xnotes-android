@@ -164,6 +164,7 @@ object XnotesIcons {
     val zoomOut = icon(circle(11.0, 11.0, 8.0), "M21 21l-4.35-4.35", "M8 11h6")
     val fit = icon("M8 3H5a2 2 0 0 0-2 2v3", "M21 8V5a2 2 0 0 0-2-2h-3", "M3 16v3a2 2 0 0 0 2 2h3", "M16 21h3a2 2 0 0 0 2-2v-3")
     val page = icon(rect(3.0, 3.0, 18.0, 18.0), "M12 8v8", "M8 12h8")
+    val addPage = icon("M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z", "M14 2v6h6", "M12 12v6", "M9 15h6")
     // The infinite canvas: a ruled field running past its own edges.
     val canvas = icon(rect(3.0, 3.0, 18.0, 18.0), "M3 9h18", "M3 15h18", "M9 3v18", "M15 3v18")
     // The overview map: the canvas frame opening at its corner for the panel that rests there,

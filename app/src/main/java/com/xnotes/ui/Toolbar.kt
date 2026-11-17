@@ -286,6 +286,7 @@ private fun ToolbarItemView(
         ToolbarItem.STYLES -> StylesButton(editor, onImportTemplate)
         ToolbarItem.MARGINS -> MarginsButton(editor)
         ToolbarItem.VIEW -> ViewButton(editor)
+        ToolbarItem.ADD_PAGE -> ToolbarIcon(XnotesIcons.addPage, stringResource(R.string.add_page)) { editor.addPage() }
 
         ToolbarItem.ZOOM -> {
             ToolbarIcon(XnotesIcons.zoomOut, stringResource(R.string.zoom_out), enabled = !editor.zoomLocked, shortcut = Keys.ZOOM_OUT) { editor.zoomOut() }

@@ -264,4 +264,11 @@ class ToolbarLayoutTest {
         val canvas = ToolbarLayout.fromRaw(listOf(listOf("select" to true, "insert_space" to true)), ToolbarLayout.CANVAS_ITEMS, ToolbarLayout.CANVAS_DEFAULT)
         assertTrue(ToolbarItem.INSERT_SPACE !in canvas.items())
     }
+
+    @Test fun addPageJoinsHiddenAfterView() {
+        val d = ToolbarLayout.DEFAULT.sections[8].entries
+        assertEquals(ToolbarEntry(ToolbarItem.ADD_PAGE, visible = false), d.last())
+        val stored = ToolbarLayout.fromRaw(listOf(listOf("margins" to true, "view" to true, "fit" to true)))
+        assertEquals(ToolbarEntry(ToolbarItem.ADD_PAGE, visible = false), stored.sections[0].entries[2])
+    }
 }
