@@ -88,6 +88,7 @@ val ToolbarItem.labelRes: Int
         ToolbarItem.CALLIGRAPHY -> R.string.tool_calligraphy
         ToolbarItem.SPEED -> R.string.tool_speed
         ToolbarItem.TAPER -> R.string.tool_taper
+        ToolbarItem.SPACER -> R.string.toolbar_spacer
         ToolbarItem.HIGHLIGHTER -> R.string.tool_highlighter
         ToolbarItem.ERASER -> R.string.tool_eraser
         ToolbarItem.PAN -> R.string.tool_pan

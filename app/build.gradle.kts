@@ -11,6 +11,9 @@ plugins {
 // the published (signed) binary for reproducible builds.
 val keystorePropertiesFile = rootProject.file("keystore.properties")
 val hasReleaseSigning = keystorePropertiesFile.exists()
+// opt-in build for reviewers: separate package, same sources, never overwrites XNotes.
+// ./gradlew :app:assembleRelease -PtoolbarReviewBuild=true
+val toolbarReviewBuild = providers.gradleProperty("toolbarReviewBuild").orNull == "true"
 val keystoreProperties = Properties().apply {
     if (hasReleaseSigning) keystorePropertiesFile.inputStream().use { load(it) }
 }
@@ -25,6 +28,7 @@ android {
         applicationId = "com.xnotes"
         minSdk = 26
         targetSdk = 36
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = 70
         versionName = "0.9.9"
         ndk {
@@ -75,6 +79,10 @@ android {
             versionNameSuffix = "-debug"
         }
         release {
+            if (toolbarReviewBuild) {
+                applicationIdSuffix = ".pr431review"
+                versionNameSuffix = "-pr431-review"
+            }
             if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")
             // R8 shrinks/optimises release builds (see proguard-rules.pro for the few keeps). R8
             // output is reproducible (pinned AGP fixes the R8 version + mapping); the one
@@ -140,4 +148,12 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.json)
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.ui.test.junit4)
+    // Compose 1.11 transitively requests Espresso 3.5.0, which uses InputManager.getInstance
+    // removed in recent Android APIs. Require the compatible stable instrumentation runtime.
+    androidTestImplementation(libs.androidx.test.espresso.core)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    debugImplementation(libs.androidx.ui.test.manifest)
 }
