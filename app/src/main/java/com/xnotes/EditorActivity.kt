@@ -834,8 +834,56 @@ private fun EditorScreen(
         context.startActivity(Intent.createChooser(send, context.getString(R.string.share_named, stem)))
     }
 
+    /**
+     * Bring the pages of the PDFs among [uris] level with their notes, behind the export dialog
+     * when any is behind, then run [then] off the main thread: what leaves xnotes as a PDF shows
+     * what the note holds. Cancelling the dialog, or an export that fails, stops short of [then].
+     */
+    fun freshenThen(uris: List<String>, then: suspend () -> Unit) {
+        val cancel = java.util.concurrent.atomic.AtomicBoolean(false)
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val behind = uris.filter { runCatching { editor.pdfNeedsExport(it) }.getOrDefault(false) }
+            var level = true
+            if (behind.isNotEmpty()) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    exportCancel = cancel
+                    exportProgress = ExportProgress(0, -1, "page")
+                }
+                for (u in behind) {
+                    if (cancel.get()) break
+                    val shown = { f: Float -> if (!cancel.get()) exportProgress = ExportProgress((f * 1000).toInt().coerceIn(0, 999), -1, "page") }
+                    level = editor.freshenPdf(u, shown) { cancel.get() } && level
+                }
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    if (exportCancel === cancel) exportProgress = null
+                }
+            }
+            when {
+                cancel.get() -> Unit
+                !level -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { editor.message = context.getString(R.string.err_share_note) }
+                else -> then()
+            }
+        }
+    }
+
     fun shareFile(uriStr: String, asPdf: Boolean) {
         val stem = stemOf(uriStr)
+        // A PDF goes out as the file it is, its pages drawn again first when they are behind its note.
+        if (kindOf(uriStr) == com.xnotes.core.util.DocumentKind.PDF) {
+            freshenThen(listOf(uriStr)) {
+                val file = runCatching {
+                    val dir = java.io.File(context.cacheDir, "share").apply { mkdirs() }
+                    dir.listFiles()?.forEach { it.delete() }
+                    java.io.File(dir, "$stem.pdf").also { f -> java.io.FileOutputStream(f).use { o -> editor.copyFileTo(uriStr, o) } }
+                }.getOrNull()
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    if (file == null || runCatching { launchShare(file, stem, "application/pdf") }.isFailure) {
+                        editor.message = context.getString(R.string.err_share_note)
+                    }
+                }
+            }
+            return
+        }
         if (asPdf) {
             // Render with progress, then share the finished PDF (writes into cache/share for FileProvider).
             runPdfExport(stem, shareDir = true, counting = countingOf(uriStr),
@@ -847,10 +895,9 @@ private fun EditorScreen(
             runCatching {
                 val dir = java.io.File(context.cacheDir, "share").apply { mkdirs() }
                 dir.listFiles()?.forEach { it.delete() } // keep only the file we're about to share
-                val kind = kindOf(uriStr)
-                val file = java.io.File(dir, "$stem${kind.suffix}")
+                val file = java.io.File(dir, "$stem${kindOf(uriStr).suffix}")
                 java.io.FileOutputStream(file).use { o -> editor.copyFileTo(uriStr, o) }
-                launchShare(file, stem, if (kind == com.xnotes.core.util.DocumentKind.PDF) "application/pdf" else "application/octet-stream")
+                launchShare(file, stem, "application/octet-stream")
             }.onFailure { editor.message = context.getString(R.string.err_share_note) }
         }
     }
@@ -858,7 +905,8 @@ private fun EditorScreen(
     // Share several stored files at once, each as the bundle it is (no PDF render for a batch).
     fun shareFiles(uris: List<String>) {
         if (uris.isEmpty()) return
-        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        // The PDFs among them have their pages drawn again first, where they are behind.
+        freshenThen(uris) {
             val intent = runCatching {
                 val dir = java.io.File(context.cacheDir, "share").apply { mkdirs() }
                 dir.listFiles()?.forEach { it.delete() }

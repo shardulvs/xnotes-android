@@ -3805,6 +3805,20 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         else -> false
     }
 
+    /**
+     * Bring the pages of the PDF at [uri] level with its note, when they are behind, before the
+     * file is handed to another app. True when they are level; false when the export was
+     * cancelled or failed. IO.
+     */
+    fun freshenPdf(uri: String, onProgress: (Float) -> Unit = {}, isCancelled: () -> Boolean = { false }): Boolean {
+        if (!pagesBehind(uri)) return true
+        val name = queryDisplayName(android.net.Uri.parse(uri)) ?: return false
+        return com.xnotes.platform.PdfExports.exportNow(uri, name, onProgress, isCancelled)
+    }
+
+    /** Whether the stored file at [uri] is a PDF whose pages are behind its note. IO. */
+    fun pdfNeedsExport(uri: String): Boolean = isPdfFile(uri) && pagesBehind(uri)
+
     /** Whether the PDF at [uri] holds a note of ours. IO. */
     private fun holdsNote(uri: String): Boolean =
         runCatching { withNoteInside(android.net.Uri.parse(uri)) { true } }.getOrNull() == true

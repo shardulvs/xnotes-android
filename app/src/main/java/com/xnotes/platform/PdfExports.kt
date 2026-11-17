@@ -91,6 +91,9 @@ object PdfExports {
     }
     private val tasks = AtomicInteger(0)
 
+    /** Held for the length of one export: the worker's, or one asked for here and now. */
+    private val oneAtATime = ReentrantLock()
+
     private class Job(val key: String, val name: String) {
         val cancel = AtomicBoolean(false)
     }
@@ -248,7 +251,36 @@ object PdfExports {
     /** What the file was when its note was taken out for an export. */
     private class Taken(val size: Long, val end: String)
 
+    /**
+     * Export the PDF at [uri], named [name], here and now on the caller's thread, for something
+     * that needs its pages level with its note before going on: sharing it. An export of it that
+     * is already running is waited for. True when the pages are level afterwards.
+     */
+    fun exportNow(uri: String, name: String, onProgress: (Float) -> Unit = {}, isCancelled: () -> Boolean = { false }): Boolean {
+        if (!ready) return false
+        val key = keyOf(uri)
+        store.wait(key, uri, name)
+        oneAtATime.lock()
+        try {
+            val entry = store.get(key)?.takeIf { it.waits } ?: return true // drawn while this waited its turn
+            export(entry, onProgress, isCancelled)
+            return store.get(key)?.waits != true
+        } finally {
+            oneAtATime.unlock()
+        }
+    }
+
     private fun run(entry: PdfExportStore.Entry) {
+        oneAtATime.lock()
+        try {
+            if (store.get(entry.key)?.waits == true) export(entry, {}, { false })
+        } finally {
+            oneAtATime.unlock()
+        }
+    }
+
+    /** One export, start to finish; [oneAtATime] is held. */
+    private fun export(entry: PdfExportStore.Entry, onProgress: (Float) -> Unit, isCancelled: () -> Boolean) {
         val exporter = exporter ?: return
         val job = Job(entry.key, entry.name)
         current = job
@@ -259,13 +291,13 @@ object PdfExports {
             if (!temp.mkdirs()) return
             val note = File(dir, "note.xnote")
             val out = File(dir, "out.pdf")
-            val stopped = { job.cancel.get() || entry.key in held }
+            val stopped = { job.cancel.get() || entry.key in held || isCancelled() }
             if (stopped()) return
             val taken = locked(entry.uri) { takeNote(entry, note) } ?: return
             val began = SystemClock.elapsedRealtime()
             show(entry.key, 0f)
             val whole = runCatching {
-                exporter.export(note, entry.name, out, temp, { show(entry.key, it) }, stopped)
+                exporter.export(note, entry.name, out, temp, { show(entry.key, it); onProgress(it) }, stopped)
             }.getOrDefault(false)
             if (!whole || stopped()) {
                 android.util.Log.i("xnotes.save", "pdf export of ${entry.name} ${if (whole) "dropped" else "stopped or failed"} after ${SystemClock.elapsedRealtime() - began}ms")
