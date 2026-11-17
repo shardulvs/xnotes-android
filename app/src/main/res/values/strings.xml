@@ -356,6 +356,12 @@
     <string name="recording_in_progress">A recording is in progress</string>
     <string name="recording_channel">Recordings</string>
     <string name="pdf_export_channel">Saving PDFs</string>
+    <string name="pdf_changed_title">This PDF was changed in another app</string>
+    <string name="pdf_changed_body">Another app has changed this PDF since you last edited it in xnotes. Choose which version to keep.</string>
+    <string name="pdf_changed_keep_theirs">Keep the other app\'s changes</string>
+    <string name="pdf_changed_keep_theirs_detail">Your ink, shapes and text stay on the pages, but you can no longer edit or erase them.</string>
+    <string name="pdf_changed_keep_ours">Keep editing in xnotes</string>
+    <string name="pdf_changed_keep_ours_detail">The other app\'s changes are removed the next time xnotes saves this PDF.</string>
     <string name="pdf_export_saving">Saving PDF</string>
     <string name="recording_chip">Recording, %1$s</string>
     <string name="err_mic_needed">Recording needs the microphone.</string>

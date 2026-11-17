@@ -1146,6 +1146,27 @@ private fun EditorScreen(
             SplitHost(editor, actions)
         }
     }
+    // A PDF another app has written to since xnotes last did: which version it opens as is asked first.
+    listOfNotNull(editor, editor.secondary).forEach { pane ->
+        if (pane.pdfConflict != null) {
+            com.xnotes.ui.AlertDialog(
+                onDismissRequest = { pane.leavePdfConflict() },
+                title = { androidx.compose.material3.Text(stringResource(R.string.pdf_changed_title)) },
+                text = {
+                    androidx.compose.foundation.layout.Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
+                        androidx.compose.material3.Text(stringResource(R.string.pdf_changed_body))
+                        PdfVersionChoice(R.string.pdf_changed_keep_theirs, R.string.pdf_changed_keep_theirs_detail) { scope.launch { pane.keepTheirPdf() } }
+                        PdfVersionChoice(R.string.pdf_changed_keep_ours, R.string.pdf_changed_keep_ours_detail) { scope.launch { pane.keepOurPdf() } }
+                    }
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = { pane.leavePdfConflict() }) {
+                        androidx.compose.material3.Text(stringResource(R.string.cancel))
+                    }
+                },
+            )
+        }
+    }
     if (showShareChooser) {
         val shareUri = pendingShareUri
         // Remembered because resolving the kind is a SAF query, and this is composition.
@@ -2039,3 +2060,22 @@ private fun displayNameOf(resolver: android.content.ContentResolver, uri: Uri): 
         } else null
     }
 }.getOrNull()
+
+/** One of the two versions a PDF changed in another app can be kept as: what choosing it does, and what that costs. */
+@Composable
+private fun PdfVersionChoice(label: Int, detail: Int, onClick: () -> Unit) {
+    val palette = com.xnotes.ui.theme.LocalPalette.current
+    val shape = androidx.compose.material3.MaterialTheme.shapes.medium
+    androidx.compose.foundation.layout.Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .border(1.dp, palette.border.toComposeColor(), shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp),
+    ) {
+        androidx.compose.material3.Text(stringResource(label), color = palette.text.toComposeColor(), fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        androidx.compose.material3.Text(stringResource(detail), color = palette.textDim.toComposeColor(), fontSize = 13.sp)
+    }
+}

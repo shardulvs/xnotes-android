@@ -168,6 +168,94 @@ class PdfNoteTest {
         assertArrayEquals(newer, attachment(pdf, "n.xnote"))
     }
 
+    // --- a PDF another app has written since ---
+
+    /** What another app's save leaves: every object written out again with a page of its own, our marker's length now wrong. */
+    private fun rewrittenByAnotherApp(pdf: File): File {
+        val out = temp(".pdf")
+        PDDocument.load(pdf).use { doc ->
+            doc.addPage(PDPage())
+            doc.save(out)
+        }
+        return out
+    }
+
+    private fun inspect(pdf: File): XnotesPdf.Inspection = RandomAccessFile(pdf, "r").use { XnotesPdf.inspect(it.channel) }
+
+    @Test fun theNoteComesBackOutOfAPdfAnotherAppRewrote() {
+        val content = bytes("mine", 4000)
+        val ours = PDDocument().use { doc ->
+            doc.addPage(PDPage())
+            saved(doc, PdfNote(temp(".xnote", content), "Lecture 3.xnote"))
+        }
+        val theirs = rewrittenByAnotherApp(ours)
+        assertTrue("its bytes no longer say it is ours", inspect(theirs) is XnotesPdf.Inspection.Plain)
+
+        val out = temp(".xnote")
+        assertTrue(PdfNote.extract(theirs, out))
+        assertArrayEquals(content, out.readBytes())
+    }
+
+    @Test fun theNewestNoteComesOutOfAPdfWithATailToo() {
+        val ours = PDDocument().use { doc ->
+            doc.addPage(PDPage())
+            saved(doc, PdfNote(temp(".xnote", bytes("exported")), "n.xnote"))
+        }
+        val newer = bytes("saved since", 5200)
+        RandomAccessFile(ours, "rw").use { raf ->
+            FileInputStream(temp(".xnote", newer)).use { zip -> assertTrue(XnotesPdf.appendTail(raf.channel, zip.channel) != null) }
+        }
+
+        val out = temp(".xnote")
+        assertTrue(PdfNote.extract(rewrittenByAnotherApp(ours), out))
+        assertArrayEquals(newer, out.readBytes())
+    }
+
+    @Test fun aPdfWithNoNoteGivesNone() {
+        val bare = temp(".pdf")
+        PDDocument().use { doc ->
+            doc.addPage(PDPage())
+            doc.save(bare)
+        }
+
+        assertFalse(PdfNote.extract(bare, temp(".xnote")))
+    }
+
+    @Test fun strippingLeavesAPlainPdf() {
+        val ours = PDDocument().use { doc ->
+            doc.addPage(PDPage())
+            doc.addPage(PDPage())
+            saved(doc, PdfNote(temp(".xnote", bytes("mine")), "n.xnote"))
+        }
+        val plain = temp(".pdf")
+
+        PdfNote.strip(rewrittenByAnotherApp(ours), plain)
+
+        assertTrue(inspect(plain) is XnotesPdf.Inspection.Plain)
+        assertFalse(String(plain.readBytes(), latin).contains("XNotes"))
+        assertFalse(PdfNote.extract(plain, temp(".xnote")))
+        PDDocument.load(plain).use { doc ->
+            assertEquals(3, doc.numberOfPages)
+            assertEquals(null, doc.documentCatalog.cosObject.getDictionaryObject(COSName.NAMES))
+        }
+    }
+
+    @Test fun strippingKeepsTheAttachmentsThatAreNotOurs() {
+        val ours = PDDocument().use { doc ->
+            doc.addPage(PDPage())
+            val other = COSDictionary().apply { setItem(COSName.TYPE, COSName.getPDFName("Filespec")) }
+            val tree = COSDictionary().apply { setItem(COSName.NAMES, COSArray().apply { add(COSString("b.txt")); add(other) }) }
+            doc.documentCatalog.cosObject.setItem(COSName.NAMES, COSDictionary().apply { setItem(embeddedFiles, tree) })
+            saved(doc, PdfNote(temp(".xnote", bytes("mine")), "n.xnote"))
+        }
+        assertEquals(listOf("b.txt", "n.xnote"), attachments(ours))
+        val plain = temp(".pdf")
+
+        PdfNote.strip(ours, plain)
+
+        assertEquals(listOf("b.txt"), attachments(plain))
+    }
+
     @Test fun sealingRefusesAFileThatDoesNotHoldTheNote() {
         val bare = temp(".pdf")
         PDDocument().use { doc ->

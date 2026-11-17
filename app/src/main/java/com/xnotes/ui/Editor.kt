@@ -3665,7 +3665,19 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * the loaded note and leaves the explorer as it was. A second tap while one open is in flight is
      * ignored, so two reads never race to swap in a document.
      */
-    suspend fun openAsync(uri: String, name: String? = null) {
+    suspend fun openAsync(uri: String, name: String? = null) =
+        openFrom(uri, name) { timing -> readStoredNote(uri, name, timing, ask = true) }
+
+    /**
+     * [openAsync]'s work, with the note read by [read]. [unsaved] opens it as holding changes its
+     * file does not have yet, so the next save writes them.
+     */
+    private suspend fun openFrom(
+        uri: String,
+        name: String?,
+        unsaved: Boolean = false,
+        read: (com.xnotes.format.DocumentCodec.ReadTiming) -> Document?,
+    ) {
         if (opening) return
         openCancelled.set(false)
         opening = true
@@ -3684,7 +3696,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             holding = uri.takeIf { pdf }
             val doc = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 fileBytes = fileSizeOf(uri)
-                readStoredNote(uri, name, timing)?.also {
+                read(timing)?.also {
                     it.created = settleCreated(uri, it.created)
                     // Pages already behind their note, from another session or device, are drawn when this one closes.
                     if (pdf && pagesBehind(uri)) com.xnotes.platform.PdfExports.stale(uri, name.orEmpty())
@@ -3712,6 +3724,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             noteOpen = true // push the editor on top of backstage (only on a successful open)
             opened = true
             rememberOpened(uri, name)
+            if (unsaved) {
+                state.document.dirty = true
+                refreshContent() // which starts the save, for a note that autosaves
+            }
+        } catch (e: PdfChangedElsewhere) {
+            // Not opened yet: which version it opens as is the user's to say.
+            pdfConflict = PdfConflict(uri, name, e.staged)
         } catch (e: XNoteFormatException) {
             message = appContext.getString(R.string.err_not_xnotes)
         } catch (e: PdfUnreadable) {
@@ -3741,18 +3760,23 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * `.pdf` gives the note inside it when it is an xnotes PDF, and otherwise a note of its pages
      * with nothing on them yet. Every reader of a stored note comes through here, so none of them
      * can take a PDF for a bundle. The document's files are temps the caller owns. IO.
+     *
+     * With [ask], a PDF that another app has written to since xnotes last did is not read at all:
+     * [PdfChangedElsewhere] is thrown, for the user to be asked which version to keep.
      */
-    private fun readStoredNote(uri: String, name: String? = null, timing: DocumentCodec.ReadTiming? = null): Document? {
+    private fun readStoredNote(uri: String, name: String? = null, timing: DocumentCodec.ReadTiming? = null, ask: Boolean = false): Document? {
         val u = android.net.Uri.parse(uri)
         if (DocumentKind.ofName(name ?: queryDisplayName(u).orEmpty()) != DocumentKind.PDF) {
             return appContext.contentResolver.openInputStream(u)?.use { codec.read(it, pdfDir, imageDir, timing) }
         }
         // Under the file's lock, so a read never meets an export being copied over the file.
         return com.xnotes.platform.PdfExports.locked(uri) {
+            // Another app's bytes after ours. An open asks which to keep; a tile or an export takes ours.
+            if (ask && inspectPdf(uri) is XnotesPdf.Inspection.Appended) throw PdfChangedElsewhere(null)
             withNoteInside(u) { note ->
                 val input = java.io.BufferedInputStream(java.nio.channels.Channels.newInputStream(note), 64 * 1024)
                 codec.read(input, pdfDir, imageDir, timing)
-            } ?: pagesOfPdf(u)
+            } ?: pagesOfPdf(u, ask)
         }
     }
 
@@ -3790,9 +3814,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * PDFium opens a path, not a provider's file, so the pages are read from a private copy, which
      * becomes the note's [Document.pdfFile]. The user's file is only read.
      */
-    private fun pagesOfPdf(uri: android.net.Uri): Document? {
+    private fun pagesOfPdf(uri: android.net.Uri, ask: Boolean = false): Document? {
         val staged = java.io.File.createTempFile("src", ".pdf", pdfDir)
-        var doc: Document? = null
+        var kept = false
         try {
             appContext.contentResolver.openInputStream(uri)?.use { input ->
                 java.io.FileOutputStream(staged).use { input.copyTo(it, 64 * 1024) }
@@ -3800,15 +3824,103 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             val source = com.xnotes.platform.PdfSource.open(staged)
             try {
                 if (source.pageCount == 0) throw PdfUnreadable(source.openError)
-                doc = stampNewNoteDefaults(com.xnotes.platform.PdfImporter.import(source))
+                // A note of ours attached to a PDF that does not read as ours: another app wrote the file whole.
+                if (ask && source.attachmentNames().any { com.xnotes.platform.PdfNote.isNote(it) }) {
+                    kept = true
+                    throw PdfChangedElsewhere(staged)
+                }
+                val doc = stampNewNoteDefaults(com.xnotes.platform.PdfImporter.import(source))
+                kept = true
+                return doc
             } finally {
                 source.close()
             }
-            return doc
         } finally {
-            if (doc == null) staged.delete()
+            if (!kept) staged.delete()
         }
     }
+
+    /** A PDF another app has written to since xnotes last did; [staged] is the private copy made of it, when finding out took one. */
+    private class PdfChangedElsewhere(val staged: java.io.File?) : Exception()
+
+    /** A PDF that was changed in another app, waiting for the user to say which version to keep. */
+    class PdfConflict internal constructor(val uri: String, val name: String?, internal val staged: java.io.File?)
+
+    /** Set when an open met a PDF changed in another app; the activity asks, and answers through one of the three below. */
+    var pdfConflict by mutableStateOf<PdfConflict?>(null)
+        private set
+
+    /** Cancel: back to the explorer, the file untouched. */
+    fun leavePdfConflict() {
+        pdfConflict?.staged?.delete()
+        pdfConflict = null
+    }
+
+    /**
+     * Keep editing in xnotes: the note of ours inside the PDF opens, as holding changes the file
+     * does not have, so the next save writes the PDF whole and the other app's changes go with it.
+     */
+    suspend fun keepOurPdf() {
+        val conflict = pdfConflict ?: return
+        pdfConflict = null
+        try {
+            openFrom(conflict.uri, conflict.name, unsaved = true) { timing ->
+                val staged = conflict.staged
+                // Appended to: our file is whole underneath. Rewritten: the note is wherever that app put it, and PdfBox reads it out.
+                if (staged == null) return@openFrom readStoredNote(conflict.uri, conflict.name, timing)
+                val note = java.io.File.createTempFile("ours", ".xnote", saveTmpDir)
+                try {
+                    if (!com.xnotes.platform.PdfNote.extract(staged, note, exportMemory())) return@openFrom null
+                    java.io.FileInputStream(note).use { codec.read(it, pdfDir, imageDir, timing) }
+                } finally {
+                    note.delete()
+                }
+            }
+        } finally {
+            conflict.staged?.delete()
+        }
+    }
+
+    /**
+     * Keep the other app's changes: the PDF as it stands, without our note, becomes a plain PDF
+     * again and opens as one. The ink of ours it shows is part of its pages from here on.
+     */
+    suspend fun keepTheirPdf() {
+        val conflict = pdfConflict ?: return
+        pdfConflict = null
+        opening = true
+        val plain = try {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    com.xnotes.platform.PdfExports.locked(conflict.uri) {
+                        val current = conflict.staged ?: java.io.File.createTempFile("theirs", ".pdf", saveTmpDir).also { copy ->
+                            appContext.contentResolver.openInputStream(android.net.Uri.parse(conflict.uri))!!.use { input ->
+                                java.io.FileOutputStream(copy).use { input.copyTo(it, 64 * 1024) }
+                            }
+                        }
+                        val stripped = java.io.File.createTempFile("plain", ".pdf", saveTmpDir)
+                        try {
+                            com.xnotes.platform.PdfNote.strip(current, stripped, exportMemory())
+                            val name = conflict.name ?: queryDisplayName(android.net.Uri.parse(conflict.uri)).orEmpty()
+                            com.xnotes.platform.PdfExports.replace(conflict.uri, name, stripped).also {
+                                if (it) com.xnotes.platform.PdfExports.fresh(conflict.uri)
+                            }
+                        } finally {
+                            stripped.delete()
+                            current.delete()
+                        }
+                    }
+                }.getOrDefault(false)
+            }
+        } finally {
+            opening = false
+        }
+        if (plain) openAsync(conflict.uri, conflict.name) else message = appContext.getString(R.string.err_open_note)
+    }
+
+    /** PdfBox's working memory for reading a whole PDF: a few tens of MB, then temp files. */
+    private fun exportMemory(): com.tom_roush.pdfbox.io.MemoryUsageSetting =
+        com.tom_roush.pdfbox.io.MemoryUsageSetting.setupMixed(32L * 1024 * 1024).setTempDir(appContext.cacheDir)
 
     fun save(output: OutputStream, uri: String, name: String? = null) {
         try {
