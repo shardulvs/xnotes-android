@@ -34,9 +34,8 @@ import java.io.OutputStream
  * meshes are a render artifact, and reading pixels back off the GPU would give a raster of whatever
  * happened to be on screen at whatever zoom it was at.
  *
- * Text boxes become real, selectable text. The few looks that have no vector form (neon, the
- * highlighter's multiply, translucent ink) are rasterized in place by [PdfItemRaster], exactly as
- * they are on a paged export.
+ * Text boxes become real, selectable text. Neon, whose glow has no vector form, is rasterized in
+ * place by [PdfItemRaster], exactly as it is on a paged export.
  */
 object CanvasPdfExporter {
 
@@ -119,7 +118,7 @@ object CanvasPdfExporter {
             r.beginMark(PdfTags.markOf(item))
             if (PdfItemRaster.needsRaster(item)) {
                 PdfItemRaster.item(item, cover)?.let { raster ->
-                    r.drawItemBitmap(raster.bmp, raster.rect, raster.multiply)
+                    r.drawItemBitmap(raster.bmp, raster.rect)
                     raster.bmp.recycle()
                 }
                 if (item is ShapeItem) item.paintLabel(r)
