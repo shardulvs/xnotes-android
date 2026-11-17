@@ -28,6 +28,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.key
@@ -252,6 +254,37 @@ internal fun ThumbBadges(b: ExplorerBody, e: BrowseEntry, inset: Dp = 8.dp) {
         }
         val pages = b.pages(e)
         if (b.view.showPages && pages > 1) TileBadge(XnotesIcons.pages, "$pages", Modifier.align(Alignment.BottomEnd))
+        ExportRing(e, Modifier.align(Alignment.TopEnd))
+    }
+}
+
+/**
+ * A ring on the tile of a PDF whose pages are being drawn again, as far round as that has got.
+ * It reads the running exports itself, so their progress redraws the ring and nothing around it.
+ */
+@Composable
+internal fun ExportRing(e: BrowseEntry, modifier: Modifier = Modifier) {
+    if (e.isDir || DocumentKind.ofName(e.name) != DocumentKind.PDF) return
+    val running by com.xnotes.platform.PdfExports.progress.collectAsState()
+    if (running.isEmpty()) return
+    val key = remember(e.documentUri) { com.xnotes.platform.PdfExports.keyOf(e.documentUri) }
+    val fraction = running[key] ?: return
+    val palette = LocalPalette.current
+    Box(
+        modifier
+            .size(22.dp)
+            .clip(CircleShape)
+            .background(palette.bg.withAlpha(if (palette.isDark) 200 else 235).toComposeColor())
+            .border(1.dp, palette.border.toComposeColor(), CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        CircularProgressIndicator(
+            progress = { fraction },
+            modifier = Modifier.size(13.dp),
+            color = palette.accent.toComposeColor(),
+            trackColor = palette.border.toComposeColor(),
+            strokeWidth = 2.dp,
+        )
     }
 }
 
@@ -553,6 +586,7 @@ internal fun GalleryItem(b: ExplorerBody, e: BrowseEntry, shelf: Dp) {
                     ThumbImage(img, whole = true, Modifier.fillMaxSize())
                     if (selected) Box(Modifier.fillMaxSize().background(palette.selectionBackground.withAlpha(77).toComposeColor()))
                     if (selecting) CheckRing(selected, Modifier.align(Alignment.TopStart).padding(6.dp))
+                    ExportRing(e, Modifier.align(Alignment.TopEnd).padding(6.dp))
                 }
             }
         }
@@ -602,6 +636,7 @@ internal fun TimelineCard(b: ExplorerBody, e: BrowseEntry, side: Dp) {
                     TileBadge(kindIcon(kind), if (kind == EntryKind.PDF) "PDF" else stringResource(R.string.kind_canvas), Modifier.align(Alignment.BottomStart).padding(6.dp))
                 }
             }
+            ExportRing(e, Modifier.align(Alignment.TopEnd).padding(6.dp))
             if (selecting) CheckRing(selected, Modifier.align(Alignment.TopStart).padding(6.dp))
         }
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {

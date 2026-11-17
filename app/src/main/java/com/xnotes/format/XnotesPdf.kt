@@ -174,8 +174,15 @@ internal object XnotesPdf {
         while (end >= word.size) {
             val start = maxOf(0L, end - SCAN_CHUNK)
             val chunk = read(ch, start, (end - start).toInt())
-            for (i in chunk.size - word.size downTo 0) {
-                if (word.indices.all { chunk[i + it] == word[it] }) return start + i
+            // Megabytes may go by here, so a byte is only looked at closely when it could start the word.
+            var i = chunk.size - word.size
+            while (i >= 0) {
+                if (chunk[i] == word[0]) {
+                    var k = 1
+                    while (k < word.size && chunk[i + k] == word[k]) k++
+                    if (k == word.size) return start + i
+                }
+                i--
             }
             if (start == 0L) return null
             end = start + word.size - 1 // a match may straddle two chunks

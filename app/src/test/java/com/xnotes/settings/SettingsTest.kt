@@ -370,6 +370,11 @@ class SettingsTest {
         assertFalse(Settings.fromJson(JSONObject()).fingerDrawAutoChecked)
     }
 
+    @Test fun pdfNotificationsAskedDefaultsFalseAndRoundTrips() {
+        assertFalse(Settings.fromJson(JSONObject()).pdfNotificationsAsked)
+        assertTrue(Settings.fromJson(Settings(pdfNotificationsAsked = true).toJson()).pdfNotificationsAsked)
+    }
+
     @Test fun fingerDrawAutoCheckedRoundTrips() {
         val back = Settings.fromJson(Settings(fingerDrawAutoChecked = true).toJson())
         assertTrue(back.fingerDrawAutoChecked)

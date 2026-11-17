@@ -368,6 +368,27 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
     }
 
+    /** A commit put a whole new file where this editor may be tracking one: what it knew of the old file is let go. */
+    private val pdfReplaced = com.xnotes.platform.PdfExports.Listener { uri, name, before, after ->
+        pdfTails.remove(uri)
+        if (knownStamps.containsKey(uri)) rememberStamp(uri) // the next save starts from the new file, not a fork
+        if (pane == Pane.PRIMARY) carryTile(uri, name, before, after)
+    }
+
+    init {
+        com.xnotes.platform.PdfExports.init(appContext)
+        com.xnotes.platform.PdfExports.listen(pdfReplaced)
+        // The exports the queue runs are drawn by the primary editor, in its theme and with its fonts.
+        if (pane == Pane.PRIMARY) {
+            com.xnotes.platform.PdfExports.exporter = com.xnotes.platform.PdfExports.Exporter { note, pdfName, to, temp, onProgress, isCancelled ->
+                // Pages first, then the write: half the ring each, since only one of the two is slow for any one note.
+                exportNoteFile(note, pdfName, to, { done, total ->
+                    onProgress(if (total < 0) 0.5f + done / 2000f else if (total > 0) done / (2f * total) else 0f)
+                }, isCancelled, temp)
+            }
+        }
+    }
+
     /** The sticker library: encoded image files kept under filesDir across sessions (never purged).
      *  Only [java.io.File] handles are held in memory; thumbnails and inserts decode from disk. */
     // The directory keeps its old "stamps" name so libraries saved before the rename still load.
@@ -2963,6 +2984,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      */
     fun retire() {
         secondary?.retire()
+        com.xnotes.platform.PdfExports.forget(pdfReplaced)
         RetiredEditors.inProcess.add(background)
     }
 
@@ -3649,13 +3671,24 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         opening = true
         val t0 = System.nanoTime()
         var readMs = -1L
+        var opened = false
+        var holding: String? = null
         try {
             val readStart = System.nanoTime()
             var fileBytes = -1L
             val timing = com.xnotes.format.DocumentCodec.ReadTiming()
+            val pdf = DocumentKind.ofName(name.orEmpty()) == DocumentKind.PDF
+            // On screen from here: an export of this file that is running is dropped, and none starts.
+            if (pdf) com.xnotes.platform.PdfExports.hold(uri)
+            opened = false
+            holding = uri.takeIf { pdf }
             val doc = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 fileBytes = fileSizeOf(uri)
-                readStoredNote(uri, name, timing)?.also { it.created = settleCreated(uri, it.created) }
+                readStoredNote(uri, name, timing)?.also {
+                    it.created = settleCreated(uri, it.created)
+                    // Pages already behind their note, from another session or device, are drawn when this one closes.
+                    if (pdf && pagesBehind(uri)) com.xnotes.platform.PdfExports.stale(uri, name.orEmpty())
+                }
             }
             readMs = (System.nanoTime() - readStart) / 1_000_000
             state.lastOpenInflateMs = timing.inflateMs
@@ -3677,6 +3710,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             state.lastSaveBytes = fileBytes // the on-disk size, until the first autosave rewrites it
             maybeBindAutosave(uri) // resume autosaving if this note lives in the granted folder
             noteOpen = true // push the editor on top of backstage (only on a successful open)
+            opened = true
             rememberOpened(uri, name)
         } catch (e: XNoteFormatException) {
             message = appContext.getString(R.string.err_not_xnotes)
@@ -3691,6 +3725,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             state.lastOpenReadMs = readMs
             state.lastOpenTotalMs = (System.nanoTime() - t0) / 1_000_000
             opening = false
+            // An open that did not put the note on screen lets its file go again.
+            if (!opened) holding?.let { com.xnotes.platform.PdfExports.release(it) }
         }
     }
 
@@ -3711,10 +3747,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (DocumentKind.ofName(name ?: queryDisplayName(u).orEmpty()) != DocumentKind.PDF) {
             return appContext.contentResolver.openInputStream(u)?.use { codec.read(it, pdfDir, imageDir, timing) }
         }
-        return withNoteInside(u) { note ->
-            val input = java.io.BufferedInputStream(java.nio.channels.Channels.newInputStream(note), 64 * 1024)
-            codec.read(input, pdfDir, imageDir, timing)
-        } ?: pagesOfPdf(u)
+        // Under the file's lock, so a read never meets an export being copied over the file.
+        return com.xnotes.platform.PdfExports.locked(uri) {
+            withNoteInside(u) { note ->
+                val input = java.io.BufferedInputStream(java.nio.channels.Channels.newInputStream(note), 64 * 1024)
+                codec.read(input, pdfDir, imageDir, timing)
+            } ?: pagesOfPdf(u)
+        }
     }
 
     /**
@@ -3734,6 +3773,13 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             }
             note?.let(read)
         }
+
+    /** Whether the pages of the PDF at [uri] are behind the note inside it. IO. */
+    private fun pagesBehind(uri: String): Boolean = when (val found = inspectPdf(uri)) {
+        is XnotesPdf.Inspection.Ours -> found.stale
+        is XnotesPdf.Inspection.Torn -> true
+        else -> false
+    }
 
     /** Whether the PDF at [uri] holds a note of ours. IO. */
     private fun holdsNote(uri: String): Boolean =
@@ -3828,6 +3874,45 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** Whether the open note's file is a `.pdf`. */
     val openIsPdf: Boolean get() = DocumentKind.ofName(state.document.displayName.orEmpty()) == DocumentKind.PDF
 
+    /** The open note's file, when it is a PDF, is off the screen: its export may run. */
+    private fun releaseOpenPdf(afterMs: Long = 0L) {
+        val uri = state.document.path ?: return
+        if (openIsPdf) com.xnotes.platform.PdfExports.release(uri, afterMs)
+    }
+
+    /**
+     * The app has left the screen. A PDF open here may have its pages drawn again, after a moment:
+     * a system picker over the app looks the same as leaving it, and is gone again in seconds.
+     * Called from the activity's `onStop`, the last point at which Android lets the export's
+     * service start.
+     */
+    fun leftApp() {
+        secondary?.leftApp()
+        val uri = state.document.path ?: return
+        if (!noteOpen || canvasOpen || !openIsPdf) return
+        releaseOpenPdf(com.xnotes.platform.PdfExports.LEAVE_HOLD_MS)
+        // The save the pause began may still be on its way to leaving the pages behind.
+        val saving = state.document.dirty || noteWriteJob?.isActive == true
+        if (saving || com.xnotes.platform.PdfExports.isWaiting(uri)) com.xnotes.platform.PdfExports.kick(expecting = true)
+    }
+
+    /** The app is back on screen, and with it the PDF open here: an export of it that is running is dropped. */
+    fun returnedToApp() {
+        secondary?.returnedToApp()
+        val uri = state.document.path ?: return
+        if (noteOpen && !canvasOpen && openIsPdf) com.xnotes.platform.PdfExports.hold(uri)
+    }
+
+    /** Set once, by the first save into a PDF: the activity then asks whether saving PDFs may show a notification. */
+    var askPdfNotifications by mutableStateOf(false)
+        private set
+
+    /** The question [askPdfNotifications] stands for has been put, or needed no putting. */
+    fun pdfNotificationsAsked() {
+        askPdfNotifications = false
+        if (!settings.pdfNotificationsAsked) settings = settings.copy(pdfNotificationsAsked = true)
+    }
+
     /**
      * Save as, for a note whose file is a PDF: the copy at [uri], named [name], is an xnotes PDF
      * too, written whole, and the open note follows it there. [onDone] gets whether it landed.
@@ -3844,7 +3929,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         noteWriteJob = autosaveScope.launch {
             pending?.join()
             val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                synchronized(saveLock) { runCatching { writePdfWhole(uri, snapshot, name) }.getOrDefault(false) }
+                synchronized(saveLock) {
+                    com.xnotes.platform.PdfExports.locked(uri) { runCatching { writePdfWhole(uri, snapshot, name) }.getOrDefault(false) }
+                }
             }
             savingNote = false
             if (ok) {
@@ -3870,10 +3957,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * (the system "Open…" picker) maps to one key. Shared by the per-note view state ([viewKey])
      * and the creation-time store. Falls back to the raw string for non-document URIs.
      */
-    private fun documentKey(uri: String): String = runCatching {
-        val u = android.net.Uri.parse(uri)
-        "${u.authority}|${android.provider.DocumentsContract.getDocumentId(u)}"
-    }.getOrDefault(uri)
+    private fun documentKey(uri: String): String = com.xnotes.platform.PdfExports.keyOf(uri)
 
     /** The storage display name for a document/tree URI (no extension stripped), or null. */
     private fun queryDisplayName(uri: android.net.Uri): String? = runCatching {
@@ -4098,6 +4182,23 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 }
             }
             publishThumbnail(key, bmp, generation)
+        }
+    }
+
+    /**
+     * An export draws the same first page the tile already shows, under a new modified time: the
+     * cached tile is carried over to it, where drawing it again would mean reading the whole note.
+     */
+    private fun carryTile(uri: String, name: String, before: Long, after: Long) {
+        if (before < 0L || after < 0L || before == after) return
+        val generation = thumbnailGeneration
+        val old = thumbKey(uri, name, before)
+        val new = thumbKey(uri, name, after)
+        if (old == new) return
+        for ((from, to) in listOf(old to new, pageThumbKey(old) to pageThumbKey(new))) {
+            val bmp = runCatching { thumbCache.load(from, generation) }.getOrNull() ?: continue
+            thumbCache.store(to, bmp, generation)
+            publishThumbnail(to, bmp, generation)
         }
     }
 
@@ -4763,6 +4864,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             docMeta.rekeyTree(from, to)
             knownStamps.remove(oldUri)?.let { knownStamps[newUri] = it }
             knownEntries.remove(oldUri)?.let { knownEntries[newUri] = it }
+            knownEnds.remove(oldUri)?.let { knownEnds[newUri] = it }
+            pdfTails.remove(oldUri)?.let { pdfTails[newUri] = it }
+            com.xnotes.platform.PdfExports.moved(oldUri, newUri, newName ?: queryDisplayName(android.net.Uri.parse(newUri)).orEmpty())
             invalidateThumb(oldUri)
         }
         val tree = browseRoot?.let { android.net.Uri.parse(it) } ?: return
@@ -4834,6 +4938,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * it to recents, autosave rewriting its file, or the unsaved-changes guard offering to save it.
      */
     private fun purgeDeleted(docUri: String) {
+        com.xnotes.platform.PdfExports.gone(docUri)
         val target = android.net.Uri.parse(docUri)
         val delId = runCatching { android.provider.DocumentsContract.getDocumentId(target) }.getOrNull() ?: return
         val auth = target.authority
@@ -5244,15 +5349,20 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** Autosave [owner]'s [doc] to [uri], or to the fork [owner] already moved to, forking when that file moved under us. IO. */
     private fun saveNoteGuarded(uri: String, doc: Document, title: String, owner: Document): SaveResult? = synchronized(saveLock) {
         val target = forks.target(uri, owner)
-        // A PDF whose end does not read is not one to write into either: the save goes beside it.
-        if (changedUnderneath(target) || unreadablePdf(target)) {
-            val base = forks.base(target, DocumentKind.stripSuffix(title))
-            val fork = forkNote(target, doc, base) ?: return null
-            forks.record(target, fork.uri, owner, DocumentKind.stripSuffix(fork.name), base)
-            return SaveResult(fork.uri, fork)
+        fun save(): SaveResult? {
+            // A PDF whose end does not read is not one to write into either: the save goes beside it.
+            if (changedUnderneath(target) || unreadablePdf(target)) {
+                val base = forks.base(target, DocumentKind.stripSuffix(title))
+                val fork = forkNote(target, doc, base) ?: return null
+                forks.record(target, fork.uri, owner, DocumentKind.stripSuffix(fork.name), base)
+                return SaveResult(fork.uri, fork)
+            }
+            if (!writeNoteSafely(target, doc)) return null
+            return SaveResult(target, null)
         }
-        if (!writeNoteSafely(target, doc)) return null
-        SaveResult(target, null)
+        // A PDF's export commits under the file's lock, so the check for a change and the write share it:
+        // a commit landing between the two would look like someone else's change, and fork.
+        if (isPdfFile(target)) com.xnotes.platform.PdfExports.locked(target) { save() } else save()
     }
 
     /** The canvas sibling of [saveNoteGuarded]. IO. */
@@ -5305,7 +5415,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * throw mid-encode left the note as 0 bytes. Returns true only when [uri] now holds the note.
      */
     private fun writeNoteSafely(uri: String, doc: Document): Boolean = synchronized(saveLock) {
-        if (isPdfFile(uri)) return writePdf(uri, doc) // a bundle's bytes must never land in a PDF
+        // A bundle's bytes must never land in a PDF.
+        if (isPdfFile(uri)) return com.xnotes.platform.PdfExports.locked(uri) { writePdf(uri, doc) }
         // Replace only the manifest when everything ahead of it is already right. A splice that
         // fails part way leaves a file that is not a valid zip, and falling through to the full
         // rewrite below is what puts it right, so this must stay ordered this way.
@@ -5473,6 +5584,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             PdfSave.NOT_OURS -> writePdfWhole(uri, doc)
         }
         if (saved) {
+            if (!settings.pdfNotificationsAsked && !askPdfNotifications) autosaveScope.launch { askPdfNotifications = true }
             state.lastSaveEncodeMs = msSince(start)
             state.lastSaveCopyMs = 0L
             state.lastSaveManifestMs = timing.manifestMs
@@ -5507,6 +5619,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         } ?: return PdfSave.FAILED
         pdfTails[uri] = tail
         rememberStamp(uri)
+        // The pages are behind the note from here until an export draws them again.
+        com.xnotes.platform.PdfExports.stale(uri, doc.displayName ?: queryDisplayName(android.net.Uri.parse(uri)).orEmpty())
         return PdfSave.SAVED
     }
 
@@ -5563,13 +5677,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val pdf = java.io.File.createTempFile("save", ".pdf", saveTmpDir)
         try {
             if (!writeXnotesPdf(doc, pdfName, pdf)) return false
-            // Opening the file truncates it, so the temp is opened first; see [copyOver].
-            val copied = com.xnotes.core.util.copyOver(pdf, copyBuffer) {
-                appContext.contentResolver.openOutputStream(android.net.Uri.parse(uri), "wt")
-            }
-            if (!copied) return false
+            // Kept in app storage until the copy over the file is seen whole; see [PdfExports.replace].
+            if (!com.xnotes.platform.PdfExports.replace(uri, pdfName, pdf)) return false
             pdfTails.remove(uri) // whole again: the next save starts a tail of its own
             rememberStamp(uri)
+            com.xnotes.platform.PdfExports.fresh(uri)
             return true
         } finally {
             pdf.delete()
@@ -5598,8 +5710,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         to: java.io.File,
         onProgress: (Int, Int) -> Unit = { _, _ -> },
         isCancelled: () -> Boolean = { false },
+        temp: java.io.File? = null,
     ): Boolean {
-        val doc = java.io.FileInputStream(note).use { codec.read(it, pdfDir, imageDir) }
+        // What the bundle unpacks to goes in [temp] when the caller brings one: an export that outlives
+        // this editor's activity must not sit in the dirs the next editor empties.
+        val doc = java.io.FileInputStream(note).use { codec.read(it, temp ?: pdfDir, temp ?: imageDir) }
         val src = doc.pdfFile?.let { com.xnotes.platform.PdfSource.create(it) }
         try {
             val stem = DocumentKind.stripSuffix(pdfName)
@@ -5679,6 +5794,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 // still counts, but only the document it belongs to may have its flags touched.
                 if (state.document === doc) res.fork?.let { adoptNoteFork(it) }
                 invalidateThumb(res.uri) // file changed on disk; drop the stale tile so the grid re-renders it
+                com.xnotes.platform.PdfExports.kick() // nothing to do while the note is on screen, which holds its file
             } else if (wasDirty && state.document === doc) {
                 doc.dirty = true; dirty = true // nothing was written; the edits are still unsaved
             }
@@ -6731,6 +6847,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         flowText.endSession() // flushes the typing burst so the autosave below carries it
         flushAutosave() // save the outgoing note if it was autosaving to the folder
         autosaveUri = null
+        if (state.document.path != doc.path) releaseOpenPdf() // its export starts once that save has landed
         // File readouts belong to the outgoing note; a file-backed open re-sets them after the swap.
         state.lastOpenCompacted = doc.compactedOnLoad
         state.openFileBytes = -1L
@@ -9644,6 +9761,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             autosaveUri?.let { uri -> autosaveScope.launch { regenerateClosedNoteThumb(uri) } }
             autosaveUri = null
             noteOpen = false
+            // Off the screen, with its last save in the file: a PDF's pages are drawn again now.
+            releaseOpenPdf()
+            com.xnotes.platform.PdfExports.kick()
         }
     }
 }

@@ -355,6 +355,8 @@
     <string name="recording_other_pane">The other pane is recording</string>
     <string name="recording_in_progress">A recording is in progress</string>
     <string name="recording_channel">Recordings</string>
+    <string name="pdf_export_channel">Saving PDFs</string>
+    <string name="pdf_export_saving">Saving PDF</string>
     <string name="recording_chip">Recording, %1$s</string>
     <string name="err_mic_needed">Recording needs the microphone.</string>
     <string name="mic_settings">Settings</string>

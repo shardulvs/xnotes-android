@@ -91,6 +91,8 @@ data class Settings(
     val prefs: Preferences = Preferences(),
     /** One-shot flag: the first-run stylus check (which may auto-enable finger-draw) has run. */
     val fingerDrawAutoChecked: Boolean = false,
+    /** One-shot flag: the first edit of a PDF has asked whether its saving may show a notification. */
+    val pdfNotificationsAsked: Boolean = false,
 ) {
     fun configFor(tool: Tool): ToolConfig = tools[tool] ?: ToolDefaults.configFor(tool)
 
@@ -146,6 +148,7 @@ data class Settings(
             .put("prefs", prefs.toJson())
             .put("view_defaults", com.xnotes.platform.ViewSettingsJson.write(JSONObject(), viewDefaults))
             .put("finger_draw_auto_checked", fingerDrawAutoChecked)
+            .put("pdf_notifications_asked", pdfNotificationsAsked)
     }
 
     companion object {
@@ -202,6 +205,7 @@ data class Settings(
                 newTable = tableDefaults(o.optJSONObject("new_table")),
                 prefs = Preferences.fromJson(o.optJSONObject("prefs")),
                 fingerDrawAutoChecked = o.optBoolean("finger_draw_auto_checked", false),
+                pdfNotificationsAsked = o.optBoolean("pdf_notifications_asked", false),
             )
         }
 

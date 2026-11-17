@@ -187,6 +187,7 @@ class EditorActivity : ComponentActivity() {
             var ready by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) {
                 ed.restoreSession() // heavy load off-thread; the system splash stays up meanwhile
+                com.xnotes.platform.PdfExports.resume() // PDFs the last run left with pages behind, or half copied
                 ready = true
                 ed.prewarmBackstage() // warm recents/explorer caches so the first backstage open is instant
             }
@@ -284,9 +285,16 @@ class EditorActivity : ComponentActivity() {
     }
 
     // Playback never goes on with xnotes off screen; a split window that only lost focus is still on it.
+    override fun onStart() {
+        super.onStart()
+        editor?.returnedToApp()
+    }
+
     override fun onStop() {
         super.onStop()
         com.xnotes.ui.AudioPlayback.pause()
+        // The last moment Android lets a foreground service start, which a PDF's export runs under.
+        editor?.leftApp()
     }
 
     @Suppress("DEPRECATION") // RUNNING_* still arrive below Android 14
@@ -512,6 +520,17 @@ private fun EditorScreen(
 
     // Recording asks for the microphone the first time, and on Android 13 and later for notifications
     // too, since the recording shows one while xnotes is off screen. Refusing notifications still records.
+    // A PDF's pages are drawn again after xnotes leaves the screen, under a notification that Android 13
+    // and later only show when allowed. Asked once, for the first PDF edited, and not before that note is
+    // closed: a system dialog over the page would take the pen mid-stroke.
+    val pdfNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { editor.pdfNotificationsAsked() }
+    LaunchedEffect(editor.askPdfNotifications, editor.noteOpen) {
+        if (!editor.askPdfNotifications || editor.noteOpen) return@LaunchedEffect
+        val missing = android.os.Build.VERSION.SDK_INT >= 33 &&
+            androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (missing) pdfNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS) else editor.pdfNotificationsAsked()
+    }
     var pendingRecordPane by remember { mutableStateOf<Editor?>(null) }
     // Notifications are asked for once a run when only they are missing; the system stops asking after two refusals anyway.
     var askedNotifications by remember { mutableStateOf(false) }
