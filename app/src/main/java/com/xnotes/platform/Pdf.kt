@@ -17,6 +17,7 @@ import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.xnotes.R
 import com.xnotes.core.geometry.Affine
+import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.ConnectorItem
 import com.xnotes.core.model.Document
@@ -25,11 +26,13 @@ import com.xnotes.core.model.PageInsets
 import com.xnotes.core.model.PageLayers
 import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.model.Rooms
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.displayMarkup
 import com.xnotes.core.model.insets
 import com.xnotes.core.model.sourceHeight
 import com.xnotes.core.model.sourceWidth
+import com.xnotes.core.pal.FillRule
 import com.xnotes.core.pal.Mark
 import com.xnotes.core.pal.Renderer
 import com.xnotes.core.pdf.FlowHeadings
@@ -44,6 +47,8 @@ import com.xnotes.core.pdf.TextLink
 import com.xnotes.core.text.FlowFrame
 import com.xnotes.core.text.FlowPainter
 import com.xnotes.core.text.TextFlow
+import com.xnotes.core.vector.VectorContour
+import com.xnotes.core.vector.VectorSeg
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -154,8 +159,9 @@ object PdfExporter {
     private const val SCRATCH_MAIN_MEM_BYTES = 32L * 1024 * 1024
 
     /**
-     * [paperColor] gives each page's background fill (the on-screen paper colour, e.g. dark-theme
-     * `#161616`) — used for plain note pages; an imported PDF page keeps its own background instead.
+     * [paperColor] gives each page's paper as it is on screen (e.g. dark-theme `#161616`). It fills a
+     * plain note page whole; an imported PDF page keeps its own background and takes the paper only
+     * where the PDF does not show, in its margins and the room inserted into it.
      * [onProgress] reports `(pagesDone, totalPages)` (once as `(0, total)` first) and [isCancelled]
      * is polled per page so a long export can show a dialog and abort before [out] is written. A
      * plain note is written tagged, titled [title]; a PDF-backed one keeps its source's own make-up.
@@ -324,7 +330,7 @@ object PdfExporter {
                     // must a margined one — its extra paper is written by growing the page's boxes —
                     // and one with room in it, whose PDF is laid in bands round it.
                     if (page.items.isNotEmpty() || flow.bounds(page) != null || !ins.isZero || page.rooms.isNotEmpty()) {
-                        frames[index] = annotatePage(ctx, srcDoc.getPage(index), page, ins, s, paintRuling, flow)
+                        frames[index] = annotatePage(ctx, srcDoc.getPage(index), page, ins, s, paperColor, paintRuling, flow)
                     } else if (page.markups.isNotEmpty()) {
                         srcDoc.getPage(index).let { pd -> PdfMarkups.write(ctx, pd, page.markups, sourceFrame(pd, s)) }
                     }
@@ -363,7 +369,7 @@ object PdfExporter {
                 val srcIdx = page.pdfPage
                 val ins = page.insets(doc)
                 frames[index] = if (srcIdx != null && srcDoc != null && srcIdx in 0 until srcDoc.numberOfPages) {
-                    vectorImportedPage(ctx, srcDoc, srcIdx, page, ins, s, paintRuling, flow)
+                    vectorImportedPage(ctx, srcDoc, srcIdx, page, ins, s, paperColor, paintRuling, flow)
                 } else {
                     vectorBlankPage(ctx, page, ins, s, paperColor, paintRuling, flow)
                 }
@@ -437,12 +443,12 @@ object PdfExporter {
         return true
     }
 
-    /** Copy a source page in as vector, then overlay its ruling + annotations; returns where it drew. */
-    private fun vectorImportedPage(ctx: PdfExportContext, srcDoc: PDDocument, srcIdx: Int, page: Page, ins: PageInsets, s: Double, paintRuling: (Page, Renderer) -> Unit, flow: FlowExport): PageFrame {
+    /** Copy a source page in as vector, then overlay its paper, ruling + annotations; returns where it drew. */
+    private fun vectorImportedPage(ctx: PdfExportContext, srcDoc: PDDocument, srcIdx: Int, page: Page, ins: PageInsets, s: Double, paperColor: (Page) -> Rgba, paintRuling: (Page, Renderer) -> Unit, flow: FlowExport): PageFrame {
         val pdfPage = ctx.doc.importPage(srcDoc.getPage(srcIdx))
         ownAnnotations(pdfPage)
         turnAsShown(pdfPage, page)
-        return annotatePage(ctx, pdfPage, page, ins, s, paintRuling, flow)
+        return annotatePage(ctx, pdfPage, page, ins, s, paperColor, paintRuling, flow)
     }
 
     /** Turn [pdfPage], a source page in the export, as far past its own /Rotate as the note shows it. */
@@ -461,10 +467,10 @@ object PdfExporter {
     }
 
     /**
-     * Append [page]'s ruling + annotations as a new content stream over an existing [pdfPage] of the
-     * export, then its markups; returns where it drew.
+     * Append [page]'s paper round its PDF, its ruling + annotations as a new content stream over an
+     * existing [pdfPage] of the export, then its markups; returns where it drew.
      */
-    private fun annotatePage(ctx: PdfExportContext, pdfPage: PDPage, page: Page, ins: PageInsets, s: Double, paintRuling: (Page, Renderer) -> Unit, flow: FlowExport): PageFrame {
+    internal fun annotatePage(ctx: PdfExportContext, pdfPage: PDPage, page: Page, ins: PageInsets, s: Double, paperColor: (Page) -> Rgba, paintRuling: (Page, Renderer) -> Unit, flow: FlowExport): PageFrame {
         val frame = sourceFrame(pdfPage, s)
         val cover = footprintOf(page, ins)
         // Room inserted into the page lays its PDF in bands round it, before the box grows to hold them.
@@ -472,7 +478,7 @@ object PdfExporter {
         if (banded) PdfBands.band(ctx.doc, pdfPage, page, frame)
         growPageBox(pdfPage, frame, cover, ins, banded)
         PDPageContentStream(ctx.doc, pdfPage, PDPageContentStream.AppendMode.APPEND, true, true).use { cs ->
-            paintItems(cs, ctx, pdfPage, page, frame, cover, paintRuling, flow)
+            paintItems(cs, ctx, pdfPage, page, frame, cover, paintRuling, flow, paperColor(page))
         }
         if (banded) {
             val tiles = com.xnotes.core.model.Rooms.tiles(page.rooms, page.sourceWidth, page.sourceHeight).map { t ->
@@ -531,10 +537,14 @@ object PdfExporter {
         return frame
     }
 
-    /** Draw a page's ruling (behind ink), the flow text, then its items in z-order, where [frame] puts them; [cover] is its paper. */
-    private fun paintItems(cs: PDPageContentStream, ctx: PdfExportContext, pdfPage: PDPage, page: Page, frame: PageFrame, cover: Rect, paintRuling: (Page, Renderer) -> Unit, flow: FlowExport) {
+    /**
+     * Draw a page's ruling (behind ink), the flow text, then its items in z-order, where [frame] puts
+     * them; [cover] is its paper. A PDF page, drawn already, first gets [paper] round it.
+     */
+    private fun paintItems(cs: PDPageContentStream, ctx: PdfExportContext, pdfPage: PDPage, page: Page, frame: PageFrame, cover: Rect, paintRuling: (Page, Renderer) -> Unit, flow: FlowExport, paper: Rgba? = null) {
         val renderer = PdfBoxRenderer(cs, ctx, pdfPage, frame.ox, frame.oy, frame.s, frame.turn)
         renderer.beginMark(Mark.Decoration)
+        if (paper != null) fillPaper(renderer, page, cover, paper)
         paintRuling(page, renderer) // page ruling sits behind the ink
         renderer.endMark()
         PageLayers.paint(page.items.forExport(), {
@@ -555,6 +565,18 @@ object PdfExporter {
             renderer.endMark()
         }
         renderer.endPage()
+    }
+
+    /** Fill the paper [page]'s PDF leaves bare, its margins and the room inserted into it, in [color]. */
+    private fun fillPaper(r: Renderer, page: Page, cover: Rect, color: Rgba) {
+        val strips = Rooms.paper(cover, page.rooms, page.sourceWidth, page.sourceHeight)
+        if (strips.isEmpty()) return
+        // One path, so strips that meet show no seam between them in a viewer.
+        val path = strips.map { s ->
+            val corners = listOf(Pt(s.right, s.top), Pt(s.right, s.bottom), Pt(s.left, s.bottom))
+            VectorContour(Pt(s.left, s.top), corners.map { VectorSeg.Line(it) }, closed = true)
+        }
+        r.fillPath(path, color, FillRule.NONZERO)
     }
 
     /** [page]'s whole paper in page space, margins included (negative on a margined edge). */
