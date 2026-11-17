@@ -566,7 +566,7 @@
     <string name="nothing_this_colour">Nothing has this colour.</string>
     <string name="recent_empty">Nothing opened yet. Notes and canvases you open show up here.</string>
     <string name="nothing_to_show">Nothing to show here.</string>
-    <string name="no_pdf_notes_here">No PDF notes here.</string>
+    <string name="no_pdf_notes_here">No PDFs here.</string>
     <string name="include_subfolders">Include subfolders</string>
     <string name="opened_on_device">opened on this device</string>
     <string name="clear">Clear</string>
@@ -938,7 +938,7 @@
     <string name="opened_ago">Opened %1$s</string>
     <string name="kind_folders">Folders</string>
     <string name="kind_notes">Notes</string>
-    <string name="kind_pdf_notes">PDF notes</string>
+    <string name="kind_pdf_notes">PDFs</string>
     <string name="kind_canvases">Canvases</string>
     <string name="hue_black">Black</string>
     <string name="hue_white">White</string>
@@ -1051,7 +1051,7 @@
     <string name="modified">Modified</string>
     <string name="created">Created</string>
     <string name="kind_note">Note</string>
-    <string name="kind_pdf_note">PDF note</string>
+    <string name="kind_pdf_note">PDF</string>
     <string name="kind_canvas">Canvas</string>
     <string name="more_for">More for %1$s</string>
     <string name="pinned_to_sidebar">Pinned to sidebar</string>

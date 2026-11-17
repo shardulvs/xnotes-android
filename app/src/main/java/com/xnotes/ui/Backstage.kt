@@ -1097,7 +1097,7 @@ private fun ExplorerSection(
             metaTick++
         }
     }
-    val kindOf: (BrowseEntry) -> EntryKind = { entryKind(it, editor.cachedMeta(it)) }
+    val kindOf: (BrowseEntry) -> EntryKind = { entryKind(it) }
     val withCreated: (BrowseEntry) -> BrowseEntry = { e -> editor.createdOf(e).let { if (it == e.created) e else e.copy(created = it) } }
     val arrange: (List<BrowseEntry>) -> List<BrowseEntry> = remember(view.sortKey, view.descending, view.folders, kindFilter, metaTick) {
         { list ->
@@ -1817,8 +1817,8 @@ private fun ExplorerSection(
                                     DropdownMenuItem(text = { Text(stringResource(R.string.save_copy_ellipsis)) }, onClick = { moreOpen = false; selection.clear(); calls.saveCopyFile(one.documentUri) })
                                     DropdownMenuItem(text = { Text(stringResource(R.string.export_pdf)) }, onClick = { moreOpen = false; selection.clear(); calls.exportFilePdf(one.documentUri) })
                                 }
-                                // Only notes merge: a canvas has no pages, a folder no one order.
-                                val notes = selection.filter { !it.isDir && com.xnotes.core.util.DocumentKind.ofName(it.name) == com.xnotes.core.util.DocumentKind.NOTE }
+                                // Notes and PDFs merge: a canvas has no pages, a folder no one order.
+                                val notes = selection.filter { !it.isDir && com.xnotes.core.util.DocumentKind.ofName(it.name).let { k -> k == com.xnotes.core.util.DocumentKind.NOTE || k == com.xnotes.core.util.DocumentKind.PDF } }
                                 if (notes.size >= 2 && notes.size == selection.size) {
                                     DropdownMenuItem(text = { Text(stringResource(R.string.merge_ellipsis)) }, onClick = {
                                         moreOpen = false
@@ -2239,7 +2239,7 @@ private fun DragPreview(editor: Editor, items: List<BrowseEntry>, sizePx: IntSiz
 @Composable
 private fun StackedNoteCard(editor: Editor, entry: BrowseEntry, modifier: Modifier) {
     val palette = LocalPalette.current
-    val thumb = editor.cachedNoteTile(entry.documentUri)
+    val thumb = editor.cachedNoteTile(entry.documentUri, entry.name, entry.modified)
     val shape = MaterialTheme.shapes.medium
     Column(modifier.clip(shape).background(palette.bg.toComposeColor()).border(1.dp, palette.accent.toComposeColor(), shape)) {
         Box(Modifier.fillMaxWidth().weight(1f).background(palette.paper.toComposeColor())) {

@@ -148,7 +148,7 @@ internal class ExplorerBody(
 
     fun meta(e: BrowseEntry): DocMetaStore.Meta? = metas[e.documentUri]
 
-    fun kind(e: BrowseEntry): EntryKind = entryKind(e, meta(e))
+    fun kind(e: BrowseEntry): EntryKind = entryKind(e)
 
     fun pages(e: BrowseEntry): Int = meta(e)?.pages ?: 0
 
@@ -165,11 +165,14 @@ internal class ExplorerBody(
     fun colorOf(e: BrowseEntry): Rgba? = e.color.takeIf { view.showColour }
 }
 
-internal fun entryKind(e: BrowseEntry, meta: DocMetaStore.Meta?): EntryKind = when {
+/** What [e] is, which for a file is what its name says: a note made from a PDF is a note, and only a `.pdf` is a PDF. */
+internal fun entryKind(e: BrowseEntry): EntryKind = when {
     e.isDir -> EntryKind.FOLDER
-    DocumentKind.ofName(e.name) == DocumentKind.CANVAS -> EntryKind.CANVAS
-    meta?.pdf == true -> EntryKind.PDF
-    else -> EntryKind.NOTE
+    else -> when (DocumentKind.ofName(e.name)) {
+        DocumentKind.CANVAS -> EntryKind.CANVAS
+        DocumentKind.PDF -> EntryKind.PDF
+        else -> EntryKind.NOTE
+    }
 }
 
 internal fun kindIcon(k: EntryKind): ImageVector = when (k) {
@@ -198,10 +201,14 @@ internal fun EntryThumb(editor: Editor, entry: BrowseEntry, shape: ThumbShape, m
 @Composable
 internal fun rememberThumb(editor: Editor, entry: BrowseEntry, whole: Boolean): ImageBitmap? = key(editor, editor.thumbnailVersion) {
     val thumb by produceState<ImageBitmap?>(
-        if (whole) editor.cachedPageThumb(entry.documentUri) else editor.cachedNoteTile(entry.documentUri),
+        if (whole) editor.cachedPageThumb(entry.documentUri, entry.name, entry.modified) else editor.cachedNoteTile(entry.documentUri, entry.name, entry.modified),
         entry.documentUri, entry.modified, whole,
     ) {
-        value = if (whole) editor.pageThumbnail(entry.documentUri, entry.name) else editor.tileThumbnail(entry.documentUri, entry.name)
+        value = if (whole) {
+            editor.pageThumbnail(entry.documentUri, entry.name, entry.modified)
+        } else {
+            editor.tileThumbnail(entry.documentUri, entry.name, entry.modified)
+        }
     }
     thumb
 }

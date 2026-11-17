@@ -814,9 +814,10 @@ private fun EditorScreen(
             runCatching {
                 val dir = java.io.File(context.cacheDir, "share").apply { mkdirs() }
                 dir.listFiles()?.forEach { it.delete() } // keep only the file we're about to share
-                val file = java.io.File(dir, "$stem${kindOf(uriStr).suffix}")
+                val kind = kindOf(uriStr)
+                val file = java.io.File(dir, "$stem${kind.suffix}")
                 java.io.FileOutputStream(file).use { o -> editor.copyFileTo(uriStr, o) }
-                launchShare(file, stem, "application/octet-stream")
+                launchShare(file, stem, if (kind == com.xnotes.core.util.DocumentKind.PDF) "application/pdf" else "application/octet-stream")
             }.onFailure { editor.message = context.getString(R.string.err_share_note) }
         }
     }
@@ -831,9 +832,12 @@ private fun EditorScreen(
                 val auth = "${context.packageName}.fileprovider"
                 val taken = HashSet<String>()
                 val out = ArrayList<Uri>()
+                var allPdf = true
                 for (u in uris) {
                     val stem = stemOf(u)
-                    val suffix = kindOf(u).suffix
+                    val kind = kindOf(u)
+                    if (kind != com.xnotes.core.util.DocumentKind.PDF) allPdf = false
+                    val suffix = kind.suffix
                     var name = "$stem$suffix"
                     var n = 2
                     while (!taken.add(name.lowercase())) name = "$stem (${n++})$suffix"
@@ -842,7 +846,7 @@ private fun EditorScreen(
                     out.add(androidx.core.content.FileProvider.getUriForFile(context, auth, file))
                 }
                 Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-                    type = "application/octet-stream"
+                    type = if (allPdf) "application/pdf" else "application/octet-stream"
                     putParcelableArrayListExtra(Intent.EXTRA_STREAM, out)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
@@ -980,7 +984,15 @@ private fun EditorScreen(
                 onImportPdf = { importPdfLauncher.launch(arrayOf("application/pdf")) },
                 onOpenFile = { uri -> guarded(editor) { openTreeFile(uri) } },
                 onPickRoot = { pickRootLauncher.launch(null) },
-                onShareFile = { uri -> pendingShareUri = uri; showShareChooser = true },
+                // A PDF is shared as the file it is; only a note or a canvas has a second form to offer.
+                onShareFile = { uri ->
+                    if (kindOf(uri) == com.xnotes.core.util.DocumentKind.PDF) {
+                        shareFile(uri, asPdf = false)
+                    } else {
+                        pendingShareUri = uri
+                        showShareChooser = true
+                    }
+                },
                 onSaveCopyFile = { uri -> pendingSaveCopyUri = uri; saveCopyLauncher.launch("${stemOf(uri)}${kindOf(uri).suffix}") },
                 onExportFilePdf = { uri ->
                     runPdfExport(stemOf(uri), shareDir = false, counting = countingOf(uri),

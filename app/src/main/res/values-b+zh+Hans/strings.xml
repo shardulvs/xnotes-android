@@ -463,7 +463,7 @@
     <string name="nothing_this_colour">没有项目使用此颜色。</string>
     <string name="recent_empty">还没有打开过任何内容。你打开的笔记和画布会显示在这里。</string>
     <string name="nothing_to_show">这里没有可显示的内容。</string>
-    <string name="no_pdf_notes_here">这里没有 PDF 笔记。</string>
+    <string name="no_pdf_notes_here">这里没有 PDF。</string>
     <string name="include_subfolders">包括子文件夹</string>
     <string name="opened_on_device">在此设备上打开过</string>
     <string name="clear">清除</string>
@@ -782,7 +782,7 @@
     <string name="opened_ago">%1$s打开</string>
     <string name="kind_folders">文件夹</string>
     <string name="kind_notes">笔记</string>
-    <string name="kind_pdf_notes">PDF 笔记</string>
+    <string name="kind_pdf_notes">PDF</string>
     <string name="kind_canvases">画布</string>
     <string name="hue_black">黑色</string>
     <string name="hue_white">白色</string>
@@ -891,7 +891,7 @@
     <string name="modified">修改时间</string>
     <string name="created">创建时间</string>
     <string name="kind_note">笔记</string>
-    <string name="kind_pdf_note">PDF 笔记</string>
+    <string name="kind_pdf_note">PDF</string>
     <string name="kind_canvas">画布</string>
     <string name="more_for">“%1$s”的更多选项</string>
     <string name="pinned_to_sidebar">已固定到侧边栏</string>
