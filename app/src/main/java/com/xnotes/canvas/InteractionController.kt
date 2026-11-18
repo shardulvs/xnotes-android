@@ -77,8 +77,6 @@ import com.xnotes.core.stroke.Scribble
 import com.xnotes.core.stroke.Sample
 import com.xnotes.core.stroke.ShapeRecognizer
 import com.xnotes.core.stroke.Stabilizer
-import com.xnotes.core.stroke.SteadyReadout
-import com.xnotes.core.stroke.SteadyTrace
 import com.xnotes.core.stroke.StrokeSimplify
 import com.xnotes.core.tools.EraseMode
 import com.xnotes.core.tools.InkPalette
@@ -87,7 +85,6 @@ import com.xnotes.core.shapes.ShapeKind
 import com.xnotes.core.tools.MarkupMode
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
-import com.xnotes.core.tools.ToolConversions
 import com.xnotes.core.tools.ToolDefaults
 import com.xnotes.ui.theme.Palette
 import kotlin.math.abs
@@ -278,14 +275,6 @@ class InteractionController(
     /** The live stroke's stabilization, or null while its pen draws the nib as is. */
     private var steadier: Stabilizer? = null
 
-    /** Debug HUD: what stabilization did to the last stroke. */
-    val steadyReadout = SteadyReadout()
-
-    /** Whether strokes are measured for [steadyReadout]; true only while the debug HUD is up. */
-    var measureSteadying: () -> Boolean = { false }
-
-    private val steadyTrace = SteadyTrace()
-    private var tracing = false
     private var drawingPointerId = -1
     private var drawingIsStylus = false
 
@@ -1246,8 +1235,6 @@ class InteractionController(
         stroke.addSample(Sample(first.x, first.y, pressure)) // first sample: t = 0
         steadier = Stabilizer.forStroke(cfg.stabilize && !straight, cfg.stabilizeTrail, cfg.stabilizeCrossover, speedScale)
         steadier?.start(down.x, down.y, 0.0)
-        tracing = measureSteadying()
-        if (tracing) steadyTrace.start(down.x, down.y)
         liveStroke = stroke
         strokePageIndex = pageIndex
         mode = PointerMode.DRAW
@@ -1308,7 +1295,6 @@ class InteractionController(
                 Pt(steady.x, steady.y)
             }
         }
-        if (tracing && steady != null) steadyTrace.add(nib.x, nib.y, content.x, content.y)
         // The pen has walked onto another page: carry the stroke over rather than let it slide
         // under the paper. A straight line is one segment by definition and never hands over.
         if (!stroke.straight) {
@@ -1460,7 +1446,6 @@ class InteractionController(
         val stroke = liveStroke
         val pi = strokePageIndex
         if (stroke != null && pi != null && !stroke.isEmpty) {
-            if (tracing && !tapCandidate) recordSteadying(stroke)
             // The pen is up: rebuild with lift-time rules on (a dot-sized calligraphy stroke
             // takes the nib's broad face) before the stroke is committed or held for fading.
             stroke.finished = true
@@ -1500,14 +1485,6 @@ class InteractionController(
             refreshSelectionMenu()
         }
         requestRender()
-    }
-
-    /** Debug HUD: log what stabilization did to the stroke just lifted, or that it was off. */
-    private fun recordSteadying(stroke: Stroke) {
-        val cfg = stroke.config
-        val effect = if (steadier != null) steadyTrace.measure(stroke.speedScale * SteadyTrace.MM_PER_DP) else null
-        steadyReadout.last =
-            SteadyReadout.Row(ToolConversions.trailToStrength(cfg.stabilizeTrail), ToolConversions.dpPerSToCrossover(cfg.stabilizeCrossover), effect)
     }
 
     /** Pen-up sample reduction: like the capture gate, the tolerance is screen-space — viewport

@@ -42,8 +42,6 @@ fun CanvasDebugOverlay(editor: InfiniteEditor) {
     }
 
     val lines = buildList {
-        addAll(editor.interaction.steadyReadout.lines())
-        add("")
         add("%.0f fps   %.1f ms".format(stats.fps, stats.frameMs))
         add("visible    ${stats.visibleItems} / ${stats.items}")
         add("draws      ${stats.drawCalls}")

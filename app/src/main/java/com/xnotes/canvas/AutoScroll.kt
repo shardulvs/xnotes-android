@@ -44,7 +44,7 @@ class AutoScroll(
         if (held()) {
             carry = 0.0
         } else {
-            carry += mmPerSec * state.document.dpi / MM_PER_INCH * state.zoom * dt
+            carry += pxPerSec() * dt
             val px = floor(carry)
             if (px >= 1.0) {
                 carry -= px
@@ -60,6 +60,11 @@ class AutoScroll(
         }
         choreographer.postFrameCallback(frame)
     }
+
+    /** Seconds until the view reaches the end of the note at the current speed and zoom. */
+    fun secondsToEnd(): Double = (state.maxScrollY() - state.scrollY).coerceAtLeast(0.0) / pxPerSec()
+
+    private fun pxPerSec(): Double = mmPerSec * state.document.dpi / MM_PER_INCH * state.zoom
 
     private companion object {
         const val MM_PER_INCH = 25.4

@@ -1680,8 +1680,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         controller.frontInk = com.xnotes.canvas.FrontInk(state, view, pad)
         pad.onSurfaceLost = { controller.frontInk?.surfaceLost() }
         view.debugOverlay.frontHud = { controller.frontInk?.hud }
-        view.debugOverlay.steadyHud = { controller.steadyReadout.lines() }
-        controller.measureSteadying = { view.debugOverlay.enabled }
+        view.debugOverlay.autoScrollHud = { if (autoScrollOn) autoScroll.secondsToEnd() else null }
         view.afterLayout = { refreshView() }
         view.onScrollbarScrolled = { refreshView() }
         // The canvas starts at built-in defaults; push any non-default global View settings
