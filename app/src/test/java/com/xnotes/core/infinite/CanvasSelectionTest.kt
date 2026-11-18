@@ -2,6 +2,7 @@ package com.xnotes.core.infinite
 
 import com.xnotes.canvas.HandleId
 import com.xnotes.canvas.SelectionMath
+import com.xnotes.core.FakeTextMeasurer
 import com.xnotes.core.geometry.Affine
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
@@ -15,6 +16,7 @@ import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.Routing
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.Stroke
+import com.xnotes.core.model.TextItem
 import com.xnotes.core.stroke.Sample
 import com.xnotes.core.shapes.Axis
 import com.xnotes.core.shapes.Elbow
@@ -184,6 +186,194 @@ class CanvasSelectionTest {
     }
 
     // --- resizing ---
+
+    @Test fun aTextResizeUsesXNoteGeometryAndTracksReflow() {
+        val item = TextItem(Pt(100.0, 100.0), width = 300.0,
+            text = "Wrapping long text across several lines should change height when width changes. ".repeat(5),
+            pointSize = 20.0, measurer = FakeTextMeasurer())
+        val sel = CanvasSelection(docOf(item))
+        sel.select(listOf(item))
+        sel.beginTransform()
+        sel.resizeLive(HandleId.R, Pt(175.0, 120.0))
+        val actual = item.bounds()
+        assertEquals(20.0, item.pointSize, 1e-9)
+        assertEquals(actual.center.x, sel.box!!.center.x, 1e-6)
+        assertEquals(actual.center.y, sel.box!!.center.y, 1e-6)
+        assertEquals(actual.w / 2, sel.box!!.halfW, 1e-6)
+        assertEquals(actual.h / 2, sel.box!!.halfH, 1e-6)
+        // The next drag must move the reflowed text and its box together, without
+        // needing a deselect/reselect to repair stale selection geometry.
+        sel.beginTransform()
+        sel.moveLive(500.0, 300.0)
+        assertEquals(item.bounds().center.x, sel.box!!.center.x, 1e-6)
+        assertEquals(item.bounds().center.y, sel.box!!.center.y, 1e-6)
+    }
+
+    @Test fun textNeverExposesUnsupportedRotationButImagesStillDo() {
+        val text = TextItem(Pt(100.0, 100.0), width = 300.0, text = "Rotate grip regression",
+            pointSize = 20.0, measurer = FakeTextMeasurer())
+        val image = box(450.0, 100.0, 100.0, 100.0)
+        val sel = CanvasSelection(docOf(text, image))
+        sel.select(listOf(text))
+        assertNull("TextItem has no rotation property", sel.rotateGrip(34.0))
+        val old = text.snapshotGeometry()
+        val oldBox = sel.box
+        sel.beginTransform()
+        assertEquals(0.0, sel.previewRotate(Pt(250.0, 30.0)), 0.0)
+        sel.rotateLive(Pt(250.0, 30.0))
+        assertEquals(old, text.snapshotGeometry())
+        assertEquals(oldBox, sel.box)
+
+        sel.select(listOf(text, image))
+        assertNull("Mixed selection cannot rotate a TextItem either", sel.rotateGrip(34.0))
+        sel.beginTransform()
+        val mixedBox = sel.box
+        assertEquals(0.0, sel.previewRotate(Pt(550.0, 80.0)), 0.0)
+        assertEquals(mixedBox, sel.box)
+
+        sel.select(listOf(image))
+        assertNotNull("Existing image rotation must remain available", sel.rotateGrip(34.0))
+    }
+
+    @Test fun textOverlayOmitsRotationChromeAtEveryZoom() {
+        val item = TextItem(Pt(100.0, 100.0), width = 300.0,
+            text = "Text cannot be rotated", pointSize = 20.0, measurer = FakeTextMeasurer())
+        val selection = CanvasSelection(docOf(item))
+        selection.select(listOf(item))
+        for (zoom in listOf(0.5, 1.0, 2.0, 3.0)) {
+            val box = selection.chromeBox(OverlayTessellator.FRAME_MARGIN_PX / zoom)!!
+            val normal = OverlayTessellator.selection(
+                box, zoom, Rgba(250, 90, 110), 0.25,
+                showRotateGrip = true,
+            )
+            val textChrome = OverlayTessellator.selection(
+                box, zoom, Rgba(250, 90, 110), 0.25,
+                showRotateGrip = selection.rotateGrip(OverlayTessellator.GRIP_ARM_PX / zoom) != null,
+            )
+            val normalTriangles = normal.sumOf { it.mesh.indices.size }
+            val textTriangles = textChrome.sumOf { it.mesh.indices.size }
+            assertTrue("Rotation stem/grip still rendered at zoom=$zoom",
+                textTriangles < normalTriangles)
+        }
+    }
+
+    @Test fun repeatedTextTransformsNeverDetachChromeOrLoseMinimumWidth() {
+        for (initialWidth in listOf(160.0, 300.0, 700.0)) {
+            val text = TextItem(Pt(100.0, 100.0), width = initialWidth,
+                text = "A paragraph that should wrap and scale predictably. ".repeat(8),
+                pointSize = 20.0, measurer = FakeTextMeasurer())
+            val sel = CanvasSelection(docOf(text))
+            sel.select(listOf(text))
+            for (index in 0 until 35) {
+                sel.beginTransform()
+                val before = text.bounds()
+                // Back-and-forth drags must not cumulatively drift or detach the selection.
+                if (index % 3 == 0) {
+                    sel.resizeLive(HandleId.R, Pt(before.left + 10.0, before.top + 10.0))
+                } else if (index % 3 == 1) {
+                    sel.resizeLive(HandleId.R, Pt(before.right + 25.0, before.top + 10.0))
+                } else {
+                    sel.moveLive(35.0, -19.0)
+                }
+                val bounds = text.bounds()
+                val chrome = sel.box ?: error("Selection disappeared")
+                assertTrue("Invalid width after transform $index", text.width >= 160.0)
+                assertTrue("Invalid font size after transform $index", text.pointSize.isFinite() && text.pointSize > 0)
+                assertEquals("X drift at transform $index", bounds.center.x, chrome.center.x, 0.001)
+                assertEquals("Y drift at transform $index", bounds.center.y, chrome.center.y, 0.001)
+                assertEquals(bounds.w / 2.0, chrome.halfW, 0.001)
+                assertEquals(bounds.h / 2.0, chrome.halfH, 0.001)
+                sel.refreshBox()
+            }
+        }
+    }
+
+    @Test fun cancelledTextResizeRestoresOriginalGeometry() {
+        val item = TextItem(Pt(100.0, 100.0), width = 360.0,
+            text = "A long paragraph that wraps during resize. ".repeat(12),
+            pointSize = 20.0, measurer = FakeTextMeasurer())
+        val sel = CanvasSelection(docOf(item))
+        sel.select(listOf(item))
+        val before = item.snapshotGeometry()
+        val boxBefore = sel.box
+        sel.beginTransform()
+        sel.resizeLive(HandleId.R, Pt(200.0, 100.0))
+        sel.restoreLiveGeometry()
+        assertEquals(before, item.snapshotGeometry())
+        assertEquals(boxBefore, sel.box)
+    }
+
+    @Test fun horizontalTextReflowDoesNotAccumulateReservedHeight() {
+        // The shared FakeTextMeasurer counts explicit newlines only. This fixture models
+        // width-dependent wrapping so the test exercises the actual reflow regression.
+        val base = FakeTextMeasurer()
+        val wrappingMeasurer = object : com.xnotes.core.pal.TextMeasurer by base {
+            override fun measure(text: String, font: com.xnotes.core.pal.FontSpec, wrapWidth: Double,
+                flags: com.xnotes.core.pal.TextFlags): Rect {
+                val rows = kotlin.math.ceil(text.length * font.pointSize * 0.6 / wrapWidth).toInt().coerceAtLeast(1)
+                return Rect(0.0, 0.0, wrapWidth, rows * base.lineHeight(font))
+            }
+        }
+        val item = TextItem(Pt(100.0, 100.0), width = 360.0,
+            text = "Long paragraphs can wrap and unwrap without leaving an oversized text box. ".repeat(8),
+            pointSize = 20.0, measurer = wrappingMeasurer)
+        val sel = CanvasSelection(docOf(item))
+        sel.select(listOf(item))
+        sel.beginTransform()
+        val initialHeight = item.bounds().h
+        sel.resizeLive(HandleId.R, Pt(180.0, 100.0))
+        val narrowHeight = item.bounds().h
+        assertTrue(narrowHeight > initialHeight)
+        sel.resizeLive(HandleId.R, Pt(460.0, 100.0))
+        assertEquals(0.0, item.height, 1e-9)
+        assertTrue(item.bounds().h < narrowHeight)
+        assertEquals(item.bounds().h / 2, sel.box!!.halfH, 1e-6)
+    }
+
+    @Test fun textBoxHasMinimumWidthAfterFastMoveAndRepeatedResizes() {
+        val item = TextItem(Pt(100.0, 100.0), width = 300.0,
+            text = "Long paragraph with wrapping ".repeat(40),
+            pointSize = 20.0, measurer = FakeTextMeasurer())
+        val sel = CanvasSelection(docOf(item))
+        sel.select(listOf(item))
+        sel.beginTransform()
+        sel.moveLive(900.0, 600.0)
+        sel.refreshBox()
+
+        sel.beginTransform()
+        sel.resizeLive(HandleId.R, Pt(item.pos.x + 5.0, item.pos.y + 10.0))
+        assertEquals(160.0, item.width, 1e-6)
+        assertEquals(0.0, item.height, 1e-6)
+        assertEquals(item.bounds().center.x, sel.box!!.center.x, 1e-6)
+
+        sel.refreshBox()
+        sel.beginTransform()
+        sel.resizeLive(HandleId.L, Pt(item.pos.x + item.width + 200.0, item.pos.y + 10.0))
+        assertEquals(160.0, item.width, 1e-6)
+        assertEquals(item.bounds().center.x, sel.box!!.center.x, 1e-6)
+
+        sel.refreshBox()
+        sel.beginTransform()
+        val before = item.bounds()
+        sel.resizeLive(HandleId.BR, Pt(before.left + 1.0, before.top + 1.0))
+        assertEquals(160.0, item.width, 1e-6)
+        assertEquals(item.bounds().center.x, sel.box!!.center.x, 1e-6)
+        assertEquals(item.bounds().center.y, sel.box!!.center.y, 1e-6)
+    }
+
+    @Test fun aTextCornerScalesFontProportionallyWithoutLosingItsBox() {
+        val item = TextItem(Pt(100.0, 100.0), width = 300.0,
+            text = "Long text that wraps as its box changes size. ".repeat(4),
+            pointSize = 20.0, measurer = FakeTextMeasurer())
+        val sel = CanvasSelection(docOf(item))
+        sel.select(listOf(item))
+        sel.beginTransform()
+        val original = item.bounds()
+        sel.resizeLive(HandleId.BR, Pt(original.right + 150.0, original.bottom + 100.0))
+        assertTrue("diagonal scale must change the font size", item.pointSize > 20.0)
+        assertEquals(item.bounds().center.x, sel.box!!.center.x, 1e-6)
+        assertEquals(item.bounds().center.y, sel.box!!.center.y, 1e-6)
+    }
 
     @Test fun aCornerDragScalesTheSelection() {
         val a = box(0.0, 0.0, 100.0, 100.0)

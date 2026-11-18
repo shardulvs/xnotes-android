@@ -27,7 +27,15 @@ class AndroidTextMeasurer : TextMeasurer {
         return LineMetrics(ascent = -fm.ascent.toDouble(), descent = fm.descent.toDouble())
     }
 
-    override fun outline(text: String, font: FontSpec, wrapWidth: Double, flags: TextFlags): List<VectorContour> {
+    override fun outline(text: String, font: FontSpec, wrapWidth: Double, flags: TextFlags): List<VectorContour> =
+        outlineInternal(text, font, wrapWidth, flags, null)
+
+    override fun outlineFast(text: String, font: FontSpec, wrapWidth: Double, flags: TextFlags): List<VectorContour> =
+        outlineInternal(text, font, wrapWidth, flags, FAST_APPROXIMATION_ERROR_EM)
+
+    private fun outlineInternal(
+        text: String, font: FontSpec, wrapWidth: Double, flags: TextFlags, errorEm: Double?,
+    ): List<VectorContour> {
         if (text.isBlank()) return emptyList()
         val paint = AndroidText.textPaint(font)
         val layout = AndroidText.layout(text, wrapWidth.toInt(), paint, flags)
@@ -39,11 +47,17 @@ class AndroidTextMeasurer : TextMeasurer {
             while (end > start && text[end - 1].isWhitespace()) end--
             if (end <= start) continue
             path.reset()
-            // Where the layout itself draws the line, so the outline lands on the screen's glyphs.
-            paint.getTextPath(text, start, end, layout.getLineLeft(line), layout.getLineBaseline(line).toFloat(), path)
-            out += GlyphPaths.contours(path, paint.textSize.toDouble())
+            paint.getTextPath(text, start, end,
+                layout.getLineLeft(line), layout.getLineBaseline(line).toFloat(), path)
+            out += if (errorEm == null) GlyphPaths.contours(path, paint.textSize.toDouble())
+                   else GlyphPaths.approximateContours(path, paint.textSize.toDouble(), errorEm)
         }
         return out
+    }
+
+    private companion object {
+        // 0.002 em: preserves glyph counters in regression tests with fewer sampled points.
+        const val FAST_APPROXIMATION_ERROR_EM = 1.0 / 500.0
     }
 
     override fun advances(text: String, font: FontSpec): DoubleArray {

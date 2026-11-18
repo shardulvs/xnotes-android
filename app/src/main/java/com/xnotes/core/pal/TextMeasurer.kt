@@ -38,4 +38,8 @@ interface TextMeasurer {
      * host cannot outline text.
      */
     fun outline(text: String, font: FontSpec, wrapWidth: Double, flags: TextFlags = TextFlags()): List<VectorContour> = emptyList()
+
+    /** Fast path for editable XCanvas TextItems. Other measurers retain the regular path. */
+    fun outlineFast(text: String, font: FontSpec, wrapWidth: Double, flags: TextFlags = TextFlags()): List<VectorContour> =
+        outline(text, font, wrapWidth, flags)
 }

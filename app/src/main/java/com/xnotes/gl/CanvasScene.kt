@@ -11,7 +11,9 @@ import com.xnotes.core.infinite.MeshData
 import com.xnotes.core.infinite.Minimap
 import com.xnotes.core.infinite.MeshPart
 import com.xnotes.core.model.CanvasItem
+import com.xnotes.core.model.ImageData
 import com.xnotes.core.model.ImageItem
+import com.xnotes.core.model.TextItem
 import com.xnotes.core.model.Rgba
 import java.util.IdentityHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -88,6 +90,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         class Lift(val items: List<CanvasItem>, val at: LiftTransform) : Edit()
 
         class Remove(val item: CanvasItem) : Edit()
+        class DropTexture(val image: ImageData) : Edit()
         class Order(val items: List<CanvasItem>) : Edit()
 
         /** Room for the batch queued right behind it, so the buffers grow once for all of it. */
@@ -210,8 +213,18 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
         post(Edit.Upsert(item, emptyList(), bounds, item, false))
     }
 
+    /** Keep a native TextItem in the document/z-order, but draw its colored glyphs as a texture. */
+    fun upsertTextTexture(item: TextItem, image: ImageItem, bounds: Rect) {
+        post(Edit.Upsert(item, emptyList(), bounds, image, false))
+    }
+
     fun remove(item: CanvasItem) {
         post(Edit.Remove(item))
+    }
+
+    /** Free an obsolete text bitmap from the GL cache without touching normal image items. */
+    fun dropTextTexture(image: ImageData) {
+        post(Edit.DropTexture(image))
     }
 
     /** Publish the document's z order; the scene draws back to front by it. */
@@ -1041,6 +1054,7 @@ class CanvasScene(private val store: GeometryStore = GeometryStore()) : GlScene 
                 is Edit.Wet -> applyWet(edit)
                 is Edit.Lift -> applyLift(edit)
                 is Edit.Remove -> applyRemove(edit.item)
+                is Edit.DropTexture -> textures.discard(edit.image)
                 is Edit.Order -> applyOrder(edit.items)
                 is Edit.Reserve -> store.reserve(edit.vertices, edit.indices)
                 Edit.Reset -> applyReset()
