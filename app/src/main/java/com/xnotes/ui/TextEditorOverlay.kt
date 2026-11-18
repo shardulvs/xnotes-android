@@ -96,6 +96,18 @@ interface TextEditHost {
 
     /** End the edit with the model's text, or [text] when given. */
     fun commitText(text: String? = null)
+
+    /** Whether the bar can slide the box it sits above: a note's text box, placed by that bar. */
+    val canMoveEditingBox: Boolean get() = false
+
+    /** The bar's drag began: the host opens one undo step for the whole slide. */
+    fun beginEditingBoxDrag() {}
+
+    /** Slide the box being edited by a viewport-space drag of the bar. */
+    fun dragEditingBox(dx: Float, dy: Float) {}
+
+    /** The bar's drag ended. */
+    fun endEditingBoxDrag() {}
 }
 
 /**

@@ -3089,6 +3089,15 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         controller.panWhileEditing(dxFinger.toDouble(), dyFinger.toDouble())
     }
 
+    // The style bar above an edited box is that box's title bar: dragging it slides the box.
+    override val canMoveEditingBox: Boolean get() = controller.canMoveEditingBox
+
+    override fun beginEditingBoxDrag() = controller.beginEditingBoxDrag()
+
+    override fun dragEditingBox(dx: Float, dy: Float) = controller.dragEditingBox(dx.toDouble(), dy.toDouble())
+
+    override fun endEditingBoxDrag() = controller.endEditingBoxDrag()
+
     // --- page styles (paper colour + ruling): document-wide ("All Pages") and per-page ---
 
     /** The document-wide style override; per-page styles layer on top (see [PageStyle]). */
