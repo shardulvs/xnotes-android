@@ -747,6 +747,13 @@ fun ViewMenuPopup(editor: Editor, onDismiss: () -> Unit) {
             Spacer(Modifier.size(10.dp))
             ToggleRow(stringResource(R.string.caption_vertical_scrolling), vs.verticalScroll) { setVerticalScroll(it) }
             ToggleRow(stringResource(R.string.caption_free_movement), vs.freeMovement) { setFreeMovement(it) }
+            // Autoscroll lives outside the View settings, so it never stirs the "Default for all notes" row.
+            ToggleRow(stringResource(R.string.caption_autoscroll), editor.autoScrollOn, enabled = vs.verticalScroll) { editor.setAutoScroll(it) }
+            SliderRow(
+                stringResource(R.string.caption_autoscroll_speed), editor.autoScrollSpeed / 10f,
+                Preferences.AUTOSCROLL_MIN / 10f..Preferences.AUTOSCROLL_MAX / 10f, step = 0.1f, suffix = " mm/s",
+                enabled = vs.verticalScroll,
+            ) { editor.pickAutoScrollSpeed((it * 10f).roundToInt()) }
 
             Spacer(Modifier.size(10.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -1166,10 +1173,11 @@ private fun PopupBackLink(text: String, onBack: () -> Unit) {
 }
 
 @Composable
-internal fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+internal fun ToggleRow(label: String, checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.width(220.dp)) {
-        Text(label, color = LocalPalette.current.text.toComposeColor(), fontSize = 12.sp)
-        Switch(checked = checked, onCheckedChange = onChange)
+        val palette = LocalPalette.current
+        Text(label, color = (if (enabled) palette.text else palette.textDim).toComposeColor(), fontSize = 12.sp)
+        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
     }
 }
 

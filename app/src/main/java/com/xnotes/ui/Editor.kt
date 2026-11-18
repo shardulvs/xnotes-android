@@ -666,6 +666,23 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      *  This is what the canvas, caches and thumbnails all consume. */
     var viewSettings by mutableStateOf(settings.viewDefaults)
         private set
+
+    /** The View menu's autoscroll. Never a View setting: it starts off in every note, and only its speed is remembered. */
+    var autoScrollOn by mutableStateOf(false)
+        private set
+
+    /** Autoscroll speed in tenths of a paper millimetre per second. */
+    var autoScrollSpeed by mutableStateOf(settings.prefs.autoScrollSpeed)
+        private set
+
+    private val autoScroll by lazy {
+        com.xnotes.canvas.AutoScroll(
+            state,
+            held = { canvasTouched || controller.isFlinging },
+            onMoved = { refreshView(); onRender() },
+            onEnded = { setAutoScroll(false) },
+        )
+    }
     var rulerVisible by mutableStateOf(false)
         private set
     var wandEnabled by mutableStateOf(false)
@@ -839,6 +856,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         // matching how a note opened from outside the root behaves.
         canvasAutosaveUri = if (uri != null && browseRoot?.let { isUnderTree(uri, it) } == true) uri else null
         canvasAutosaveUri?.let { rememberStamp(it) }
+        setAutoScroll(false)
         canvasOpen = true
         noteOpen = true
         canvas.recoverRecordings(fromSession)
@@ -4056,6 +4074,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      */
     fun leftApp() {
         secondary?.leftApp()
+        setAutoScroll(false)
         val uri = state.document.path ?: return
         if (!noteOpen || canvasOpen || !openIsPdf) return
         releaseOpenPdf(com.xnotes.platform.PdfExports.LEAVE_HOLD_MS)
@@ -6311,6 +6330,29 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         applyResolvedViewSettings()
     }
 
+    /** Start or stop autoscroll; it only runs in vertical scrolling, and keeps the screen awake while it does. */
+    fun setAutoScroll(on: Boolean) {
+        val run = on && viewSettings.verticalScroll
+        if (run == autoScrollOn) return
+        autoScrollOn = run
+        view.keepScreenOn = run
+        if (run) {
+            autoScroll.mmPerSec = autoScrollSpeed / 10.0
+            autoScroll.start()
+        } else {
+            autoScroll.stop()
+        }
+    }
+
+    fun pickAutoScrollSpeed(tenths: Int) {
+        val v = tenths.coerceIn(Preferences.AUTOSCROLL_MIN, Preferences.AUTOSCROLL_MAX)
+        if (v == autoScrollSpeed) return
+        autoScrollSpeed = v
+        autoScroll.mmPerSec = v / 10.0
+        settings = settings.copy(prefs = settings.prefs.copy(autoScrollSpeed = v))
+        saveSettingsSoon()
+    }
+
     /** Re-resolve the effective settings and react to whatever actually changed. */
     private fun applyResolvedViewSettings() {
         val prev = viewSettings
@@ -6376,6 +6418,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             if (evictPdfPageThumbnails()) pdfThumbTick++
             currentUri?.let { invalidateThumb(it) } // the recents tile re-renders with the new filter
         }
+        if (!new.verticalScroll && autoScrollOn) setAutoScroll(false)
         view.scrollbarEnabled = new.scrollbar
         view.requestRender()
     }
@@ -6411,6 +6454,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * note's View-menu settings ride along (folder notes remember them; anything else resets).
      */
     private fun installInitialView(path: String?) {
+        setAutoScroll(false)
         val saved = viewKey(path)?.let { viewStates.get(it) }
         installViewOverrides(saved?.overrides ?: com.xnotes.canvas.ViewOverrides())
         state.pendingInitialView =
@@ -10164,6 +10208,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      *  [noteOpen] so the editor is removed from the stack. The document stays as an inert buffer. */
     fun goHome() {
         if (!noteOpen) return
+        setAutoScroll(false)
         // Closing the note places a recording still going, before the note is saved.
         AudioRecording.stopFor(this)
         infiniteOrNull?.let { AudioRecording.stopFor(it) }

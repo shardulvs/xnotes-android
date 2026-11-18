@@ -322,6 +322,7 @@ class InteractionController(
     // the controller's selection/edit logic stays constructible — and unit-testable — off-device.
     private val choreographer by lazy { Choreographer.getInstance() }
     private var flinging = false
+    val isFlinging: Boolean get() = flinging
     private var flingVel = Pt.ZERO // scroll-space velocity, viewport px/s
     private var lastFlingMs = 0L
     private val flingFrame = Choreographer.FrameCallback { frameTimeNanos -> stepFling(frameTimeNanos) }
