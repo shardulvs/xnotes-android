@@ -1,0 +1,10 @@
+- xnotes-compatible PDFs
+  - Open and write on a PDF directly, without converting it to .xnote
+  - Ink and everything else stays editable when the PDF is reopened
+  - The file still opens as a normal PDF in any reader
+  - Convert notes to PDFs and back
+- Much smaller PDF exports
+- Free page movement in vertical scroll
+- Fix ink lag after rotating on some tablets
+- Fix exporting owner-protected PDFs
+- Page margins and inserted space keep their colour in exports
