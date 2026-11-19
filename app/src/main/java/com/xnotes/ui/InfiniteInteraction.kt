@@ -1028,7 +1028,8 @@ class InfiniteInteraction(
             grabHandle = handle
             transformMargin = sel.chromeMargin(margin)
             sel.beginTransform(rigid = true)
-            beginLiftedTransform(sel, at, resize = true)
+            // Moving one end reshapes a line rather than mapping it, so the model carries that drag.
+            if (handle == HandleId.START || handle == HandleId.END) endLift() else beginLiftedTransform(sel, at, resize = true)
             mode = CanvasPointerMode.RESIZE
             return true
         }
