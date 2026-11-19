@@ -88,4 +88,34 @@ class ExplorerSortTest {
             ),
         )
     }
+
+    @Test
+    fun nameSortsNumberedRunsByValue() {
+        // A numbered folder reads as counting order: week 2 belongs before week 10, not after it.
+        assertEquals(
+            listOf("week 1", "week 2", "week 10"),
+            order(
+                ExplorerSortKey.NAME, descending = false,
+                entry("week 10", isDir = false),
+                entry("week 1", isDir = false),
+                entry("week 2", isDir = false),
+            ),
+        )
+    }
+
+    @Test
+    fun namesCompareDigitRunsByValue() {
+        assertEquals(-1, compareNames("page 9", "page 10"))
+        assertEquals(-1, compareNames("Week 2", "week 10"))
+        assertEquals(0, compareNames("Week 2", "week 2"))
+        assertEquals(-1, compareNames("note", "note 2"))
+    }
+
+    @Test
+    fun digitRunsNeitherOverflowNorLosePadding() {
+        // Longer than any int or long, which is why the runs are compared as text.
+        assertEquals(1, compareNames("n 100000000000000000000", "n 99999999999999999999"))
+        assertEquals(-1, compareNames("page 9", "page 09"))
+        assertEquals(-1, compareNames("page 09", "page 10"))
+    }
 }
