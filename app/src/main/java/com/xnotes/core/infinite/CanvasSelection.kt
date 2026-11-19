@@ -126,9 +126,12 @@ class CanvasSelection(private val doc: InfiniteDocument) {
         return if (square || loneTapeBox != null) all.filter { it.id in CORNERS } else all
     }
 
+    /** True when the selection turns by a grip: never with a pill in it, nor a strip of tape, which its ends reorient. */
+    val turns: Boolean get() = items.none { it is AudioItem } && loneTapeStrip == null
+
     /** The rotate grip's centre, [arm] content pixels past the box's top edge. */
     fun rotateGrip(arm: Double, screenMargin: Double = 0.0): Pt? =
-        if (items.any { it is AudioItem } || loneTapeStrip != null) null else chromeBox(screenMargin)?.let { ResizeMath.obbRotateGrip(it, arm) }
+        if (!turns) null else chromeBox(screenMargin)?.let { ResizeMath.obbRotateGrip(it, arm) }
 
     /** Which handle [p] lands on, within [tolerance] content pixels, or null. */
     fun hitHandle(p: Pt, tolerance: Double, screenMargin: Double = 0.0): HandleId? =

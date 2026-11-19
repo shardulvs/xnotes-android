@@ -71,8 +71,8 @@ object OverlayTessellator {
 
     /**
      * The selection box, its handles (all eight unless [handles] names fewer), the rotate grip and
-     * its stem, and over a lone shape the dots that edit its points: faint ones halfway along each
-     * edge, solid ones on the vertices.
+     * its stem unless [grip] is off, and over a lone shape the dots that edit its points: faint ones
+     * halfway along each edge, solid ones on the vertices.
      */
     fun selection(
         box: Obb,
@@ -84,25 +84,26 @@ object OverlayTessellator {
         vertexDots: List<Pt> = emptyList(),
         edgeDots: List<Pt> = emptyList(),
         knobs: List<Pt> = emptyList(),
+        grip: Boolean = true,
     ): List<MeshPart> {
         if (zoom <= 0.0) return emptyList()
         val outline = MeshBuilder()
         val half = OUTLINE_PX / zoom / 2.0
         dashInto(outline, box.corners(), half, closed = true, zoom = zoom, devicePxPerDp = devicePxPerDp, tolerance = tolerance)
 
-        // The stem out to the grip, so it reads as attached rather than floating. Solid: it is a
-        // join, not a boundary, and a dashed one at this length would be two ticks and a gap.
-        val arm = GRIP_ARM_PX / zoom
-        val top = com.xnotes.canvas.ResizeMath.obbTopMid(box)
-        val grip = com.xnotes.canvas.ResizeMath.obbRotateGrip(box, arm)
-        outline.polylineRibbon(listOf(top, grip), half, closed = false, tolerance = tolerance)
-
         val marks = MeshBuilder()
         val handleHalf = HANDLE_PX / zoom / 2.0
         for (c in handles ?: com.xnotes.canvas.ResizeMath.obbHandles(box).map { it.content }) {
             marks.rect(c.x - handleHalf, c.y - handleHalf, handleHalf * 2, handleHalf * 2)
         }
-        marks.circle(grip.x, grip.y, GRIP_PX / zoom / 2.0, tolerance)
+        if (grip) {
+            // The stem out to the grip, so it reads as attached rather than floating. Solid: it is a
+            // join, not a boundary, and a dashed one at this length would be two ticks and a gap.
+            val top = com.xnotes.canvas.ResizeMath.obbTopMid(box)
+            val at = com.xnotes.canvas.ResizeMath.obbRotateGrip(box, GRIP_ARM_PX / zoom)
+            outline.polylineRibbon(listOf(top, at), half, closed = false, tolerance = tolerance)
+            marks.circle(at.x, at.y, GRIP_PX / zoom / 2.0, tolerance)
+        }
 
         val parts = ArrayList<MeshPart>(5)
         if (!outline.isEmpty) parts.add(MeshPart(outline.build(), accent, InkPass.OPAQUE))

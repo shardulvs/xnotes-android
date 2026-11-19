@@ -430,6 +430,15 @@ class CanvasSelectionTest {
         assertTrue("the outline must stay one thickness on screen", outSpan > inSpan)
     }
 
+    @Test fun aSelectionThatCannotTurnDrawsNoGrip() {
+        val sel = CanvasSelection(docOf())
+        sel.select(listOf(box(0.0, 0.0, 100.0, 100.0)))
+        val accent = com.xnotes.core.model.Rgba(0, 255, 0, 255)
+        fun top(parts: List<MeshPart>) = parts.minOf { p -> (0 until p.mesh.vertexCount).minOf { p.mesh.positions[2 * it + 1] } }
+        assertTrue(top(OverlayTessellator.selection(sel.box!!, 1.0, accent, 0.01)) < -30.0)
+        assertTrue(top(OverlayTessellator.selection(sel.box!!, 1.0, accent, 0.01, grip = false)) > -10.0)
+    }
+
     @Test fun theBandAndLassoProduceGeometry() {
         val accent = com.xnotes.core.model.Rgba(0, 255, 0, 255)
         assertTrue(OverlayTessellator.band(Rect(0.0, 0.0, 50.0, 40.0), 1.0, accent, 0.01).isNotEmpty())
