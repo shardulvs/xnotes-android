@@ -187,6 +187,7 @@ class EditorActivity : ComponentActivity() {
             var ready by remember { mutableStateOf(false) }
             LaunchedEffect(Unit) {
                 ed.restoreSession() // heavy load off-thread; the system splash stays up meanwhile
+                com.xnotes.platform.PdfExports.resume() // PDFs the last run left with pages behind, or half copied
                 ready = true
                 ed.prewarmBackstage() // warm recents/explorer caches so the first backstage open is instant
             }
@@ -284,9 +285,16 @@ class EditorActivity : ComponentActivity() {
     }
 
     // Playback never goes on with xnotes off screen; a split window that only lost focus is still on it.
+    override fun onStart() {
+        super.onStart()
+        editor?.returnedToApp()
+    }
+
     override fun onStop() {
         super.onStop()
         com.xnotes.ui.AudioPlayback.pause()
+        // The last moment Android lets a foreground service start, which a PDF's export runs under.
+        editor?.leftApp()
     }
 
     @Suppress("DEPRECATION") // RUNNING_* still arrive below Android 14
@@ -375,6 +383,20 @@ private fun EditorScreen(
             runCatching { resolver.openOutputStream(it, "wt")?.use { o -> savePane.save(o, it.toString(), name) } }
                 .onSuccess { val p = pendingAfterSave; pendingAfterSave = null; p?.invoke() }
                 .onFailure { editor.message = context.getString(R.string.err_save_note); pendingAfterSave = null }
+        }
+    }
+
+    // "Save as" for a note that is a PDF: the copy is an xnotes PDF too, exported off the main thread.
+    val createPdfLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/pdf"),
+    ) { uri ->
+        uri?.let {
+            runCatching { resolver.takePersistableUriPermission(it, rwFlags) }
+            savePane.savePdfAs(it.toString(), displayNameOf(resolver, it)) { ok ->
+                val p = pendingAfterSave
+                pendingAfterSave = null
+                if (ok) p?.invoke()
+            }
         }
     }
 
@@ -498,6 +520,17 @@ private fun EditorScreen(
 
     // Recording asks for the microphone the first time, and on Android 13 and later for notifications
     // too, since the recording shows one while xnotes is off screen. Refusing notifications still records.
+    // A PDF's pages are drawn again after xnotes leaves the screen, under a notification that Android 13
+    // and later only show when allowed. Asked once, for the first PDF edited, and not before that note is
+    // closed: a system dialog over the page would take the pen mid-stroke.
+    val pdfNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { editor.pdfNotificationsAsked() }
+    LaunchedEffect(editor.askPdfNotifications, editor.noteOpen) {
+        if (!editor.askPdfNotifications || editor.noteOpen) return@LaunchedEffect
+        val missing = android.os.Build.VERSION.SDK_INT >= 33 &&
+            androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (missing) pdfNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS) else editor.pdfNotificationsAsked()
+    }
     var pendingRecordPane by remember { mutableStateOf<Editor?>(null) }
     // Notifications are asked for once a run when only they are missing; the system stops asking after two refusals anyway.
     var askedNotifications by remember { mutableStateOf(false) }
@@ -604,7 +637,7 @@ private fun EditorScreen(
     /** Open the "Save as" picker for [target], remembering which pane its result belongs to. */
     fun launchSaveAs(target: Editor) {
         savePane = target
-        createLauncher.launch("${target.title}.xnote")
+        if (target.openIsPdf) createPdfLauncher.launch("${target.title}.pdf") else createLauncher.launch("${target.title}.xnote")
     }
 
     fun saveOrPrompt() {
@@ -801,8 +834,56 @@ private fun EditorScreen(
         context.startActivity(Intent.createChooser(send, context.getString(R.string.share_named, stem)))
     }
 
+    /**
+     * Bring the pages of the PDFs among [uris] level with their notes, behind the export dialog
+     * when any is behind, then run [then] off the main thread: what leaves xnotes as a PDF shows
+     * what the note holds. Cancelling the dialog, or an export that fails, stops short of [then].
+     */
+    fun freshenThen(uris: List<String>, then: suspend () -> Unit) {
+        val cancel = java.util.concurrent.atomic.AtomicBoolean(false)
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val behind = uris.filter { runCatching { editor.pdfNeedsExport(it) }.getOrDefault(false) }
+            var level = true
+            if (behind.isNotEmpty()) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    exportCancel = cancel
+                    exportProgress = ExportProgress(0, -1, "page")
+                }
+                for (u in behind) {
+                    if (cancel.get()) break
+                    val shown = { f: Float -> if (!cancel.get()) exportProgress = ExportProgress((f * 1000).toInt().coerceIn(0, 999), -1, "page") }
+                    level = editor.freshenPdf(u, shown) { cancel.get() } && level
+                }
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    if (exportCancel === cancel) exportProgress = null
+                }
+            }
+            when {
+                cancel.get() -> Unit
+                !level -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { editor.message = context.getString(R.string.err_share_note) }
+                else -> then()
+            }
+        }
+    }
+
     fun shareFile(uriStr: String, asPdf: Boolean) {
         val stem = stemOf(uriStr)
+        // A PDF goes out as the file it is, its pages drawn again first when they are behind its note.
+        if (kindOf(uriStr) == com.xnotes.core.util.DocumentKind.PDF) {
+            freshenThen(listOf(uriStr)) {
+                val file = runCatching {
+                    val dir = java.io.File(context.cacheDir, "share").apply { mkdirs() }
+                    dir.listFiles()?.forEach { it.delete() }
+                    java.io.File(dir, "$stem.pdf").also { f -> java.io.FileOutputStream(f).use { o -> editor.copyFileTo(uriStr, o) } }
+                }.getOrNull()
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    if (file == null || runCatching { launchShare(file, stem, "application/pdf") }.isFailure) {
+                        editor.message = context.getString(R.string.err_share_note)
+                    }
+                }
+            }
+            return
+        }
         if (asPdf) {
             // Render with progress, then share the finished PDF (writes into cache/share for FileProvider).
             runPdfExport(stem, shareDir = true, counting = countingOf(uriStr),
@@ -824,16 +905,20 @@ private fun EditorScreen(
     // Share several stored files at once, each as the bundle it is (no PDF render for a batch).
     fun shareFiles(uris: List<String>) {
         if (uris.isEmpty()) return
-        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        // The PDFs among them have their pages drawn again first, where they are behind.
+        freshenThen(uris) {
             val intent = runCatching {
                 val dir = java.io.File(context.cacheDir, "share").apply { mkdirs() }
                 dir.listFiles()?.forEach { it.delete() }
                 val auth = "${context.packageName}.fileprovider"
                 val taken = HashSet<String>()
                 val out = ArrayList<Uri>()
+                var allPdf = true
                 for (u in uris) {
                     val stem = stemOf(u)
-                    val suffix = kindOf(u).suffix
+                    val kind = kindOf(u)
+                    if (kind != com.xnotes.core.util.DocumentKind.PDF) allPdf = false
+                    val suffix = kind.suffix
                     var name = "$stem$suffix"
                     var n = 2
                     while (!taken.add(name.lowercase())) name = "$stem (${n++})$suffix"
@@ -842,7 +927,7 @@ private fun EditorScreen(
                     out.add(androidx.core.content.FileProvider.getUriForFile(context, auth, file))
                 }
                 Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-                    type = "application/octet-stream"
+                    type = if (allPdf) "application/pdf" else "application/octet-stream"
                     putParcelableArrayListExtra(Intent.EXTRA_STREAM, out)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
@@ -980,7 +1065,15 @@ private fun EditorScreen(
                 onImportPdf = { importPdfLauncher.launch(arrayOf("application/pdf")) },
                 onOpenFile = { uri -> guarded(editor) { openTreeFile(uri) } },
                 onPickRoot = { pickRootLauncher.launch(null) },
-                onShareFile = { uri -> pendingShareUri = uri; showShareChooser = true },
+                // A PDF is shared as the file it is; only a note or a canvas has a second form to offer.
+                onShareFile = { uri ->
+                    if (kindOf(uri) == com.xnotes.core.util.DocumentKind.PDF) {
+                        shareFile(uri, asPdf = false)
+                    } else {
+                        pendingShareUri = uri
+                        showShareChooser = true
+                    }
+                },
                 onSaveCopyFile = { uri -> pendingSaveCopyUri = uri; saveCopyLauncher.launch("${stemOf(uri)}${kindOf(uri).suffix}") },
                 onExportFilePdf = { uri ->
                     runPdfExport(stemOf(uri), shareDir = false, counting = countingOf(uri),
@@ -1101,6 +1194,46 @@ private fun EditorScreen(
             SplitHost(editor, actions)
         }
     }
+    // A PDF another app has written to since xnotes last did: which version it opens as is asked first.
+    listOfNotNull(editor, editor.secondary).forEach { pane ->
+        if (pane.pdfConflict != null) {
+            com.xnotes.ui.AlertDialog(
+                onDismissRequest = { pane.leavePdfConflict() },
+                title = { androidx.compose.material3.Text(stringResource(R.string.pdf_changed_title)) },
+                text = {
+                    androidx.compose.foundation.layout.Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
+                        androidx.compose.material3.Text(stringResource(R.string.pdf_changed_body))
+                        PdfVersionChoice(R.string.pdf_changed_keep_theirs, R.string.pdf_changed_keep_theirs_detail) { scope.launch { pane.keepTheirPdf() } }
+                        PdfVersionChoice(R.string.pdf_changed_keep_ours, R.string.pdf_changed_keep_ours_detail) { scope.launch { pane.keepOurPdf() } }
+                    }
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = { pane.leavePdfConflict() }) {
+                        androidx.compose.material3.Text(stringResource(R.string.cancel))
+                    }
+                },
+            )
+        }
+        // The same of a PDF being made into a note: which version the note is made from.
+        pane.pdfVersionQuestion?.let { asked ->
+            com.xnotes.ui.AlertDialog(
+                onDismissRequest = { pane.answerPdfVersion(null) },
+                title = { androidx.compose.material3.Text(stringResource(if (asked.several) R.string.pdf_changed_some_title else R.string.pdf_changed_title)) },
+                text = {
+                    androidx.compose.foundation.layout.Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
+                        androidx.compose.material3.Text(stringResource(if (asked.several) R.string.pdf_changed_notes_body else R.string.pdf_changed_note_body))
+                        PdfVersionChoice(R.string.pdf_changed_keep_theirs, R.string.pdf_changed_keep_theirs_detail) { pane.answerPdfVersion(com.xnotes.ui.PdfVersion.THEIRS) }
+                        PdfVersionChoice(R.string.pdf_changed_note_ours, R.string.pdf_changed_note_ours_detail) { pane.answerPdfVersion(com.xnotes.ui.PdfVersion.OURS) }
+                    }
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = { pane.answerPdfVersion(null) }) {
+                        androidx.compose.material3.Text(stringResource(R.string.cancel))
+                    }
+                },
+            )
+        }
+    }
     if (showShareChooser) {
         val shareUri = pendingShareUri
         // Remembered because resolving the kind is a SAF query, and this is composition.
@@ -1186,7 +1319,8 @@ private fun EditorScreen(
     editor.batchExport?.let { p -> PdfBatchExportDialog(p) { editor.cancelBatchExport() } }
     // Either pane may be importing: a PDF inserted into its note.
     val importer = editor.takeIf { it.importing } ?: editor.secondary?.takeIf { it.importing }
-    if (importer != null) {
+    // Not while it waits on which version of a changed PDF to take: that dialog stands alone.
+    if (importer != null && importer.pdfVersionQuestion == null) {
         // A batch counts files, so it gets a determinate ring; a single import has nothing to count.
         val batch = importer.importProgress
         if (batch != null) PdfImportBatchDialog(batch.done, batch.total) { importer.cancelImportInProgress() }
@@ -1994,3 +2128,22 @@ private fun displayNameOf(resolver: android.content.ContentResolver, uri: Uri): 
         } else null
     }
 }.getOrNull()
+
+/** One of the two versions a PDF changed in another app can be kept as: what choosing it does, and what that costs. */
+@Composable
+private fun PdfVersionChoice(label: Int, detail: Int, onClick: () -> Unit) {
+    val palette = com.xnotes.ui.theme.LocalPalette.current
+    val shape = androidx.compose.material3.MaterialTheme.shapes.medium
+    androidx.compose.foundation.layout.Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .border(1.dp, palette.border.toComposeColor(), shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp),
+    ) {
+        androidx.compose.material3.Text(stringResource(label), color = palette.text.toComposeColor(), fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        androidx.compose.material3.Text(stringResource(detail), color = palette.textDim.toComposeColor(), fontSize = 13.sp)
+    }
+}

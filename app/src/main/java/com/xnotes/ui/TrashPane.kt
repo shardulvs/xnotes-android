@@ -257,7 +257,7 @@ private fun TrashRow(
     val palette = LocalPalette.current
     val words = rememberExplorerWords()
     val e = item.entry
-    val kind = entryKind(e, editor.cachedMeta(e))
+    val kind = entryKind(e)
     val dim = palette.textDim.toComposeColor()
     val wasIn = item.path.lastOrNull() ?: rootName
     val deleted = formatWhen(words, item.deleted, now, "day", true, clock24, zone)

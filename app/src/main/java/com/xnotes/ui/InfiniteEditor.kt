@@ -132,7 +132,6 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
         onCommitSelection = { commitSelection(it) },
         onLiftSelection = { items, at -> scene.setLift(items, at) },
         devicePxPerDp = { devicePxPerDp },
-        measureSteadying = { debugVisible },
         onMinimapPress = { vx, vy -> minimapTap(vx, vy) },
         onContextMenu = { vp, content, locked -> contextMenu = ContextMenuTarget(vp.x, vp.y, content, locked) },
         hasPasteContent = { hasClipboardItems || clipboardHasImage },

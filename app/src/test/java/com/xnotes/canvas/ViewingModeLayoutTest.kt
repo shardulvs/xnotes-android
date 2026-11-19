@@ -104,4 +104,40 @@ class ViewingModeLayoutTest {
         st.zoom = 1.0
         assertEquals(false, st.isDocumentEndVisible())
     }
+
+    @Test fun verticalFreeMovementAllowsAllEdgesAndCornersToReachViewportCenter() {
+        val st = state(2, ViewingMode.SINGLE)
+        st.freeMovement = true
+        st.insetLeft = 60.0
+        st.insetTop = 100.0
+        st.fitWidth()
+        val first = st.pageRects.first()
+        val last = st.pageRects.last()
+
+        st.scrollBy(-1e6, -1e6)
+        assertEquals(st.clearCenter().x, st.contentToViewport(com.xnotes.core.geometry.Pt(first.left, first.top)).x, 1e-6)
+        assertEquals(st.clearCenter().y, st.contentToViewport(com.xnotes.core.geometry.Pt(first.left, first.top)).y, 1e-6)
+
+        st.scrollBy(1e6, 1e6)
+        assertEquals(st.clearCenter().x, st.contentToViewport(com.xnotes.core.geometry.Pt(last.right, last.bottom)).x, 1e-6)
+        assertEquals(st.clearCenter().y, st.contentToViewport(com.xnotes.core.geometry.Pt(last.right, last.bottom)).y, 1e-6)
+    }
+
+    @Test fun verticalFreeMovementNeverReachesLessThanTheNormalBounds() {
+        val st = state(2, ViewingMode.SINGLE)
+        st.insetLeft = 60.0
+        st.insetTop = 100.0
+        st.zoom = 16.0 // a 48 px margin now outgrows half the screen
+        val normal = listOf(st.minScrollX(), st.minScrollY(), st.maxScrollX(), st.maxScrollY())
+        st.freeMovement = true
+        assertTrue(st.minScrollX() <= normal[0] && st.minScrollY() <= normal[1])
+        assertTrue(st.maxScrollX() >= normal[2] && st.maxScrollY() >= normal[3])
+
+        st.zoom = CanvasState.MIN_ZOOM // the document is a speck: its edges still stop at the centre
+        val last = st.pageRects.last()
+        st.scrollBy(1e6, 1e6)
+        val corner = st.contentToViewport(com.xnotes.core.geometry.Pt(last.right, last.bottom))
+        assertEquals(st.clearCenter().x, corner.x, 1e-6)
+        assertEquals(st.clearCenter().y, corner.y, 1e-6)
+    }
 }

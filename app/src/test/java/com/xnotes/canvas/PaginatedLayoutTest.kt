@@ -153,6 +153,20 @@ class PaginatedLayoutTest {
         assertEquals(st.clearCenter().y, st.contentToViewport(Pt(page.centerX, page.bottom)).y, 1e-6)
     }
 
+    @Test fun freeModeKeepsAFittingPageCentredSideways() {
+        val st = state(3)
+        st.freeMovement = true
+        st.insetLeft = 80.0
+        st.zoom = 0.6
+        st.goToPage(1)
+        val page = st.pageRects[1]
+        for (dx in listOf(-1e6, 1e6)) {
+            st.scrollBy(dx, 0.0)
+            assertEquals(st.clearCenter().x, st.contentToViewport(page.center).x, 1e-6)
+            assertTrue(st.atRowEdge(next = dx > 0))
+        }
+    }
+
     @Test fun goToPageJumpsTheWindowToTheRow() {
         val st = state(5)
         st.zoom = 1.0

@@ -14,6 +14,9 @@ enum class DocumentKind(val extension: String) {
 
     /** The infinite canvas. */
     CANVAS("xcanvas"),
+
+    /** A PDF: a paged notebook too, one that keeps its note inside it once it has been written on. */
+    PDF("pdf"),
     ;
 
     /** The extension with its dot, as it appears at the end of a file name. */

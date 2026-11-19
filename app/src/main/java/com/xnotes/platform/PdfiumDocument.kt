@@ -110,6 +110,10 @@ class PdfiumDocument private constructor(
         return SearchText.ofPdf(parts[0] as IntArray, parts[1] as ByteArray)
     }
 
+    /** The names of the files attached to the document; empty when it has none or is not open. */
+    fun attachmentNames(priority: PdfPriority): List<String> =
+        withHandle(priority) { PdfiumNative.nativeAttachmentNames(it) }?.toList().orEmpty()
+
     /**
      * The document outline in reading order, at most [maxEntries] bookmarks, those without a title
      * dropped (their children stay); null when not open. A bookmark chain that loops is cut. Read in
