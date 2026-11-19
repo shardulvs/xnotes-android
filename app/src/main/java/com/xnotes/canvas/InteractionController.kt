@@ -808,6 +808,9 @@ class InteractionController(
             // off the selection it still pans.
             toolType == MotionEvent.TOOL_TYPE_FINGER && !fingerDraws && tool.fingerPansWhenOff &&
                 fingerHitsSelection(content) -> Tool.SELECT
+            // Likewise a frozen capture: a finger on a handle or inside it adjusts it.
+            toolType == MotionEvent.TOOL_TYPE_FINGER && !fingerDraws && tool == Tool.SCREENSHOT &&
+                fingerHitsCapture(content) -> Tool.SCREENSHOT
             // A finger otherwise pans instead of drawing/selecting/shaping/erasing (text stays usable by finger).
             toolType == MotionEvent.TOOL_TYPE_FINGER && !fingerDraws && tool.fingerPansWhenOff -> Tool.PAN
             else -> tool
@@ -943,9 +946,10 @@ class InteractionController(
         }
         // The flow caret owns its own long press (word selection), mid text-drag it is suppressed so
         // a hold-then-drag still sizes a box, and a markup drag held still is just a slow drag; room
-        // held still under the pen is just room opened slowly.
+        // held still under the pen is just room opened slowly, and so is a capture adjusted slowly.
         if (mode != PointerMode.FLOW_TEXT && mode != PointerMode.TEXT_DRAG && mode != PointerMode.PDF_TEXT &&
-            mode != PointerMode.POLYGON && mode != PointerMode.ROOM
+            mode != PointerMode.POLYGON && mode != PointerMode.ROOM &&
+            mode != PointerMode.SHOT_RESIZE && mode != PointerMode.SHOT_MOVE
         ) {
             armLongPress(Pt(vx, vy), content, isFinger, free)
         }
@@ -2079,6 +2083,12 @@ class InteractionController(
             }
         }
         beginScreenshot(content)
+    }
+
+    /** Whether [content] lands on the frozen capture's handles or inside it. */
+    private fun fingerHitsCapture(content: Pt): Boolean {
+        val rect = screenshotRect ?: return false
+        return ResizeMath.hitHandle(shotHandles(rect), content, HANDLE_HIT / state.zoom) != null || rect.contains(content)
     }
 
     /** The frozen capture's eight handles, in content space, where the capture is drawn. */
