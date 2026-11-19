@@ -10,6 +10,9 @@
     <string name="tool_highlighter">荧光笔</string>
     <string name="tool_eraser">橡皮擦</string>
     <string name="tool_pan">平移</string>
+    <string name="tool_reader">阅读模式</string>
+    <string name="reader_exit">退出阅读模式</string>
+    <string name="reader_read_only">只读</string>
     <string name="tool_select">选择</string>
     <string name="tool_lasso">套索</string>
     <string name="tool_screenshot">截图</string>

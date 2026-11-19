@@ -755,9 +755,10 @@ fun PdfSelectionMenu(editor: Editor) {
     val density = LocalDensity.current
     val actions = remember { editor.pdfTextActions() }
     var overflowOpen by remember { mutableStateOf(false) }
+    val marks = if (editor.readerMode) emptyList() else PDF_MARKS
 
     val barHeightPx = with(density) { 48.dp.toPx() }
-    val barWidthPx = with(density) { ((1 + PDF_MARKS.size + if (actions.isEmpty()) 0 else 1) * 46).dp.toPx() }
+    val barWidthPx = with(density) { ((1 + marks.size + if (actions.isEmpty()) 0 else 1) * 46).dp.toPx() }
     val gap = with(density) { 10.dp.toPx() }
     val margin = with(density) { 8.dp.toPx() }
     // When pushed below the selection, also clear the teardrop handles hanging there.
@@ -780,7 +781,7 @@ fun PdfSelectionMenu(editor: Editor) {
                 .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium),
         ) {
             ActionIcon(XnotesIcons.copy, stringResource(R.string.copy), shortcut = Keys.COPY) { editor.copyPdfText() }
-            for ((type, icon, label) in PDF_MARKS) {
+            for ((type, icon, label) in marks) {
                 ActionIcon(icon, stringResource(label)) { editor.markPdfSelection(type) }
             }
             if (actions.isNotEmpty()) {
