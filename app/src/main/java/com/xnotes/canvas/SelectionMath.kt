@@ -87,6 +87,19 @@ object SelectionMath {
         return out
     }
 
+    /** How far from a shape's or a connector's outline a press still picks it, in dp on screen. */
+    const val PICK_REACH_DP = 16.0
+
+    /**
+     * What a press at [p] picks from [items], listed bottom to top: the topmost [eligible] item it
+     * lands on, else the topmost eligible shape or connector whose outline is within [reach]. A thin
+     * outline is hard to land on; ink, pictures and text are picked only where they are, so a press
+     * among handwriting still starts a band.
+     */
+    fun pick(items: List<CanvasItem>, p: Pt, reach: Double, eligible: (CanvasItem) -> Boolean = { true }): CanvasItem? =
+        items.lastOrNull { eligible(it) && it.contains(p) }
+            ?: items.lastOrNull { eligible(it) && ((it is ShapeItem && it.touches(p, reach)) || (it is ConnectorItem && it.touches(p, reach))) }
+
     /** How far past its page edge an item may reach and still be reachable by a band that misses
      *  the page rect. Covers neon bloom and ink drawn over the margin. */
     const val OFF_PAGE_SLACK = 64.0

@@ -165,4 +165,38 @@ class SelectionMathTest {
         assertEquals(listOf<CanvasItem>(fill), SelectionMath.lassoMembers(listOf(fill), sq(-10.0, -10.0, 130.0)))
         assertTrue(SelectionMath.bandMembers(listOf(fill), Rect(30.0, 30.0, 20.0, 20.0)).isEmpty())
     }
+
+    // --- picking with a press ---
+
+    private fun thin(kind: ShapeKind, a: Pt, b: Pt) = ShapeItem(kind, a, b, Rgba(0, 0, 0, 255), 1.0)
+
+    @Test fun aPressNearAThinLinePicksIt() {
+        val line = thin(ShapeKind.LINE, Pt(0.0, 0.0), Pt(100.0, 0.0))
+        assertSame(line, SelectionMath.pick(listOf(line), Pt(50.0, 15.0), 20.0))
+        assertEquals(null, SelectionMath.pick(listOf(line), Pt(50.0, 25.0), 20.0))
+    }
+
+    @Test fun aDirectHitBeatsAShapeMerelyInReach() {
+        val ink = dot(50.0, 15.0)
+        val line = thin(ShapeKind.LINE, Pt(0.0, 0.0), Pt(100.0, 0.0))
+        assertSame(ink, SelectionMath.pick(listOf(ink, line), Pt(50.0, 15.0), 20.0))
+        assertSame(line, SelectionMath.pick(listOf(ink, line), Pt(10.0, 15.0), 20.0))
+    }
+
+    @Test fun inkIsPickedOnlyWhereItIs() {
+        val ink = dot(50.0, 50.0)
+        assertEquals(null, SelectionMath.pick(listOf(ink), Pt(50.0, 65.0), 20.0))
+    }
+
+    @Test fun anUnfilledShapesMiddleIsNotPicked() {
+        val ring = thin(ShapeKind.ELLIPSE, Pt(0.0, 0.0), Pt(200.0, 200.0))
+        assertEquals(null, SelectionMath.pick(listOf(ring), Pt(100.0, 100.0), 20.0))
+        assertSame(ring, SelectionMath.pick(listOf(ring), Pt(100.0, 12.0), 20.0))
+    }
+
+    @Test fun aPickSkipsWhatIsNotEligible() {
+        val under = thin(ShapeKind.LINE, Pt(0.0, 10.0), Pt(100.0, 10.0))
+        val locked = thin(ShapeKind.LINE, Pt(0.0, 0.0), Pt(100.0, 0.0)).apply { this.locked = true }
+        assertSame(under, SelectionMath.pick(listOf(under, locked), Pt(50.0, 2.0), 20.0) { !it.locked })
+    }
 }

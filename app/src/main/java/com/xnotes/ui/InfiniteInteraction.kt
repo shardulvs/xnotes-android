@@ -1121,10 +1121,11 @@ class InfiniteInteraction(
      * whether the press really landed on something is the item's own answer.
      */
     private fun itemAt(content: Pt): CanvasItem? {
-        val pad = TAP_SLOP_PX / viewport.zoom
+        val reach = SelectionMath.PICK_REACH_DP * devicePxPerDp() / viewport.zoom
+        val pad = maxOf(TAP_SLOP_PX / viewport.zoom, reach)
         val near = Rect(content.x - pad, content.y - pad, pad * 2, pad * 2)
-        // Last, not first: the index comes back in z-order, so the topmost item is the one hit.
-        return itemsIn(near).lastOrNull { it.contains(content) }
+        // The index comes back in z-order, so the topmost item is the one picked.
+        return SelectionMath.pick(itemsIn(near), content, reach)
     }
 
     /** [itemAt] but skipping anything pinned, which is what a tap or a drag may actually grab. */

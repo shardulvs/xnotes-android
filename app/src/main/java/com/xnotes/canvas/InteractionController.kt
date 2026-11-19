@@ -1980,7 +1980,7 @@ class InteractionController(
         val pageIndex = state.pageIndexAtContent(content)
         if (pageIndex != null) {
             val local = state.toPageSpace(pageIndex, content)
-            val hit = state.document.pages[pageIndex].items.lastOrNull { !it.locked && it.contains(local) }
+            val hit = SelectionMath.pick(state.document.pages[pageIndex].items, local, pickReach()) { !it.locked }
             if (hit != null) {
                 if (selection.none { it.item === hit }) setSelection(listOf(Selected(pageIndex, hit)))
                 beginMove(content)
@@ -2446,6 +2446,9 @@ class InteractionController(
     }
 
     private fun dotReach(): Double = com.xnotes.core.infinite.OverlayTessellator.DOT_TOUCH_PX / state.zoom
+
+    /** How near a shape's outline a select press or a held finger picks it, in page units. */
+    private fun pickReach(): Double = SelectionMath.PICK_REACH_DP * state.devicePxPerDp / state.zoom
 
     /** A lone shape's point dots over its chrome: faint ones halfway along edges, solid ones on vertices. */
     private fun drawEditDots(r: Renderer) {
@@ -3551,8 +3554,7 @@ class InteractionController(
             tool == Tool.LASSO || tool == Tool.SHAPE || tool == Tool.TEXT || tool == Tool.TEXT_BOX || tool == Tool.TAPE
         val pageIndex = state.pageIndexAtContent(content)
         val hit = if (pageIndex != null) {
-            val local = state.toPageSpace(pageIndex, content)
-            state.document.pages[pageIndex].items.lastOrNull { it.contains(local) }
+            SelectionMath.pick(state.document.pages[pageIndex].items, state.toPageSpace(pageIndex, content), pickReach())
         } else {
             null
         }
