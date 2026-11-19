@@ -244,6 +244,9 @@ class PdfSource private constructor(
     }
 
     /** The PDF's outline (bookmarks), empty when it has none. Waits, so not on the main thread. */
+    /** The names of the files attached to the PDF; empty when it has none. Waits for the open. */
+    fun attachmentNames(): List<String> = if (closed) emptyList() else pdf.attachmentNames(PdfPriority.INTERACTIVE)
+
     fun outline(): List<PdfOutlineEntry> =
         if (closed) emptyList() else pdf.outline(MAX_OUTLINE, PdfPriority.THUMBNAIL).orEmpty()
 

@@ -25,8 +25,8 @@ class DebugOverlay {
     /** What the front buffer is doing, when there is one; installed by the host. */
     var frontHud: () -> String? = { null }
 
-    /** What stabilization did to the last stroke; installed by the host. */
-    var steadyHud: () -> List<String> = { emptyList() }
+    /** Seconds autoscroll needs to reach the end of the note, or null while it is off; installed by the host. */
+    var autoScrollHud: () -> Double? = { null }
 
     fun toggle() {
         enabled = !enabled
@@ -83,6 +83,11 @@ class DebugOverlay {
 
     private fun memStat(key: String): Long = memInfo.getMemoryStat(key)?.toLongOrNull() ?: 0L
 
+    private fun fmtDuration(seconds: Double): String {
+        val s = seconds.toLong()
+        return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
+    }
+
     private fun fmtBytes(bytes: Long): String =
         if (bytes < 1024 * 1024) "%.0f KB".format(bytes / 1024.0) else "%.2f MB".format(bytes / MB)
 
@@ -97,11 +102,7 @@ class DebugOverlay {
         val (rw, rh) = state.targetRasterSize()
         val res = if (rw > 0) "$rw x $rh" else "-"
         val lines = buildList {
-            val steady = steadyHud()
-            if (steady.isNotEmpty()) {
-                addAll(steady)
-                add("")
-            }
+            autoScrollHud()?.let { add("end in     ${fmtDuration(it)}") }
             add("%.0f fps   %.1f ms".format(fps, frameMs))
             add("cache res  $res")
             add("visible    ${snap.visiblePages} pg")
@@ -170,15 +171,15 @@ class DebugOverlay {
         private const val MEM_SAMPLE_NS = 1_000_000_000L // re-read PSS from smaps at most once a second
         private const val SMOOTH = 0.15 // EMA weight on the newest frame
 
-        private const val PANEL_W = 460.0
+        private const val PANEL_W = 310.0
         private const val MARGIN = 16.0
-        private const val PAD_X = 20.0
-        private const val PAD_Y = 18.0
-        private const val HINT_GAP = 10.0
+        private const val PAD_X = 14.0
+        private const val PAD_Y = 12.0
+        private const val HINT_GAP = 7.0
 
         private const val HINT = "four finger tap to dismiss"
-        private val FONT = FontSpec(15.0, bold = true)
-        private val HINT_FONT = FontSpec(11.0)
+        private val FONT = FontSpec(10.0, bold = true)
+        private val HINT_FONT = FontSpec(8.0)
         private val PANEL_BG = Rgba(0, 0, 0, 170)
         private val TEXT = Rgba(238, 238, 238)
         private val TEXT_DIM = Rgba(175, 175, 175)

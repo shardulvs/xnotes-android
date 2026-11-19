@@ -118,8 +118,10 @@ import com.xnotes.core.util.DocumentKind
 import com.xnotes.core.util.FileStamp
 import com.xnotes.core.util.NameTemplate
 import com.xnotes.format.DocumentCodec
+import com.xnotes.format.FileWindow
 import com.xnotes.format.SvgColors
 import com.xnotes.format.XNoteFormatException
+import com.xnotes.format.XnotesPdf
 import com.xnotes.platform.AndroidImageCodec
 import com.xnotes.platform.AndroidSurfaceFactory
 import com.xnotes.platform.AndroidTextMeasurer
@@ -202,6 +204,9 @@ data class PendingImport(val defaultName: String, val uri: String, val markdown:
 
 /** How far a multi-file PDF import has got; drives the count in the import dialog. */
 data class ImportProgress(val done: Int, val total: Int)
+
+/** Which version of a PDF changed in another app a note is made from: the note xnotes left in it, or its pages now. */
+enum class PdfVersion { OURS, THEIRS }
 
 /** Per-folder colour sidecar: a hidden ".xnote" dir holding "colors.json" (item name -> hex). */
 private const val SIDECAR_DIR = ".xnote"
@@ -382,6 +387,27 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
     }
 
+    /** A commit put a whole new file where this editor may be tracking one: what it knew of the old file is let go. */
+    private val pdfReplaced = com.xnotes.platform.PdfExports.Listener { uri, name, before, after ->
+        pdfTails.remove(uri)
+        if (knownStamps.containsKey(uri)) rememberStamp(uri) // the next save starts from the new file, not a fork
+        if (pane == Pane.PRIMARY) carryTile(uri, name, before, after)
+    }
+
+    init {
+        com.xnotes.platform.PdfExports.init(appContext)
+        com.xnotes.platform.PdfExports.listen(pdfReplaced)
+        // The exports the queue runs are drawn by the primary editor, in its theme and with its fonts.
+        if (pane == Pane.PRIMARY) {
+            com.xnotes.platform.PdfExports.exporter = com.xnotes.platform.PdfExports.Exporter { note, pdfName, to, temp, onProgress, isCancelled ->
+                // Pages first, then the write: half the ring each, since only one of the two is slow for any one note.
+                exportNoteFile(note, pdfName, to, { done, total ->
+                    onProgress(if (total < 0) 0.5f + done / 2000f else if (total > 0) done / (2f * total) else 0f)
+                }, isCancelled, temp)
+            }
+        }
+    }
+
     /** The sticker library: encoded image files kept under filesDir across sessions (never purged).
      *  Only [java.io.File] handles are held in memory; thumbnails and inserts decode from disk. */
     // The directory keeps its old "stamps" name so libraries saved before the rename still load.
@@ -544,6 +570,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      *  in place is only worth its (brief) window of an invalid file when the assets are the save. */
     private val MIN_SPLICE_BYTES = 1024L * 1024L
 
+    private val PDF_MIME = "application/pdf"
+
     var tool by mutableStateOf(Tool.DEFAULT)
         private set
 
@@ -659,6 +687,23 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      *  This is what the canvas, caches and thumbnails all consume. */
     var viewSettings by mutableStateOf(settings.viewDefaults)
         private set
+
+    /** The View menu's autoscroll. Never a View setting: it starts off in every note, and only its speed is remembered. */
+    var autoScrollOn by mutableStateOf(false)
+        private set
+
+    /** Autoscroll speed in tenths of a paper millimetre per second. */
+    var autoScrollSpeed by mutableStateOf(settings.prefs.autoScrollSpeed)
+        private set
+
+    private val autoScroll by lazy {
+        com.xnotes.canvas.AutoScroll(
+            state,
+            held = { canvasTouched || controller.isFlinging },
+            onMoved = { refreshView(); onRender() },
+            onEnded = { setAutoScroll(false) },
+        )
+    }
     var rulerVisible by mutableStateOf(false)
         private set
     var wandEnabled by mutableStateOf(false)
@@ -832,6 +877,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         // matching how a note opened from outside the root behaves.
         canvasAutosaveUri = if (uri != null && browseRoot?.let { isUnderTree(uri, it) } == true) uri else null
         canvasAutosaveUri?.let { rememberStamp(it) }
+        setAutoScroll(false)
         canvasOpen = true
         noteOpen = true
         canvas.recoverRecordings(fromSession)
@@ -1666,8 +1712,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         controller.frontInk = com.xnotes.canvas.FrontInk(state, view, pad)
         pad.onSurfaceLost = { controller.frontInk?.surfaceLost() }
         view.debugOverlay.frontHud = { controller.frontInk?.hud }
-        view.debugOverlay.steadyHud = { controller.steadyReadout.lines() }
-        controller.measureSteadying = { view.debugOverlay.enabled }
+        view.debugOverlay.autoScrollHud = { if (autoScrollOn) autoScroll.secondsToEnd() else null }
         view.afterLayout = { refreshView() }
         view.onScrollbarScrolled = { refreshView() }
         // The canvas starts at built-in defaults; push any non-default global View settings
@@ -2991,6 +3036,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      */
     fun retire() {
         secondary?.retire()
+        com.xnotes.platform.PdfExports.forget(pdfReplaced)
         RetiredEditors.inProcess.add(background)
     }
 
@@ -3063,7 +3109,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             state.zoomLocked = snap.zoomLocked
             state.relayout()
             if (state.viewportW > 0) state.establishInitialView()
-            maybeBindAutosave(state.document.path) // resume autosave if the restored note is in the folder
+            // Resume autosave if the restored note is in the folder. A PDF another app has appended to
+            // since is left alone: its edits stay unsaved until the user says to save over it.
+            val path = state.document.path
+            if (path == null || !isPdfFile(path) || inspectPdf(path) !is XnotesPdf.Inspection.Appended) maybeBindAutosave(path)
             refreshContent()
             view.requestRender()
             recoverRecordings(fromSession = true)
@@ -3668,21 +3717,42 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * the loaded note and leaves the explorer as it was. A second tap while one open is in flight is
      * ignored, so two reads never race to swap in a document.
      */
-    suspend fun openAsync(uri: String, name: String? = null) {
+    suspend fun openAsync(uri: String, name: String? = null) =
+        openFrom(uri, name) { timing -> readStoredNote(uri, name, timing, ask = true) }
+
+    /**
+     * [openAsync]'s work, with the note read by [read]. [unsaved] opens it as holding changes its
+     * file does not have yet, so the next save writes them.
+     */
+    private suspend fun openFrom(
+        uri: String,
+        name: String?,
+        unsaved: Boolean = false,
+        read: (com.xnotes.format.DocumentCodec.ReadTiming) -> Document?,
+    ) {
         if (opening) return
         openCancelled.set(false)
         opening = true
         val t0 = System.nanoTime()
         var readMs = -1L
+        var opened = false
+        var holding: String? = null
         try {
             val readStart = System.nanoTime()
             var fileBytes = -1L
             val timing = com.xnotes.format.DocumentCodec.ReadTiming()
+            val pdf = DocumentKind.ofName(name.orEmpty()) == DocumentKind.PDF
+            // On screen from here: an export of this file that is running is dropped, and none starts.
+            if (pdf) com.xnotes.platform.PdfExports.hold(uri)
+            opened = false
+            holding = uri.takeIf { pdf }
             val doc = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 fileBytes = fileSizeOf(uri)
-                appContext.contentResolver.openInputStream(android.net.Uri.parse(uri))
-                    ?.use { codec.read(it, pdfDir, imageDir, timing) }
-                    ?.also { it.created = settleCreated(uri, it.created) }
+                read(timing)?.also {
+                    it.created = settleCreated(uri, it.created)
+                    // Pages already behind their note, from another session or device, are drawn when this one closes.
+                    if (pdf && pagesBehind(uri)) com.xnotes.platform.PdfExports.stale(uri, name.orEmpty())
+                }
             }
             readMs = (System.nanoTime() - readStart) / 1_000_000
             state.lastOpenInflateMs = timing.inflateMs
@@ -3704,9 +3774,20 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             state.lastSaveBytes = fileBytes // the on-disk size, until the first autosave rewrites it
             maybeBindAutosave(uri) // resume autosaving if this note lives in the granted folder
             noteOpen = true // push the editor on top of backstage (only on a successful open)
+            opened = true
             rememberOpened(uri, name)
+            if (unsaved) {
+                state.document.dirty = true
+                refreshContent() // which starts the save, for a note that autosaves
+            }
+        } catch (e: PdfChangedElsewhere) {
+            // Not opened yet: which version it opens as is the user's to say.
+            pdfConflict = PdfConflict(uri, name, e.staged)
         } catch (e: XNoteFormatException) {
             message = appContext.getString(R.string.err_not_xnotes)
+        } catch (e: PdfUnreadable) {
+            val locked = e.error == com.xnotes.platform.PdfOpenError.PASSWORD
+            message = appContext.getString(if (locked) R.string.err_pdf_password else R.string.err_open_note)
         } catch (e: Exception) {
             message = appContext.getString(R.string.err_open_note)
         } finally {
@@ -3715,11 +3796,236 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             state.lastOpenReadMs = readMs
             state.lastOpenTotalMs = (System.nanoTime() - t0) / 1_000_000
             opening = false
+            // An open that did not put the note on screen lets its file go again.
+            if (!opened) holding?.let { com.xnotes.platform.PdfExports.release(it) }
         }
     }
 
     /** Aborts an in-flight open (the dialog's Cancel) so the loaded note is discarded, not shown. */
     fun cancelOpenInProgress() { openCancelled.set(true) }
+
+    /** A stored PDF that PDFium would not open, and why. */
+    private class PdfUnreadable(val error: com.xnotes.platform.PdfOpenError?) : Exception()
+
+    /**
+     * The note the stored file at [uri] holds; [name] is the file's, when the caller has it. A
+     * `.pdf` gives the note inside it when it is an xnotes PDF, and otherwise a note of its pages
+     * with nothing on them yet. Every reader of a stored note comes through here, so none of them
+     * can take a PDF for a bundle. The document's files are temps the caller owns. IO.
+     *
+     * With [ask], a PDF that another app has written to since xnotes last did is not read at all:
+     * [PdfChangedElsewhere] is thrown, for the user to be asked which version to keep.
+     */
+    private fun readStoredNote(uri: String, name: String? = null, timing: DocumentCodec.ReadTiming? = null, ask: Boolean = false): Document? {
+        val u = android.net.Uri.parse(uri)
+        if (DocumentKind.ofName(name ?: queryDisplayName(u).orEmpty()) != DocumentKind.PDF) {
+            return appContext.contentResolver.openInputStream(u)?.use { codec.read(it, pdfDir, imageDir, timing) }
+        }
+        // Under the file's lock, so a read never meets an export being copied over the file.
+        return com.xnotes.platform.PdfExports.locked(uri) {
+            // Another app's bytes after ours. An open asks which to keep; a tile or an export takes ours.
+            if (ask && inspectPdf(uri) is XnotesPdf.Inspection.Appended) throw PdfChangedElsewhere(null)
+            withNoteInside(u) { note ->
+                val input = java.io.BufferedInputStream(java.nio.channels.Channels.newInputStream(note), 64 * 1024)
+                codec.read(input, pdfDir, imageDir, timing)
+            } ?: pagesOfPdf(u, ask)
+        }
+    }
+
+    /**
+     * Hand [read] the note inside the PDF at [uri], as a window of the open file; null when it holds
+     * none of ours. A PDF another app has appended to still holds ours underneath, and gives that.
+     */
+    private fun <T> withNoteInside(uri: android.net.Uri, read: (FileWindow) -> T): T? =
+        appContext.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+            // As in [entriesOf], the stream built on the descriptor is never closed.
+            val ch = java.io.FileInputStream(pfd.fileDescriptor).channel
+            val note = when (val found = XnotesPdf.inspect(ch)) {
+                is XnotesPdf.Inspection.Ours -> XnotesPdf.embedded(ch, found)
+                is XnotesPdf.Inspection.Appended -> XnotesPdf.embedded(FileWindow(ch, 0L, found.ownLength), found.own)
+                // A save that never finished: the note as it was before that save is whole underneath.
+                is XnotesPdf.Inspection.Torn -> XnotesPdf.embedded(FileWindow(ch, 0L, found.ownLength), found.own)
+                XnotesPdf.Inspection.Plain, XnotesPdf.Inspection.Unreadable -> null
+            }
+            note?.let(read)
+        }
+
+    /** Whether the pages of the PDF at [uri] are behind the note inside it. IO. */
+    private fun pagesBehind(uri: String): Boolean = when (val found = inspectPdf(uri)) {
+        is XnotesPdf.Inspection.Ours -> found.stale
+        is XnotesPdf.Inspection.Torn -> true
+        else -> false
+    }
+
+    /**
+     * Bring the pages of the PDF at [uri] level with its note, when they are behind, before the
+     * file is handed to another app. True when they are level; false when the export was
+     * cancelled or failed. IO.
+     */
+    fun freshenPdf(uri: String, onProgress: (Float) -> Unit = {}, isCancelled: () -> Boolean = { false }): Boolean {
+        if (!pagesBehind(uri)) return true
+        val name = queryDisplayName(android.net.Uri.parse(uri)) ?: return false
+        return com.xnotes.platform.PdfExports.exportNow(uri, name, onProgress, isCancelled)
+    }
+
+    /** Whether the stored file at [uri] is a PDF whose pages are behind its note. IO. */
+    fun pdfNeedsExport(uri: String): Boolean = isPdfFile(uri) && pagesBehind(uri)
+
+    /** Whether the PDF at [uri] holds a note of ours. IO. */
+    private fun holdsNote(uri: String): Boolean =
+        runCatching { withNoteInside(android.net.Uri.parse(uri)) { true } }.getOrNull() == true
+
+    /**
+     * A note of the plain PDF at [uri]: its pages, on the new-note defaults, with nothing drawn yet.
+     * PDFium opens a path, not a provider's file, so the pages are read from a private copy, which
+     * becomes the note's [Document.pdfFile]. The user's file is only read.
+     */
+    private fun pagesOfPdf(uri: android.net.Uri, ask: Boolean = false): Document? {
+        val staged = java.io.File.createTempFile("src", ".pdf", pdfDir)
+        var kept = false
+        try {
+            appContext.contentResolver.openInputStream(uri)?.use { input ->
+                java.io.FileOutputStream(staged).use { input.copyTo(it, 64 * 1024) }
+            } ?: return null
+            val source = com.xnotes.platform.PdfSource.open(staged)
+            try {
+                if (source.pageCount == 0) throw PdfUnreadable(source.openError)
+                // A note of ours attached to a PDF that does not read as ours: another app wrote the file whole.
+                if (ask && source.attachmentNames().any { com.xnotes.platform.PdfNote.isNote(it) }) {
+                    kept = true
+                    throw PdfChangedElsewhere(staged)
+                }
+                val doc = stampNewNoteDefaults(com.xnotes.platform.PdfImporter.import(source))
+                kept = true
+                return doc
+            } finally {
+                source.close()
+            }
+        } finally {
+            if (!kept) staged.delete()
+        }
+    }
+
+    /** A PDF another app has written to since xnotes last did; [staged] is the private copy made of it, when finding out took one. */
+    private class PdfChangedElsewhere(val staged: java.io.File?) : Exception()
+
+    /** A PDF that was changed in another app, waiting for the user to say which version to keep. */
+    class PdfConflict internal constructor(val uri: String, val name: String?, internal val staged: java.io.File?)
+
+    /** Set when an open met a PDF changed in another app; the activity asks, and answers through one of the three below. */
+    var pdfConflict by mutableStateOf<PdfConflict?>(null)
+        private set
+
+    /** Cancel: back to the explorer, the file untouched. */
+    fun leavePdfConflict() {
+        pdfConflict?.staged?.delete()
+        pdfConflict = null
+    }
+
+    /**
+     * Keep editing in xnotes: the note of ours inside the PDF opens, as holding changes the file
+     * does not have, so the next save writes the PDF whole and the other app's changes go with it.
+     */
+    suspend fun keepOurPdf() {
+        val conflict = pdfConflict ?: return
+        pdfConflict = null
+        try {
+            openFrom(conflict.uri, conflict.name, unsaved = true) { timing ->
+                val staged = conflict.staged
+                // Appended to: our file is whole underneath. Rewritten: the note is wherever that app put it, and PdfBox reads it out.
+                if (staged == null) return@openFrom readStoredNote(conflict.uri, conflict.name, timing)
+                val note = java.io.File.createTempFile("ours", ".xnote", saveTmpDir)
+                try {
+                    if (!com.xnotes.platform.PdfNote.extract(staged, note, exportMemory())) return@openFrom null
+                    java.io.FileInputStream(note).use { codec.read(it, pdfDir, imageDir, timing) }
+                } finally {
+                    note.delete()
+                }
+            }
+        } finally {
+            conflict.staged?.delete()
+        }
+    }
+
+    /**
+     * Keep the other app's changes: the PDF as it stands, without our note, becomes a plain PDF
+     * again and opens as one. The ink of ours it shows is part of its pages from here on.
+     */
+    suspend fun keepTheirPdf() {
+        val conflict = pdfConflict ?: return
+        pdfConflict = null
+        opening = true
+        val plain = try {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching {
+                    com.xnotes.platform.PdfExports.locked(conflict.uri) {
+                        val current = conflict.staged ?: java.io.File.createTempFile("theirs", ".pdf", saveTmpDir).also { copy ->
+                            appContext.contentResolver.openInputStream(android.net.Uri.parse(conflict.uri))!!.use { input ->
+                                java.io.FileOutputStream(copy).use { input.copyTo(it, 64 * 1024) }
+                            }
+                        }
+                        val stripped = java.io.File.createTempFile("plain", ".pdf", saveTmpDir)
+                        try {
+                            com.xnotes.platform.PdfNote.strip(current, stripped, exportMemory())
+                            val name = conflict.name ?: queryDisplayName(android.net.Uri.parse(conflict.uri)).orEmpty()
+                            com.xnotes.platform.PdfExports.replace(conflict.uri, name, stripped).also {
+                                if (it) com.xnotes.platform.PdfExports.fresh(conflict.uri)
+                            }
+                        } finally {
+                            stripped.delete()
+                            current.delete()
+                        }
+                    }
+                }.getOrDefault(false)
+            }
+        } finally {
+            opening = false
+        }
+        if (plain) openAsync(conflict.uri, conflict.name) else message = appContext.getString(R.string.err_open_note)
+    }
+
+    /** A note being made of a PDF changed in another app, waiting for the user to say which version; [several] in a batch. */
+    class PdfVersionQuestion internal constructor(val several: Boolean, internal val reply: kotlinx.coroutines.CompletableDeferred<PdfVersion?>)
+
+    /** Set while Make a note or Convert to note waits on that answer; the activity asks, and answers through [answerPdfVersion]. */
+    var pdfVersionQuestion by mutableStateOf<PdfVersionQuestion?>(null)
+        private set
+
+    /** The user's answer; null is Cancel, which makes no note. */
+    fun answerPdfVersion(version: PdfVersion?) {
+        pdfVersionQuestion?.reply?.complete(version)
+    }
+
+    /**
+     * The version notes are made from in one job. The user is asked the first time a PDF changed in
+     * another app is met ([PdfChangedElsewhere]), and the answer stands for the rest of the job.
+     */
+    private inner class VersionPick(private val several: Boolean) {
+        private var picked: PdfVersion? = null
+
+        /** Runs [work] with the pick. Null when it makes nothing, or the user cancels, which cancels the job. */
+        suspend fun <T> make(work: (PdfVersion?) -> T?): T? = try {
+            work(picked)
+        } catch (e: PdfChangedElsewhere) {
+            val reply = kotlinx.coroutines.CompletableDeferred<PdfVersion?>()
+            pdfVersionQuestion = PdfVersionQuestion(several, reply)
+            picked = try {
+                reply.await()
+            } finally {
+                pdfVersionQuestion = null
+            }
+            if (picked == null) {
+                importCancelled.set(true)
+                null
+            } else {
+                work(picked)
+            }
+        }
+    }
+
+    /** PdfBox's working memory for reading a whole PDF: a few tens of MB, then temp files. */
+    private fun exportMemory(): com.tom_roush.pdfbox.io.MemoryUsageSetting =
+        com.tom_roush.pdfbox.io.MemoryUsageSetting.setupMixed(32L * 1024 * 1024).setTempDir(appContext.cacheDir)
 
     fun save(output: OutputStream, uri: String, name: String? = null) {
         try {
@@ -3782,6 +4088,85 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
     }
 
+    /** Whether the open note's file is a `.pdf`. */
+    val openIsPdf: Boolean get() = DocumentKind.ofName(state.document.displayName.orEmpty()) == DocumentKind.PDF
+
+    /** The open note's file, when it is a PDF, is off the screen: its export may run. */
+    private fun releaseOpenPdf(afterMs: Long = 0L) {
+        val uri = state.document.path ?: return
+        if (openIsPdf) com.xnotes.platform.PdfExports.release(uri, afterMs)
+    }
+
+    /**
+     * The app has left the screen. A PDF open here may have its pages drawn again, after a moment:
+     * a system picker over the app looks the same as leaving it, and is gone again in seconds.
+     * Called from the activity's `onStop`, the last point at which Android lets the export's
+     * service start.
+     */
+    fun leftApp() {
+        secondary?.leftApp()
+        setAutoScroll(false)
+        val uri = state.document.path ?: return
+        if (!noteOpen || canvasOpen || !openIsPdf) return
+        releaseOpenPdf(com.xnotes.platform.PdfExports.LEAVE_HOLD_MS)
+        // The save the pause began may still be on its way to leaving the pages behind.
+        val saving = state.document.dirty || noteWriteJob?.isActive == true
+        if (saving || com.xnotes.platform.PdfExports.isWaiting(uri)) com.xnotes.platform.PdfExports.kick(expecting = true)
+    }
+
+    /** The app is back on screen, and with it the PDF open here: an export of it that is running is dropped. */
+    fun returnedToApp() {
+        secondary?.returnedToApp()
+        val uri = state.document.path ?: return
+        if (noteOpen && !canvasOpen && openIsPdf) com.xnotes.platform.PdfExports.hold(uri)
+    }
+
+    /** Set once, by the first save into a PDF: the activity then asks whether saving PDFs may show a notification. */
+    var askPdfNotifications by mutableStateOf(false)
+        private set
+
+    /** The question [askPdfNotifications] stands for has been put, or needed no putting. */
+    fun pdfNotificationsAsked() {
+        askPdfNotifications = false
+        if (!settings.pdfNotificationsAsked) settings = settings.copy(pdfNotificationsAsked = true)
+    }
+
+    /**
+     * Save as, for a note whose file is a PDF: the copy at [uri], named [name], is an xnotes PDF
+     * too, written whole, and the open note follows it there. [onDone] gets whether it landed.
+     */
+    fun savePdfAs(uri: String, name: String?, onDone: (Boolean) -> Unit = {}) {
+        noteDebounceJob?.cancel()
+        val doc = state.document
+        val snapshot = doc.snapshot() // main thread: its own page lists over the live items
+        val wasDirty = doc.dirty
+        doc.dirty = false
+        dirty = false
+        savingNote = true
+        val pending = noteWriteJob
+        noteWriteJob = autosaveScope.launch {
+            pending?.join()
+            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                synchronized(saveLock) {
+                    com.xnotes.platform.PdfExports.locked(uri) { runCatching { writePdfWhole(uri, snapshot, name) }.getOrDefault(false) }
+                }
+            }
+            savingNote = false
+            if (ok) {
+                if (state.document === doc) {
+                    doc.path = uri
+                    if (name != null) doc.displayName = name
+                    maybeBindAutosave(uri)
+                    refreshContent()
+                }
+            } else {
+                if (wasDirty && state.document === doc) { doc.dirty = true; dirty = true }
+                message = appContext.getString(R.string.err_save_note)
+            }
+            onDone(ok)
+        }
+    }
+
     // --- explorer thumbnails & document identity ---
 
     /**
@@ -3790,10 +4175,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * (the system "Open…" picker) maps to one key. Shared by the per-note view state ([viewKey])
      * and the creation-time store. Falls back to the raw string for non-document URIs.
      */
-    private fun documentKey(uri: String): String = runCatching {
-        val u = android.net.Uri.parse(uri)
-        "${u.authority}|${android.provider.DocumentsContract.getDocumentId(u)}"
-    }.getOrDefault(uri)
+    private fun documentKey(uri: String): String = com.xnotes.platform.PdfExports.keyOf(uri)
 
     /** The storage display name for a document/tree URI (no extension stripped), or null. */
     private fun queryDisplayName(uri: android.net.Uri): String? = runCatching {
@@ -3965,13 +4347,20 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             }
         }
 
-    /** The square tile for the document at [uri], whichever kind it is. */
-    suspend fun tileThumbnail(uri: String, name: String): ImageBitmap? =
+    /** The square tile for the document at [uri], whichever kind it is; [modified] is its file's, as listed. */
+    suspend fun tileThumbnail(uri: String, name: String, modified: Long): ImageBitmap? =
         if (com.xnotes.core.util.DocumentKind.ofName(name) == com.xnotes.core.util.DocumentKind.CANVAS) {
             canvasTileThumbnail(uri)
         } else {
-            noteTileThumbnail(uri)
+            noteTileThumbnail(uri, name, modified)
         }
+
+    /**
+     * What the tile of the file at [uri] is cached under. A PDF's carries the modified time of the
+     * file it was drawn from: other apps write PDFs, and a tile must not outlive the pages it shows.
+     */
+    private fun thumbKey(uri: String, name: String?, modified: Long): String =
+        if (DocumentKind.ofName(name.orEmpty()) == DocumentKind.PDF) "$uri@$modified" else uri
 
     /** The square side (px) explorer tiles render at — fixed so rotation/column changes don't re-render. */
     private val tilePx = 600
@@ -3980,7 +4369,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private val pageThumbPx = 600
 
     /** An already-loaded tile for [uri] at its current content, to seed the grid instantly. */
-    fun cachedNoteTile(uri: String): ImageBitmap? = synchronized(noteThumbs) { noteThumbs.get(uri) }
+    fun cachedNoteTile(uri: String, name: String, modified: Long): ImageBitmap? =
+        synchronized(noteThumbs) { noteThumbs.get(thumbKey(uri, name, modified)) }
 
     /**
      * The square thumbnail for the note at [uri], for the explorer grid. Returns a cached hit
@@ -3989,44 +4379,75 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * stalling the UI. The cache is authoritative — a cached tile is shown unconditionally; a content
      * change drops it ([invalidateThumb]) so it re-renders, and closing a note regenerates it.
      */
-    suspend fun noteTileThumbnail(uri: String): ImageBitmap? {
+    private suspend fun noteTileThumbnail(uri: String, name: String, modified: Long): ImageBitmap? {
         val generation = thumbnailGeneration
-        synchronized(noteThumbs) { noteThumbs.get(uri)?.let { return it } }
+        val key = thumbKey(uri, name, modified)
+        synchronized(noteThumbs) { noteThumbs.get(key)?.let { return it } }
         return withContext(thumbDispatcher) {
             delay(150) // let a quick scroll-past cancel this before any heavy work begins
             if (!isActive || !isCurrentThumbnail(generation)) return@withContext null
-            synchronized(noteThumbs) { noteThumbs.get(uri)?.let { return@withContext it } }
-            val bmp = thumbCache.load(uri, generation) ?: run {
-                val doc = runCatching {
-                    appContext.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { codec.read(it, pdfDir, imageDir) }
-                }.getOrNull() ?: return@withContext null
+            synchronized(noteThumbs) { noteThumbs.get(key)?.let { return@withContext it } }
+            val bmp = thumbCache.load(key, generation) ?: run {
+                val doc = runCatching { readStoredNote(uri, name) }.getOrNull() ?: return@withContext null
                 doc.created?.let { createdStore.put(documentKey(uri), it) }
+                if (key != uri) countPages(uri, doc, modified)
                 try {
                     val vs = viewSettingsFor(uri)
-                    renderDocThumbnailSquare(doc, tilePx, pdfPageFilterFor(vs), vs.rotation)?.also { thumbCache.store(uri, it, generation) } ?: return@withContext null
+                    renderDocThumbnailSquare(doc, tilePx, pdfPageFilterFor(vs), vs.rotation)?.also { thumbCache.store(key, it, generation) } ?: return@withContext null
                 } finally {
                     doc.pdfFile?.delete() // transient doc loaded just for a thumbnail; drop its extracts
                     deleteImageTemps(doc)
                 }
             }
-            publishThumbnail(uri, bmp, generation)
+            publishThumbnail(key, bmp, generation)
         }
     }
 
-    /** The key a document's whole-page thumbnail is cached under, beside its square tile's. */
-    private fun pageThumbKey(uri: String): String = "$uri#page"
+    /**
+     * An export draws the same first page the tile already shows, under a new modified time: the
+     * cached tile is carried over to it, where drawing it again would mean reading the whole note.
+     */
+    private fun carryTile(uri: String, name: String, before: Long, after: Long) {
+        if (before < 0L || after < 0L || before == after) return
+        val generation = thumbnailGeneration
+        val old = thumbKey(uri, name, before)
+        val new = thumbKey(uri, name, after)
+        if (old == new) return
+        for ((from, to) in listOf(old to new, pageThumbKey(old) to pageThumbKey(new))) {
+            val bmp = runCatching { thumbCache.load(from, generation) }.getOrNull() ?: continue
+            thumbCache.store(to, bmp, generation)
+            publishThumbnail(to, bmp, generation)
+        }
+    }
+
+    /** A converted file shows the first page it showed before: its cached tile goes with it to the new file. */
+    private fun carryTileAcross(oldUri: String, oldName: String, oldModified: Long, newUri: String, newName: String) {
+        val generation = thumbnailGeneration
+        val newModified = stampOf(newUri)?.modified ?: return
+        val old = thumbKey(oldUri, oldName, oldModified)
+        val new = thumbKey(newUri, newName, newModified)
+        for ((from, to) in listOf(old to new, pageThumbKey(old) to pageThumbKey(new))) {
+            val bmp = runCatching { thumbCache.load(from, generation) }.getOrNull() ?: continue
+            thumbCache.store(to, bmp, generation)
+            publishThumbnail(to, bmp, generation)
+        }
+    }
+
+    /** The key a document's whole-page thumbnail is cached under, beside its square tile's, [tile]. */
+    private fun pageThumbKey(tile: String): String = "$tile#page"
 
     /** An already-rendered whole-page thumbnail for [uri], to seed a tile instantly. */
-    fun cachedPageThumb(uri: String): ImageBitmap? = synchronized(noteThumbs) { noteThumbs.get(pageThumbKey(uri)) }
+    fun cachedPageThumb(uri: String, name: String, modified: Long): ImageBitmap? =
+        synchronized(noteThumbs) { noteThumbs.get(pageThumbKey(thumbKey(uri, name, modified))) }
 
     /**
      * The first page whole, for Gallery and the "Whole page" tiles: [pageThumbPx] tall at the page's own shape,
      * or for a canvas its content in a landscape frame of the same size. Cached like the square tiles, and dropped
      * with them when the document changes.
      */
-    suspend fun pageThumbnail(uri: String, name: String): ImageBitmap? {
+    suspend fun pageThumbnail(uri: String, name: String, modified: Long): ImageBitmap? {
         val generation = thumbnailGeneration
-        val key = pageThumbKey(uri)
+        val key = pageThumbKey(thumbKey(uri, name, modified))
         synchronized(noteThumbs) { noteThumbs.get(key)?.let { return it } }
         return withContext(thumbDispatcher) {
             delay(150)
@@ -4043,8 +4464,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                         deleteCanvasImageTemps(doc)
                     }
                 } else {
-                    val doc = runCatching { appContext.contentResolver.openInputStream(u)?.use { codec.read(it, pdfDir, imageDir) } }.getOrNull()
-                        ?: return@withContext null
+                    val doc = runCatching { readStoredNote(uri, name) }.getOrNull() ?: return@withContext null
                     try {
                         val vs = viewSettingsFor(uri)
                         renderDocPage(doc, 0, pageThumbPx, pdfPageFilterFor(vs), vs.rotation)
@@ -4064,9 +4484,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val generation = thumbnailGeneration
         if (DocumentKind.ofName(name) == DocumentKind.CANVAS) return emptyList()
         return withContext(thumbDispatcher) {
-            val doc = runCatching {
-                appContext.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { codec.read(it, pdfDir, imageDir) }
-            }.getOrNull() ?: return@withContext emptyList()
+            val doc = runCatching { readStoredNote(uri, name) }.getOrNull() ?: return@withContext emptyList()
             try {
                 val vs = viewSettingsFor(uri)
                 val filter = pdfPageFilterFor(vs)
@@ -4115,17 +4533,19 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private suspend fun regenerateClosedNoteThumb(uri: String) {
         val generation = thumbnailGeneration
         val doc = state.document
+        // A PDF's tile is asked for by the file's modified time, which the save just made has set.
+        val key = thumbKey(uri, doc.displayName, knownStamps[uri]?.modified ?: -1L)
         // The closing note's own filter + rotation, captured before any swap.
         val filter = pdfPageFilter()
         val rotation = viewSettings.rotation
         withContext(thumbDispatcher) {
             if (state.document !== doc) return@withContext // a new note was opened; don't cache stale pixels
             val bmp = runCatching { renderDocThumbnailSquare(doc, tilePx, filter, rotation) }.getOrNull() ?: return@withContext
-            thumbCache.store(uri, bmp, generation)
+            thumbCache.store(key, bmp, generation)
             // The whole-page tile is drawn again the next time it's shown.
-            synchronized(noteThumbs) { noteThumbs.remove(pageThumbKey(uri)) }
-            thumbCache.remove(pageThumbKey(uri))
-            publishThumbnail(uri, bmp, generation)
+            synchronized(noteThumbs) { noteThumbs.remove(pageThumbKey(key)) }
+            thumbCache.remove(pageThumbKey(key))
+            publishThumbnail(key, bmp, generation)
         }
     }
 
@@ -4402,10 +4822,16 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** Creates a new `.xnote` named [name] under [parentDocId], written by [write]; returns its URI, or null.
      *  If [write] throws (an IO error, or a cancelled import), the half-written file is deleted so a failed
      *  import never leaves an empty/partial note behind. */
-    private fun createNoteFile(treeUri: String, parentDocId: String, name: String, write: (OutputStream) -> Unit): String? {
+    private fun createNoteFile(
+        treeUri: String,
+        parentDocId: String,
+        name: String,
+        mime: String = "application/octet-stream",
+        write: (OutputStream) -> Unit,
+    ): String? {
         val parent = android.provider.DocumentsContract.buildDocumentUriUsingTree(android.net.Uri.parse(treeUri), parentDocId)
         val uri = runCatching {
-            android.provider.DocumentsContract.createDocument(appContext.contentResolver, parent, "application/octet-stream", name)
+            android.provider.DocumentsContract.createDocument(appContext.contentResolver, parent, mime, name)
         }.getOrNull() ?: return null
         return runCatching {
             appContext.contentResolver.openOutputStream(uri, "wt")?.use { write(it) }
@@ -4456,13 +4882,36 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** Imports the PDF at [pdfFile] into a new `.xnote` under [parentDocId] (named after [rawName]);
-     *  returns its URI, or null. The PDF is streamed straight into the bundle, never held in RAM. IO. */
-    fun createPdfNoteFile(treeUri: String, parentDocId: String, rawName: String, pdfFile: java.io.File): String? {
+     *  returns its URI, or null. The PDF is streamed straight into the bundle, never held in RAM.
+     *  [version] is as for [noteToMake], which throws for the user to be asked. IO. */
+    fun createPdfNoteFile(treeUri: String, parentDocId: String, rawName: String, pdfFile: java.io.File, version: PdfVersion? = null): String? {
         val source = com.xnotes.platform.PdfSource.open(pdfFile)
         lastImportError = source.openError
         if (source.pageCount == 0) {
             source.close()
             return null
+        }
+        // An xnotes PDF made into a note is the note inside it, ink still editable, not its pages with the ink baked in.
+        if (source.attachmentNames().any { com.xnotes.platform.PdfNote.isNote(it) }) {
+            source.close()
+            noteToMake(pdfFile, version)?.let { note ->
+                try {
+                    val name = uniqueDocumentName(treeUri, parentDocId, rawName, com.xnotes.core.util.DocumentKind.NOTE)
+                    return createNoteFile(treeUri, parentDocId, name) { out -> java.io.FileInputStream(note).use { it.copyTo(out, copyBuffer) } }
+                } finally {
+                    note.delete()
+                }
+            }
+            // The pages are taken instead, without the note riding along inside them.
+            val plain = java.io.File.createTempFile("plain", ".pdf", pdfDir)
+            try {
+                com.xnotes.platform.PdfNote.strip(pdfFile, plain, exportMemory())
+                return createPdfNoteFile(treeUri, parentDocId, rawName, plain)
+            } catch (e: Exception) {
+                return null
+            } finally {
+                plain.delete()
+            }
         }
         val doc = com.xnotes.platform.PdfImporter.import(source, state.document.dpi) // doc.pdfFile = pdfFile
         stampNewNoteDefaults(doc)
@@ -4471,6 +4920,79 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val uri = createNoteFile(treeUri, parentDocId, name) { codec.write(doc, it) { importCancelled.get() } }
         source.close()
         return uri
+    }
+
+    /**
+     * The note to make of the PDF in [pdf], which lists a note of ours: the one it carries, as
+     * [noteCarriedBy] gives it, or null when the note is to be made of its pages. That is when it
+     * carries none that reads, and when another app has changed it and [version] says theirs.
+     * Changed, with no [version] yet, it throws [PdfChangedElsewhere] for the user to be asked.
+     */
+    private fun noteToMake(pdf: java.io.File, version: PdfVersion?): java.io.File? {
+        val changed = changedElsewhere(pdf)
+        if (changed && version == PdfVersion.THEIRS) return null
+        val note = noteCarriedBy(pdf) ?: return null
+        if (changed && version == null) {
+            note.delete()
+            throw PdfChangedElsewhere(null)
+        }
+        return note
+    }
+
+    /** Whether another app has written to the PDF in [pdf], which lists a note of ours, since xnotes last did. */
+    private fun changedElsewhere(pdf: java.io.File): Boolean = runCatching {
+        java.io.RandomAccessFile(pdf, "r").use { raf ->
+            when (XnotesPdf.inspect(raf.channel)) {
+                is XnotesPdf.Inspection.Ours, is XnotesPdf.Inspection.Torn -> false
+                // Bytes after ours, or an end that is not ours on a file that still lists our note.
+                else -> true
+            }
+        }
+    }.getOrDefault(false)
+
+    /**
+     * The note the PDF in [pdf] carries, as a bundle in a temp file the caller deletes; null when it
+     * carries none that reads as one. A PDF that is ours, or ours underneath, gives it straight from
+     * its bytes; one another app wrote out whole gives it through PdfBox.
+     */
+    private fun noteCarriedBy(pdf: java.io.File): java.io.File? {
+        val note = java.io.File.createTempFile("carried", ".xnote", saveTmpDir)
+        val found = runCatching {
+            val direct = java.io.RandomAccessFile(pdf, "r").use { raf ->
+                val ch = raf.channel
+                val inside = when (val seen = XnotesPdf.inspect(ch)) {
+                    is XnotesPdf.Inspection.Ours -> XnotesPdf.embedded(ch, seen)
+                    is XnotesPdf.Inspection.Appended -> XnotesPdf.embedded(FileWindow(ch, 0L, seen.ownLength), seen.own)
+                    is XnotesPdf.Inspection.Torn -> XnotesPdf.embedded(FileWindow(ch, 0L, seen.ownLength), seen.own)
+                    else -> null
+                } ?: return@use false
+                java.io.FileOutputStream(note).use { out ->
+                    var at = 0L
+                    while (at < inside.size()) at += inside.transferTo(at, inside.size() - at, out.channel).also { if (it <= 0L) throw java.io.IOException("short read") }
+                }
+                true
+            }
+            (direct || com.xnotes.platform.PdfNote.extract(pdf, note, exportMemory())) &&
+                java.io.FileInputStream(note).use { codec.peek(it.channel) } != null
+        }.getOrDefault(false)
+        if (!found) note.delete()
+        return note.takeIf { found }
+    }
+
+    /**
+     * Keeps the PDF in [pdfFile] as a PDF: a copy named after [rawName] under [parentDocId].
+     * Returns its URI, or null, with [lastImportError] saying why when the PDF would not open.
+     */
+    fun createPdfCopy(treeUri: String, parentDocId: String, rawName: String, pdfFile: java.io.File): String? {
+        val source = com.xnotes.platform.PdfSource.open(pdfFile)
+        lastImportError = source.openError
+        val opens = source.pageCount > 0
+        source.close()
+        if (!opens) return null
+        val name = uniqueDocumentName(treeUri, parentDocId, rawName, DocumentKind.PDF)
+        return createNoteFile(treeUri, parentDocId, name, PDF_MIME) { out ->
+            java.io.FileInputStream(pdfFile).use { copyStream(it, out) { importCancelled.get() } }
+        }
     }
 
     /**
@@ -4559,18 +5081,22 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      *  Copies the picked file to a local temp first (the slow part, shown under the import loader), then
      *  builds the note and drops the temp. Clears the request on success or cancel; keeps it on a genuine
      *  failure so the user can retry the name. IO — call off-thread. */
-    fun commitImport(treeUri: String, parentDocId: String, rawName: String): String? {
+    suspend fun commitImport(treeUri: String, parentDocId: String, rawName: String, asPdf: Boolean = false): String? {
         val pending = pendingImport ?: return null
         importCancelled.set(false)
         val uri = if (pending.markdown) {
             lastImportError = null
             readMarkdown(pending.uri)?.let { createMarkdownNoteFile(treeUri, parentDocId, rawName, it) }
+        } else if (asPdf && isUnderTree(pending.uri, treeUri)) {
+            lastImportError = null
+            pending.uri // already a PDF in the folder: there is nothing to copy
         } else {
             val staged = runCatching {
                 appContext.contentResolver.openInputStream(android.net.Uri.parse(pending.uri))?.let { stageImport(it) }
             }.getOrNull()
             if (staged == null) null else try {
-                createPdfNoteFile(treeUri, parentDocId, rawName, staged)
+                if (asPdf) createPdfCopy(treeUri, parentDocId, rawName, staged)
+                else VersionPick(several = false).make { createPdfNoteFile(treeUri, parentDocId, rawName, staged, it) }
             } finally {
                 staged.delete()
             }
@@ -4585,11 +5111,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      *  [importing]. Returns the new note's URI, or null on failure/cancel. On cancel [pendingImport]
      *  is cleared (dialog dismisses); on a genuine failure it's kept so the caller can show an error
      *  and let the user retry. */
-    suspend fun commitImportAsync(treeUri: String, parentDocId: String, rawName: String): String? {
+    suspend fun commitImportAsync(treeUri: String, parentDocId: String, rawName: String, asPdf: Boolean = false): String? {
         importing = true
         return try {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                commitImport(treeUri, parentDocId, rawName)
+                commitImport(treeUri, parentDocId, rawName, asPdf)
             }
         } finally {
             importing = false
@@ -4606,25 +5132,32 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      *  so a batch costs the same memory as a single import however long the list is. Names come from
      *  the source files. Cancel stops after the file in flight, discarding only that one; whatever
      *  already landed stays. [importProgress] drives the dialog's count. IO — runs off-thread. */
-    suspend fun commitImportsAsync(treeUri: String, parentDocId: String): Int {
+    suspend fun commitImportsAsync(treeUri: String, parentDocId: String, asPdf: Boolean = false): Int {
         val items = pendingImports
-        if (items.isEmpty()) return 0
+        if (items.isEmpty() || importing) return 0 // a second tap while the first lot is landing
         importCancelled.set(false)
         importing = true
         importProgress = ImportProgress(0, items.size)
         return try {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 var done = 0
+                val pick = VersionPick(several = items.size > 1)
                 for (item in items) {
                     if (importCancelled.get()) break
-                    val staged = runCatching {
-                        appContext.contentResolver.openInputStream(android.net.Uri.parse(item.uri))?.let { stageImport(it) }
-                    }.getOrNull()
-                    if (staged != null) {
-                        try {
-                            if (createPdfNoteFile(treeUri, parentDocId, item.defaultName, staged) != null) done++
-                        } finally {
-                            staged.delete()
+                    if (asPdf && isUnderTree(item.uri, treeUri)) {
+                        done++ // already a PDF in the folder: there is nothing to copy
+                    } else {
+                        val staged = runCatching {
+                            appContext.contentResolver.openInputStream(android.net.Uri.parse(item.uri))?.let { stageImport(it) }
+                        }.getOrNull()
+                        if (staged != null) {
+                            try {
+                                val made = if (asPdf) createPdfCopy(treeUri, parentDocId, item.defaultName, staged)
+                                else pick.make { createPdfNoteFile(treeUri, parentDocId, item.defaultName, staged, it) }
+                                if (made != null) done++
+                            } finally {
+                                staged.delete()
+                            }
                         }
                     }
                     importProgress = ImportProgress(done, items.size)
@@ -4640,6 +5173,129 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** Aborts an in-flight import (the dialog's Cancel) so its stream-copy stops at the next buffer. */
     fun cancelImportInProgress() { importCancelled.set(true) }
+
+    /**
+     * Convert the stored file at [uri] in place: a note into an xnotes PDF, or a PDF into a note.
+     * The new file takes the old one's place in its folder under the other extension, and all that
+     * is remembered about the old one goes with it. Runs behind the progress dialog, which can
+     * cancel it until the new file is written; [onDone] gets the new file's uri, or null.
+     */
+    fun convertDocument(uri: String, onDone: (String?) -> Unit = {}) {
+        val root = browseRoot ?: return onDone(null)
+        autosaveScope.launch {
+            importCancelled.set(false)
+            val name = withContext(Dispatchers.IO) { queryDisplayName(android.net.Uri.parse(uri)) }.orEmpty()
+            val toPdf = when (DocumentKind.ofName(name)) {
+                DocumentKind.NOTE -> true
+                DocumentKind.PDF -> false
+                else -> return@launch onDone(null)
+            }
+            noteWriteJob?.join() // a save of this very file may still be going out
+            busyWith = if (toPdf) R.string.converting_to_pdf else R.string.converting_to_note
+            importing = true
+            val made = try {
+                // The question is asked between two runs of the work, since the first holds the file's lock.
+                withContext(Dispatchers.IO) { runCatching { VersionPick(several = false).make { convertFile(root, uri, name, toPdf, it) } }.getOrNull() }
+            } finally {
+                importing = false
+                busyWith = null
+            }
+            if (made == null && !importCancelled.get()) message = appContext.getString(R.string.err_convert)
+            onDone(made)
+        }
+    }
+
+    /** [convertDocument]'s work; [version] is as for [noteToMake], which throws for the user to be asked. IO. */
+    private fun convertFile(root: String, uri: String, name: String, toPdf: Boolean, version: PdfVersion?): String? {
+        val parentId = parentDocIdOf(uri) ?: return null
+        val kind = if (toPdf) DocumentKind.PDF else DocumentKind.NOTE
+        val newName = uniqueDocumentName(root, parentId, DocumentKind.stripSuffix(name), kind)
+        val made = java.io.File.createTempFile("convert", kind.suffix, saveTmpDir)
+        var newUri: String? = null
+        try {
+            // The new file's bytes first, in private storage: nothing in the folder changes until they are whole.
+            val whole = if (toPdf) {
+                val note = java.io.File.createTempFile("note", ".xnote", saveTmpDir)
+                try {
+                    java.io.FileOutputStream(note).use { copyFileTo(uri, it) }
+                    exportNoteFile(note, newName, made, isCancelled = { importCancelled.get() })
+                } finally {
+                    note.delete()
+                }
+            } else {
+                com.xnotes.platform.PdfExports.hold(uri) // no export of it while its note is read out
+                com.xnotes.platform.PdfExports.locked(uri) { noteOfPdf(uri, made, version) }
+            }
+            if (!whole || importCancelled.get()) return null
+            val oldModified = stampOf(uri)?.modified ?: -1L
+            newUri = createNoteFile(root, parentId, newName, if (toPdf) PDF_MIME else "application/octet-stream") { out ->
+                java.io.FileInputStream(made).use { it.copyTo(out, copyBuffer) }
+            } ?: return null
+            // All that is remembered about the file goes to the new one, and then the old one goes.
+            runCatching { moveItemColor(root, parentId, name, newName) }
+            carryTileAcross(uri, name, oldModified, newUri, newName)
+            if (state.document.path == uri) {
+                state.document.path = newUri
+                state.document.displayName = newName
+                if (autosaveUri == uri) autosaveUri = newUri
+            }
+            onDocumentMoved(uri, newUri, newName)
+            com.xnotes.platform.PdfExports.fresh(newUri) // a new PDF's pages are level with its note; a note has none to draw
+            runCatching { android.provider.DocumentsContract.deleteDocument(appContext.contentResolver, android.net.Uri.parse(uri)) }
+            return newUri
+        } finally {
+            made.delete()
+            if (!toPdf) {
+                com.xnotes.platform.PdfExports.release(uri)
+                newUri?.let { com.xnotes.platform.PdfExports.release(it) }
+            }
+        }
+    }
+
+    /**
+     * Write the note the PDF at [uri] stands for into [to]: the one it carries, or for a plain PDF
+     * a new one of its pages, as Make a note makes. False when the PDF cannot be read. [version]
+     * is as for [noteToMake], which throws for the user to be asked.
+     */
+    private fun noteOfPdf(uri: String, to: java.io.File, version: PdfVersion?): Boolean {
+        val staged = appContext.contentResolver.openInputStream(android.net.Uri.parse(uri))?.let { stageImport(it) } ?: return false
+        var pages = staged
+        try {
+            val peek = com.xnotes.platform.PdfSource.open(staged)
+            val carries = try {
+                peek.attachmentNames().any { com.xnotes.platform.PdfNote.isNote(it) }
+            } finally {
+                peek.close()
+            }
+            if (carries) {
+                noteToMake(staged, version)?.let { note ->
+                    try {
+                        note.copyTo(to, overwrite = true)
+                    } finally {
+                        note.delete()
+                    }
+                    return true
+                }
+                // The pages are taken instead, without the note riding along inside them.
+                pages = java.io.File.createTempFile("plain", ".pdf", pdfDir)
+                com.xnotes.platform.PdfNote.strip(staged, pages, exportMemory())
+            }
+            val source = com.xnotes.platform.PdfSource.open(pages)
+            try {
+                lastImportError = source.openError
+                if (source.pageCount == 0) return false
+                val doc = stampNewNoteDefaults(com.xnotes.platform.PdfImporter.import(source, state.document.dpi))
+                doc.created = createdStore.get(documentKey(uri)) ?: System.currentTimeMillis()
+                java.io.FileOutputStream(to).use { codec.write(doc, it) { importCancelled.get() } }
+                return true
+            } finally {
+                source.close()
+            }
+        } finally {
+            staged.delete()
+            if (pages !== staged) pages.delete()
+        }
+    }
 
     /** Renames a document (file or folder) to [newName]; follows the open note. IO, call off-thread. */
     fun renameDocument(docUri: String, newName: String): Boolean {
@@ -4669,6 +5325,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             docMeta.rekeyTree(from, to)
             knownStamps.remove(oldUri)?.let { knownStamps[newUri] = it }
             knownEntries.remove(oldUri)?.let { knownEntries[newUri] = it }
+            knownEnds.remove(oldUri)?.let { knownEnds[newUri] = it }
+            pdfTails.remove(oldUri)?.let { pdfTails[newUri] = it }
+            com.xnotes.platform.PdfExports.moved(oldUri, newUri, newName ?: queryDisplayName(android.net.Uri.parse(newUri)).orEmpty())
             invalidateThumb(oldUri)
         }
         val tree = browseRoot?.let { android.net.Uri.parse(it) } ?: return
@@ -4711,7 +5370,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     fun renameCurrentDocument(rawName: String): Boolean {
         val name = rawName.trim()
         if (name.isEmpty()) return false
-        val fileName = if (name.endsWith(".xnote", ignoreCase = true)) name else "$name.xnote"
+        // The file keeps the kind it has: renaming an open PDF must not turn its name into a note's.
+        val kind = DocumentKind.ofName(state.document.displayName.orEmpty())?.takeIf { it != DocumentKind.CANVAS } ?: DocumentKind.NOTE
+        val fileName = DocumentKind.withSuffix(DocumentKind.stripSuffix(name), kind)
         val uri = currentUri
         return if (uri != null) {
             renameDocument(uri, fileName)
@@ -4738,6 +5399,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * it to recents, autosave rewriting its file, or the unsaved-changes guard offering to save it.
      */
     private fun purgeDeleted(docUri: String) {
+        com.xnotes.platform.PdfExports.gone(docUri)
         val target = android.net.Uri.parse(docUri)
         val delId = runCatching { android.provider.DocumentsContract.getDocumentId(target) }.getOrNull() ?: return
         val auth = target.authority
@@ -4959,6 +5621,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** Each file's zip directory as this editor last read or wrote it, by uri: what a moved stamp is checked against. */
     private val knownEntries = java.util.concurrent.ConcurrentHashMap<String, com.xnotes.format.ZipTail.Directory>()
 
+    /** The last bytes of each PDF as this editor last read or wrote it, by uri: a PDF's stand-in for [knownEntries]. */
+    private val knownEnds = java.util.concurrent.ConcurrentHashMap<String, ByteArray>()
+
+    /** The tail this editor has written into each PDF since that file was last whole, by uri: the one a save may rewrite. */
+    private val pdfTails = java.util.concurrent.ConcurrentHashMap<String, XnotesPdf.Tail>()
+
     /** Where a fork landed: the new file's uri, and the name to show the user. */
     private class Fork(val uri: String, val name: String)
 
@@ -5008,6 +5676,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * back from it otherwise. Forgets both when the provider reports no stamp.
      */
     private fun rememberStamp(uri: String, entries: com.xnotes.format.ZipTail.Directory? = null) {
+        if (isPdfFile(uri)) {
+            // A PDF is no zip to read a directory from: its last bytes stand in, and move with every save.
+            val end = endOfPdf(uri)
+            val stamp = stampOf(uri)
+            if (stamp != null) knownStamps[uri] = stamp else knownStamps.remove(uri)
+            if (stamp != null && end != null) knownEnds[uri] = end else knownEnds.remove(uri)
+            return
+        }
         val dir = entries ?: entriesOf(uri)
         val stamp = stampOf(uri)
         if (stamp != null) knownStamps[uri] = stamp else knownStamps.remove(uri)
@@ -5032,11 +5708,52 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val known = knownStamps[uri] ?: return false
         val now = stampOf(uri) ?: return false
         if (known.matches(now)) return false
+        knownEnds[uri]?.let { end ->
+            if (endOfPdf(uri)?.contentEquals(end) != true) return true
+            knownStamps[uri] = now // the same save under a new stamp
+            return false
+        }
         val entries = knownEntries[uri] ?: return true
         if (entriesOf(uri)?.let { entries.sameAs(it) } != true) return true
         knownStamps[uri] = now // the same save under a new stamp; the stamp is what was wrong
         return false
     }
+
+    /** Whether the stored file at [uri] is a `.pdf`, by its name. */
+    private fun isPdfFile(uri: String): Boolean {
+        val u = android.net.Uri.parse(uri)
+        // The open note's own name, else the name a path-like document id ends in; the provider is only asked when neither says.
+        val name = state.document.displayName?.takeIf { uri == state.document.path }
+            ?: u.lastPathSegment?.takeIf { DocumentKind.isDocument(it) }
+            ?: queryDisplayName(u)
+        return DocumentKind.ofName(name.orEmpty()) == DocumentKind.PDF
+    }
+
+    /** The PDF at [uri] as one channel that reads and writes, handed to [block]; null when its provider will not open it so. */
+    private fun <T> withPdfFile(uri: String, block: (java.nio.channels.FileChannel) -> T): T? =
+        appContext.contentResolver.openFileDescriptor(android.net.Uri.parse(uri), "rw")?.use { pfd ->
+            // As in [entriesOf], the streams built on the descriptor are never closed.
+            block(
+                com.xnotes.format.ReadWriteChannel(
+                    java.io.FileInputStream(pfd.fileDescriptor).channel,
+                    java.io.FileOutputStream(pfd.fileDescriptor).channel,
+                ),
+            )
+        }
+
+    /** What the PDF at [uri] is as it stands, or null when it cannot be read. */
+    private fun inspectPdf(uri: String): XnotesPdf.Inspection? = runCatching {
+        appContext.contentResolver.openFileDescriptor(android.net.Uri.parse(uri), "r")?.use { pfd ->
+            XnotesPdf.inspect(java.io.FileInputStream(pfd.fileDescriptor).channel)
+        }
+    }.getOrNull()
+
+    /** The last bytes of the PDF at [uri], or null when they cannot be read. */
+    private fun endOfPdf(uri: String): ByteArray? = runCatching {
+        appContext.contentResolver.openFileDescriptor(android.net.Uri.parse(uri), "r")?.use { pfd ->
+            XnotesPdf.ending(java.io.FileInputStream(pfd.fileDescriptor).channel)
+        }
+    }.getOrNull()
 
     /** The parent folder's document id for the file at [uri], or null when it has none. */
     private fun parentDocIdOf(uri: String): String? {
@@ -5057,10 +5774,27 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private fun forkNote(uri: String, doc: Document, title: String): Fork? {
         val root = browseRoot ?: return null
         val parentId = parentDocIdOf(uri) ?: return null
+        if (isPdfFile(uri)) return forkPdf(root, parentId, doc, title)
         val name = forkName(root, parentId, title, com.xnotes.core.util.DocumentKind.NOTE)
         val forked = createNoteFile(root, parentId, name) { codec.write(doc, it) } ?: return null
         rememberStamp(forked)
         return Fork(forked, name)
+    }
+
+    /** [forkNote] for an xnotes PDF. Its fork is one too, so it is written as an export with the note inside. */
+    private fun forkPdf(root: String, parentId: String, doc: Document, title: String): Fork? {
+        val name = forkName(root, parentId, title, DocumentKind.PDF)
+        val pdf = java.io.File.createTempFile("fork", ".pdf", saveTmpDir)
+        try {
+            if (!writeXnotesPdf(doc, name, pdf)) return null
+            val forked = createNoteFile(root, parentId, name, PDF_MIME) { out ->
+                java.io.FileInputStream(pdf).use { it.copyTo(out, copyBuffer) }
+            } ?: return null
+            rememberStamp(forked)
+            return Fork(forked, name)
+        } finally {
+            pdf.delete()
+        }
     }
 
     /** The canvas sibling of [forkNote]. */
@@ -5076,14 +5810,20 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** Autosave [owner]'s [doc] to [uri], or to the fork [owner] already moved to, forking when that file moved under us. IO. */
     private fun saveNoteGuarded(uri: String, doc: Document, title: String, owner: Document): SaveResult? = synchronized(saveLock) {
         val target = forks.target(uri, owner)
-        if (changedUnderneath(target)) {
-            val base = forks.base(target, DocumentKind.stripSuffix(title))
-            val fork = forkNote(target, doc, base) ?: return null
-            forks.record(target, fork.uri, owner, DocumentKind.stripSuffix(fork.name), base)
-            return SaveResult(fork.uri, fork)
+        fun save(): SaveResult? {
+            // A PDF whose end does not read is not one to write into either: the save goes beside it.
+            if (changedUnderneath(target) || unreadablePdf(target)) {
+                val base = forks.base(target, DocumentKind.stripSuffix(title))
+                val fork = forkNote(target, doc, base) ?: return null
+                forks.record(target, fork.uri, owner, DocumentKind.stripSuffix(fork.name), base)
+                return SaveResult(fork.uri, fork)
+            }
+            if (!writeNoteSafely(target, doc)) return null
+            return SaveResult(target, null)
         }
-        if (!writeNoteSafely(target, doc)) return null
-        SaveResult(target, null)
+        // A PDF's export commits under the file's lock, so the check for a change and the write share it:
+        // a commit landing between the two would look like someone else's change, and fork.
+        if (isPdfFile(target)) com.xnotes.platform.PdfExports.locked(target) { save() } else save()
     }
 
     /** The canvas sibling of [saveNoteGuarded]. IO. */
@@ -5136,6 +5876,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * throw mid-encode left the note as 0 bytes. Returns true only when [uri] now holds the note.
      */
     private fun writeNoteSafely(uri: String, doc: Document): Boolean = synchronized(saveLock) {
+        // A bundle's bytes must never land in a PDF.
+        if (isPdfFile(uri)) return com.xnotes.platform.PdfExports.locked(uri) { writePdf(uri, doc) }
         // Replace only the manifest when everything ahead of it is already right. A splice that
         // fails part way leaves a file that is not a valid zip, and falling through to the full
         // rewrite below is what puts it right, so this must stay ordered this way.
@@ -5190,31 +5932,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
         val target = android.net.Uri.parse(uri)
         val existing = entriesOf(uri) ?: return@runCatching false
-
-        // Every asset has to still be the same file in the same place, or the manifest is not the
-        // only thing that changed and the whole bundle has to be rebuilt.
-        val ordered = existing.entries.sortedBy { it.localOffset }
-        if (ordered.size <= expected.size) return@runCatching false
-        for (i in expected.indices) {
-            val e = ordered[i]
-            if (e.name != expected[i].first || e.size != expected[i].second) return@runCatching false
-            if (e.method != java.util.zip.ZipEntry.STORED) return@runCatching false
-        }
-        val tailStart = ordered[expected.size].localOffset
-        if (tailStart < MIN_SPLICE_BYTES) return@runCatching false
+        val (keep, tailStart) = splicePoint(existing, expected) ?: return@runCatching false
 
         val encodeStart = System.nanoTime()
         val timing = com.xnotes.format.DocumentCodec.WriteTiming()
-        val tmp = java.io.File.createTempFile("tail", ".zip", saveTmpDir)
+        val tmp = tailZip(doc, assets, audio, timing)
         try {
-            // The new tail is built as an ordinary little zip of its own, so java.util.zip keeps
-            // doing the deflating, the checksums and the entry headers.
-            java.io.FileOutputStream(tmp).use { out ->
-                java.util.zip.ZipOutputStream(out).use { zos ->
-                    zos.setLevel(java.util.zip.Deflater.BEST_SPEED)
-                    codec.writeTail(zos, doc, assets, timing, audio)
-                }
-            }
             val spliceStart = System.nanoTime()
             var entries: com.xnotes.format.ZipTail.Directory? = null
             val length = java.io.FileInputStream(tmp).use { tail ->
@@ -5225,7 +5948,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                     val written = com.xnotes.format.ZipTail.splice(
                         java.io.FileOutputStream(pfd.fileDescriptor).channel,
                         tailStart,
-                        ordered.subList(0, expected.size),
+                        keep,
                         tail.channel,
                         tailDir,
                     )
@@ -5250,6 +5973,232 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             tmp.delete()
         }
     }.getOrDefault(false)
+
+    /**
+     * Where a save can splice into a bundle whose directory is [existing]: the entries it keeps,
+     * and where its tail starts. Null when [expected], the assets the note holds now, are not what
+     * leads the bundle, or when too little leads it for a splice to be worth its risk.
+     */
+    private fun splicePoint(
+        existing: com.xnotes.format.ZipTail.Directory,
+        expected: List<Pair<String, Long>>,
+    ): Pair<List<com.xnotes.format.ZipTail.Entry>, Long>? {
+        // Every asset has to still be the same file in the same place, or the manifest is not the
+        // only thing that changed and the whole bundle has to be rebuilt.
+        val ordered = existing.entries.sortedBy { it.localOffset }
+        if (ordered.size <= expected.size) return null
+        for (i in expected.indices) {
+            val e = ordered[i]
+            if (e.name != expected[i].first || e.size != expected[i].second) return null
+            if (e.method != java.util.zip.ZipEntry.STORED) return null
+        }
+        val tailStart = ordered[expected.size].localOffset
+        if (tailStart < MIN_SPLICE_BYTES) return null
+        return ordered.subList(0, expected.size) to tailStart
+    }
+
+    /**
+     * [doc]'s tail entries as an ordinary little zip of its own, in a temp file the caller deletes,
+     * so java.util.zip keeps doing the deflating, the checksums and the entry headers.
+     */
+    private fun tailZip(
+        doc: Document,
+        assets: List<Pair<String, java.io.File>>,
+        audio: List<Pair<String, java.io.File>>,
+        timing: com.xnotes.format.DocumentCodec.WriteTiming,
+    ): java.io.File {
+        val tmp = java.io.File.createTempFile("tail", ".zip", saveTmpDir)
+        try {
+            java.io.FileOutputStream(tmp).use { out ->
+                java.util.zip.ZipOutputStream(out).use { zos ->
+                    zos.setLevel(java.util.zip.Deflater.BEST_SPEED)
+                    codec.writeTail(zos, doc, assets, timing, audio)
+                }
+            }
+            return tmp
+        } catch (e: Throwable) {
+            tmp.delete()
+            throw e
+        }
+    }
+
+    // --- saving into a PDF ---
+
+    private enum class PdfSave { SAVED, FAILED, NOT_OURS }
+
+    /**
+     * Save [doc] into the PDF at [uri]. A file that is ours takes a tail: the first save since the
+     * file was last whole appends one holding the whole note, and each save after that splices it
+     * in place, which costs about what saving a bundle costs. A PDF that is not ours as it stands
+     * has nothing to append to, so it is written whole, as an export with the note inside.
+     */
+    private fun writePdf(uri: String, doc: Document): Boolean = runCatching {
+        val start = System.nanoTime()
+        val timing = com.xnotes.format.DocumentCodec.WriteTiming()
+        // A provider that will not open the file to be written in place still takes it whole,
+        // and so does a file a failed tail left unfinished. One whose end never read is left alone.
+        val tailed = runCatching { withPdfFile(uri) { ch -> writePdfTail(uri, ch, doc, timing) } }.getOrNull()
+            ?: if (inspectPdf(uri) is XnotesPdf.Inspection.Unreadable) PdfSave.FAILED else PdfSave.NOT_OURS
+        val saved = when (tailed) {
+            PdfSave.SAVED -> true
+            PdfSave.FAILED -> false
+            PdfSave.NOT_OURS -> writePdfWhole(uri, doc)
+        }
+        if (saved) {
+            if (!settings.pdfNotificationsAsked && !askPdfNotifications) autosaveScope.launch { askPdfNotifications = true }
+            state.lastSaveEncodeMs = msSince(start)
+            state.lastSaveCopyMs = 0L
+            state.lastSaveManifestMs = timing.manifestMs
+            state.lastSaveAssetsMs = timing.assetsMs
+            state.lastSaveDeflateMs = timing.deflateMs
+            state.lastSaveManifestBytes = timing.manifestBytes
+            state.lastSaveBytes = knownStamps[uri]?.size ?: -1L
+        }
+        saved
+    }.getOrDefault(false)
+
+    /** The tail half of [writePdf], on the open file [ch]. */
+    private fun writePdfTail(uri: String, ch: java.nio.channels.FileChannel, doc: Document, timing: com.xnotes.format.DocumentCodec.WriteTiming): PdfSave {
+        val found = XnotesPdf.inspect(ch)
+        // The tail this editor wrote may be rewritten only while it is still what the file ends in.
+        val session = pdfTails.remove(uri)?.takeIf {
+            found is XnotesPdf.Inspection.Ours && found.tailStart == it.start && it.end == ch.size()
+        }
+        val tail = if (session != null) {
+            spliceIntoTail(ch, session, doc, timing) ?: wholeNote(doc, timing) { XnotesPdf.rewriteTail(ch, session, it) }
+        } else {
+            when (found) {
+                is XnotesPdf.Inspection.Ours -> wholeNote(doc, timing) { XnotesPdf.appendTail(ch, it) }
+                is XnotesPdf.Inspection.Torn -> {
+                    // A save that never finished: cut back to what is whole, then save as onto any file of ours.
+                    ch.truncate(found.ownLength)
+                    wholeNote(doc, timing) { XnotesPdf.appendTail(ch, it) }
+                }
+                is XnotesPdf.Inspection.Appended, XnotesPdf.Inspection.Plain -> return PdfSave.NOT_OURS
+                XnotesPdf.Inspection.Unreadable -> return PdfSave.FAILED
+            }
+        } ?: return PdfSave.FAILED
+        pdfTails[uri] = tail
+        rememberStamp(uri)
+        // The pages are behind the note from here until an export draws them again.
+        com.xnotes.platform.PdfExports.stale(uri, doc.displayName ?: queryDisplayName(android.net.Uri.parse(uri)).orEmpty())
+        return PdfSave.SAVED
+    }
+
+    /** The whole of [doc] as a bundle in a temp file, handed to [put] as a channel. */
+    private fun wholeNote(
+        doc: Document,
+        timing: com.xnotes.format.DocumentCodec.WriteTiming,
+        put: (java.nio.channels.FileChannel) -> XnotesPdf.Tail?,
+    ): XnotesPdf.Tail? {
+        // Encoded before the file is touched, as in [writeNoteSafely]: a failed encode leaves it be.
+        val tmp = java.io.File.createTempFile("save", ".xnote", saveTmpDir)
+        try {
+            java.io.FileOutputStream(tmp).use { codec.write(doc, it, timing = timing) }
+            return java.io.FileInputStream(tmp).use { put(it.channel) }
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    /**
+     * [writeNoteInPlace] for the note in [tail]: only its manifest and flow are replaced, through a
+     * window of the PDF, and the tail closed again. Null, with the file as it was or cut open for
+     * [XnotesPdf.rewriteTail] to put right, when the note's assets are not the ones the tail holds.
+     */
+    private fun spliceIntoTail(
+        ch: java.nio.channels.FileChannel,
+        tail: XnotesPdf.Tail,
+        doc: Document,
+        timing: com.xnotes.format.DocumentCodec.WriteTiming,
+    ): XnotesPdf.Tail? {
+        val assets = codec.imageAssets(doc)
+        val audio = codec.audioAssets(doc)
+        val expected = codec.storedEntries(doc, assets, audio).map { (name, file) -> name to file.length() }
+        if (expected.isEmpty()) return null
+        val existing = com.xnotes.format.ZipTail.read(tail.window(ch)) ?: return null
+        val (keep, tailStart) = splicePoint(existing, expected) ?: return null
+        val tmp = tailZip(doc, assets, audio, timing)
+        try {
+            return java.io.FileInputStream(tmp).use { zip ->
+                val tailDir = com.xnotes.format.ZipTail.read(zip.channel) ?: return null
+                // From here until the tail is closed the file has no end, which is how a save cut short is told.
+                val note = XnotesPdf.openTail(ch, tail)
+                val length = com.xnotes.format.ZipTail.splice(note, tailStart, keep, zip.channel, tailDir)
+                if (length < 0L) null else XnotesPdf.closeTail(ch, tail, length)
+            }
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    /** Write the PDF at [uri], named [name] when the caller knows it, whole: [doc] exported with its note inside, copied over the file. */
+    private fun writePdfWhole(uri: String, doc: Document, name: String? = null): Boolean {
+        val pdfName = name ?: doc.displayName ?: queryDisplayName(android.net.Uri.parse(uri)) ?: return false
+        val pdf = java.io.File.createTempFile("save", ".pdf", saveTmpDir)
+        try {
+            if (!writeXnotesPdf(doc, pdfName, pdf)) return false
+            // Kept in app storage until the copy over the file is seen whole; see [PdfExports.replace].
+            if (!com.xnotes.platform.PdfExports.replace(uri, pdfName, pdf)) return false
+            pdfTails.remove(uri) // whole again: the next save starts a tail of its own
+            rememberStamp(uri)
+            com.xnotes.platform.PdfExports.fresh(uri)
+            return true
+        } finally {
+            pdf.delete()
+        }
+    }
+
+    /** [doc] as an xnotes PDF named [pdfName] in [to]. False when it could not be written, with nothing left in [to]. */
+    private fun writeXnotesPdf(doc: Document, pdfName: String, to: java.io.File): Boolean {
+        val note = java.io.File.createTempFile("note", ".xnote", saveTmpDir)
+        try {
+            java.io.FileOutputStream(note).use { codec.write(doc, it) }
+            return exportNoteFile(note, pdfName, to)
+        } finally {
+            note.delete()
+        }
+    }
+
+    /**
+     * The bundle [note] as an xnotes PDF named [pdfName] in [to]: its pages drawn the way Export PDF
+     * draws them, and [note] itself attached. The pages come from a private read of the bundle, so
+     * a note being edited is never drawn from while it changes. False when [isCancelled] stopped it.
+     */
+    private fun exportNoteFile(
+        note: java.io.File,
+        pdfName: String,
+        to: java.io.File,
+        onProgress: (Int, Int) -> Unit = { _, _ -> },
+        isCancelled: () -> Boolean = { false },
+        temp: java.io.File? = null,
+    ): Boolean {
+        // What the bundle unpacks to goes in [temp] when the caller brings one: an export that outlives
+        // this editor's activity must not sit in the dirs the next editor empties.
+        val doc = java.io.FileInputStream(note).use { codec.read(it, temp ?: pdfDir, temp ?: imageDir) }
+        val src = doc.pdfFile?.let { com.xnotes.platform.PdfSource.create(it) }
+        try {
+            val stem = DocumentKind.stripSuffix(pdfName)
+            return com.xnotes.platform.PdfExporter.exportWithNote(
+                appContext, doc, src, to,
+                com.xnotes.platform.PdfNote(note, DocumentKind.withSuffix(stem, DocumentKind.NOTE)),
+                { exportPaper(doc, it) },
+                { page, r -> paintExportRuling(doc, page, r) },
+                onProgress, isCancelled,
+                flow = flowExportHooks(doc),
+                title = stem,
+                headingBookmarks = settings.prefs.pdfHeadingBookmarks,
+            )
+        } finally {
+            src?.close()
+            doc.pdfFile?.delete()
+            deleteImageTemps(doc)
+        }
+    }
+
+    /** Whether [uri] is a PDF this editor has no tail in whose end does not read: one a save must not be written into. */
+    private fun unreadablePdf(uri: String): Boolean =
+        pdfTails[uri] == null && isPdfFile(uri) && inspectPdf(uri) is XnotesPdf.Inspection.Unreadable
 
     /** The on-disk size of the SAF document at [uri] in bytes, or -1 when the provider won't say. */
     private fun fileSizeOf(uri: String): Long = runCatching {
@@ -5306,6 +6255,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 // still counts, but only the document it belongs to may have its flags touched.
                 if (state.document === doc) res.fork?.let { adoptNoteFork(it) }
                 invalidateThumb(res.uri) // file changed on disk; drop the stale tile so the grid re-renders it
+                com.xnotes.platform.PdfExports.kick() // nothing to do while the note is on screen, which holds its file
             } else if (wasDirty && state.document === doc) {
                 doc.dirty = true; dirty = true // nothing was written; the edits are still unsaved
             }
@@ -5411,6 +6361,29 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         applyResolvedViewSettings()
     }
 
+    /** Start or stop autoscroll; it only runs in vertical scrolling, and keeps the screen awake while it does. */
+    fun setAutoScroll(on: Boolean) {
+        val run = on && viewSettings.verticalScroll
+        if (run == autoScrollOn) return
+        autoScrollOn = run
+        view.keepScreenOn = run
+        if (run) {
+            autoScroll.mmPerSec = autoScrollSpeed / 10.0
+            autoScroll.start()
+        } else {
+            autoScroll.stop()
+        }
+    }
+
+    fun pickAutoScrollSpeed(tenths: Int) {
+        val v = tenths.coerceIn(Preferences.AUTOSCROLL_MIN, Preferences.AUTOSCROLL_MAX)
+        if (v == autoScrollSpeed) return
+        autoScrollSpeed = v
+        autoScroll.mmPerSec = v / 10.0
+        settings = settings.copy(prefs = settings.prefs.copy(autoScrollSpeed = v))
+        saveSettingsSoon()
+    }
+
     /** Re-resolve the effective settings and react to whatever actually changed. */
     private fun applyResolvedViewSettings() {
         val prev = viewSettings
@@ -5422,6 +6395,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** Push a settings change into the canvas/caches; each View-menu feature reacts here. */
     private fun onViewSettingsChanged(prev: com.xnotes.canvas.ViewSettings, new: com.xnotes.canvas.ViewSettings) {
+        val beforeOrigin = state.origin()
         state.freeMovement = new.freeMovement
         if (prev.mode != new.mode || prev.rotation != new.rotation || prev.verticalScroll != new.verticalScroll) {
             // Re-group / re-orient / re-flow the pages, keep the reader on the same page, and
@@ -5444,12 +6418,20 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 state.goToPage(cur)
                 refreshView()
             }
-        } else if (prev.freeMovement != new.freeMovement && !new.verticalScroll && state.didInitialFit) {
+        } else if (prev.freeMovement != new.freeMovement && state.didInitialFit) {
             if (new.freeMovement) {
                 state.fitWidthActive = false // free pinches never hold a fit
                 state.fitHeightActive = false
             }
-            state.goToPage(state.currentPageIndex()) // the page lands where the new rules put it
+            if (!new.verticalScroll) {
+                state.goToPage(state.currentPageIndex()) // the page lands where the new rules put it
+            } else {
+                if (new.freeMovement) {
+                    state.scrollX = -beforeOrigin.x - state.flipOffsetX
+                    state.scrollY = -beforeOrigin.y - state.overscrollY
+                }
+                state.clampScroll()
+            }
             refreshView()
         }
         if (prev.rotation != new.rotation) {
@@ -5467,6 +6449,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             if (evictPdfPageThumbnails()) pdfThumbTick++
             currentUri?.let { invalidateThumb(it) } // the recents tile re-renders with the new filter
         }
+        if (!new.verticalScroll && autoScrollOn) setAutoScroll(false)
         view.scrollbarEnabled = new.scrollbar
         view.requestRender()
     }
@@ -5502,6 +6485,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * note's View-menu settings ride along (folder notes remember them; anything else resets).
      */
     private fun installInitialView(path: String?) {
+        setAutoScroll(false)
         val saved = viewKey(path)?.let { viewStates.get(it) }
         installViewOverrides(saved?.overrides ?: com.xnotes.canvas.ViewOverrides())
         state.pendingInitialView =
@@ -5849,17 +6833,31 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val kind = DocumentKind.ofName(entry.name) ?: return null
         val key = documentKey(entry.documentUri)
         docMeta.get(key, entry.modified)?.let { return it }
-        val meta = if (kind == DocumentKind.CANVAS) {
-            val peek = peekFile(entry.documentUri, { canvasCodec.peek(it) }, { canvasCodec.peek(it) }) ?: return null
-            peek.created?.let { createdStore.put(key, it) }
-            // A canvas has no pages or PDF; the entry just marks it read at this modified time.
-            com.xnotes.platform.DocMetaStore.Meta(0, false, entry.modified)
-        } else {
-            val peek = peekFile(entry.documentUri, { codec.peek(it) }, { codec.peek(it) }) ?: return null
-            peek.created?.let { createdStore.put(key, it) }
-            com.xnotes.platform.DocMetaStore.Meta(peek.pages, peek.hasPdf, entry.modified)
+        val meta = when (kind) {
+            DocumentKind.CANVAS -> {
+                val peek = peekFile(entry.documentUri, { canvasCodec.peek(it) }, { canvasCodec.peek(it) }) ?: return null
+                peek.created?.let { createdStore.put(key, it) }
+                // A canvas has no pages or PDF; the entry just marks it read at this modified time.
+                com.xnotes.platform.DocMetaStore.Meta(0, false, entry.modified)
+            }
+            DocumentKind.PDF -> {
+                // The note inside says how many pages; a PDF without one is counted when its tile is drawn.
+                val peek = runCatching { withNoteInside(android.net.Uri.parse(entry.documentUri)) { codec.peek(it) } }.getOrNull()
+                peek?.created?.let { createdStore.put(key, it) }
+                com.xnotes.platform.DocMetaStore.Meta(peek?.pages ?: 0, false, entry.modified)
+            }
+            DocumentKind.NOTE -> {
+                val peek = peekFile(entry.documentUri, { codec.peek(it) }, { codec.peek(it) }) ?: return null
+                peek.created?.let { createdStore.put(key, it) }
+                com.xnotes.platform.DocMetaStore.Meta(peek.pages, peek.hasPdf, entry.modified)
+            }
         }
         return meta.also { docMeta.put(key, it) }
+    }
+
+    /** Record how many pages [doc] has, just read from the PDF at [uri] as it was at [modified]: a PDF without a note inside is only counted by opening it. */
+    private fun countPages(uri: String, doc: Document, modified: Long) {
+        docMeta.put(documentKey(uri), com.xnotes.platform.DocMetaStore.Meta(doc.pages.size, false, modified))
     }
 
     /** [entry]'s created time as known now, which its file's own record, read after the listing, may have replaced. Instant. */
@@ -6208,7 +7206,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             exportCanvasFileToPdf(srcUri, out, onProgress, isCancelled, title)
             return
         }
-        val doc = appContext.contentResolver.openInputStream(android.net.Uri.parse(srcUri))?.use { codec.read(it, pdfDir, imageDir) } ?: return
+        // A PDF nothing has been written on is its own export.
+        if (com.xnotes.core.util.DocumentKind.ofName(name) == com.xnotes.core.util.DocumentKind.PDF && !holdsNote(srcUri)) {
+            onProgress(0, 1)
+            copyFileTo(srcUri, out)
+            onProgress(1, 1)
+            return
+        }
+        val doc = readStoredNote(srcUri, name) ?: return
         val src = doc.pdfFile?.let { com.xnotes.platform.PdfSource.create(it) }
         try {
             com.xnotes.platform.PdfExporter.export(
@@ -6338,6 +7343,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         flowText.endSession() // flushes the typing burst so the autosave below carries it
         flushAutosave() // save the outgoing note if it was autosaving to the folder
         autosaveUri = null
+        if (state.document.path != doc.path) releaseOpenPdf() // its export starts once that save has landed
         // File readouts belong to the outgoing note; a file-backed open re-sets them after the swap.
         state.lastOpenCompacted = doc.compactedOnLoad
         state.openFileBytes = -1L
@@ -6909,10 +7915,18 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val extra = com.xnotes.platform.PdfSource.open(staged)
         val sizes = extra.allPageSizePoints()?.takeIf { it.isNotEmpty() }
         lastImportError = extra.openError
+        val carries = sizes != null && extra.attachmentNames().any { com.xnotes.platform.PdfNote.isNote(it) }
         extra.close()
         if (sizes == null) {
             staged.delete()
             return null
+        }
+        // An xnotes PDF goes in as its pages: the note it carries would only ride along inside this one's source.
+        if (carries) {
+            val plain = java.io.File.createTempFile("plain", ".pdf", pdfDir)
+            val stripped = runCatching { com.xnotes.platform.PdfNote.strip(staged, plain, exportMemory()) }.isSuccess
+            if (stripped) plain.copyTo(staged, overwrite = true)
+            plain.delete()
         }
         if (base == null) return JoinedPdf(staged, 0, sizes) // a plain note takes the PDF as it is
         try {
@@ -7199,9 +8213,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         try {
             for (u in uris) {
                 if (importCancelled.get()) return null
-                val doc = runCatching {
-                    appContext.contentResolver.openInputStream(android.net.Uri.parse(u))?.use { codec.read(it, pdfDir, imageDir) }
-                }.getOrNull() ?: return null
+                val doc = runCatching { readStoredNote(u) }.getOrNull() ?: return null
                 docs += doc
                 doc.pdfFile?.let { temps += it }
             }
@@ -9268,6 +10280,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     fun goHome() {
         if (!noteOpen) return
         exitReader()
+        setAutoScroll(false)
         // Closing the note places a recording still going, before the note is saved.
         AudioRecording.stopFor(this)
         infiniteOrNull?.let { AudioRecording.stopFor(it) }
@@ -9293,6 +10306,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             autosaveUri?.let { uri -> autosaveScope.launch { regenerateClosedNoteThumb(uri) } }
             autosaveUri = null
             noteOpen = false
+            // Off the screen, with its last save in the file: a PDF's pages are drawn again now.
+            releaseOpenPdf()
+            com.xnotes.platform.PdfExports.kick()
         }
     }
 }

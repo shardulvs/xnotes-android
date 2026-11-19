@@ -58,9 +58,10 @@ internal fun SizeDropdown(size: PageSize?, unset: String? = null, onSelect: (Pag
 internal fun parseMm(raw: String): Double? =
     raw.trim().toDoubleOrNull()?.takeIf { it in PageSize.CUSTOM_MIN_MM..PageSize.CUSTOM_MAX_MM }
 
-/** Drop a whole number's ".0" so the field reads "210", not "210.0". */
+/** A side to 0.01 mm without trailing zeros, so "210" not "210.0", and px round-trip noise never shows. */
 internal fun formatMm(v: Double): String =
-    if (v == Math.floor(v) && !v.isInfinite()) v.toInt().toString() else v.toString()
+    if (!v.isFinite()) v.toString()
+    else java.math.BigDecimal.valueOf(Math.round(v * 100)).movePointLeft(2).stripTrailingZeros().toPlainString()
 
 /** Page size…: a named size turned either way, or Custom's sides, for the pages it was opened on. */
 @OptIn(ExperimentalLayoutApi::class)

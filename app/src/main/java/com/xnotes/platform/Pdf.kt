@@ -17,6 +17,7 @@ import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
 import com.xnotes.R
 import com.xnotes.core.geometry.Affine
+import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.ConnectorItem
 import com.xnotes.core.model.Document
@@ -25,11 +26,13 @@ import com.xnotes.core.model.PageInsets
 import com.xnotes.core.model.PageLayers
 import com.xnotes.core.model.PageSize
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.model.Rooms
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.displayMarkup
 import com.xnotes.core.model.insets
 import com.xnotes.core.model.sourceHeight
 import com.xnotes.core.model.sourceWidth
+import com.xnotes.core.pal.FillRule
 import com.xnotes.core.pal.Mark
 import com.xnotes.core.pal.Renderer
 import com.xnotes.core.pdf.FlowHeadings
@@ -44,8 +47,12 @@ import com.xnotes.core.pdf.TextLink
 import com.xnotes.core.text.FlowFrame
 import com.xnotes.core.text.FlowPainter
 import com.xnotes.core.text.TextFlow
+import com.xnotes.core.vector.VectorContour
+import com.xnotes.core.vector.VectorSeg
 import java.io.BufferedOutputStream
 import java.io.File
+import java.io.FileOutputStream
+import java.io.InterruptedIOException
 import java.io.OutputStream
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -88,11 +95,10 @@ object PdfImporter {
  *
  * The imported PDF background stays **vector** — its pages are copied straight into the output via
  * PdfBox, never rasterized — so a 4 MB source no longer balloons into a 100 MB export. Annotations
- * are drawn on top: plain ink, shapes and inserted images become real vector/image objects through
- * [PdfBoxRenderer], and the typed flow and text boxes become real, selectable text. Only
- * effect-heavy items (neon glow, the highlighter's multiply blend, translucent ink) are rasterized
- * in place: cropped to their own box, drawn at the right z-order, and (for the highlighter)
- * composited with Multiply so they still tint what's below.
+ * are drawn on top: ink (the highlighter and translucent ink as transparency groups), shapes and
+ * inserted images become real vector/image objects through [PdfBoxRenderer], and the typed flow and
+ * text boxes become real, selectable text. Only neon, whose glow is a blur, is rasterized in place,
+ * cropped to its own box and drawn at the right z-order.
  *
  * A source page turned by `/Rotate` goes in as it is, with the overlay drawn turned to match
  * ([PageFrame]). If PdfBox cannot parse the source PDF at all we fall back to the framework
@@ -153,12 +159,15 @@ object PdfExporter {
     private const val SCRATCH_MAIN_MEM_BYTES = 32L * 1024 * 1024
 
     /**
-     * [paperColor] gives each page's background fill (the on-screen paper colour, e.g. dark-theme
-     * `#161616`) — used for plain note pages; an imported PDF page keeps its own background instead.
+     * [paperColor] gives each page's paper as it is on screen (e.g. dark-theme `#161616`). It fills a
+     * plain note page whole; an imported PDF page keeps its own background and takes the paper only
+     * where the PDF does not show, in its margins and the room inserted into it.
      * [onProgress] reports `(pagesDone, totalPages)` (once as `(0, total)` first) and [isCancelled]
      * is polled per page so a long export can show a dialog and abort before [out] is written. A
      * plain note is written tagged, titled [title]; a PDF-backed one keeps its source's own make-up.
      * The source's bookmarks are kept, and [headingBookmarks] adds one per heading of the flow.
+     * [note] is attached to make it an xnotes PDF, its marker left open for [PdfNote.seal] once the
+     * bytes are in a file ([exportWithNote]).
      */
     fun export(
         context: Context,
@@ -172,6 +181,7 @@ object PdfExporter {
         flow: FlowExport = FlowExport.NONE,
         title: String = doc.title,
         headingBookmarks: Boolean = true,
+        note: PdfNote? = null,
     ) {
         // Text fonts read PdfBox's glyph list, which only loads once the resource loader is set up.
         PDFBoxResourceLoader.init(context.applicationContext)
@@ -184,17 +194,85 @@ object PdfExporter {
         val srcDoc = if (file != null) loadSource(file, mem) else null
         // A PDF background we can't parse with PdfBox: keep the working framework rasterizer.
         if (file != null && srcDoc == null) {
-            exportRasterized(doc, source, sink, paperColor, paintRuling, onProgress, isCancelled, flow)
+            if (note == null) {
+                exportRasterized(doc, source, sink, paperColor, paintRuling, onProgress, isCancelled, flow)
+            } else {
+                rasterizedWithNote(context, doc, source, sink, paperColor, paintRuling, onProgress, isCancelled, flow, mem, note)
+            }
             sink.flush()
             return
         }
         val tags = if (file == null) tagSetup(context, title) else null
         try {
-            exportVector(doc, srcDoc, sink, paperColor, paintRuling, onProgress, isCancelled, mem, flow, tags, headingBookmarks)
+            exportVector(doc, srcDoc, sink, paperColor, paintRuling, onProgress, isCancelled, mem, flow, tags, headingBookmarks, note)
         } finally {
             srcDoc?.runCatching { close() }
         }
         sink.flush()
+    }
+
+    /**
+     * [export] as an xnotes PDF: the pages in [to] with [note] inside and the marker stamped. False
+     * when [isCancelled] stopped it. [to] is deleted unless it holds the whole file.
+     */
+    fun exportWithNote(
+        context: Context,
+        doc: Document,
+        source: PdfSource?,
+        to: File,
+        note: PdfNote,
+        paperColor: (Page) -> Rgba,
+        paintRuling: (Page, Renderer) -> Unit = { _, _ -> },
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> },
+        isCancelled: () -> Boolean = { false },
+        flow: FlowExport = FlowExport.NONE,
+        title: String = doc.title,
+        headingBookmarks: Boolean = true,
+    ): Boolean {
+        var whole = false
+        try {
+            FileOutputStream(to).use { file ->
+                // The save is one PdfBox call, and only a stream that throws stops it part way.
+                val out = CancellableOutputStream(file, isCancelled)
+                export(context, doc, source, out, paperColor, paintRuling, onProgress, isCancelled, flow, title, headingBookmarks, note)
+            }
+            if (isCancelled()) return false
+            note.seal(to)
+            whole = true
+            return true
+        } catch (e: InterruptedIOException) {
+            if (isCancelled()) return false
+            throw e
+        } finally {
+            if (!whole) to.delete()
+        }
+    }
+
+    /** [exportRasterized] with [note] attached: PdfBox reads the framework's PDF back and writes it out with the note. */
+    private fun rasterizedWithNote(
+        context: Context,
+        doc: Document,
+        source: PdfSource?,
+        out: OutputStream,
+        paperColor: (Page) -> Rgba,
+        paintRuling: (Page, Renderer) -> Unit,
+        onProgress: (Int, Int) -> Unit,
+        isCancelled: () -> Boolean,
+        flow: FlowExport,
+        mem: MemoryUsageSetting,
+        note: PdfNote,
+    ) {
+        val pages = File.createTempFile("raster", ".pdf", context.cacheDir)
+        try {
+            FileOutputStream(pages).use { exportRasterized(doc, source, it, paperColor, paintRuling, onProgress, isCancelled, flow) }
+            if (isCancelled()) return
+            PDDocument.load(pages, mem).use { pdf ->
+                note.attachTo(pdf)
+                pdf.save(out)
+            }
+        } finally {
+            pages.delete()
+        }
     }
 
     /** How a tagged export of [title] reads to a screen reader, in the device's language. */
@@ -205,8 +283,12 @@ object PdfExporter {
         altImage = context.getString(R.string.pdf_alt_image),
     )
 
-    private fun loadSource(file: File, mem: MemoryUsageSetting): PDDocument? = try {
-        PDDocument.load(file, mem) // file-backed + scratch-capped: never reads the whole PDF into RAM
+    internal fun loadSource(file: File, mem: MemoryUsageSetting): PDDocument? = try {
+        // file-backed + scratch-capped: never reads the whole PDF into RAM
+        PDDocument.load(file, mem).also {
+            // One under an owner password opens like any other, but PdfBox will not save it as it is.
+            if (it.isEncrypted) it.isAllSecurityToBeRemoved = true
+        }
     } catch (_: Throwable) {
         null
     }
@@ -223,6 +305,7 @@ object PdfExporter {
         flow: FlowExport,
         tags: PdfTags.Setup?,
         headingBookmarks: Boolean,
+        note: PdfNote?,
     ) {
         val s = 72.0 / doc.dpi
         val total = doc.pages.size
@@ -247,7 +330,7 @@ object PdfExporter {
                     // must a margined one — its extra paper is written by growing the page's boxes —
                     // and one with room in it, whose PDF is laid in bands round it.
                     if (page.items.isNotEmpty() || flow.bounds(page) != null || !ins.isZero || page.rooms.isNotEmpty()) {
-                        frames[index] = annotatePage(ctx, srcDoc.getPage(index), page, ins, s, paintRuling, flow)
+                        frames[index] = annotatePage(ctx, srcDoc.getPage(index), page, ins, s, paperColor, paintRuling, flow)
                     } else if (page.markups.isNotEmpty()) {
                         srcDoc.getPage(index).let { pd -> PdfMarkups.write(ctx, pd, page.markups, sourceFrame(pd, s)) }
                     }
@@ -261,10 +344,11 @@ object PdfExporter {
             ctx.finish()
             PdfBands.moveDestinations(srcDoc, roomPages(doc, srcDoc, frames))
             PdfBookmarks.write(srcDoc, emptyList(), headingAnchors(doc, flow, ctx, frames, headingBookmarks))
+            note?.attachTo(srcDoc)
             // Page work is near-instant on this path, so all the time is in writing the PDF — one
             // opaque PdfBox call. Report it as byte progress (output ≈ the source PDF's size) so the
             // dialog keeps moving instead of freezing at "done". total = -1 marks the writing phase.
-            val est = doc.pdfFile?.length() ?: 0L
+            val est = (doc.pdfFile?.length() ?: 0L) + (note?.file?.length() ?: 0L)
             if (est > 0) {
                 onProgress(0, -1) // enter the writing phase at 0% right away (no spinner flash)
                 srcDoc.save(ProgressOutputStream(out, est) { p -> onProgress(p, -1) })
@@ -285,7 +369,7 @@ object PdfExporter {
                 val srcIdx = page.pdfPage
                 val ins = page.insets(doc)
                 frames[index] = if (srcIdx != null && srcDoc != null && srcIdx in 0 until srcDoc.numberOfPages) {
-                    vectorImportedPage(ctx, srcDoc, srcIdx, page, ins, s, paintRuling, flow)
+                    vectorImportedPage(ctx, srcDoc, srcIdx, page, ins, s, paperColor, paintRuling, flow)
                 } else {
                     vectorBlankPage(ctx, page, ins, s, paperColor, paintRuling, flow)
                 }
@@ -305,6 +389,7 @@ object PdfExporter {
             PdfBookmarks.write(outDoc, sources, emptyList())
             PdfBands.moveDestinations(outDoc, roomPages(doc, outDoc, frames))
             PdfBookmarks.write(outDoc, emptyList(), headingAnchors(doc, flow, ctx, frames, headingBookmarks))
+            note?.attachTo(outDoc)
             outDoc.save(out)
         } finally {
             outDoc.runCatching { close() }
@@ -358,12 +443,12 @@ object PdfExporter {
         return true
     }
 
-    /** Copy a source page in as vector, then overlay its ruling + annotations; returns where it drew. */
-    private fun vectorImportedPage(ctx: PdfExportContext, srcDoc: PDDocument, srcIdx: Int, page: Page, ins: PageInsets, s: Double, paintRuling: (Page, Renderer) -> Unit, flow: FlowExport): PageFrame {
+    /** Copy a source page in as vector, then overlay its paper, ruling + annotations; returns where it drew. */
+    private fun vectorImportedPage(ctx: PdfExportContext, srcDoc: PDDocument, srcIdx: Int, page: Page, ins: PageInsets, s: Double, paperColor: (Page) -> Rgba, paintRuling: (Page, Renderer) -> Unit, flow: FlowExport): PageFrame {
         val pdfPage = ctx.doc.importPage(srcDoc.getPage(srcIdx))
         ownAnnotations(pdfPage)
         turnAsShown(pdfPage, page)
-        return annotatePage(ctx, pdfPage, page, ins, s, paintRuling, flow)
+        return annotatePage(ctx, pdfPage, page, ins, s, paperColor, paintRuling, flow)
     }
 
     /** Turn [pdfPage], a source page in the export, as far past its own /Rotate as the note shows it. */
@@ -382,10 +467,10 @@ object PdfExporter {
     }
 
     /**
-     * Append [page]'s ruling + annotations as a new content stream over an existing [pdfPage] of the
-     * export, then its markups; returns where it drew.
+     * Append [page]'s paper round its PDF, its ruling + annotations as a new content stream over an
+     * existing [pdfPage] of the export, then its markups; returns where it drew.
      */
-    private fun annotatePage(ctx: PdfExportContext, pdfPage: PDPage, page: Page, ins: PageInsets, s: Double, paintRuling: (Page, Renderer) -> Unit, flow: FlowExport): PageFrame {
+    internal fun annotatePage(ctx: PdfExportContext, pdfPage: PDPage, page: Page, ins: PageInsets, s: Double, paperColor: (Page) -> Rgba, paintRuling: (Page, Renderer) -> Unit, flow: FlowExport): PageFrame {
         val frame = sourceFrame(pdfPage, s)
         val cover = footprintOf(page, ins)
         // Room inserted into the page lays its PDF in bands round it, before the box grows to hold them.
@@ -393,7 +478,7 @@ object PdfExporter {
         if (banded) PdfBands.band(ctx.doc, pdfPage, page, frame)
         growPageBox(pdfPage, frame, cover, ins, banded)
         PDPageContentStream(ctx.doc, pdfPage, PDPageContentStream.AppendMode.APPEND, true, true).use { cs ->
-            paintItems(cs, ctx, pdfPage, page, frame, cover, paintRuling, flow)
+            paintItems(cs, ctx, pdfPage, page, frame, cover, paintRuling, flow, paperColor(page))
         }
         if (banded) {
             val tiles = com.xnotes.core.model.Rooms.tiles(page.rooms, page.sourceWidth, page.sourceHeight).map { t ->
@@ -452,10 +537,14 @@ object PdfExporter {
         return frame
     }
 
-    /** Draw a page's ruling (behind ink), the flow text, then its items in z-order, where [frame] puts them; [cover] is its paper. */
-    private fun paintItems(cs: PDPageContentStream, ctx: PdfExportContext, pdfPage: PDPage, page: Page, frame: PageFrame, cover: Rect, paintRuling: (Page, Renderer) -> Unit, flow: FlowExport) {
+    /**
+     * Draw a page's ruling (behind ink), the flow text, then its items in z-order, where [frame] puts
+     * them; [cover] is its paper. A PDF page, drawn already, first gets [paper] round it.
+     */
+    private fun paintItems(cs: PDPageContentStream, ctx: PdfExportContext, pdfPage: PDPage, page: Page, frame: PageFrame, cover: Rect, paintRuling: (Page, Renderer) -> Unit, flow: FlowExport, paper: Rgba? = null) {
         val renderer = PdfBoxRenderer(cs, ctx, pdfPage, frame.ox, frame.oy, frame.s, frame.turn)
         renderer.beginMark(Mark.Decoration)
+        if (paper != null) fillPaper(renderer, page, cover, paper)
         paintRuling(page, renderer) // page ruling sits behind the ink
         renderer.endMark()
         PageLayers.paint(page.items.forExport(), {
@@ -465,7 +554,7 @@ object PdfExporter {
             renderer.beginMark(PdfTags.markOf(item))
             if (PdfItemRaster.needsRaster(item)) {
                 PdfItemRaster.item(item, cover)?.let { raster ->
-                    renderer.drawItemBitmap(raster.bmp, raster.rect, raster.multiply)
+                    renderer.drawItemBitmap(raster.bmp, raster.rect)
                     raster.bmp.recycle()
                 }
                 if (item is ShapeItem) item.paintLabel(renderer)
@@ -476,6 +565,18 @@ object PdfExporter {
             renderer.endMark()
         }
         renderer.endPage()
+    }
+
+    /** Fill the paper [page]'s PDF leaves bare, its margins and the room inserted into it, in [color]. */
+    private fun fillPaper(r: Renderer, page: Page, cover: Rect, color: Rgba) {
+        val strips = Rooms.paper(cover, page.rooms, page.sourceWidth, page.sourceHeight)
+        if (strips.isEmpty()) return
+        // One path, so strips that meet show no seam between them in a viewer.
+        val path = strips.map { s ->
+            val corners = listOf(Pt(s.right, s.top), Pt(s.right, s.bottom), Pt(s.left, s.bottom))
+            VectorContour(Pt(s.left, s.top), corners.map { VectorSeg.Line(it) }, closed = true)
+        }
+        r.fillPath(path, color, FillRule.NONZERO)
     }
 
     /** [page]'s whole paper in page space, margins included (negative on a margined edge). */

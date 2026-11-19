@@ -49,6 +49,9 @@ object PdfiumNative {
     /** Page [index]'s codepoints and flags as [nativePageText] reads them, leaving the page cache as it was. */
     @JvmStatic external fun nativePageChars(doc: Long, index: Int): Array<Any>?
 
+    /** The names of the files attached to the document, at most a few hundred. */
+    @JvmStatic external fun nativeAttachmentNames(doc: Long): Array<String>?
+
     /** See [PdfiumDocument.render]; it stops early once [lifetime] or [token] is cancelled. */
     @JvmStatic external fun nativeRender(
         doc: Long, index: Int, turn: Int, bitmap: Bitmap, fullW: Int, fullH: Int, left: Int, top: Int,

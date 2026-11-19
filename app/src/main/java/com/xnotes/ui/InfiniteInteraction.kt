@@ -37,8 +37,6 @@ import com.xnotes.core.stroke.Sample
 import com.xnotes.core.stroke.Scribble
 import com.xnotes.core.stroke.ShapeRecognizer
 import com.xnotes.core.stroke.Stabilizer
-import com.xnotes.core.stroke.SteadyReadout
-import com.xnotes.core.stroke.SteadyTrace
 import com.xnotes.core.stroke.StrokeSimplify
 import com.xnotes.core.tape.TapeGeometry
 import com.xnotes.core.tools.EraseMode
@@ -46,7 +44,6 @@ import com.xnotes.core.tools.InkPalette
 import com.xnotes.core.tools.ShapeConfig
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
-import com.xnotes.core.tools.ToolConversions
 import kotlin.math.exp
 
 /** What the current gesture is doing. */
@@ -108,8 +105,6 @@ class InfiniteInteraction(
     private val onLiftSelection: (List<CanvasItem>, LiftTransform) -> Unit = { _, _ -> },
     /** Content pixels per dp, so the speed pen judges gesture speed independently of zoom. */
     private val devicePxPerDp: () -> Double = { 1.0 },
-    /** Whether strokes are measured for [steadyReadout]; true only while the debug HUD is up. */
-    private val measureSteadying: () -> Boolean = { false },
     /** A press that landed on the minimap; returns true when it was consumed as navigation. */
     private val onMinimapPress: (Double, Double) -> Boolean = { _, _ -> false },
     /**
@@ -304,12 +299,6 @@ class InfiniteInteraction(
 
     /** The live stroke's stabilization, or null while its pen draws the nib as is. */
     private var steadier: Stabilizer? = null
-
-    /** Debug HUD: what stabilization did to the last stroke. */
-    val steadyReadout = SteadyReadout()
-
-    private val steadyTrace = SteadyTrace()
-    private var tracing = false
 
     // Pan and inertial fling, in viewport px and viewport px/s.
     private var lastPan = Pt.ZERO
@@ -817,8 +806,6 @@ class InfiniteInteraction(
         stroke.addSample(Sample(p.x, p.y, pressureOf(e, 0)))
         steadier = Stabilizer.forStroke(config.stabilize && !straight, config.stabilizeTrail, config.stabilizeCrossover, speedScale)
         steadier?.start(p.x, p.y, 0.0)
-        tracing = measureSteadying()
-        if (tracing) steadyTrace.start(p.x, p.y)
         liveStroke = stroke
         mode = CanvasPointerMode.DRAW
         // Only solid pens arm the snap: a highlighter or a straight-line drag never becomes a shape.
@@ -879,7 +866,6 @@ class InfiniteInteraction(
                 Pt(steady.x, steady.y)
             }
         }
-        if (tracing && steady != null) steadyTrace.add(nib.x, nib.y, p.x, p.y)
         val last = stroke.samples.lastOrNull()
         // Decimate by on-screen spacing rather than content spacing, so drawing while zoomed in
         // keeps its detail instead of faceting into chords a zoom factor long.
@@ -911,7 +897,6 @@ class InfiniteInteraction(
             onWetStroke(null)
             return
         }
-        if (tracing && !tapCandidate) recordSteadying(stroke)
         // The pen is up: rebuild with lift-time rules on before the stroke is committed. The wet
         // buffer is deliberately not cleared here: the commit releases it in the same step, so no
         // frame can land between the two and blink.
@@ -919,14 +904,6 @@ class InfiniteInteraction(
         simplifyForCommit(stroke)
         if (scribbleErase(stroke)) return
         onCommitStroke(stroke)
-    }
-
-    /** Debug HUD: log what stabilization did to the stroke just lifted, or that it was off. */
-    private fun recordSteadying(stroke: Stroke) {
-        val cfg = stroke.config
-        val effect = if (steadier != null) steadyTrace.measure(stroke.speedScale * SteadyTrace.MM_PER_DP) else null
-        steadyReadout.last =
-            SteadyReadout.Row(ToolConversions.trailToStrength(cfg.stabilizeTrail), ToolConversions.dpPerSToCrossover(cfg.stabilizeCrossover), effect)
     }
 
     /** Scribble to erase: when [stroke] reads as a scribble over ink, erase that instead of committing it. */
@@ -1051,7 +1028,8 @@ class InfiniteInteraction(
             grabHandle = handle
             transformMargin = sel.chromeMargin(margin)
             sel.beginTransform(rigid = true)
-            beginLiftedTransform(sel, at, resize = true)
+            // Moving one end reshapes a line rather than mapping it, so the model carries that drag.
+            if (handle == HandleId.START || handle == HandleId.END) endLift() else beginLiftedTransform(sel, at, resize = true)
             mode = CanvasPointerMode.RESIZE
             return true
         }
@@ -1143,10 +1121,11 @@ class InfiniteInteraction(
      * whether the press really landed on something is the item's own answer.
      */
     private fun itemAt(content: Pt): CanvasItem? {
-        val pad = TAP_SLOP_PX / viewport.zoom
+        val reach = SelectionMath.PICK_REACH_DP * devicePxPerDp() / viewport.zoom
+        val pad = maxOf(TAP_SLOP_PX / viewport.zoom, reach)
         val near = Rect(content.x - pad, content.y - pad, pad * 2, pad * 2)
-        // Last, not first: the index comes back in z-order, so the topmost item is the one hit.
-        return itemsIn(near).lastOrNull { it.contains(content) }
+        // The index comes back in z-order, so the topmost item is the one picked.
+        return SelectionMath.pick(itemsIn(near), content, reach)
     }
 
     /** [itemAt] but skipping anything pinned, which is what a tap or a drag may actually grab. */

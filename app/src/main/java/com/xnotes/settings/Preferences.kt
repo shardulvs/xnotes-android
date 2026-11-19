@@ -113,6 +113,8 @@ data class Preferences(
     val showExtensions: Boolean = false,
     /** Whether an exported PDF gets a bookmark for each heading of the note's text. */
     val pdfHeadingBookmarks: Boolean = true,
+    /** The View menu's autoscroll speed in tenths of a paper millimetre per second; autoscroll itself always starts off. */
+    val autoScrollSpeed: Int = AUTOSCROLL_DEFAULT,
 ) {
     /**
      * A new note's page size in document pixels. A named size is laid out under
@@ -198,6 +200,7 @@ data class Preferences(
         .put("show_folder_counts", showFolderCounts)
         .put("show_extensions", showExtensions)
         .put("pdf_heading_bookmarks", pdfHeadingBookmarks)
+        .put("autoscroll_speed", autoScrollSpeed)
 
     companion object {
         /** The accent a two-tone setting saved without a seed of its own has always loaded as. */
@@ -213,6 +216,11 @@ data class Preferences(
 
         /** [trashDays] for keeping deleted items until Trash is emptied by hand. */
         const val TRASH_FOREVER = -1
+
+        /** [autoScrollSpeed] bounds and default, in tenths of a mm per second. */
+        const val AUTOSCROLL_MIN = 1
+        const val AUTOSCROLL_MAX = 100
+        const val AUTOSCROLL_DEFAULT = 20
 
         /** Settable range of the min/max zoom limits, in percent (within the hard zoom bounds). */
         const val ZOOM_LIMIT_MIN_PCT = 20
@@ -315,6 +323,7 @@ data class Preferences(
                 showFolderCounts = o.optBoolean("show_folder_counts", true),
                 showExtensions = o.optBoolean("show_extensions", false),
                 pdfHeadingBookmarks = o.optBoolean("pdf_heading_bookmarks", true),
+                autoScrollSpeed = o.optInt("autoscroll_speed", AUTOSCROLL_DEFAULT).coerceIn(AUTOSCROLL_MIN, AUTOSCROLL_MAX),
             )
         }
     }

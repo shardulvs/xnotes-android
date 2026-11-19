@@ -445,7 +445,7 @@ class CanvasState(
 
     /** When true, zoom is fixed (pinch pans only, zoom buttons/fit are no-ops). */
     var zoomLocked: Boolean = false
-    /** Paginated only: pages move up and down freely and pinches never snap to a fit (the View menu toggle). */
+    /** The View menu toggle: pinches never snap to a fit; vertical scroll lets any page edge reach the clear centre, paginated frees up and down. */
     var freeMovement: Boolean = false
 
     /**
@@ -763,10 +763,11 @@ class CanvasState(
     fun origin(): Pt {
         val cw = contentW * zoom
         val ch = contentH * zoom
-        // Paginated: the row clamp centres the row when it fits, so the scroll always wins; the
-        // whole strip must never be centred (a spread or a taller page would push a page off centre).
-        val ox = (if (!verticalScroll || cw >= clearW) -scrollX else insetLeft + (clearW - cw) / 2.0) - flipOffsetX
-        val oy = (if (!verticalScroll || ch >= clearH) -scrollY else insetTop + (clearH - ch) / 2.0) - overscrollY
+        // Paginated (or free movement): the scroll always wins; the whole strip must never be
+        // force-centred (a spread or a taller page would push a page off centre, and free movement
+        // pans even when the content fits inside the viewport).
+        val ox = (if (!verticalScroll || freeMovement || cw >= clearW) -scrollX else insetLeft + (clearW - cw) / 2.0) - flipOffsetX
+        val oy = (if (!verticalScroll || freeMovement || ch >= clearH) -scrollY else insetTop + (clearH - ch) / 2.0) - overscrollY
         return Pt(ox, oy)
     }
 
@@ -783,11 +784,23 @@ class CanvasState(
     fun visibleContentRect(): Rect =
         Rect.fromPoints(viewportToContent(Pt(0.0, 0.0)), viewportToContent(Pt(viewportW.toDouble(), viewportH.toDouble())))
 
-    // A floating bar lets the scroll run past the content's edges by as much as it covers.
-    fun minScrollX(): Double = -insetLeft
-    fun minScrollY(): Double = -insetTop
-    fun maxScrollX(): Double = max(minScrollX(), ceil(contentW * zoom - viewportW + insetRight))
-    fun maxScrollY(): Double = max(minScrollY(), ceil(contentH * zoom - viewportH + insetBottom))
+    private fun freeVertical(): Boolean = freeMovement && verticalScroll && pageRects.isNotEmpty()
+
+    // A floating bar lets the scroll run past the content's edges by as much as it covers;
+    // free vertical movement lets any page edge reach the middle of the clear area.
+    // At deep zoom a margin outgrows half the screen, so free movement keeps whichever reach is longer.
+    fun minScrollX(): Double =
+        if (freeVertical()) min(-insetLeft, sideMargin * zoom - clearCenter().x) else -insetLeft
+    fun minScrollY(): Double =
+        if (freeVertical()) min(-insetTop, vertMargin * zoom - clearCenter().y) else -insetTop
+    fun maxScrollX(): Double {
+        val edge = ceil(contentW * zoom - viewportW + insetRight)
+        return if (freeVertical()) max(edge, (contentW - sideMargin) * zoom - clearCenter().x) else max(-insetLeft, edge)
+    }
+    fun maxScrollY(): Double {
+        val edge = ceil(contentH * zoom - viewportH + insetBottom)
+        return if (freeVertical()) max(edge, (contentH - vertMargin) * zoom - clearCenter().y) else max(-insetTop, edge)
+    }
 
     fun clampScroll() {
         if (!verticalScroll && pageRects.isNotEmpty()) {
@@ -956,8 +969,12 @@ class CanvasState(
         val top = row.minOf { pageRects[it].top }
         val centerX = (row.minOf { pageRects[it].left } + row.maxOf { pageRects[it].right }) / 2.0
         // Scroll so the page top clears the toolbar with a small gap, so no part of the
-        // page is hidden behind the chrome.
-        scrollY = (top * zoom - TOP_GAP - insetTop).coerceAtLeast(-insetTop)
+        // page is hidden behind the chrome (or centre when the whole document fits vertically).
+        scrollY = if (freeMovement && contentH * zoom < clearH) {
+            (contentH / 2.0) * zoom - clearCenter().y
+        } else {
+            (top * zoom - TOP_GAP - insetTop).coerceAtLeast(-insetTop)
+        }
         scrollX = centerX * zoom - clearCenter().x
         clampScroll()
     }
@@ -1113,7 +1130,7 @@ class CanvasState(
      * zoom the caller applies; the false→true transition of either flag surfaces the lock hint.
      */
     fun snapZoomToFit(raw: Double): Double {
-        if (!verticalScroll && freeMovement) { // free movement pinches straight past both magnets
+        if (freeMovement) { // free movement pinches straight past both magnets
             fitWidthActive = false
             fitHeightActive = false
             return raw
@@ -1154,7 +1171,7 @@ class CanvasState(
         val center = clearCenter()
         val centerContentY = viewportToContent(center).y
         zoom = fitWidthZoom()
-        scrollX = minScrollX()
+        scrollX = if (freeVertical()) (contentW / 2.0) * zoom - center.x else minScrollX()
         scrollY = centerContentY * zoom - center.y
         invalidateCachesForZoom()
         clampScroll()
@@ -2046,8 +2063,8 @@ class CanvasState(
     internal fun originFor(sx: Double, sy: Double, z: Double): Pt {
         val cw = contentW * z
         val ch = contentH * z
-        val ox = if (!verticalScroll || cw >= clearW) -sx else insetLeft + (clearW - cw) / 2.0
-        val oy = if (!verticalScroll || ch >= clearH) -sy else insetTop + (clearH - ch) / 2.0
+        val ox = if (!verticalScroll || freeMovement || cw >= clearW) -sx else insetLeft + (clearW - cw) / 2.0
+        val oy = if (!verticalScroll || freeMovement || ch >= clearH) -sy else insetTop + (clearH - ch) / 2.0
         return Pt(ox, oy)
     }
 

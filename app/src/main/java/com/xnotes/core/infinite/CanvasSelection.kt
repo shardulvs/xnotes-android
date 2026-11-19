@@ -16,6 +16,7 @@ import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.ConnectorItem
 import com.xnotes.core.model.GeometrySnapshot
 import com.xnotes.core.model.GlueFollow
+import com.xnotes.core.model.ShapeHandle
 import com.xnotes.core.model.ShapeItem
 import com.xnotes.core.model.TapeItem
 import com.xnotes.core.model.TapeMode
@@ -95,6 +96,9 @@ class CanvasSelection(private val doc: InfiniteDocument) {
     /** The lone selected strip of tape, which its two ends drag. */
     private val loneTapeStrip: TapeItem? get() = (items.singleOrNull() as? TapeItem)?.takeIf { it.mode == TapeMode.STRAIGHT }
 
+    /** The lone selected line or arrow, which its two ends drag, as on a note. */
+    private val loneEndpointShape: ShapeItem? get() = (items.singleOrNull() as? ShapeItem)?.takeIf { it.shape.isEndpointShape }
+
     private val CORNERS = setOf(HandleId.TL, HandleId.TR, HandleId.BL, HandleId.BR)
 
     private fun boxOf(of: List<CanvasItem>): Obb? =
@@ -116,9 +120,10 @@ class CanvasSelection(private val doc: InfiniteDocument) {
     /** True when [p] is inside the selection, so a press there grabs it rather than starting a band. */
     fun contains(p: Pt, screenMargin: Double = 0.0): Boolean = chromeBox(screenMargin)?.contains(p) == true
 
-    /** The resize handles, in content space; a shape that keeps its aspect gets corners only, a strip of tape its two ends. */
+    /** The resize handles, in content space; a shape that keeps its aspect gets corners only, a line, an arrow or a strip of tape its two ends. */
     fun handles(screenMargin: Double = 0.0): List<ResizeHandle> {
         loneTapeStrip?.let { t -> return listOf(ResizeHandle(HandleId.START, t.shape.points[0]), ResizeHandle(HandleId.END, t.shape.points[1])) }
+        loneEndpointShape?.let { s -> return listOf(ResizeHandle(HandleId.START, s.start), ResizeHandle(HandleId.END, s.end)) }
         val all = chromeBox(screenMargin)?.let { ResizeMath.obbHandles(it) } ?: return emptyList()
         // A pill scales by its corners and lengthens by its sides; nothing stretches it upright.
         if (items.all { it is AudioItem }) return all.filter { it.id != HandleId.T && it.id != HandleId.B }
@@ -126,9 +131,12 @@ class CanvasSelection(private val doc: InfiniteDocument) {
         return if (square || loneTapeBox != null) all.filter { it.id in CORNERS } else all
     }
 
+    /** True when the selection turns by a grip: never with a pill in it, nor a lone line, arrow or strip of tape, which its ends reorient. */
+    val turns: Boolean get() = items.none { it is AudioItem } && loneTapeStrip == null && loneEndpointShape == null
+
     /** The rotate grip's centre, [arm] content pixels past the box's top edge. */
     fun rotateGrip(arm: Double, screenMargin: Double = 0.0): Pt? =
-        if (items.any { it is AudioItem } || loneTapeStrip != null) null else chromeBox(screenMargin)?.let { ResizeMath.obbRotateGrip(it, arm) }
+        if (!turns) null else chromeBox(screenMargin)?.let { ResizeMath.obbRotateGrip(it, arm) }
 
     /** Which handle [p] lands on, within [tolerance] content pixels, or null. */
     fun hitHandle(p: Pt, tolerance: Double, screenMargin: Double = 0.0): HandleId? =
@@ -229,7 +237,7 @@ class CanvasSelection(private val doc: InfiniteDocument) {
      * far outside the box the handle sits ([chromeMargin]), which the box edge keeps behind it.
      */
     fun resizeLive(handle: HandleId, pointer: Pt, margin: Double = 0.0) {
-        if (handle == HandleId.START || handle == HandleId.END) return dragTapeEnd(handle, pointer)
+        if (handle == HandleId.START || handle == HandleId.END) return dragEnd(handle, pointer)
         val from = startBox ?: return
         val result = boxResize(from, handle, pointer, margin)
         box = result.obb
@@ -253,13 +261,27 @@ class CanvasSelection(private val doc: InfiniteDocument) {
     private fun boxResize(from: Obb, handle: HandleId, pointer: Pt, margin: Double): ResizeMath.ObbResize =
         if (loneTapeBox != null && handle in CORNERS) ResizeMath.obbResizeFree(from, handle, pointer) else ResizeMath.obbResize(from, handle, pointer, margin)
 
-    /** Drag the lone strip of tape's [handle] end to [pointer], snapped level or upright against the other end, as when laid. */
-    private fun dragTapeEnd(handle: HandleId, pointer: Pt) {
-        val tape = loneTapeStrip ?: return
-        tape.restoreGeometry(startSnapshots[0])
-        val (a, b) = tape.shape.points
-        val ends = if (handle == HandleId.START) listOf(TapeGeometry.snap(b, pointer), b) else listOf(a, TapeGeometry.snap(a, pointer))
-        tape.shape = tape.shape.copy(points = ends)
+    /**
+     * Drag the [handle] end of the lone line, arrow or strip of tape to [pointer], the other end held
+     * still. Tape snaps level or upright against it, as when laid; a line goes wherever it is put.
+     */
+    private fun dragEnd(handle: HandleId, pointer: Pt) {
+        val item = items.singleOrNull() ?: return
+        item.restoreGeometry(startSnapshots.singleOrNull() ?: return)
+        val tape = loneTapeStrip
+        val line = loneEndpointShape
+        when {
+            tape != null -> {
+                val (a, b) = tape.shape.points
+                val ends = if (handle == HandleId.START) listOf(TapeGeometry.snap(b, pointer), b) else listOf(a, TapeGeometry.snap(a, pointer))
+                tape.shape = tape.shape.copy(points = ends)
+            }
+            line != null -> {
+                val (s, e) = ResizeMath.resizeOpenShape(line.start, line.end, handle, pointer)
+                line.setGeometry(ShapeHandle(s, e))
+            }
+            else -> return
+        }
         box = boxOf(items)
         doc.itemsChanged(items)
     }
