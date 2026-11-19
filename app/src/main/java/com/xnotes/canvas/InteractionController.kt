@@ -2129,6 +2129,16 @@ class InteractionController(
         requestRender()
     }
 
+    /** A cut-short adjust: the capture goes back where it was, with its menu on it. */
+    private fun abandonScreenshotAdjust() {
+        val start = shotStart ?: return
+        screenshotRect = start
+        shotGrab = null
+        shotStart = null
+        onScreenshotMenu(screenshotRectViewport(start))
+        requestRender()
+    }
+
     /** Show the capture's menu where it now sits, whatever the mode is. */
     private fun showScreenshotMenu() {
         onScreenshotMenu(screenshotRect?.let { screenshotRectViewport(it) })
@@ -4502,6 +4512,7 @@ class InteractionController(
         bandRect = null
         lassoPoints.clear()
         if (mode == PointerMode.SHOT) clearScreenshot() // a second finger turns the drag into a zoom
+        if (mode == PointerMode.SHOT_RESIZE || mode == PointerMode.SHOT_MOVE) abandonScreenshotAdjust()
         clearOverscroll() // a second finger ends any bottom-pull; the elastic snaps away
         clearFlipPull() // ...and any paginated edge-pull folds back into the scroll
         mode = PointerMode.PINCH
@@ -4636,11 +4647,7 @@ class InteractionController(
         // Cancel an in-progress capture drag; a frozen capture (mode IDLE) survives.
         if (mode == PointerMode.SHOT) { screenshotRect = null; onScreenshotMenu(null) }
         // A cancelled adjust puts the frozen capture back where it was.
-        if (mode == PointerMode.SHOT_RESIZE || mode == PointerMode.SHOT_MOVE) {
-            shotStart?.let { screenshotRect = it }
-            shotGrab = null
-            shotStart = null
-        }
+        if (mode == PointerMode.SHOT_RESIZE || mode == PointerMode.SHOT_MOVE) abandonScreenshotAdjust()
         if (mode == PointerMode.PINCH && state.zoomingInProgress) {
             state.zoomingInProgress = false
             state.invalidateCachesForZoom()
