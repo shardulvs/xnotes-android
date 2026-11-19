@@ -4720,7 +4720,7 @@ class InteractionController(
             screenshotRect?.let { shot ->
                 r.strokeRect(shot, chromePen(1.6))
                 // Once frozen, its handles stay on screen: the capture can be adjusted, not redrawn.
-                if (mode == PointerMode.IDLE) {
+                if (mode != PointerMode.SHOT) {
                     val side = HANDLE_SIZE / state.zoom
                     for (h in shotHandles(shot)) {
                         r.fillRect(Rect(h.content.x - side / 2, h.content.y - side / 2, side, side), state.palette.accent)
