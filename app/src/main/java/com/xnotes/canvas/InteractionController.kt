@@ -2065,11 +2065,10 @@ class InteractionController(
     private fun beginScreenshotGesture(content: Pt) {
         val rect = screenshotRect
         if (rect != null) {
-            val grab = ResizeMath.hitHandle(shotHandles(rect), content, HANDLE_HIT / state.zoom)
+            val grab = ResizeMath.hitHandle(ResizeMath.boxHandles(rect), content, HANDLE_HIT / state.zoom)
             if (grab != null) {
                 shotStart = rect
                 shotGrab = grab
-                shotGrabAt = content
                 onScreenshotMenu(null) // hidden while the pen is down, so it never sits under it
                 mode = PointerMode.SHOT_RESIZE
                 return
@@ -2088,11 +2087,8 @@ class InteractionController(
     /** Whether [content] lands on the frozen capture's handles or inside it. */
     private fun fingerHitsCapture(content: Pt): Boolean {
         val rect = screenshotRect ?: return false
-        return ResizeMath.hitHandle(shotHandles(rect), content, HANDLE_HIT / state.zoom) != null || rect.contains(content)
+        return ResizeMath.hitHandle(ResizeMath.boxHandles(rect), content, HANDLE_HIT / state.zoom) != null || rect.contains(content)
     }
-
-    /** The frozen capture's eight handles, in content space, where the capture is drawn. */
-    private fun shotHandles(rect: Rect): List<ResizeHandle> = ResizeMath.boxHandles(rect)
 
     /** Drag a handle of the frozen capture: the edge it moves follows the pen, the opposite one stays. */
     private fun extendScreenshotResize(content: Pt) {
@@ -2125,7 +2121,7 @@ class InteractionController(
         mode = PointerMode.IDLE
         shotGrab = null
         shotStart = null
-        showScreenshotMenu()
+        refreshScreenshotMenu()
         requestRender()
     }
 
@@ -2137,11 +2133,6 @@ class InteractionController(
         shotStart = null
         onScreenshotMenu(screenshotRectViewport(start))
         requestRender()
-    }
-
-    /** Show the capture's menu where it now sits, whatever the mode is. */
-    private fun showScreenshotMenu() {
-        onScreenshotMenu(screenshotRect?.let { screenshotRectViewport(it) })
     }
 
     private fun beginScreenshot(content: Pt) {
@@ -4729,7 +4720,7 @@ class InteractionController(
                 // Once frozen, its handles stay on screen: the capture can be adjusted, not redrawn.
                 if (mode != PointerMode.SHOT) {
                     val side = HANDLE_SIZE / state.zoom
-                    for (h in shotHandles(shot)) {
+                    for (h in ResizeMath.boxHandles(shot)) {
                         r.fillRect(Rect(h.content.x - side / 2, h.content.y - side / 2, side, side), state.palette.accent)
                     }
                 }
