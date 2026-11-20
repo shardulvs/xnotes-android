@@ -332,6 +332,14 @@ class CanvasCodecTest {
         assertTrue(back.straight)
     }
 
+    @Test fun penOpacityRoundTrips() {
+        val doc = InfiniteDocument()
+        doc.add(Stroke(Tool.CALLIGRAPHY, ToolConfig(opacityEnabled = true, opacity = 0.25), mutableListOf(Sample(0.0, 0.0, 1.0), Sample(20.0, 0.0, 1.0))))
+        val back = roundTrip(doc).items[0] as Stroke
+        assertTrue(back.config.opacityEnabled)
+        assertEquals(0.25, back.config.opacity, 1e-9)
+    }
+
     @Test fun everyShapeKindRoundTrips() {
         val doc = InfiniteDocument()
         for (k in ShapeKind.all) {

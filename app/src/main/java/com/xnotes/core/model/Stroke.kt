@@ -234,10 +234,13 @@ class Stroke(
             invalidate()
         }
 
-    /** Ink colour with the tool's alpha scale applied (the highlighter uses its configurable
-     *  [ToolConfig.highlighterAlpha]; every other tool is opaque, scale 1.0). */
+    /** Ink colour with its alpha applied: [ToolConfig.highlighterAlpha], or [ToolConfig.opacity] when enabled. */
     val renderColor get() = config.rgba.scaleAlpha(
-        if (tool == Tool.HIGHLIGHTER) config.highlighterAlpha else tool.alphaScale,
+        when {
+            tool == Tool.HIGHLIGHTER -> config.highlighterAlpha
+            config.opacityEnabled -> config.opacity
+            else -> 1.0
+        },
     )
 
     /** How this stroke's translucent ink composites: the highlighter darkens with MULTIPLY, or

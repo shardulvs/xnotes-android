@@ -114,10 +114,15 @@ data class ToolConfig(
     val stabilizeTrail: Double = Stabilizer.DEFAULT_TRAIL,
     /** Stabilization: the speed in dp/s below which movement counts as slow and is steadied hardest. */
     val stabilizeCrossover: Double = Stabilizer.DEFAULT_CROSSOVER,
+    /** Translucent ink: draw at [opacity]; every stroke tool but the highlighter, which has [highlighterAlpha]. */
+    val opacityEnabled: Boolean = false,
+    /** Ink opacity in [OPACITY_MIN, 1]. Only used when [opacityEnabled]. */
+    val opacity: Double = 0.5,
 ) {
     companion object {
         const val DEFAULT_MARKUP_INTENSITY = 0.9
         const val MARKUP_INTENSITY_MIN = 0.1
+        const val OPACITY_MIN = 0.1
     }
 }
 
@@ -207,6 +212,11 @@ object ToolConversions {
     fun intensityToHighlighterAlpha(intensity: Double): Double = intensity.coerceIn(10.0, 100.0) / 100.0
 
     fun highlighterAlphaToIntensity(a: Double): Double = a * 100.0
+
+    /** OPACITY (10..100 percent, whole steps) -> ink opacity in [0.10, 1.0]. */
+    fun percentToOpacity(percent: Double): Double = percent.roundToInt().coerceIn(10, 100) / 100.0
+
+    fun opacityToPercent(o: Double): Double = o * 100.0
 
     /** WIDTH slider range per tool (spec 04 §5): 4..120 for the highlighter, 1..80 for the eraser
      *  (its radius, default 24), tape's own range, else 1..20. */

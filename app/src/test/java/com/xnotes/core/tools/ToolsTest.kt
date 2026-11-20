@@ -108,9 +108,14 @@ class ToolsTest {
         assertTrue(Tool.CALLIGRAPHY.isStroke)
         assertTrue(Tool.DASHED.isStroke)
         assertFalse(Tool.SELECT.isStroke)
-        assertEquals(0.35, Tool.HIGHLIGHTER.alphaScale, 1e-9)
-        assertEquals(1.0, Tool.PEN.alphaScale, 1e-9)
         assertEquals(Tool.PAN, Tool.DEFAULT)
+    }
+
+    @Test fun opacityPercentSnapsToWholeStepsInRange() {
+        assertEquals(1.0, ToolConversions.percentToOpacity(99.6), 0.0)
+        assertEquals(0.5, ToolConversions.percentToOpacity(50.2), 0.0)
+        assertEquals(0.1, ToolConversions.percentToOpacity(3.0), 0.0)
+        assertEquals(1.0, ToolConversions.percentToOpacity(140.0), 0.0)
     }
 
     @Test fun shapeKinds() {

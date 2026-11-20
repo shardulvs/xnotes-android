@@ -88,7 +88,7 @@ import kotlin.math.roundToInt
 /**
  * Stroke-tool configuration popup (spec 10 §3): PRESSURE / SENSITIVITY, then the
  * tool's signature control: MULTIPLIER (calligraphy), THINNING / SMOOTHING / TOP SPEED (speed pen) or
- * TIP WIDTH PERCENTAGE (taper pen), then WIDTH, a STABILIZATION toggle (with STRENGTH and
+ * TIP WIDTH PERCENTAGE (taper pen), then WIDTH, an OPACITY toggle and slider (hidden under neon), a STABILIZATION toggle (with STRENGTH and
  * CROSSOVER), and a NEON toggle (with INTENSITY) on any stroke tool but the highlighter.
  */
 @OptIn(ExperimentalLayoutApi::class)
@@ -111,6 +111,8 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
     var scale by remember { mutableStateOf(base.scale) }
     var intensity by remember { mutableStateOf(ToolConversions.highlighterAlphaToIntensity(base.highlighterAlpha).toFloat()) }
     var inverse by remember { mutableStateOf(base.highlighterInverse) }
+    var faded by remember { mutableStateOf(base.opacityEnabled) }
+    var opacity by remember { mutableStateOf(ToolConversions.opacityToPercent(base.opacity).toFloat()) }
     var colorOverride by remember { mutableStateOf(base.colorOverride) }
     var steady by remember { mutableStateOf(base.stabilize) }
     var steadyStrength by remember { mutableStateOf(ToolConversions.trailToStrength(base.stabilizeTrail).toFloat()) }
@@ -124,6 +126,7 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
         val top = if (tool == Tool.SPEED) ToolConversions.topSpeedToDpPerMs(topSpeed.toDouble()) else base.speedTop
         val tmf = if (tool == Tool.TAPER) taperTip.toDouble() / 100.0 else base.taperMinFactor
         val ha = if (tool == Tool.HIGHLIGHTER) ToolConversions.intensityToHighlighterAlpha(intensity.toDouble()) else base.highlighterAlpha
+        val op = if (tool != Tool.HIGHLIGHTER) ToolConversions.percentToOpacity(opacity.toDouble()) else base.opacity
         editor.updateToolConfig(
             tool,
             base.copy(
@@ -147,6 +150,8 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
                 stabilize = steady,
                 stabilizeTrail = ToolConversions.strengthToTrail(steadyStrength.toDouble()),
                 stabilizeCrossover = ToolConversions.crossoverToDpPerS(crossover.toDouble()),
+                opacityEnabled = faded,
+                opacity = op,
             ),
         )
     }
@@ -195,6 +200,14 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
                 stringResource(R.string.caption_width), width,
                 range.start.toFloat()..range.endInclusive.toFloat(), step = ToolConversions.WIDTH_STEP.toFloat(),
             ) { width = it; emit() }
+            // Neon paints at full strength whatever the opacity, so opacity hides under it.
+            val hasGlow = tool.isStroke && tool != Tool.HIGHLIGHTER && tool != Tool.DASHED
+            if (tool.isStroke && tool != Tool.HIGHLIGHTER && !(hasGlow && glow)) {
+                ToggleRow(stringResource(R.string.caption_opacity), faded) { faded = it; emit() }
+                if (faded) {
+                    SliderRow(stringResource(R.string.caption_intensity), opacity, 10f..100f, step = 1f) { opacity = it; emit() }
+                }
+            }
             // SCALE off: ink keeps a constant on-screen thickness whatever zoom you draw at.
             ToggleRow(stringResource(R.string.caption_scale), scale) { scale = it; emit() }
             if (tool == Tool.DASHED) {
@@ -220,7 +233,7 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
             }
             // Glow is offered on every stroke tool except the highlighter (translucent) and the
             // dashed pen (it draws a line, not a fillable ribbon, so a halo has nothing to hug).
-            if (tool.isStroke && tool != Tool.HIGHLIGHTER && tool != Tool.DASHED) {
+            if (hasGlow) {
                 ToggleRow(stringResource(R.string.caption_neon), glow) { glow = it; emit() }
                 if (glow) {
                     SliderRow(stringResource(R.string.caption_glow_intensity), glowIntensity, 0f..100f) { glowIntensity = it; emit() }

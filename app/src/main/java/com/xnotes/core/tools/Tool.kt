@@ -41,9 +41,6 @@ enum class Tool(val id: String) {
         this == SELECT || this == LASSO || this == SCREENSHOT || this == SHAPE || this == ERASER || this == MARKUP || this == TAPE ||
         this == INSERT_SPACE
 
-    /** Render-time ink alpha scale: the highlighter is translucent (spec 03 §3). */
-    val alphaScale: Double get() = if (this == HIGHLIGHTER) 0.35 else 1.0
-
     companion object {
         fun fromId(id: String?): Tool? = entries.firstOrNull { it.id == id }
 

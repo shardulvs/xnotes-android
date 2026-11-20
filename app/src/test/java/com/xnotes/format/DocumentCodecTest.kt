@@ -476,6 +476,25 @@ class DocumentCodecTest {
         assertEquals(0.0, taper.samples[0].t, 1e-9)   // non-speed stroke writes no time
     }
 
+    @Test fun penOpacityRoundTripsAndATurnedOffOneWritesNone() {
+        val doc = Document(dpi = 150)
+        val page = Page(1240.0, 1754.0)
+        page.items.add(Stroke(Tool.PEN, ToolConfig(opacityEnabled = true, opacity = 0.4), mutableListOf(Sample(1.0, 2.0, 1.0))))
+        page.items.add(Stroke(Tool.PEN, ToolConfig(), mutableListOf(Sample(3.0, 4.0, 1.0))))
+        doc.pages.add(page)
+
+        val items = roundTrip(doc).pages[0].items
+        val faded = items[0] as Stroke
+        assertEquals(0.4, faded.config.opacity, 1e-9)
+        assertEquals((255 * 0.4).toInt(), faded.renderColor.a)
+        assertFalse((items[1] as Stroke).config.opacityEnabled)
+        assertEquals(255, (items[1] as Stroke).renderColor.a)
+        page.items.removeAt(0)
+        val out = ByteArrayOutputStream()
+        codec.write(doc, out)
+        assertFalse(manifestOf(out.toByteArray()).contains("\"opacity\""))
+    }
+
     @Test fun legacyTaperLengthLoadsAsEnabledTaper() {
         // Files written before the whole-stroke taper carry taper_length but no taper_enabled; a
         // positive legacy length must still load as an enabled taper so old notes keep tapering.

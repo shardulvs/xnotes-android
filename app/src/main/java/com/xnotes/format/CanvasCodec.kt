@@ -253,6 +253,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             j.name("highlighter_alpha").value(s.config.highlighterAlpha)
             if (s.config.highlighterInverse) j.name("highlighter_inverse").value(true)
         }
+        if (s.config.opacityEnabled) j.name("opacity").value(s.config.opacity)
         j.endObject()
         // Samples are almost all of a dense manifest's bytes, so they go out through [JsonWrite.samplePoint], which rounds them: 0.01
         // content px and 0.001 pressure are far below anything visible. Rounding is idempotent,
@@ -808,6 +809,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
         var dashGap: Double? = null
         var highlighterAlpha: Double? = null
         var highlighterInverse: Boolean? = null
+        var opacity: Double? = null
     }
 
     private fun parseItem(p: JsonPull, items: MutableList<CanvasItem>, pending: MutableList<Pending>, glue: GlueRead) {
@@ -938,6 +940,8 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
             dashGap = c?.dashGap ?: def.dashGap,
             highlighterAlpha = c?.highlighterAlpha ?: def.highlighterAlpha,
             highlighterInverse = c?.highlighterInverse ?: def.highlighterInverse,
+            opacityEnabled = c?.opacity != null,
+            opacity = (c?.opacity ?: def.opacity).coerceIn(ToolConfig.OPACITY_MIN, 1.0),
         )
         val stroke = Stroke(tool, config, emptyList(), s.speedScale, s.straight, s.smoothScale)
         s.samples?.let { stroke.setSamples(it.xs, it.ys, it.ps, it.ts, it.n, it.ws) }
@@ -1140,6 +1144,7 @@ class CanvasCodec(private val imageCodec: ImageCodec, private val textMeasurer: 
                 "dash_gap" -> c.dashGap = doubleOrNull(p)
                 "highlighter_alpha" -> c.highlighterAlpha = doubleOrNull(p)
                 "highlighter_inverse" -> c.highlighterInverse = boolOrNull(p)
+                "opacity" -> c.opacity = doubleOrNull(p)
                 else -> p.skipValue()
             }
         }

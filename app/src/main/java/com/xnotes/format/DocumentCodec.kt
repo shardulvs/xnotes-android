@@ -429,6 +429,7 @@ class DocumentCodec(
             j.name("highlighter_alpha").value(s.config.highlighterAlpha)
             if (s.config.highlighterInverse) j.name("highlighter_inverse").value(true)
         }
+        if (s.config.opacityEnabled) j.name("opacity").value(s.config.opacity)
         j.endObject()
         // Samples are ~97% of a dense manifest's bytes, so they go out through [JsonWrite.samplePoint], which rounds them: 0.01
         // content px (2dp) and 0.001 pressure (3dp) are far below anything visible, and a
@@ -1195,6 +1196,7 @@ class DocumentCodec(
         var dashGap: Double? = null
         var highlighterAlpha: Double? = null
         var highlighterInverse: Boolean? = null
+        var opacity: Double? = null
     }
 
     private fun parseItem(p: JsonPull, items: MutableList<CanvasItem>, pending: MutableList<Pending>, glue: GlueRead) {
@@ -1344,6 +1346,8 @@ class DocumentCodec(
             // Absent on legacy highlighter strokes -> the historical 0.35, so they reload unchanged.
             highlighterAlpha = c?.highlighterAlpha ?: def.highlighterAlpha,
             highlighterInverse = c?.highlighterInverse ?: def.highlighterInverse,
+            opacityEnabled = c?.opacity != null,
+            opacity = (c?.opacity ?: def.opacity).coerceIn(ToolConfig.OPACITY_MIN, 1.0),
         )
         val stroke = Stroke(tool, config, emptyList(), s.speedScale, s.straight, s.smoothScale)
         s.samples?.let { stroke.setSamples(it.xs, it.ys, it.ps, it.ts, it.n, it.ws) }
@@ -1547,6 +1551,7 @@ class DocumentCodec(
                 "dash_gap" -> c.dashGap = doubleOrNull(p)
                 "highlighter_alpha" -> c.highlighterAlpha = doubleOrNull(p)
                 "highlighter_inverse" -> c.highlighterInverse = boolOrNull(p)
+                "opacity" -> c.opacity = doubleOrNull(p)
                 else -> p.skipValue()
             }
         }

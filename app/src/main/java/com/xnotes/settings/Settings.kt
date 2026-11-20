@@ -398,6 +398,8 @@ data class Settings(
             .put("scale", c.scale)
             .put("highlighter_alpha", c.highlighterAlpha)
             .put("highlighter_inverse", c.highlighterInverse)
+            .put("opacity_enabled", c.opacityEnabled)
+            .put("opacity", c.opacity)
             .put("markup_mode", c.markupMode.id)
             .put("markup_intensity", c.markupIntensity)
             .put("tape_mode", c.tapeMode.id)
@@ -434,6 +436,8 @@ data class Settings(
                 scale = o.optBoolean("scale", d.scale),
                 highlighterAlpha = o.optDouble("highlighter_alpha", d.highlighterAlpha),
                 highlighterInverse = o.optBoolean("highlighter_inverse", d.highlighterInverse),
+                opacityEnabled = o.optBoolean("opacity_enabled", d.opacityEnabled),
+                opacity = o.optDouble("opacity", d.opacity).coerceIn(ToolConfig.OPACITY_MIN, 1.0),
                 markupMode = if (o.has("markup_mode")) MarkupMode.fromId(o.optString("markup_mode")) else d.markupMode,
                 markupIntensity = o.optDouble("markup_intensity", d.markupIntensity)
                     .coerceIn(ToolConfig.MARKUP_INTENSITY_MIN, 1.0),
