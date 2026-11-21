@@ -423,7 +423,7 @@ class CanvasView @JvmOverloads constructor(
                 continue
             }
 
-            r.fillRect(pr, st.paperColor(page))
+            st.fillPaper(r, page, pr)
             st.backgroundForOrSchedule(page)?.let { blitPageSurface(r, st, page, pr, it.surface) }
             // A live caret session lifts the flow out of the ink cache; paint it
             // immediate-mode here (under the ink, over the background) so every
@@ -459,7 +459,7 @@ class CanvasView @JvmOverloads constructor(
                     val pr = st.pageRects.getOrNull(i) ?: continue
                     if (!pr.intersects(neighbourVisible)) continue
                     val page = st.document.pages[i]
-                    r.fillRect(pr, st.paperColor(page))
+                    st.fillPaper(r, page, pr)
                     st.backgroundForOrSchedule(page)?.let { blitPageSurface(r, st, page, pr, it.surface) }
                     r.withSave {
                         r.clipRect(pr)
@@ -603,7 +603,7 @@ class CanvasView @JvmOverloads constructor(
      * the cut cannot split is drawn live where it stays. A layer rebuilt since is drawn as it is.
      */
     private fun drawRoomPage(r: AndroidRenderer, st: CanvasState, page: Page, pr: Rect, v: RoomView, visible: Rect) {
-        r.fillRect(pr, st.paperColor(page))
+        st.fillPaper(r, page, pr)
         // Asked for so a settled room's changed footprint schedules the rebuilds that end it.
         st.backgroundForOrSchedule(page)
         st.cacheForOrSchedule(page)

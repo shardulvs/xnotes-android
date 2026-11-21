@@ -82,6 +82,8 @@ import com.xnotes.core.model.snapshot
 import com.xnotes.core.model.insets
 import com.xnotes.core.model.sourceHeight
 import com.xnotes.core.model.sourceWidth
+import com.xnotes.core.model.paintPaperStrips
+import com.xnotes.core.model.paperStrips
 import com.xnotes.core.model.resolvedPageColor
 import com.xnotes.core.text.CellIndex
 import com.xnotes.core.text.CharStyle
@@ -2053,9 +2055,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             val page = state.document.pages[i]
             r.withSave {
                 r.clipRect(pr)
-                r.fillRect(pr, state.paperColor(page))
+                val paper = state.paperColor(page)
+                r.fillRect(pr, paper)
                 val cover = state.footprint(page)
                 r.translate(pr.left - cover.left, pr.top - cover.top) // into page space (past the margins)
+                paintPaperStrips(r, page.paperStrips(state.document, paper))
                 val local = com.xnotes.core.geometry.Rect.ltrb(
                     (content.left - pr.left).coerceAtLeast(0.0) + cover.left,
                     (content.top - pr.top).coerceAtLeast(0.0) + cover.top,
@@ -2182,10 +2186,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (view.shift <= 0.0 || view.sideways) return
         val page = view.page
         // While the pen drags the page has not grown yet, so it is ruled as it will be.
-        val shown = if (!view.live) page else Page(
-            page.width, page.height + view.shift, pdfPage = page.pdfPage, style = page.style, margins = page.margins,
-            pdfTurn = page.pdfTurn, rooms = com.xnotes.core.model.Rooms.opened(page.rooms, view.split, view.shift),
-        )
+        val shown = state.shownPage(page)
         val cover = state.footprint(shown)
         val region = if (page.pdfPage != null) {
             Rect(cover.left, view.split, cover.w, view.shift)
@@ -3335,6 +3336,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     private fun paintExportRuling(doc: Document, page: Page, r: Renderer) {
         val cover = exportFootprint(doc, page)
+        paintPaperStrips(r, page.paperStrips(doc, exportPaper(doc, page)))
         TemplateLibrary.paint(r, doc, page, cover, cover)
     }
 
@@ -3560,10 +3562,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val w = widthPx.coerceAtLeast(1)
         val h = (cover.h * scale).toInt().coerceAtLeast(1)
         val surface = com.xnotes.platform.AndroidRasterSurface.create(w, h)
-        surface.fill(state.paperColor(page))
+        val paper = state.paperColor(page)
+        surface.fill(paper)
         val r = surface.renderer()
         r.scale(scale, scale)
         r.translate(-cover.left, -cover.top)
+        paintPaperStrips(r, page.paperStrips(state.document, paper))
         if (!active()) return null
         // Paints the PDF page too, not just the ruling.
         com.xnotes.platform.PdfSource.withPriority(com.xnotes.platform.PdfPriority.THUMBNAIL) {
@@ -4196,10 +4200,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val cover = exportFootprint(doc, page)
         val surface = com.xnotes.platform.AndroidRasterSurface.create(w, h)
         // Resolve the paper colour against this note's own document/page style (not the open note's).
-        surface.fill(page.resolvedPageColor(doc, state.pageColorOverride) ?: state.palette.paper)
+        val paper = page.resolvedPageColor(doc, state.pageColorOverride) ?: state.palette.paper
+        surface.fill(paper)
         val r = surface.renderer()
         r.scale(scale, scale)
         r.translate(-cover.left, -cover.top)
+        paintPaperStrips(r, page.paperStrips(doc, paper))
         // A pixel per 300 px of tile, so the ruling survives the disk cache's half-size decode.
         TemplateLibrary.paint(r, doc, page, cover, cover, maxOf(1.0, maxOf(w, h) / 300.0) / scale)
         doc.pdfFile?.let { file ->

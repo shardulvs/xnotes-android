@@ -11,6 +11,9 @@ import com.xnotes.core.audio.InkFade
 import com.xnotes.core.model.PageLayers
 import com.xnotes.core.model.PageTemplates
 import com.xnotes.core.model.Rgba
+import com.xnotes.core.model.Rooms
+import com.xnotes.core.model.paintPaperStrips
+import com.xnotes.core.model.paperStrips
 import com.xnotes.core.model.Stroke
 import com.xnotes.core.model.TextMarkup
 import com.xnotes.core.model.insets
@@ -78,6 +81,8 @@ class RoomView(
     val anchored: List<CanvasItem>,
     val cover: Rect,
     val live: Boolean = true,
+    /** The colour room opening here takes, or null for the page's own. */
+    val color: Rgba? = null,
 ) {
     /** Anchored items drawn under the ink: dropped colour, which lies under the lines it fills. */
     val fills: List<CanvasItem> get() = anchored.filter { it is com.xnotes.core.model.ShapeItem && it.isFill }
@@ -303,11 +308,40 @@ class CanvasState(
      * land, which the changed footprint schedules, and lay the note out round the page as it now is.
      */
     fun settleRoom(view: RoomView) {
-        roomView = RoomView(view.page, view.sideways, view.split, view.resume, view.shift, view.anchored, view.cover, live = false)
+        roomView = RoomView(view.page, view.sideways, view.split, view.resume, view.shift, view.anchored, view.cover, live = false, color = view.color)
         staleInk.remove(view.page)
         cacheGen++
         sharpGen++
         relayout()
+    }
+
+    /** [page] as the room under the pen shows it: grown or shrunk by it, its rooms as the edit will leave them. */
+    fun shownPage(page: Page): Page {
+        val v = roomView ?: return page
+        if (!v.live || v.page !== page || v.shift == 0.0) return page
+        val rooms = if (v.shift > 0.0) {
+            Rooms.opened(page.rooms, v.split, v.shift, v.sideways, v.color)
+        } else {
+            Rooms.at(page.rooms, (v.split + v.resume) / 2, v.sideways)?.let { Rooms.closed(page.rooms, it, v.split, v.resume) } ?: page.rooms
+        }
+        return Page(
+            page.width + if (v.sideways) v.shift else 0.0, page.height + if (v.sideways) 0.0 else v.shift,
+            pdfPage = page.pdfPage, style = page.style, margins = page.margins, pdfTurn = page.pdfTurn, rooms = rooms,
+        ).also { it.cover = page.cover }
+    }
+
+    /** Fill [page]'s paper over [pr]: its own colour, then its margins and room in theirs, laid out as [shown]. */
+    fun fillPaper(r: Renderer, page: Page, pr: Rect, shown: Page = shownPage(page)) {
+        val paper = paperColor(page)
+        r.fillRect(pr, paper)
+        val strips = shown.paperStrips(document, paper)
+        if (strips.isEmpty()) return
+        r.save()
+        r.clipRect(pr)
+        r.translate(pr.left, pr.top)
+        applyPageTransform(r, page)
+        paintPaperStrips(r, strips)
+        r.restore()
     }
 
     /** True once [page]'s caches hold what a settled [roomView] drew, so it can go. */
@@ -2001,7 +2035,7 @@ class CanvasState(
         ri.translate(o.x, o.y)
         ri.scale(z, z)
         for (d in draws) {
-            rb.fillRect(d.pr, paperColor(d.page))
+            fillPaper(rb, d.page, d.pr, d.page)
             rb.save()
             rb.clipRect(d.pr)
             rb.translate(d.pr.left, d.pr.top)
