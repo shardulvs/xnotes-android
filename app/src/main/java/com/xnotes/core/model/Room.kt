@@ -8,9 +8,10 @@ import com.xnotes.core.pal.Renderer
 /**
  * Room the Insert space tool opened on a page: a band [size] content px tall from [at] px below the
  * page's top edge, across its whole width. On a page turned a quarter since, the band stands
- * [sideways]: [size] wide from [at] px right of its left edge, down its whole height.
+ * [sideways]: [size] wide from [at] px right of its left edge, down its whole height. Its paper is
+ * [color], or the page's own colour when null.
  */
-data class Room(val at: Double, val size: Double, val sideways: Boolean = false) {
+data class Room(val at: Double, val size: Double, val sideways: Boolean = false, val color: Rgba? = null) {
     val end: Double get() = at + size
 }
 
@@ -35,8 +36,8 @@ object Rooms {
     fun at(rooms: List<Room>, along: Double, sideways: Boolean, slop: Double = 0.0): Room? =
         rooms.firstOrNull { it.sideways == sideways && along >= it.at - slop && along <= it.end + slop }
 
-    /** [rooms] with [size] more room at [at]: a cut inside a room or on its edge grows that room, and every room after moves on. */
-    fun opened(rooms: List<Room>, at: Double, size: Double, sideways: Boolean = false): List<Room> {
+    /** [rooms] with [size] more room at [at], a new room in [color]: a cut inside a room or on its edge grows that room, and every room after moves on. */
+    fun opened(rooms: List<Room>, at: Double, size: Double, sideways: Boolean = false, color: Rgba? = null): List<Room> {
         if (size <= EPS) return rooms
         val grown = at(rooms, at, sideways)
         val out = ArrayList<Room>(rooms.size + 1)
@@ -48,7 +49,7 @@ object Rooms {
                 else -> r
             }
         }
-        if (grown == null) out += Room(at, size, sideways)
+        if (grown == null) out += Room(at, size, sideways, color)
         return sorted(out)
     }
 
@@ -214,16 +215,16 @@ object Rooms {
         return sorted(
             rooms.map { r ->
                 when (q) {
-                    1 -> if (r.sideways) Room(r.at, r.size, false) else Room(h - r.end, r.size, true)
-                    2 -> if (r.sideways) Room(w - r.end, r.size, true) else Room(h - r.end, r.size, false)
-                    else -> if (r.sideways) Room(w - r.end, r.size, false) else Room(r.at, r.size, true)
+                    1 -> if (r.sideways) r.copy(sideways = false) else r.copy(at = h - r.end, sideways = true)
+                    2 -> if (r.sideways) r.copy(at = w - r.end) else r.copy(at = h - r.end)
+                    else -> if (r.sideways) r.copy(at = w - r.end, sideways = false) else r.copy(sideways = true)
                 }
             },
         )
     }
 
     /** [rooms] scaled by [k] with their page. */
-    fun scaled(rooms: List<Room>, k: Double): List<Room> = if (k == 1.0) rooms else rooms.map { Room(it.at * k, it.size * k, it.sideways) }
+    fun scaled(rooms: List<Room>, k: Double): List<Room> = if (k == 1.0) rooms else rooms.map { it.copy(at = it.at * k, size = it.size * k) }
 
     private fun sorted(rooms: List<Room>): List<Room> = rooms.sortedWith(compareBy<Room>({ it.sideways }, { it.at }))
 }

@@ -20,9 +20,9 @@ object PageTurn {
 
     /** [m] turned with its page: each edge's margin goes where that edge goes. */
     fun margins(m: PageMargins, turns: Int): PageMargins = when (normalize(turns)) {
-        1 -> PageMargins(left = m.bottom, top = m.left, right = m.top, bottom = m.right)
-        2 -> PageMargins(left = m.right, top = m.bottom, right = m.left, bottom = m.top)
-        3 -> PageMargins(left = m.top, top = m.right, right = m.bottom, bottom = m.left)
+        1 -> PageMargins(left = m.bottom, top = m.left, right = m.top, bottom = m.right, color = m.color)
+        2 -> PageMargins(left = m.right, top = m.bottom, right = m.left, bottom = m.top, color = m.color)
+        3 -> PageMargins(left = m.top, top = m.right, right = m.bottom, bottom = m.left, color = m.color)
         else -> m
     }
 

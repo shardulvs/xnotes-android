@@ -157,6 +157,18 @@ class RoomsTest {
         assertEquals((300.0 * toPts - 10.0).toFloat(), q.left, 1e-3f)
     }
 
+    @Test fun turningAPageKeepsItsRoomAndMarginColours() {
+        val doc = Document()
+        val red = Rgba(200, 0, 0)
+        val blue = Rgba(0, 0, 200)
+        val page = Page(200.0, 350.0, margins = PageMargins(left = 0.1, color = blue), rooms = listOf(Room(100.0, 50.0, color = red)))
+        doc.pages.add(page)
+        PageTurn.turn(page, doc, 1)
+        assertEquals(listOf(Room(200.0, 50.0, sideways = true, color = red)), page.rooms)
+        assertEquals(blue, page.margins.color)
+        assertEquals(listOf(Room(300.0, 20.0, color = red)), Rooms.opened(listOf(Room(300.0, 10.0, color = red)), 305.0, 10.0, color = blue))
+    }
+
     @Test fun marginsMeasureThePageWithoutItsRoom() {
         val doc = Document()
         val page = Page(200.0, 300.0, margins = PageMargins(top = 0.1), rooms = listOf(Room(100.0, 100.0)))

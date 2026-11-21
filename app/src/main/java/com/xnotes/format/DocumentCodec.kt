@@ -379,6 +379,10 @@ class DocumentCodec(
             j.name("at").value(r.at)
             j.name("size").value(r.size)
             if (r.sideways) j.name("sideways").value(true)
+            r.color?.let {
+                j.name("color")
+                writeRgba(j, it)
+            }
             j.endObject()
         }
         j.endArray()
@@ -729,6 +733,10 @@ class DocumentCodec(
         m.top?.let { j.name("top").value(it) }
         m.right?.let { j.name("right").value(it) }
         m.bottom?.let { j.name("bottom").value(it) }
+        m.color?.let {
+            j.name("color")
+            writeRgba(j, it)
+        }
         j.endObject()
     }
 
@@ -1651,6 +1659,7 @@ class DocumentCodec(
         var top: Double? = null
         var right: Double? = null
         var bottom: Double? = null
+        var color: Rgba? = null
         p.beginObject()
         while (p.hasNext()) {
             when (p.nextName()) {
@@ -1658,13 +1667,14 @@ class DocumentCodec(
                 "top" -> top = doubleOrNull(p)
                 "right" -> right = doubleOrNull(p)
                 "bottom" -> bottom = doubleOrNull(p)
+                "color" -> color = rgbaOrNull(p)
                 else -> p.skipValue()
             }
         }
         p.endObject()
         // A file from a newer/looser writer can carry anything; clamp to the range the UI offers.
         fun clamp(v: Double?) = v?.coerceIn(0.0, PageMargins.MAX)
-        return PageMargins(clamp(left), clamp(top), clamp(right), clamp(bottom))
+        return PageMargins(clamp(left), clamp(top), clamp(right), clamp(bottom), color)
     }
 
     /** The note's size for added pages; null (copy the page before) when absent or naming a size this build lacks. */
@@ -1820,17 +1830,19 @@ class DocumentCodec(
             var at: Double? = null
             var size: Double? = null
             var sideways = false
+            var color: Rgba? = null
             p.beginObject()
             while (p.hasNext()) {
                 when (p.nextName()) {
                     "at" -> at = doubleOrNull(p)
                     "size" -> size = doubleOrNull(p)
                     "sideways" -> sideways = boolOr(p, false)
+                    "color" -> color = rgbaOrNull(p)
                     else -> p.skipValue()
                 }
             }
             p.endObject()
-            if (at != null && size != null && at.isFinite() && size.isFinite() && size > 0.0) out += Room(at, size, sideways)
+            if (at != null && size != null && at.isFinite() && size.isFinite() && size > 0.0) out += Room(at, size, sideways, color)
         }
         p.endArray()
         return out

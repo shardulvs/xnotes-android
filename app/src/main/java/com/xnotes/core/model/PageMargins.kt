@@ -19,16 +19,18 @@ enum class PageEdge(val id: String) {
  * never moves the ink — so page space simply starts at negative coordinates on a margined edge
  * (see [PageInsets]). Like [PageStyle] every field is independently nullable: null inherits from
  * the next level down (page -> document -> none), which is what gives the UI its "Default" chip.
+ * [color] paints all four strips; unset at every level, they take the page's own colour.
  */
 data class PageMargins(
     val left: Double? = null,
     val top: Double? = null,
     val right: Double? = null,
     val bottom: Double? = null,
+    val color: Rgba? = null,
 ) {
     /** True when nothing is overridden — the codec writes no `margins` object in this case. */
     val isEmpty: Boolean
-        get() = left == null && top == null && right == null && bottom == null
+        get() = left == null && top == null && right == null && bottom == null && color == null
 
     fun edge(e: PageEdge): Double? = when (e) {
         PageEdge.LEFT -> left
@@ -83,6 +85,7 @@ fun Page.resolvedMargins(doc: Document): PageMargins {
         top = margins.top ?: d.top,
         right = margins.right ?: d.right,
         bottom = margins.bottom ?: d.bottom,
+        color = margins.color ?: d.color,
     )
 }
 

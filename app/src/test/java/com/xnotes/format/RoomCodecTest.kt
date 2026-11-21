@@ -10,6 +10,8 @@ import com.xnotes.core.model.Document
 import com.xnotes.core.model.ImageData
 import com.xnotes.core.model.ImageItem
 import com.xnotes.core.model.Page
+import com.xnotes.core.model.PageMargins
+import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.Room
 import com.xnotes.core.model.Stroke
 import com.xnotes.core.stroke.Sample
@@ -65,6 +67,23 @@ class RoomCodecTest {
         assertEquals(page.rooms, back.rooms)
         assertEquals(listOf(CutEdge(10.0, 40.0, 0.0, 1.0)), (back.items[0] as Stroke).cuts)
         assertEquals(Rect.ltrb(0.0, 0.5, 1.0, 1.0), (back.items[1] as ImageItem).part)
+    }
+
+    @Test fun roomAndMarginColoursComeBack() {
+        val doc = Document()
+        doc.margins = PageMargins(left = 0.1, color = Rgba(20, 30, 40))
+        val page = Page(200.0, 400.0, margins = PageMargins(color = Rgba(1, 2, 3)), rooms = listOf(Room(100.0, 50.0, color = Rgba(200, 100, 50)), Room(300.0, 20.0)))
+        doc.pages += page
+        val back = read(write(doc))
+        assertEquals(page.rooms, back.pages.single().rooms)
+        assertEquals(PageMargins(color = Rgba(1, 2, 3)), back.pages.single().margins)
+        assertEquals(PageMargins(left = 0.1, color = Rgba(20, 30, 40)), back.margins)
+    }
+
+    @Test fun defaultColoursWriteNothing() {
+        val doc = Document()
+        doc.pages += Page(200.0, 400.0, margins = PageMargins(top = 0.2), rooms = listOf(Room(100.0, 50.0)))
+        assertFalse(manifestOf(write(doc)).contains("color"))
     }
 
     @Test fun nothingNewIsWrittenWithoutRoom() {
