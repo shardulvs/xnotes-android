@@ -401,7 +401,7 @@ class InteractionController(
     /** Tool armed just before the text tool, to return to once an edit is committed. */
     private var toolBeforeText: Tool? = null
     /** Insert space's gesture, its live room and what it lifts out of the page's cache. */
-    private val insertSpace = InsertSpaceGesture(state, history, { requestRender() }) { page, rect -> repairRegion(page, rect) }
+    private val insertSpace = InsertSpaceGesture(state, history, { requestRender() }, { configFor(Tool.INSERT_SPACE).colorOverride }) { page, rect -> repairRegion(page, rect) }
     /** Whether the live erase is finger-driven (vs the stylus eraser tip / side button): a finger
      *  erase yields to a two-finger pinch, a stylus erase ignores incidental finger/palm contact. */
     private var erasingWithFinger = false

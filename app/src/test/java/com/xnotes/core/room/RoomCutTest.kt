@@ -62,6 +62,18 @@ class RoomCutTest {
         assertEquals(640.0, p.height, eps)
     }
 
+    @Test fun newRoomTakesItsColourAndGrownRoomKeepsItsOwn() {
+        val red = Rgba(200, 0, 0)
+        val blue = Rgba(0, 0, 200)
+        val p = page()
+        RoomCut.open(p, 150.0, 40.0, red)
+        assertEquals(listOf(Room(150.0, 40.0, color = red)), p.rooms)
+        RoomCut.open(p, 160.0, 10.0, blue)
+        assertEquals(listOf(Room(150.0, 50.0, color = red)), p.rooms)
+        RoomCut.close(p, p.rooms.single(), 150.0, 170.0)
+        assertEquals(listOf(Room(150.0, 30.0, color = red)), p.rooms)
+    }
+
     @Test fun inkTheCutCrossesSplitsIntoTwoPiecesThatKeepEverySample() {
         val s = line(50.0, 100.0, 200.0)
         val p = page(s)

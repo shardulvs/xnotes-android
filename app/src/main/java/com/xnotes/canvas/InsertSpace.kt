@@ -7,6 +7,7 @@ import com.xnotes.core.history.History
 import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.GlueFollow
 import com.xnotes.core.model.Page
+import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.Room
 import com.xnotes.core.model.Rooms
 import com.xnotes.core.pal.FontSpec
@@ -28,6 +29,8 @@ internal class InsertSpaceGesture(
     private val state: CanvasState,
     private val history: History,
     private val requestRender: () -> Unit,
+    /** The colour new room takes, or null for the page's own. */
+    private val roomColor: () -> Rgba?,
     /** Repaint [Page]'s cache over a rect: an item went in or out of [lifted]. */
     private val repair: (Page, Rect) -> Unit,
 ) {
@@ -171,7 +174,7 @@ internal class InsertSpaceGesture(
             return false
         }
         val command = when (k) {
-            Kind.OPEN -> if (openSize() >= minRoom()) RoomCut.open(page, press.y, openSize()) else null
+            Kind.OPEN -> if (openSize() >= minRoom()) RoomCut.open(page, press.y, openSize(), view.color) else null
             else -> room?.let { r -> closeStrip(r)?.let { (a, b) -> if (b - a >= MIN_CLOSE_MM * mm()) RoomCut.close(page, r, a, b) else null } }
         }
         if (command == null) {
@@ -274,7 +277,7 @@ internal class InsertSpaceGesture(
         lifted.removeAll(gone.toSet())
         lifted.addAll(came)
         for (item in gone + came) repair(page, item.paintBounds())
-        state.roomView = RoomView(page, sideways, split, resume, shift, now.toList(), state.footprint(page))
+        state.roomView = RoomView(page, sideways, split, resume, shift, now.toList(), state.footprint(page), color = roomColor())
         state.relayout()
         requestRender()
     }

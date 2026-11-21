@@ -18,6 +18,7 @@ import com.xnotes.core.model.ImageCrop
 import com.xnotes.core.model.ImageItem
 import com.xnotes.core.model.Page
 import com.xnotes.core.model.PageShape
+import com.xnotes.core.model.Rgba
 import com.xnotes.core.model.Room
 import com.xnotes.core.model.Rooms
 import com.xnotes.core.model.Stroke
@@ -48,10 +49,10 @@ object RoomCut {
         return (most - page.height).coerceAtLeast(0.0)
     }
 
-    /** Open [size] of room down [page] at [at] (page space, from its top), as one done edit; null when nothing opens. */
-    fun open(page: Page, at: Double, size: Double): Command? {
+    /** Open [size] of room down [page] at [at] (page space, from its top), new room in [color], as one done edit; null when nothing opens. */
+    fun open(page: Page, at: Double, size: Double, color: Rgba? = null): Command? {
         if (size <= Rooms.EPS) return null
-        return apply(page, false, at, at, size, Rooms.opened(page.rooms, at, size))
+        return apply(page, false, at, at, size, Rooms.opened(page.rooms, at, size, color = color))
     }
 
     /** Close the strip [from] to [to] of [room] on [page], clamped to it, as one done edit; null when nothing closes. */

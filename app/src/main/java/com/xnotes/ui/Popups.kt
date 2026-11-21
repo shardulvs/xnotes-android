@@ -1114,6 +1114,30 @@ fun TapeConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
     }
 }
 
+/** Insert space popup: the colour new room takes. Default leaves it the page's own colour. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun InsertSpaceConfigPopup(editor: Editor, onDismiss: () -> Unit) {
+    val base = remember { editor.toolConfig(Tool.INSERT_SPACE) }
+    var color by remember { mutableStateOf(base.colorOverride) }
+
+    fun pick(next: Rgba?) {
+        color = next
+        editor.updateToolConfig(Tool.INSERT_SPACE, base.copy(colorOverride = next))
+    }
+
+    DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
+        Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
+            PopupTitle(stringResource(R.string.tool_insert_space))
+            StyleCaption(stringResource(R.string.caption_colour))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                ModeChip(stringResource(R.string.default_choice), color == null) { pick(null) }
+                SwatchCircles(editor, SwatchRole.PAPER, color) { pick(it) }
+            }
+        }
+    }
+}
+
 /**
  * Text markup tool popup: what a drag over PDF text does (select it, or one of the four marks) and,
  * in Highlight mode, how deep it goes. A mark takes the toolbar's active ink colour.
