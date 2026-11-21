@@ -547,9 +547,10 @@ private fun TemplateCustomizer(
 
 /**
  * Page-margins popup: two tabs — "All Pages" (the document-wide override) and "Current Page" — and
- * within each, one tab per edge with a slider for how much paper to add there, as a percentage of
- * the page's own width (left/right) or height (top/bottom). The extra space is ordinary page: it
- * takes the paper colour and the ruling, and nothing on the page moves when it grows. Like
+ * within each, the margins' colour and one tab per edge with a slider for how much paper to add
+ * there, as a percentage of the page's own width (left/right) or height (top/bottom). The extra
+ * space is ordinary page: it takes the ruling, the paper colour unless it has one of its own, and
+ * nothing on the page moves when it grows. Like
  * [StylesPopup] the popup holds the edited value locally and pushes each change to the [Editor]
  * (which persists, but never undoes); "Default" clears an edge so it inherits the level below.
  */
@@ -580,6 +581,14 @@ fun MarginsPopup(editor: Editor, onDismiss: () -> Unit) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ModeChip(stringResource(R.string.all_pages), tab == 0) { tab = 0 }
                 ModeChip(stringResource(R.string.current_page), tab == 1) { tab = 1 }
+            }
+
+            // One colour for all four edges, so it sits above the edge chips.
+            Spacer(Modifier.size(12.dp))
+            StyleCaption(stringResource(R.string.caption_colour))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                ModeChip(stringResource(R.string.default_choice), margins.color == null) { apply(margins.copy(color = null)) }
+                SwatchCircles(editor, SwatchRole.PAPER, margins.color) { apply(margins.copy(color = it)) }
             }
 
             Spacer(Modifier.size(12.dp))
