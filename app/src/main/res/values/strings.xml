@@ -504,6 +504,8 @@
     <string name="page_from_image">Page template from image</string>
     <string name="cover_from_image">Cover template from image</string>
     <string name="tab_generate_ai">Generate using AI</string>
+    <string name="all_templates">All templates</string>
+    <string name="add_template">Add a template</string>
     <string name="ai_intro">AI assistants such as ChatGPT and Claude can design page templates and cover templates for you. Because the xtemplate format is new to them, provide its specification along with your request.</string>
     <string name="ai_step_copy">Copy the specification</string>
     <string name="ai_guide_name">xtemplate for AI assistants</string>

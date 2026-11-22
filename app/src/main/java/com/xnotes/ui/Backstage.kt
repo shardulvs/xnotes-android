@@ -1875,7 +1875,6 @@ private fun ExplorerSection(
         var busy by remember { mutableStateOf(false) }
         NewNoteScreen(
             editor = editor,
-            folderName = stack.lastOrNull()?.second ?: rootName ?: stringResource(R.string.folder),
             initialName = remember { nextUntitled(editor, editor.cachedChildren(root, currentDocId)) },
             error = fieldError,
             busy = busy,

@@ -112,7 +112,6 @@ fun SidePanel(
     if (pickingCover) {
         NewNoteScreen(
             editor = editor,
-            folderName = "",
             initialName = "",
             error = null,
             busy = false,
