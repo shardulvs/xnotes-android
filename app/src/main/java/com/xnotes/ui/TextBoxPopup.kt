@@ -99,7 +99,10 @@ internal fun TextBoxConfigPopup(editor: Editor, onDismiss: () -> Unit) {
                 Text(stringResource(R.string.font), color = palette.textDim.toComposeColor(), fontSize = 13.sp, modifier = Modifier.width(74.dp))
                 FaceDropdown(d.face) { editor.saveBoxDefaults(d.copy(face = it)) }
             }
-            SpinField(stringResource(R.string.size_pt), d.sizePt, min = 6.0, max = 96.0) { editor.saveBoxDefaults(d.copy(sizePt = it)) }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+                Text(stringResource(R.string.size_pt), color = palette.textDim.toComposeColor(), fontSize = 13.sp, modifier = Modifier.width(74.dp))
+                SpinField(d.sizePt, min = 6.0, max = 96.0, Modifier.width(116.dp)) { editor.saveBoxDefaults(d.copy(sizePt = it)) }
+            }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
                 Text(stringResource(R.string.colour), color = palette.textDim.toComposeColor(), fontSize = 13.sp, modifier = Modifier.width(74.dp))
                 ModeChip(stringResource(R.string.auto), d.color == null) { editor.saveBoxDefaults(d.copy(color = null)) }

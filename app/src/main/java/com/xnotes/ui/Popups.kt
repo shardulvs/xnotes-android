@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -86,10 +88,10 @@ import com.xnotes.ui.theme.toComposeColor
 import kotlin.math.roundToInt
 
 /**
- * Stroke-tool configuration popup (spec 10 §3): PRESSURE / SENSITIVITY, then the
- * tool's signature control: MULTIPLIER (calligraphy), THINNING / SMOOTHING / TOP SPEED (speed pen) or
- * TIP WIDTH PERCENTAGE (taper pen), then WIDTH, an OPACITY toggle and slider (hidden under neon), a STABILIZATION toggle (with STRENGTH and
- * CROSSOVER), and a NEON toggle (with INTENSITY) on any stroke tool but the highlighter.
+ * A stroke tool's menu (spec 10 §3), in three cards. The stroke: a preview, its colour and WIDTH.
+ * How it answers the hand: PRESSURE / SENSITIVITY, the tool's signature control (MULTIPLIER for
+ * calligraphy, THINNING / SMOOTHING / TOP SPEED for the speed pen, TIP WIDTH PERCENTAGE for the
+ * taper pen) and STABILIZATION. How it sits on the page: OPACITY (hidden under neon), NEON, SCALE.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -118,7 +120,7 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
     var steadyStrength by remember { mutableStateOf(ToolConversions.trailToStrength(base.stabilizeTrail).toFloat()) }
     var crossover by remember { mutableStateOf(ToolConversions.dpPerSToCrossover(base.stabilizeCrossover).toFloat()) }
 
-    fun emit() {
+    fun current(): ToolConfig {
         val m = ToolConversions.sensitivityToMinFactor(sensitivity.toDouble())
         val ds = if (tool == Tool.CALLIGRAPHY) ToolConversions.multiplierToDirectionStrength(multiplier.toDouble()) else 0.0
         val sp = if (tool == Tool.SPEED) ToolConversions.speedToStrength(speed.toDouble()) else 0.0
@@ -127,116 +129,110 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
         val tmf = if (tool == Tool.TAPER) taperTip.toDouble() / 100.0 else base.taperMinFactor
         val ha = if (tool == Tool.HIGHLIGHTER) ToolConversions.intensityToHighlighterAlpha(intensity.toDouble()) else base.highlighterAlpha
         val op = if (tool != Tool.HIGHLIGHTER) ToolConversions.percentToOpacity(opacity.toDouble()) else base.opacity
-        editor.updateToolConfig(
-            tool,
-            base.copy(
-                baseWidth = ToolConversions.snapWidth(tool, width.toDouble()),
-                pressureEnabled = pressure,
-                pressureMinFactor = m,
-                directionStrength = ds,
-                speedStrength = sp,
-                speedSmoothing = blur,
-                speedTop = top,
-                taperMinFactor = tmf,
-                neon = glow,
-                neonStrength = ToolConversions.intensityToNeonStrength(glowIntensity.toDouble()),
-                dashLength = dashLen.toDouble(),
-                dashGap = gapLen.toDouble(),
-                straightLine = straight,
-                scale = scale,
-                highlighterAlpha = ha,
-                highlighterInverse = inverse,
-                colorOverride = colorOverride,
-                stabilize = steady,
-                stabilizeTrail = ToolConversions.strengthToTrail(steadyStrength.toDouble()),
-                stabilizeCrossover = ToolConversions.crossoverToDpPerS(crossover.toDouble()),
-                opacityEnabled = faded,
-                opacity = op,
-            ),
+        return base.copy(
+            baseWidth = ToolConversions.snapWidth(tool, width.toDouble()),
+            pressureEnabled = pressure,
+            pressureMinFactor = m,
+            directionStrength = ds,
+            speedStrength = sp,
+            speedSmoothing = blur,
+            speedTop = top,
+            taperMinFactor = tmf,
+            neon = glow,
+            neonStrength = ToolConversions.intensityToNeonStrength(glowIntensity.toDouble()),
+            dashLength = dashLen.toDouble(),
+            dashGap = gapLen.toDouble(),
+            straightLine = straight,
+            scale = scale,
+            highlighterAlpha = ha,
+            highlighterInverse = inverse,
+            colorOverride = colorOverride,
+            stabilize = steady,
+            stabilizeTrail = ToolConversions.strengthToTrail(steadyStrength.toDouble()),
+            stabilizeCrossover = ToolConversions.crossoverToDpPerS(crossover.toDouble()),
+            opacityEnabled = faded,
+            opacity = op,
         )
     }
 
-    DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
-        Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
-            PopupTitle(stringResource(tool.labelRes))
-            // COLOUR override: "Default" follows the toolbar's active ink colour; pick a hue to pin
-            // this tool to it regardless of the toolbar selection.
-            StyleCaption(stringResource(R.string.caption_colour))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                val active = editor.hostToolbarColors.getOrNull(editor.hostActiveColorIndex)
-                ColorOrNone(
-                    stringResource(R.string.default_choice),
-                    colorOverride,
-                    suggested = active ?: LocalPalette.current.text,
-                    onChange = { colorOverride = it; emit() },
-                ) { d, p ->
-                    ColorPickerPopup(initial = colorOverride ?: active, recents = editor.hostRecentColors, onDismiss = d, onPick = p)
+    fun emit() = editor.updateToolConfig(tool, current())
+
+    val active = editor.hostToolbarColors.getOrNull(editor.hostActiveColorIndex)
+    val hasPressure = tool == Tool.PEN || tool == Tool.CALLIGRAPHY || tool == Tool.SPEED || tool == Tool.TAPER
+    // Glow is offered on every stroke tool except the highlighter (translucent) and the
+    // dashed pen (it draws a line, not a fillable ribbon, so a halo has nothing to hug).
+    val hasGlow = tool.isStroke && tool != Tool.HIGHLIGHTER && tool != Tool.DASHED
+    val range = ToolConversions.widthRange(tool)
+
+    ToolMenu(stringResource(tool.labelRes), onDismiss) {
+        // The stroke itself: its colour and its width.
+        MenuCard(buildList<MenuGroup> {
+            add {
+                // "Default" follows the toolbar's active ink colour; a colour picked here pins the tool to it.
+                MenuRow(stringResource(R.string.caption_colour)) {
+                    ColorOrNone(
+                        stringResource(R.string.default_choice),
+                        colorOverride,
+                        suggested = active ?: LocalPalette.current.text,
+                        onChange = { colorOverride = it; emit() },
+                    ) { d, p ->
+                        ColorPickerPopup(initial = colorOverride ?: active, recents = editor.hostRecentColors, onDismiss = d, onPick = p)
+                    }
                 }
             }
-            Spacer(Modifier.size(12.dp))
-            val hasPressure = tool == Tool.PEN || tool == Tool.CALLIGRAPHY || tool == Tool.SPEED || tool == Tool.TAPER
-            if (hasPressure) {
-                ToggleRow(stringResource(R.string.caption_pressure), pressure) { pressure = it; emit() }
-                if (pressure) {
-                    SliderRow(stringResource(R.string.caption_sensitivity), sensitivity, 0f..100f) { sensitivity = it; emit() }
-                }
+            add {
+                MenuSlider(
+                    stringResource(R.string.caption_width), width,
+                    range.start.toFloat()..range.endInclusive.toFloat(), step = ToolConversions.WIDTH_STEP.toFloat(),
+                ) { width = it; emit() }
             }
-            if (tool == Tool.CALLIGRAPHY) {
-                SliderRow(stringResource(R.string.caption_multiplier), multiplier, 1f..5f) { multiplier = it; emit() }
-            }
-            if (tool == Tool.SPEED) {
-                SliderRow(stringResource(R.string.caption_thinning), speed, 0f..100f) { speed = it; emit() }
-                SliderRow(stringResource(R.string.caption_smoothing), smoothing, 0f..100f) { smoothing = it; emit() }
-                SliderRow(stringResource(R.string.caption_top_speed), topSpeed, 0f..100f) { topSpeed = it; emit() }
-            }
-            if (tool == Tool.TAPER) {
-                SliderRow(stringResource(R.string.caption_tip_width), taperTip, 0f..100f) { taperTip = it; emit() }
-            }
-            val range = ToolConversions.widthRange(tool)
-            SliderRow(
-                stringResource(R.string.caption_width), width,
-                range.start.toFloat()..range.endInclusive.toFloat(), step = ToolConversions.WIDTH_STEP.toFloat(),
-            ) { width = it; emit() }
-            // Neon paints at full strength whatever the opacity, so opacity hides under it.
-            val hasGlow = tool.isStroke && tool != Tool.HIGHLIGHTER && tool != Tool.DASHED
-            if (tool.isStroke && tool != Tool.HIGHLIGHTER && !(hasGlow && glow)) {
-                ToggleRow(stringResource(R.string.caption_opacity), faded) { faded = it; emit() }
-                if (faded) {
-                    SliderRow(stringResource(R.string.caption_intensity), opacity, 10f..100f, step = 1f) { opacity = it; emit() }
-                }
-            }
-            // SCALE off: ink keeps a constant on-screen thickness whatever zoom you draw at.
-            ToggleRow(stringResource(R.string.caption_scale), scale) { scale = it; emit() }
+            if (tool == Tool.HIGHLIGHTER) add { MenuSlider(stringResource(R.string.caption_intensity), intensity, 10f..100f) { intensity = it; emit() } }
             if (tool == Tool.DASHED) {
-                SliderRow(stringResource(R.string.caption_dash), dashLen, 2f..40f) { dashLen = it; emit() }
-                SliderRow(stringResource(R.string.caption_gap), gapLen, 2f..40f) { gapLen = it; emit() }
+                add { MenuSlider(stringResource(R.string.caption_dash), dashLen, 2f..40f) { dashLen = it; emit() } }
+                add { MenuSlider(stringResource(R.string.caption_gap), gapLen, 2f..40f) { gapLen = it; emit() } }
             }
-            // The highlighter's strength (translucency) and an optional straight-segment lock
-            // (for ruling/underlining).
-            if (tool == Tool.HIGHLIGHTER) {
-                SliderRow(stringResource(R.string.caption_intensity), intensity, 10f..100f) { intensity = it; emit() }
-                ToggleRow(stringResource(R.string.caption_straight_line), straight) { straight = it; emit() }
-                // INVERSE swaps the multiply blend for a screen one, so the marker lightens the
-                // page instead of darkening it. A multiply has nothing to darken on a dark page.
-                ToggleRow(stringResource(R.string.caption_inverse), inverse) { inverse = it; emit() }
+        })
+        // How it answers the hand.
+        MenuCard(buildList<MenuGroup> {
+            if (hasPressure) add {
+                MenuSwitch(stringResource(R.string.caption_pressure), pressure) { pressure = it; emit() }
+                if (pressure) MenuSlider(stringResource(R.string.caption_sensitivity), sensitivity, 0f..100f, child = true) { sensitivity = it; emit() }
             }
+            if (tool == Tool.CALLIGRAPHY) add { MenuSlider(stringResource(R.string.caption_multiplier), multiplier, 1f..5f) { multiplier = it; emit() } }
+            if (tool == Tool.SPEED) {
+                add { MenuSlider(stringResource(R.string.caption_thinning), speed, 0f..100f) { speed = it; emit() } }
+                add { MenuSlider(stringResource(R.string.caption_smoothing), smoothing, 0f..100f) { smoothing = it; emit() } }
+                add { MenuSlider(stringResource(R.string.caption_top_speed), topSpeed, 0f..100f) { topSpeed = it; emit() } }
+            }
+            if (tool == Tool.TAPER) add { MenuSlider(stringResource(R.string.caption_tip_width), taperTip, 0f..100f) { taperTip = it; emit() } }
+            // A straight-segment lock, for ruling and underlining.
+            if (tool == Tool.HIGHLIGHTER) add { MenuSwitch(stringResource(R.string.caption_straight_line), straight) { straight = it; emit() } }
             // STABILIZATION steadies the path while drawing; a straight line has nothing to steady.
-            if (tool.isStroke && !(tool == Tool.HIGHLIGHTER && straight)) {
-                ToggleRow(stringResource(R.string.caption_stabilization), steady) { steady = it; emit() }
+            if (tool.isStroke && !(tool == Tool.HIGHLIGHTER && straight)) add {
+                MenuSwitch(stringResource(R.string.caption_stabilization), steady) { steady = it; emit() }
                 if (steady) {
-                    SliderRow(stringResource(R.string.caption_strength), steadyStrength, 0f..100f) { steadyStrength = it; emit() }
-                    SliderRow(stringResource(R.string.caption_crossover), crossover, 0f..100f) { crossover = it; emit() }
+                    MenuSlider(stringResource(R.string.caption_strength), steadyStrength, 0f..100f, child = true) { steadyStrength = it; emit() }
+                    MenuSlider(stringResource(R.string.caption_crossover), crossover, 0f..100f, child = true) { crossover = it; emit() }
                 }
             }
-            // Glow is offered on every stroke tool except the highlighter (translucent) and the
-            // dashed pen (it draws a line, not a fillable ribbon, so a halo has nothing to hug).
-            if (hasGlow) {
-                ToggleRow(stringResource(R.string.caption_neon), glow) { glow = it; emit() }
-                if (glow) {
-                    SliderRow(stringResource(R.string.caption_glow_intensity), glowIntensity, 0f..100f) { glowIntensity = it; emit() }
-                }
+        })
+        // How it sits on the page.
+        MenuCard(buildList<MenuGroup> {
+            // Neon paints at full strength whatever the opacity, so opacity hides under it.
+            if (tool.isStroke && tool != Tool.HIGHLIGHTER && !(hasGlow && glow)) add {
+                MenuSwitch(stringResource(R.string.caption_opacity), faded) { faded = it; emit() }
+                if (faded) MenuSlider(stringResource(R.string.caption_intensity), opacity, 10f..100f, step = 1f, child = true) { opacity = it; emit() }
             }
-        }
+            if (hasGlow) add {
+                MenuSwitch(stringResource(R.string.caption_neon), glow) { glow = it; emit() }
+                if (glow) MenuSlider(stringResource(R.string.caption_glow_intensity), glowIntensity, 0f..100f, child = true) { glowIntensity = it; emit() }
+            }
+            // INVERSE swaps the multiply blend for a screen one, so the marker lightens the
+            // page instead of darkening it. A multiply has nothing to darken on a dark page.
+            if (tool == Tool.HIGHLIGHTER) add { MenuSwitch(stringResource(R.string.caption_inverse), inverse) { inverse = it; emit() } }
+            // SCALE off: ink keeps a constant on-screen thickness whatever zoom you draw at.
+            add { MenuSwitch(stringResource(R.string.caption_scale), scale) { scale = it; emit() } }
+        })
     }
 }
 
@@ -372,24 +368,24 @@ fun EraserConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
         ),
     )
 
-    DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
-        Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
-            PopupTitle(stringResource(R.string.title_eraser))
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                ModeChip(stringResource(R.string.eraser_stroke), selected = !area) { area = false; emit() }
-                ModeChip(stringResource(R.string.eraser_area), selected = area) { area = true; emit() }
+    ToolMenu(stringResource(R.string.title_eraser), onDismiss) {
+        MenuCard(buildList<MenuGroup> {
+            add {
+                MenuSegmented(listOf(stringResource(R.string.eraser_stroke), stringResource(R.string.eraser_area)), if (area) 1 else 0) { area = it == 1; emit() }
+                val r = ToolConversions.widthRange(Tool.ERASER)
+                MenuSlider(stringResource(R.string.caption_size), size, r.start.toFloat()..r.endInclusive.toFloat()) { size = it; emit() }
             }
-            val r = ToolConversions.widthRange(Tool.ERASER)
-            SliderRow(stringResource(R.string.caption_size), size, r.start.toFloat()..r.endInclusive.toFloat()) { size = it; emit() }
+        })
+        MenuCard(buildList<MenuGroup> {
             // SCALE off: the eraser holds a constant on-screen size whatever zoom you are at.
-            ToggleRow(stringResource(R.string.caption_scale), scale) { scale = it; emit() }
+            add { MenuSwitch(stringResource(R.string.caption_scale), scale) { scale = it; emit() } }
             // Re-arm the previous pen/highlighter once an erase lifts, so a quick fix doesn't strand
             // you in the eraser.
-            ToggleRow(stringResource(R.string.caption_switch_back), switchBack) { switchBack = it; emit() }
-            if (editor.hostHasPdf) ToggleRow(stringResource(R.string.caption_erase_markups), markups) { markups = it; emit() }
+            add { MenuSwitch(stringResource(R.string.caption_switch_back), switchBack) { switchBack = it; emit() } }
+            if (editor.hostHasPdf) add { MenuSwitch(stringResource(R.string.caption_erase_markups), markups) { markups = it; emit() } }
             // A pen scribbled over ink erases it without picking up the eraser.
-            ToggleRow(stringResource(R.string.caption_scribble_erase), scribble) { scribble = it; emit() }
-        }
+            add { MenuSwitch(stringResource(R.string.caption_scribble_erase), scribble) { scribble = it; emit() } }
+        })
     }
 }
 
@@ -401,13 +397,12 @@ fun SelectConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
 
     fun emit() = editor.updateToolConfig(Tool.SELECT, base.copy(switchBackAfterSelect = switchBack))
 
-    DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
-        Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
-            PopupTitle(stringResource(R.string.title_select))
-            // Re-arm the previous pen/highlighter once a selection action (move, resize, delete,
-            // cut, copy, duplicate) finishes, so a quick edit doesn't strand you in select.
-            ToggleRow(stringResource(R.string.caption_switch_back), switchBack) { switchBack = it; emit() }
-        }
+    ToolMenu(stringResource(R.string.title_select), onDismiss) {
+        // Re-arm the previous pen/highlighter once a selection action (move, resize, delete,
+        // cut, copy, duplicate) finishes, so a quick edit doesn't strand you in select.
+        MenuCard(buildList<MenuGroup> {
+            add { MenuSwitch(stringResource(R.string.caption_switch_back), switchBack) { switchBack = it; emit() } }
+        })
     }
 }
 
@@ -434,45 +429,45 @@ fun TapeConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
         ),
     )
 
-    DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
-        Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
-            PopupTitle(stringResource(R.string.tool_tape))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (m in TapeMode.entries) ModeChip(stringResource(m.labelRes), selected = mode == m) { mode = m; emit() }
-            }
-            Spacer(Modifier.size(8.dp))
-            StyleCaption(stringResource(R.string.caption_colour))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                val active = editor.hostToolbarColors.getOrNull(editor.hostActiveColorIndex)
-                ColorOrNone(
-                    stringResource(R.string.default_choice),
-                    colorOverride,
-                    suggested = active ?: LocalPalette.current.text,
-                    onChange = { colorOverride = it; emit() },
-                ) { d, p ->
-                    ColorPickerPopup(initial = colorOverride ?: active, recents = editor.hostRecentColors, onDismiss = d, onPick = p)
+    ToolMenu(stringResource(R.string.tool_tape), onDismiss) {
+        MenuCard(buildList<MenuGroup> {
+            add {
+                val modes = TapeMode.entries
+                MenuSegmented(modes.map { stringResource(it.labelRes) }, modes.indexOf(mode)) { mode = modes[it]; emit() }
+                MenuRow(stringResource(R.string.caption_colour)) {
+                    val active = editor.hostToolbarColors.getOrNull(editor.hostActiveColorIndex)
+                    ColorOrNone(
+                        stringResource(R.string.default_choice),
+                        colorOverride,
+                        suggested = active ?: LocalPalette.current.text,
+                        onChange = { colorOverride = it; emit() },
+                    ) { d, p ->
+                        ColorPickerPopup(initial = colorOverride ?: active, recents = editor.hostRecentColors, onDismiss = d, onPick = p)
+                    }
                 }
             }
-            Spacer(Modifier.size(8.dp))
-            StyleCaption(stringResource(R.string.caption_pattern))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (p in TapePattern.entries) ModeChip(stringResource(p.labelRes), selected = pattern == p) { pattern = p; emit() }
+            add {
+                Column(Modifier.padding(10.dp)) {
+                    PanelCaption(stringResource(R.string.caption_pattern))
+                    val patterns = TapePattern.entries
+                    PanelSegmented(patterns.map { stringResource(it.labelRes) }, patterns.indexOf(pattern), { pattern = patterns[it]; emit() })
+                }
             }
             // A rectangle is as tall as it is dragged, so only a strip and a band take a width.
             if (mode != TapeMode.RECTANGLE) {
-                Spacer(Modifier.size(4.dp))
-                val range = ToolConversions.widthRange(Tool.TAPE)
-                SliderRow(
-                    stringResource(R.string.caption_width), width,
-                    range.start.toFloat()..range.endInclusive.toFloat(), step = ToolConversions.WIDTH_STEP.toFloat(),
-                ) { width = it; emit() }
-                ToggleRow(stringResource(R.string.caption_scale), scale) { scale = it; emit() }
+                add {
+                    val range = ToolConversions.widthRange(Tool.TAPE)
+                    MenuSlider(
+                        stringResource(R.string.caption_width), width,
+                        range.start.toFloat()..range.endInclusive.toFloat(), step = ToolConversions.WIDTH_STEP.toFloat(),
+                    ) { width = it; emit() }
+                }
+                add { MenuSwitch(stringResource(R.string.caption_scale), scale) { scale = it; emit() } }
             }
-            Spacer(Modifier.size(8.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                ModeChip(stringResource(R.string.tape_reveal_all), selected = false) { editor.setAllTapePeeled(true) }
-                ModeChip(stringResource(R.string.tape_cover_all), selected = false) { editor.setAllTapePeeled(false) }
-            }
+        })
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            MenuAction(stringResource(R.string.tape_reveal_all), XnotesIcons.eye, Modifier.weight(1f)) { editor.setAllTapePeeled(true) }
+            MenuAction(stringResource(R.string.tape_cover_all), XnotesIcons.eyeOff, Modifier.weight(1f)) { editor.setAllTapePeeled(false) }
         }
     }
 }
@@ -489,12 +484,15 @@ fun InsertSpaceConfigPopup(editor: Editor, onDismiss: () -> Unit) {
         editor.updateToolConfig(Tool.INSERT_SPACE, base.copy(colorOverride = next))
     }
 
-    DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
-        Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
-            PopupTitle(stringResource(R.string.tool_insert_space))
-            StyleCaption(stringResource(R.string.caption_colour))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                ModeChip(stringResource(R.string.default_choice), color == null) { pick(null) }
+    ToolMenu(stringResource(R.string.tool_insert_space), onDismiss) {
+        PanelCard(padding = PaddingValues(start = 12.dp, top = 10.dp, end = 12.dp, bottom = 14.dp)) {
+            PanelCaption(stringResource(R.string.caption_colour))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                itemVerticalAlignment = Alignment.CenterVertically,
+            ) {
+                PanelChip(stringResource(R.string.default_choice), color == null) { pick(null) }
                 SwatchCircles(editor, SwatchRole.PAPER, color) { pick(it) }
             }
         }
@@ -513,19 +511,23 @@ fun MarkupToolPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
 
     fun emit() = editor.updateToolConfig(Tool.MARKUP, base.copy(markupMode = mode, markupIntensity = intensity / 100.0))
 
-    DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
-        Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
-            PopupTitle(stringResource(R.string.tool_markup))
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                MarkupMode.entries.forEach { m ->
-                    KindChip(markupIcon(m), stringResource(m.labelRes), selected = mode == m) { mode = m; emit() }
+    ToolMenu(stringResource(R.string.tool_markup), onDismiss) {
+        val modes = MarkupMode.entries
+        val shaded = mode == MarkupMode.HIGHLIGHT
+        MenuCard(buildList<MenuGroup> {
+            add {
+                Box(Modifier.padding(start = 10.dp, top = 10.dp, end = 10.dp, bottom = if (shaded) 0.dp else 10.dp)) {
+                    IconSegmented(modes.map { markupIcon(it) }, modes.map { stringResource(it.labelRes) }, modes.indexOf(mode), height = 38.dp) {
+                        mode = modes[it]
+                        emit()
+                    }
+                }
+                if (shaded) {
+                    val min = (ToolConfig.MARKUP_INTENSITY_MIN * 100).toFloat()
+                    MenuSlider(stringResource(R.string.caption_intensity), intensity, min..100f) { intensity = it; emit() }
                 }
             }
-            if (mode == MarkupMode.HIGHLIGHT) {
-                val min = (ToolConfig.MARKUP_INTENSITY_MIN * 100).toFloat()
-                SliderRow(stringResource(R.string.caption_intensity), intensity, min..100f) { intensity = it; emit() }
-            }
-        }
+        })
     }
 }
 
@@ -616,7 +618,7 @@ internal val NoTicks
     )
 
 /** [value] moved to the nearest [step] from the start of [range], held at its ends. */
-private fun snapTo(value: Float, range: ClosedFloatingPointRange<Float>, step: Float): Float {
+internal fun snapTo(value: Float, range: ClosedFloatingPointRange<Float>, step: Float): Float {
     return (range.start + ((value - range.start) / step).roundToInt() * step)
         .coerceIn(range.start, range.endInclusive)
 }

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -64,44 +65,55 @@ fun ShapeConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
     val connecting = config.connector != null
     val ink = editor.hostToolbarColors.getOrNull(editor.hostActiveColorIndex) ?: Rgba(0, 0, 0)
 
-    DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
-        Column(Modifier.width(284.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
-            PopupTitle(stringResource(R.string.title_shape))
+    ToolMenu(stringResource(R.string.title_shape), onDismiss, width = MENU_WIDTH.dp) {
+        PanelCard(padding = PaddingValues(INSET.dp)) {
             ShapePager(config, onPage = { emit(config.copy(shapePage = it)) }, onPick = { emit(config.choose(it)) })
+        }
+        PanelCard(padding = PaddingValues(INSET.dp)) {
             ConnectorPager(config, onPage = { emit(config.copy(connectorPage = it)) }, onPick = { emit(config.choose(it)) })
-            if (!connecting && chip.counted) CountRow(config) { emit(config.copy(n = it)) }
+        }
+        MenuCard(buildList<MenuGroup> {
+            if (!connecting && chip.counted) add { CountRow(config) { emit(config.copy(n = it)) } }
             if (!connecting && !config.placesCorners) {
-                ToggleRow(stringResource(R.string.caption_perfect), config.perfect) { emit(config.copy(perfect = it)) }
+                add { MenuSwitch(stringResource(R.string.caption_perfect), config.perfect) { emit(config.copy(perfect = it)) } }
             }
-            SliderRow(stringResource(R.string.caption_width), config.strokeWidth.toFloat(), 1f..20f, step = ToolConversions.WIDTH_STEP.toFloat()) {
-                emit(config.copy(strokeWidth = it.toDouble()))
+            add {
+                MenuSlider(stringResource(R.string.caption_width), config.strokeWidth.toFloat(), 1f..20f, step = ToolConversions.WIDTH_STEP.toFloat()) {
+                    emit(config.copy(strokeWidth = it.toDouble()))
+                }
             }
             if (!connecting && chip.kind.isClosed) {
-                ToggleRow(stringResource(R.string.caption_fill), config.fill) { emit(config.copy(fill = it)) }
-                if (config.fill) {
-                    FillColourRow(config.fillColor, ink, editor) { emit(config.copy(fillColor = it)) }
-                    val minPct = (ShapeConfig.FILL_ALPHA_MIN * 100).toFloat()
-                    SliderRow(stringResource(R.string.caption_opacity), (config.fillAlpha * 100).toFloat(), minPct..100f) {
-                        emit(config.copy(fillAlpha = (it / 100.0).coerceIn(ShapeConfig.FILL_ALPHA_MIN, ShapeConfig.FILL_ALPHA_MAX)))
+                add {
+                    MenuSwitch(stringResource(R.string.caption_fill), config.fill) { emit(config.copy(fill = it)) }
+                    if (config.fill) {
+                        FillColourRow(config.fillColor, ink, editor) { emit(config.copy(fillColor = it)) }
+                        val minPct = (ShapeConfig.FILL_ALPHA_MIN * 100).toFloat()
+                        MenuSlider(stringResource(R.string.caption_opacity), (config.fillAlpha * 100).toFloat(), minPct..100f, child = true) {
+                            emit(config.copy(fillAlpha = (it / 100.0).coerceIn(ShapeConfig.FILL_ALPHA_MIN, ShapeConfig.FILL_ALPHA_MAX)))
+                        }
                     }
                 }
             } else {
-                HeadRow(stringResource(R.string.caption_head_start), config.headStart, atStart = true) { emit(config.copy(headStart = it)) }
-                HeadRow(stringResource(R.string.caption_head_end), config.headEnd, atStart = false) { emit(config.copy(headEnd = it)) }
+                add { HeadRow(stringResource(R.string.caption_head_start), config.headStart, atStart = true) { emit(config.copy(headStart = it)) } }
+                add { HeadRow(stringResource(R.string.caption_head_end), config.headEnd, atStart = false) { emit(config.copy(headEnd = it)) } }
             }
-            ToggleRow(stringResource(R.string.caption_dashed), config.dashed) { emit(config.copy(dashed = it)) }
-            if (config.dashed) {
-                SliderRow(stringResource(R.string.caption_dash), config.dashLength.toFloat(), 2f..40f) { emit(config.copy(dashLength = it.toDouble())) }
-                SliderRow(stringResource(R.string.caption_gap), config.dashGap.toFloat(), 2f..40f) { emit(config.copy(dashGap = it.toDouble())) }
-            }
-            ToggleRow(stringResource(R.string.caption_neon), config.neon) { emit(config.copy(neon = it)) }
-            if (config.neon) {
-                val intensity = ToolConversions.neonStrengthToIntensity(config.neonStrength).toFloat()
-                SliderRow(stringResource(R.string.caption_glow_intensity), intensity, 0f..100f) {
-                    emit(config.copy(neonStrength = ToolConversions.intensityToNeonStrength(it.toDouble())))
+            add {
+                MenuSwitch(stringResource(R.string.caption_dashed), config.dashed) { emit(config.copy(dashed = it)) }
+                if (config.dashed) {
+                    MenuSlider(stringResource(R.string.caption_dash), config.dashLength.toFloat(), 2f..40f, child = true) { emit(config.copy(dashLength = it.toDouble())) }
+                    MenuSlider(stringResource(R.string.caption_gap), config.dashGap.toFloat(), 2f..40f, child = true) { emit(config.copy(dashGap = it.toDouble())) }
                 }
             }
-        }
+            add {
+                MenuSwitch(stringResource(R.string.caption_neon), config.neon) { emit(config.copy(neon = it)) }
+                if (config.neon) {
+                    val intensity = ToolConversions.neonStrengthToIntensity(config.neonStrength).toFloat()
+                    MenuSlider(stringResource(R.string.caption_glow_intensity), intensity, 0f..100f, child = true) {
+                        emit(config.copy(neonStrength = ToolConversions.intensityToNeonStrength(it.toDouble())))
+                    }
+                }
+            }
+        })
     }
 }
 
@@ -112,7 +124,7 @@ private fun ShapePager(config: ShapeConfig, onPage: (Int) -> Unit, onPick: (Shap
     ChipPager(pages.size, config.shapePage, { pageLabel(pages[it]) }, ShapePresets.ROWS, onPage) { page ->
         for (row in pages[page].presets.chunked(ShapePresets.COLUMNS)) {
             Row(horizontalArrangement = Arrangement.spacedBy(GAP.dp)) {
-                for (p in row) KindChip(ShapeIcons.of(p), stringResource(presetLabel(p.key)), selected = p.key == config.preset) { onPick(p) }
+                for (p in row) MenuTile(ShapeIcons.of(p), stringResource(presetLabel(p.key)), selected = p.key == config.preset, size = CHIP.dp) { onPick(p) }
             }
         }
     }
@@ -125,14 +137,14 @@ private fun ConnectorPager(config: ShapeConfig, onPage: (Int) -> Unit, onPick: (
     ChipPager(pages.size, config.connectorPage, { connectorPageLabel(pages[it]) }, ConnectorPresets.ROWS, onPage) { page ->
         for (row in pages[page].presets.chunked(ConnectorPresets.COLUMNS)) {
             Row(horizontalArrangement = Arrangement.spacedBy(GAP.dp)) {
-                for (p in row) KindChip(ShapeIcons.connector(p), stringResource(connectorLabel(p.key)), selected = p.key == config.preset) { onPick(p) }
+                for (p in row) MenuTile(ShapeIcons.connector(p), stringResource(connectorLabel(p.key)), selected = p.key == config.preset, size = CHIP.dp) { onPick(p) }
             }
         }
     }
 }
 
 /**
- * Chips swiped sideways a page at a time: the page's caption above, the dots below, and every page
+ * Chips swiped sideways a page at a time: the page's caption above with its dots, and every page
  * [rows] chips tall so a swipe never makes the popup jump. Remembers its page through [onPage].
  */
 @Composable
@@ -147,25 +159,18 @@ private fun ChipPager(
     val state = rememberPagerState(initialPage = initialPage.coerceIn(0, pageCount - 1)) { pageCount }
     LaunchedEffect(state.settledPage) { if (state.settledPage != initialPage) onPage(state.settledPage) }
     val palette = LocalPalette.current
-    Text(
-        stringResource(caption(state.currentPage)),
-        color = palette.textDim.toComposeColor(),
-        fontSize = 12.sp,
-        modifier = Modifier.padding(bottom = 4.dp),
-    )
-    HorizontalPager(state = state, modifier = Modifier.fillMaxWidth().height((rows * CHIP + (rows - 1) * GAP).dp)) { page ->
-        Column(verticalArrangement = Arrangement.spacedBy(GAP.dp)) { content(page) }
-    }
-    if (pageCount > 1) {
-        Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.Center) {
-            for (i in 0 until pageCount) {
-                val on = i == state.currentPage
-                Box(
-                    Modifier.padding(horizontal = 3.dp).size(6.dp).clip(CircleShape)
-                        .background((if (on) palette.accent else palette.border).toComposeColor()),
-                )
+    PanelCaption(stringResource(caption(state.currentPage))) {
+        if (pageCount > 1) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (i in 0 until pageCount) {
+                    val on = i == state.currentPage
+                    Box(Modifier.size(6.dp).clip(CircleShape).background((if (on) palette.accent else palette.border).toComposeColor()))
+                }
             }
         }
+    }
+    HorizontalPager(state = state, modifier = Modifier.fillMaxWidth().height((rows * CHIP + (rows - 1) * GAP).dp)) { page ->
+        Column(verticalArrangement = Arrangement.spacedBy(GAP.dp)) { content(page) }
     }
 }
 
@@ -177,33 +182,34 @@ private fun ChipPager(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FillColourRow(chosen: Rgba?, ink: Rgba, host: SwatchHost, onPick: (Rgba?) -> Unit) {
-    val palette = LocalPalette.current
     var editing by remember { mutableStateOf<Int?>(null) }
-    Text(stringResource(R.string.caption_fill_colour), color = palette.text.toComposeColor(), fontSize = 12.sp)
-    FlowRow(
-        Modifier.padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Swatch(ink, selected = chosen == null, label = stringResource(R.string.fill_match_outline), mark = true) { onPick(null) }
-        host.shownSwatches.forEachIndexed { i, c ->
-            val colour = c.withAlpha(255)
-            val on = chosen == colour
-            Box {
-                Swatch(colour, selected = on, label = null) { if (on) editing = i else onPick(colour) }
-                if (editing == i) {
-                    ColorPickerPopup(
-                        initial = colour,
-                        recents = host.hostRecentColors,
-                        onDismiss = {
-                            host.rememberSwatchColor(i)
-                            editing = null
-                        },
-                        onPick = { picked ->
-                            host.recolorSwatch(i, picked)
-                            onPick(picked.withAlpha(255))
-                        },
-                    )
+    Column(Modifier.padding(start = 10.dp, end = 10.dp, bottom = 12.dp)) {
+        PanelCaption(stringResource(R.string.caption_fill_colour))
+        FlowRow(
+            Modifier.padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Swatch(ink, selected = chosen == null, label = stringResource(R.string.fill_match_outline), mark = true) { onPick(null) }
+            host.shownSwatches.forEachIndexed { i, c ->
+                val colour = c.withAlpha(255)
+                val on = chosen == colour
+                Box {
+                    Swatch(colour, selected = on, label = null) { if (on) editing = i else onPick(colour) }
+                    if (editing == i) {
+                        ColorPickerPopup(
+                            initial = colour,
+                            recents = host.hostRecentColors,
+                            onDismiss = {
+                                host.rememberSwatchColor(i)
+                                editing = null
+                            },
+                            onPick = { picked ->
+                                host.recolorSwatch(i, picked)
+                                onPick(picked.withAlpha(255))
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -233,12 +239,13 @@ private fun Swatch(color: Rgba, selected: Boolean, label: String?, mark: Boolean
     if (label != null) Tooltip(label) { body() } else body()
 }
 
-/** One end's head: a chip for each, drawn on a short line. */
+/** One end's head: a segment for each, drawn on a short line. */
 @Composable
 private fun HeadRow(caption: String, chosen: Head, atStart: Boolean, onPick: (Head) -> Unit) {
-    Text(caption, color = LocalPalette.current.text.toComposeColor(), fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
-    Row(Modifier.padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(GAP.dp)) {
-        for (h in Head.entries) KindChip(ShapeIcons.head(h, atStart), stringResource(headLabel(h)), selected = h == chosen) { onPick(h) }
+    val heads = Head.entries
+    Column(Modifier.padding(10.dp)) {
+        PanelCaption(caption)
+        IconSegmented(heads.map { ShapeIcons.head(it, atStart) }, heads.map { stringResource(headLabel(it)) }, heads.indexOf(chosen)) { onPick(heads[it]) }
     }
 }
 
@@ -246,31 +253,13 @@ private fun HeadRow(caption: String, chosen: Head, atStart: Boolean, onPick: (He
 @Composable
 private fun CountRow(config: ShapeConfig, onChange: (Int) -> Unit) {
     val range = config.chip.kind.nRange ?: return
-    val palette = LocalPalette.current
     val count = config.count.coerceIn(range.first, range.last)
-    Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            stringResource(countLabel(config.chip.kind.countKind)),
-            color = palette.text.toComposeColor(), fontSize = 12.sp, modifier = Modifier.width(120.dp),
+    MenuRow(stringResource(countLabel(config.chip.kind.countKind))) {
+        MenuStepper(
+            "$count", stringResource(R.string.count_fewer), stringResource(R.string.count_more), Modifier.width(116.dp),
+            canLess = count > range.first, canMore = count < range.last,
+            onLess = { onChange(count - 1) }, onMore = { onChange(count + 1) },
         )
-        StepButton("−", stringResource(R.string.count_fewer), enabled = count > range.first) { onChange(count - 1) }
-        Text("$count", color = palette.text.toComposeColor(), fontSize = 14.sp, modifier = Modifier.width(36.dp).padding(horizontal = 8.dp))
-        StepButton("+", stringResource(R.string.count_more), enabled = count < range.last) { onChange(count + 1) }
-    }
-}
-
-@Composable
-private fun StepButton(glyph: String, label: String, enabled: Boolean, onClick: () -> Unit) {
-    val palette = LocalPalette.current
-    Tooltip(label) {
-        Box(
-            Modifier.size(30.dp).clip(CircleShape)
-                .border(1.dp, palette.border.toComposeColor(), CircleShape)
-                .clickable(enabled = enabled, onClick = onClick),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(glyph, color = (if (enabled) palette.text else palette.textDim).toComposeColor(), fontSize = 16.sp)
-        }
     }
 }
 
@@ -428,6 +417,10 @@ private fun headLabel(head: Head): Int = when (head) {
     Head.HOLLOW_DIAMOND -> R.string.head_hollow_diamond
 }
 
-/** A chip is 38 dp across; six of them and their gaps fill the popup's 256 dp. */
+/** The menu, and how far its chip cards sit their chips in from its edge. */
+private const val MENU_WIDTH = 300
+private const val INSET = 10
+
+/** A chip is 38 dp across; six of them and their gaps fill a chip card's 260 dp, to within 2. */
 private const val CHIP = 38
-private const val GAP = 5
+private const val GAP = 6

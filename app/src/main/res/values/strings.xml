@@ -312,6 +312,8 @@
     <string name="caption_cells">Cells</string>
     <string name="count_fewer">Fewer</string>
     <string name="count_more">More</string>
+    <string name="decrease">Decrease</string>
+    <string name="increase">Increase</string>
     <string name="caption_fill">Fill</string>
     <string name="caption_perfect">Perfect</string>
     <string name="caption_opacity">Opacity</string>
