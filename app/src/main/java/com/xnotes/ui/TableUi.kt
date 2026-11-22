@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,20 +19,15 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DragIndicator
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -107,91 +103,87 @@ fun TableDialog(editor: Editor, table: FlowTable?, onDismiss: () -> Unit) {
         onDismiss()
     }
 
-    AlertDialog(
-        onDismissRequest = { finish(insert = false) },
-        title = { Text(stringResource(if (table == null) R.string.insert_table else R.string.table_style)) },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                TablePreview(if (table == null) rows else 4, if (table == null) cols else 3, style, editor.tableRuleColor())
-                Spacer(Modifier.size(10.dp))
+    SheetDialog(
+        title = stringResource(if (table == null) R.string.insert_table else R.string.table_style),
+        onDismiss = { finish(insert = false) },
+        width = 360.dp,
+        gap = 8.dp,
+        action = {
+            PanelChip(stringResource(R.string.reset)) {
+                val factory = TableDefaults()
+                update(factory.rows, factory.cols, factory.style)
+            }
+        },
+        foot = {
+            if (table == null) ConfirmButtons(stringResource(R.string.insert), { finish(insert = false) }) { finish(insert = true) }
+            else SheetButton(stringResource(R.string.done), Modifier.fillMaxWidth(), ButtonKind.CONFIRM) { finish(insert = false) }
+        },
+    ) {
+        PanelCard(padding = PaddingValues(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TablePreview(
+                    if (table == null) rows else 4, if (table == null) cols else 3, style, editor.tableRuleColor(),
+                    Modifier.weight(1f).height(if (table == null) 120.dp else 104.dp),
+                )
                 if (table == null) {
-                    Stepper(stringResource(R.string.table_rows), "$rows", { update(r = rows - 1) }, { update(r = rows + 1) })
-                    Stepper(stringResource(R.string.table_columns), "$cols", { update(c = cols - 1) }, { update(c = cols + 1) })
-                }
-                Stepper(stringResource(R.string.table_padding), stringResource(R.string.table_pt_value, "%.0f".format(style.paddingPt)), {
-                    update(s = style.copy(paddingPt = style.paddingPt - 1.0))
-                }, {
-                    update(s = style.copy(paddingPt = style.paddingPt + 1.0))
-                })
-                Stepper(stringResource(R.string.table_lines), stringResource(R.string.table_pt_value, "%.2f".format(style.lineWidthPt)), {
-                    update(s = style.copy(lineWidthPt = style.lineWidthPt - LINE_STEP))
-                }, {
-                    update(s = style.copy(lineWidthPt = style.lineWidthPt + LINE_STEP))
-                })
-                ColorRow(stringResource(R.string.table_line_colour), style.lineColor, editor.tableRuleColor(), editor) {
-                    update(s = style.copy(lineColor = it))
-                }
-                Spacer(Modifier.size(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for (b in BORDER_CHOICES) {
-                        ModeChip(stringResource(b.labelRes), style.borders == b) { update(s = style.copy(borders = b)) }
-                    }
-                }
-                Spacer(Modifier.size(6.dp))
-                SwitchRow(stringResource(R.string.table_header_row), style.headerRow) { update(s = style.copy(headerRow = it)) }
-                SwitchRow(stringResource(R.string.table_banded_rows), style.banded) { update(s = style.copy(banded = it)) }
-                if (style.headerRow || style.banded) {
-                    ColorRow(stringResource(R.string.table_tint), style.tint, palette.accent, editor) { update(s = style.copy(tint = it)) }
-                }
-                Spacer(Modifier.size(8.dp))
-                if (showDefaultRow && !current().isFactory) {
-                    // The checkbox's 48dp touch frame insets the drawn box; pull the row back to align it.
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.offset(x = (-14).dp)) {
-                        Checkbox(
-                            checked = !saved.isFactory && current() == saved,
-                            onCheckedChange = { on -> editor.saveNewTableDefaults(if (on) current() else TableDefaults()) },
-                        )
-                        Text(
-                            stringResource(R.string.default_for_new_tables),
-                            color = palette.text.toComposeColor(),
-                            fontSize = 12.sp,
-                        )
-                    }
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    ModeChip(stringResource(R.string.reset), false) {
-                        val factory = TableDefaults()
-                        update(factory.rows, factory.cols, factory.style)
+                    Column(Modifier.width(128.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Stepper(stringResource(R.string.table_rows), "$rows", onMinus = { update(r = rows - 1) }, onPlus = { update(r = rows + 1) })
+                        Stepper(stringResource(R.string.table_columns), "$cols", onMinus = { update(c = cols - 1) }, onPlus = { update(c = cols + 1) })
                     }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { finish(insert = table == null) }) { Text(stringResource(if (table == null) R.string.insert else R.string.done)) }
-        },
-        dismissButton = if (table == null) {
-            { TextButton(onClick = { finish(insert = false) }) { Text(stringResource(R.string.cancel)) } }
-        } else {
-            null
-        },
-    )
+        }
+        MenuCard(buildList<MenuGroup> {
+            add {
+                MenuSegmented(BORDER_CHOICES.map { stringResource(it.labelRes) }, BORDER_CHOICES.indexOf(style.borders)) {
+                    update(s = style.copy(borders = BORDER_CHOICES[it]))
+                }
+                Spacer(Modifier.height(10.dp))
+            }
+            add {
+                Row(Modifier.padding(start = 14.dp, top = 10.dp, end = 10.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Stepper(
+                        stringResource(R.string.table_padding), stringResource(R.string.table_pt_value, "%.0f".format(style.paddingPt)), Modifier.weight(1f),
+                        onMinus = { update(s = style.copy(paddingPt = style.paddingPt - 1.0)) },
+                        onPlus = { update(s = style.copy(paddingPt = style.paddingPt + 1.0)) },
+                    )
+                    Stepper(
+                        stringResource(R.string.table_lines), stringResource(R.string.table_pt_value, "%.2f".format(style.lineWidthPt)), Modifier.weight(1f),
+                        onMinus = { update(s = style.copy(lineWidthPt = style.lineWidthPt - LINE_STEP)) },
+                        onPlus = { update(s = style.copy(lineWidthPt = style.lineWidthPt + LINE_STEP)) },
+                    )
+                }
+            }
+            add {
+                MenuRow(stringResource(R.string.table_line_colour)) {
+                    TableColor(style.lineColor, editor.tableRuleColor(), editor) { update(s = style.copy(lineColor = it)) }
+                }
+            }
+        })
+        MenuCard(buildList<MenuGroup> {
+            add { MenuSwitch(stringResource(R.string.table_header_row), style.headerRow) { update(s = style.copy(headerRow = it)) } }
+            add { MenuSwitch(stringResource(R.string.table_banded_rows), style.banded) { update(s = style.copy(banded = it)) } }
+            if (style.headerRow || style.banded) {
+                add { MenuRow(stringResource(R.string.table_tint)) { TableColor(style.tint, palette.accent, editor) { update(s = style.copy(tint = it)) } } }
+            }
+        })
+        if (showDefaultRow && !current().isFactory) {
+            PanelCheck(stringResource(R.string.default_for_new_tables), !saved.isFactory && current() == saved) { on ->
+                editor.saveNewTableDefaults(if (on) current() else TableDefaults())
+            }
+        }
+    }
 }
 
 /** A small live sketch of the table's look: fills and rules. */
 @Composable
-private fun TablePreview(rows: Int, cols: Int, style: TableStyle, autoRule: com.xnotes.core.model.Rgba) {
+private fun TablePreview(rows: Int, cols: Int, style: TableStyle, autoRule: com.xnotes.core.model.Rgba, modifier: Modifier) {
     val palette = LocalPalette.current
     val tint = (style.tint ?: palette.accent)
     val line = (style.lineColor ?: autoRule).toComposeColor()
     val header = tint.withAlpha(com.xnotes.core.text.FlowLayout.HEADER_ALPHA).toComposeColor()
     val band = tint.withAlpha(com.xnotes.core.text.FlowLayout.BAND_ALPHA).toComposeColor()
-    Canvas(
-        Modifier
-            .fillMaxWidth()
-            .height(92.dp)
-            .clip(MaterialTheme.shapes.small)
-            .background(palette.surface.toComposeColor()),
-    ) {
+    Canvas(modifier.clip(MaterialTheme.shapes.small).background(palette.bg.toComposeColor())) {
         val r = rows.coerceAtMost(PREVIEW_MAX)
         val c = cols.coerceAtMost(PREVIEW_MAX)
         val margin = 10.dp.toPx()
@@ -223,54 +215,19 @@ private fun TablePreview(rows: Int, cols: Int, style: TableStyle, autoRule: com.
     }
 }
 
+/** A number of the table under its [label], stepped one at a time. */
 @Composable
-private fun Stepper(label: String, value: String, onMinus: () -> Unit, onPlus: () -> Unit) {
-    val palette = LocalPalette.current
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = palette.textDim.toComposeColor(), fontSize = 13.sp, modifier = Modifier.width(96.dp))
-        Box(Modifier.size(34.dp).clickable(onClick = onMinus), contentAlignment = Alignment.Center) {
-            Text("−", color = palette.text.toComposeColor(), fontSize = 18.sp)
-        }
-        Text(
-            value,
-            color = palette.text.toComposeColor(),
-            fontSize = 14.sp,
-            modifier = Modifier.width(72.dp),
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        )
-        Box(Modifier.size(34.dp).clickable(onClick = onPlus), contentAlignment = Alignment.Center) {
-            Text("+", color = palette.text.toComposeColor(), fontSize = 18.sp)
-        }
-    }
-}
-
-@Composable
-private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            label,
-            color = LocalPalette.current.textDim.toComposeColor(),
-            fontSize = 13.sp,
-            modifier = Modifier.width(202.dp),
-        )
-        Switch(checked = checked, onCheckedChange = onChange)
+private fun Stepper(label: String, value: String, modifier: Modifier = Modifier, onMinus: () -> Unit, onPlus: () -> Unit) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, color = LocalPalette.current.textDim.toComposeColor(), fontSize = 12.sp, maxLines = 1)
+        MenuStepper(value, stringResource(R.string.decrease), stringResource(R.string.increase), Modifier.fillMaxWidth(), onLess = onMinus, onMore = onPlus)
     }
 }
 
 /** Auto (null = follow the theme) or a colour of its own. */
 @Composable
-private fun ColorRow(
-    label: String,
-    value: com.xnotes.core.model.Rgba?,
-    auto: com.xnotes.core.model.Rgba,
-    editor: Editor,
-    onChange: (com.xnotes.core.model.Rgba?) -> Unit,
-) {
-    val palette = LocalPalette.current
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
-        Text(label, color = palette.textDim.toComposeColor(), fontSize = 13.sp, modifier = Modifier.width(96.dp))
-        ColorOrNone(stringResource(R.string.auto), value, auto, onChange) { d, p -> ColorPickerPopup(value ?: auto, editor.recentColors, d, p) }
-    }
+private fun TableColor(value: com.xnotes.core.model.Rgba?, auto: com.xnotes.core.model.Rgba, editor: Editor, onChange: (com.xnotes.core.model.Rgba?) -> Unit) {
+    ColorOrNone(stringResource(R.string.auto), value, auto, onChange) { d, p -> ColorPickerPopup(value ?: auto, editor.recentColors, d, p) }
 }
 
 // --- edit mode ---

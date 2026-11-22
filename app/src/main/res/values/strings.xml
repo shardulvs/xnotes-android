@@ -934,7 +934,7 @@
     <string name="table_rows">Rows</string>
     <string name="table_columns">Columns</string>
     <string name="table_padding">Padding</string>
-    <string name="table_lines">Lines</string>
+    <string name="table_lines">Line width</string>
     <string name="table_line_colour">Line colour</string>
     <string name="table_header_row">Header row</string>
     <string name="table_banded_rows">Banded rows</string>

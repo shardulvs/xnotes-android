@@ -689,36 +689,6 @@ internal fun DropdownMenu(
     }
 }
 
-/**
- * The app's dialog: material's, pinned to the palette menu surface and given the same hairline
- * border and 14dp corners the hand-rolled progress dialogs use, so a dialog reads against
- * same-tone surfaces (the backstage, OLED black) and matches the menus. Shadows material3's
- * composable for every same-package caller that doesn't import material's directly.
- */
-@Composable
-internal fun AlertDialog(
-    onDismissRequest: () -> Unit,
-    confirmButton: @Composable () -> Unit,
-    modifier: Modifier = Modifier,
-    dismissButton: (@Composable () -> Unit)? = null,
-    title: (@Composable () -> Unit)? = null,
-    text: (@Composable () -> Unit)? = null,
-    shape: Shape = MaterialTheme.shapes.large,
-    containerColor: Color = LocalPalette.current.menuBg.toComposeColor(),
-) {
-    if (Eyedropper.target != null) return
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismissRequest,
-        confirmButton = confirmButton,
-        modifier = modifier.border(1.dp, LocalPalette.current.border.toComposeColor(), shape),
-        dismissButton = dismissButton,
-        title = title,
-        text = text,
-        shape = shape,
-        containerColor = containerColor,
-    )
-}
-
 /** A bar's icons sit this far in from its rounded ends. */
 internal val BAR_END = 4.dp
 
