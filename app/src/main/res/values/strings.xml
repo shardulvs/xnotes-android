@@ -320,7 +320,6 @@
     <string name="caption_opacity">Opacity</string>
     <string name="caption_dashed">Dashed</string>
     <string name="default_suffix">"  (default)"</string>
-    <string name="caption_opacity_percent">"Opacity  %1$d%%"</string>
     <string name="caption_glow_intensity">Intensity</string>
 
     <!-- Toolbar -->
@@ -486,7 +485,6 @@
     <string name="collapse_sidebar">Collapse sidebar</string>
     <string name="home">Home</string>
     <string name="new_note">New note</string>
-    <string name="new_note_in">New note in %1$s</string>
     <string name="close_new_note">Close without creating</string>
     <string name="cover">Cover</string>
     <string name="no_cover">No cover</string>
@@ -495,11 +493,7 @@
     <string name="change_cover">Change cover…</string>
     <string name="change_cover_title">Change cover</string>
     <string name="remove_cover">Remove cover</string>
-    <string name="templates_built_in">Built-in</string>
-    <string name="templates_examples">Examples</string>
     <string name="templates_imported">Imported</string>
-    <string name="templates_imported_help">Kept in your notes folder, so they sync with your notes.</string>
-    <string name="cover_designs">Designs</string>
     <string name="import_template_file">Import template</string>
     <string name="page_from_image">Page template from image</string>
     <string name="cover_from_image">Cover template from image</string>
@@ -529,10 +523,7 @@
     <string name="ai_prompt_cover_pattern">With Python, draw a generative pattern of overlapping translucent circles in deep blues and teal, and make it a cover template with a thin gold frame and a label for the title.</string>
     <string name="ai_prompt_cover_leather">A cover template that looks like a leather notebook: draw a dark leather grain with Python as light and shade over a colour I can change, and add a blind-stamped border and a gold label.</string>
     <string name="tag_all">All</string>
-    <string name="every_page">Every page</string>
     <string name="plain_paper">Plain paper</string>
-    <string name="pick_template_hint">Pick a template to set its lines, colours and spacing.</string>
-    <string name="pick_cover_hint">Pick a design to start the note with a cover.</string>
     <string name="page_size_mm">%1$s × %2$s mm</string>
     <string name="custom_size_range">Each side between %1$s and %2$s mm</string>
     <string name="new_canvas">New canvas</string>

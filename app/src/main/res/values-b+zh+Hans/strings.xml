@@ -273,7 +273,6 @@
     <string name="caption_opacity">不透明度</string>
     <string name="caption_dashed">虚线笔</string>
     <string name="default_suffix">"  (默认)"</string>
-    <string name="caption_opacity_percent">"不透明度  %1$d%%"</string>
     <string name="caption_glow_intensity">发光强度</string>
 
     <!-- Toolbar -->
