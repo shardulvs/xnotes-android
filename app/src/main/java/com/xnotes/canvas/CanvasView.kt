@@ -423,18 +423,7 @@ class CanvasView @JvmOverloads constructor(
                 continue
             }
 
-            st.fillPaper(r, page, pr)
-            st.backgroundForOrSchedule(page)?.let { blitPageSurface(r, st, page, pr, it.surface) }
-            // A live caret session lifts the flow out of the ink cache; paint it
-            // immediate-mode here (under the ink, over the background) so every
-            // keystroke shows without waiting for a cache rebuild. Formulas are
-            // never cached, so one that finishes setting shows on the next frame.
-            r.withSave {
-                r.clipRect(pr)
-                r.translate(pr.left, pr.top)
-                paintUnderInk(r, st, page, st.displayRectToPage(page, visible.translate(-pr.left, -pr.top)))
-            }
-            st.cacheForOrSchedule(page)?.let { blitPageSurface(r, st, page, pr, it.surface) }
+            drawPage(r, st, page, pr, visible)
         }
         r.restore()
 
@@ -458,15 +447,7 @@ class CanvasView @JvmOverloads constructor(
                 for (i in st.rowRanges()[neighbourRow]) {
                     val pr = st.pageRects.getOrNull(i) ?: continue
                     if (!pr.intersects(neighbourVisible)) continue
-                    val page = st.document.pages[i]
-                    st.fillPaper(r, page, pr)
-                    st.backgroundForOrSchedule(page)?.let { blitPageSurface(r, st, page, pr, it.surface) }
-                    r.withSave {
-                        r.clipRect(pr)
-                        r.translate(pr.left, pr.top)
-                        paintUnderInk(r, st, page, st.displayRectToPage(page, neighbourVisible.translate(-pr.left, -pr.top)))
-                    }
-                    st.cacheForOrSchedule(page)?.let { blitPageSurface(r, st, page, pr, it.surface) }
+                    drawPage(r, st, st.document.pages[i], pr, neighbourVisible)
                 }
                 r.restore()
                 canvas.restore()
@@ -598,61 +579,87 @@ class CanvasView @JvmOverloads constructor(
     }
 
     /**
+     * One page as its caches hold it: paper, the background bands, what goes live under the ink, then
+     * the ink bands. Bands missing where the page shows in [visible] (content space) are asked for.
+     */
+    private fun drawPage(r: AndroidRenderer, st: CanvasState, page: Page, pr: Rect, visible: Rect) {
+        st.fillPaper(r, page, pr)
+        val seen = st.displayRectToPage(page, visible.translate(-pr.left, -pr.top))
+        r.withSave {
+            r.clipRect(pr)
+            r.translate(pr.left, pr.top)
+            st.applyPageTransform(r, page)
+            st.drawBackground(r, page, seen)
+        }
+        // A live caret session lifts the flow out of the ink cache; paint it
+        // immediate-mode here (under the ink, over the background) so every
+        // keystroke shows without waiting for a cache rebuild. Formulas are
+        // never cached, so one that finishes setting shows on the next frame.
+        r.withSave {
+            r.clipRect(pr)
+            r.translate(pr.left, pr.top)
+            paintUnderInk(r, st, page, seen)
+        }
+        r.withSave {
+            r.clipRect(pr)
+            r.translate(pr.left, pr.top)
+            st.applyPageTransform(r, page)
+            st.drawInk(r, page, seen)
+        }
+    }
+
+    /**
      * The page room is being drawn through ([CanvasState.roomView]): its old layers cut at the room,
      * the near part where it was and the far part moved on, with paper ruled where room opens. What
      * the cut cannot split is drawn live where it stays. A layer rebuilt since is drawn as it is.
      */
     private fun drawRoomPage(r: AndroidRenderer, st: CanvasState, page: Page, pr: Rect, v: RoomView, visible: Rect) {
         st.fillPaper(r, page, pr)
+        val seen = st.displayRectToPage(page, visible.translate(-pr.left, -pr.top))
         // Asked for so a settled room's changed footprint schedules the rebuilds that end it.
-        st.backgroundForOrSchedule(page)
-        st.cacheForOrSchedule(page)
-        val bg = st.rawBackgroundCache(page)
-        val ink = st.rawInkCache(page)
+        st.askFor(page, seen)
+        val bg = st.roomBackground(page, v, seen)
+        val ink = st.roomInk(page, v, seen)
         r.withSave {
             r.clipRect(pr)
             r.translate(pr.left, pr.top)
             st.applyPageTransform(r, page)
-            if (bg != null) {
-                when {
-                    bg.cover != v.cover -> r.drawRaster(bg.surface, bg.cover)
-                    // A plain page's ruling is laid for the page, not carried by what is on it.
-                    page.pdfPage == null -> r.drawRaster(bg.surface, bg.cover)
-                    else -> drawCut(r, bg.surface, bg.cover, v)
-                }
+            when {
+                bg == null -> st.drawBackground(r, page, seen)
+                // A plain page's ruling is laid for the page, not carried by what is on it.
+                page.pdfPage == null -> st.drawBands(r, bg)
+                else -> drawCut(r, v) { st.drawBands(r, bg) }
             }
-            if (bg == null || bg.cover == v.cover) st.paintRoomPaper?.invoke(v, r)
+            if (bg != null || !st.hasBackgroundBuilt(page)) st.paintRoomPaper?.invoke(v, r)
         }
         r.withSave {
             r.clipRect(pr)
             r.translate(pr.left, pr.top)
-            paintUnderInk(r, st, page, st.displayRectToPage(page, visible.translate(-pr.left, -pr.top)))
+            paintUnderInk(r, st, page, seen)
         }
         r.withSave {
             r.clipRect(pr)
             r.translate(pr.left, pr.top)
             st.applyPageTransform(r, page)
             // What stays put is out of the old ink layer, so it is drawn here until a layer that holds it lands.
-            val old = ink == null || ink.cover == v.cover
+            val old = ink != null || !st.hasInkBuilt(page)
             if (old) for (item in v.fills) st.paintItem(item, r)
-            if (ink != null) {
-                if (ink.cover == v.cover) drawCut(r, ink.surface, ink.cover, v) else r.drawRaster(ink.surface, ink.cover)
-            }
+            if (ink != null) drawCut(r, v) { st.drawBands(r, ink) } else st.drawInk(r, page, seen)
             if (old) for (item in v.over) st.paintItem(item, r)
         }
     }
 
-    /** [surface], a page layer built for [cover], drawn cut at [v]'s room: what lay before it in place, what lay past it moved on. */
-    private fun drawCut(r: AndroidRenderer, surface: com.xnotes.core.pal.RasterSurface, cover: Rect, v: RoomView) {
+    /** A page layer built before [v]'s room, drawn cut at it: what lay before the room in place, what lay past it moved on. */
+    private fun drawCut(r: AndroidRenderer, v: RoomView, draw: () -> Unit) {
         val far = 1e9
         r.withSave {
             r.clipRect(if (v.sideways) Rect.ltrb(-far, -far, v.split, far) else Rect.ltrb(-far, -far, far, v.split))
-            r.drawRaster(surface, cover)
+            draw()
         }
         r.withSave {
             if (v.sideways) r.translate(v.shift, 0.0) else r.translate(0.0, v.shift)
             r.clipRect(if (v.sideways) Rect.ltrb(v.resume, -far, far, far) else Rect.ltrb(-far, v.resume, far, far))
-            r.drawRaster(surface, cover)
+            draw()
         }
     }
 
@@ -725,20 +732,6 @@ class CanvasView @JvmOverloads constructor(
         canvas.drawRect(l, b, r + 1f, b + 1f, borderPaint)
         canvas.drawRect(l, t + 1f, l + 1f, b, borderPaint)
         canvas.drawRect(r, t + 1f, r + 1f, b, borderPaint)
-    }
-
-    /** Blit a page-space cache surface into the page's display rect, rotated per the view. The
-     *  surface covers the page's whole footprint (margins included), so it blits at [CanvasState.footprint]. */
-    private fun blitPageSurface(r: AndroidRenderer, st: CanvasState, page: Page, pr: Rect, surface: com.xnotes.core.pal.RasterSurface) {
-        if (st.rotationDeg == 0) {
-            r.drawRaster(surface, pr)
-            return
-        }
-        r.withSave {
-            r.translate(pr.left, pr.top)
-            st.applyPageTransform(r, page)
-            r.drawRaster(surface, st.footprint(page))
-        }
     }
 
     /**

@@ -51,8 +51,8 @@ class UndoCacheRepairTest {
         val jobs = ArrayDeque<() -> Unit>()
         st.runAsync = { jobs.addLast(it) } // hold the build, as a real cache thread would for a frame or two
 
-        val before = st.cacheFor(page) // warm the ink cache, as a draw frame would
-        val painter = (before.surface as FakeRasterSurface).painter
+        val before = st.cacheFor(page).bands[0]!!.surface // warm the ink cache, as a draw frame would
+        val painter = (before as FakeRasterSurface).painter
         painter.ribbonRuns.clear()
 
         // Mimic an undo that removed the last-added stroke, then run the whole-page fallback.
@@ -63,19 +63,19 @@ class UndoCacheRepairTest {
         assertEquals("undo must not drop the ink cache (the blank-frame flicker)", 1, st.cacheSnapshot().inkPages)
         assertSame(
             "the pre-edit surface keeps being blitted until the rebuild lands",
-            before.surface,
-            st.cacheForOrSchedule(page)?.surface,
+            before,
+            st.cacheForOrSchedule(page)?.bands?.get(0)?.surface,
         )
         assertEquals("and asking again while it is in flight must not queue it twice", 1, jobs.size)
 
         jobs.removeFirst().invoke()
 
-        val after = st.cacheForOrSchedule(page)
-        assertNotSame("the rebuilt surface replaces it once ready", before.surface, after?.surface)
+        val after = st.cacheForOrSchedule(page)?.bands?.get(0)?.surface
+        assertNotSame("the rebuilt surface replaces it once ready", before, after)
         assertEquals(
             "and it holds the post-undo page: one stroke left, one ribbon painted",
             1,
-            (after!!.surface as FakeRasterSurface).painter.ribbonRuns.size,
+            (after as FakeRasterSurface).painter.ribbonRuns.size,
         )
     }
 
@@ -99,7 +99,7 @@ class UndoCacheRepairTest {
     @Test fun regionRepairRepaintsOnlyWhatTheRegionCovers() {
         val st = state()
         val page = st.document.pages[0]
-        val painter = (st.cacheFor(page).surface as FakeRasterSurface).painter
+        val painter = (st.cacheFor(page).bands[0]!!.surface as FakeRasterSurface).painter
 
         // A command that named its region (an undone stroke at 20,20) must not cost the whole page:
         // the dot at 120,120 is nowhere near it and stays as it was rasterized.

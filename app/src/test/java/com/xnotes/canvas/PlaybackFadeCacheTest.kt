@@ -52,7 +52,7 @@ class PlaybackFadeCacheTest {
         val jobs = ArrayDeque<() -> Unit>()
         st.runAsync = { jobs.addLast(it) }
         st.fade = InkFade(1, 5_000) // paused halfway: the later dot is faint
-        val faded = st.cacheFor(page).surface as FakeRasterSurface
+        val faded = st.cacheFor(page).bands[0]!!.surface as FakeRasterSurface
         assertEquals(1, faded.faintRuns())
         val painted = faded.painter.ribbonRuns.size
 
@@ -61,10 +61,10 @@ class PlaybackFadeCacheTest {
 
         assertEquals("nothing is rasterized on the main thread", painted, faded.painter.ribbonRuns.size)
         assertEquals("the page keeps its cache, or it blinks to bare paper", 1, st.cacheSnapshot().inkPages)
-        assertSame("the faded surface shows until the rebuild lands", faded, st.cacheForOrSchedule(page)?.surface)
+        assertSame("the faded surface shows until the rebuild lands", faded, st.cacheForOrSchedule(page)?.bands?.get(0)?.surface)
         assertEquals(1, jobs.size)
         jobs.removeFirst().invoke()
-        val after = st.cacheForOrSchedule(page)?.surface as FakeRasterSurface
+        val after = st.cacheForOrSchedule(page)?.bands?.get(0)?.surface as FakeRasterSurface
         assertNotSame(faded, after)
         assertEquals("the rebuilt surface draws the ink solid", 0, after.faintRuns())
     }
@@ -86,7 +86,7 @@ class PlaybackFadeCacheTest {
         assertTrue(st.repairRegion(page, first.paintBounds()))
         landings.removeFirst().invoke()
 
-        val painter = (st.cacheForOrSchedule(page)?.surface as FakeRasterSurface).painter
+        val painter = (st.cacheForOrSchedule(page)?.bands?.get(0)?.surface as FakeRasterSurface).painter
         assertEquals("the crossing is painted again on the surface that landed", first.paintBounds(), painter.clips.last())
         val repaint = painter.ops.subList(painter.ops.lastIndexOf("clear"), painter.ops.size)
         assertFalse("solid, as the playhead left it", repaint.contains("saveLayerAlpha"))

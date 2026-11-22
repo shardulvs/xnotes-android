@@ -53,14 +53,14 @@ class MarkupBakeTest {
     fun theOldLayerShowsUntilTheNewOneIsPainted() {
         val page = pdfPage()
         val st = state(page)
-        val old = st.backgroundFor(page)!!
+        val old = st.backgroundFor(page)!!.bands[0]
         val m = markup()
         page.markups = listOf(m)
         st.rebakeBackground(page, listOf(m))
-        assertSame(old, st.backgroundForOrSchedule(page))
+        assertSame(old, st.backgroundForOrSchedule(page)!!.bands[0])
         assertEquals(listOf(m), st.unbakedMarkups(page))
         runPending()
-        val fresh = st.backgroundForOrSchedule(page)
+        val fresh = st.backgroundForOrSchedule(page)!!.bands[0]
         assertNotSame(old, fresh)
         assertTrue(st.unbakedMarkups(page).isEmpty())
     }

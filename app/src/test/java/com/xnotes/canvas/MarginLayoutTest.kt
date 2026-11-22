@@ -9,6 +9,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** A page margin grows the paper without moving anything on it. */
@@ -119,14 +120,14 @@ class MarginLayoutTest {
         val pending = mutableListOf<() -> Unit>()
         st.runAsync = { pending += it }
         val page = st.document.pages[0]
-        st.cacheFor(page) // rasterize at the current size
+        val bands = st.cacheFor(page).bands.size // rasterize at the current size
         page.margins = PageMargins(right = 0.5)
         st.relayout()
         st.invalidatePageGeometry()
 
         // Nothing to blit while the rebuild is in flight: bare paper beats a stretched page.
         assertNull(st.cacheForOrSchedule(page))
-        assertEquals(1, pending.size)
+        assertEquals("one build a band", bands, pending.size)
 
         pending.forEach { it() }
         val rebuilt = st.cacheForOrSchedule(page)
@@ -155,25 +156,28 @@ class MarginLayoutTest {
         st.onCacheReady = { repaints++ }
         val page = st.document.pages[0]
 
-        // A frame schedules the page's ink; the slider moves before that build lands.
+        // A frame schedules the page's ink, a build a band; the slider moves before they land.
         st.cacheForOrSchedule(page)
-        assertEquals(1, pending.size)
+        val bands = pending.size
+        assertTrue(bands > 0)
         page.margins = PageMargins(right = 0.5)
         st.relayout()
         st.invalidatePageGeometry()
 
-        // The next frame is turned away: a build for this page is already in flight.
+        // The next frame is turned away: builds for this page's bands are already in flight.
         assertNull(st.cacheForOrSchedule(page))
-        assertEquals(1, pending.size)
+        assertEquals(bands, pending.size)
 
-        // That build is now stale and is dropped — but it must still ask for a repaint, or nothing
-        // would ever schedule the replacement and the page would stay blank until a scroll.
-        pending.removeAt(0).invoke()
-        assertEquals(1, repaints)
+        // Those builds are now stale and are dropped — but each must still ask for a repaint, or
+        // nothing would ever schedule the replacements and the page would stay blank until a scroll.
+        val stale = pending.toList()
+        pending.clear()
+        stale.forEach { it() }
+        assertEquals(bands, repaints)
         assertNull(st.cacheForOrSchedule(page)) // the repaint's frame reschedules
-        assertEquals(1, pending.size)
+        assertEquals(bands, pending.size)
 
-        pending.removeAt(0).invoke()
+        pending.toList().forEach { it() }
         val rebuilt = st.cacheForOrSchedule(page)
         assertNotNull(rebuilt)
         assertEquals(st.footprint(page), rebuilt!!.cover)
