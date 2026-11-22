@@ -72,13 +72,28 @@ internal val PANEL_WIDTH = 380.dp
 
 private const val PAGE_MS = 220
 
+/**
+ * The panel's three layers: the sheet, a card on it, and a button raised off a card. Dark sits each
+ * a step under the chrome's own lifts, which glare once they cover a whole panel; light and OLED
+ * (whose menu is already its darkest tone) keep the chrome's.
+ */
+internal class PanelColors(val sheet: Color, val card: Color, val raised: Color)
+
+@Composable
+internal fun panelColors(): PanelColors {
+    val p = LocalPalette.current
+    val deep = p.isDark && p.menuBg != p.bg
+    return if (deep) PanelColors(p.bg.toComposeColor(), p.menuBg.toComposeColor(), p.surface.toComposeColor())
+    else PanelColors(p.menuBg.toComposeColor(), p.surface.toComposeColor(), p.surfaceHi.toComposeColor())
+}
+
 /** The gear, pinned past the bar's scrolling tools, and the panel [content] fills while [open]. */
 @Composable
 internal fun SettingsButton(open: Boolean, onOpen: (Boolean) -> Unit, content: @Composable ColumnScope.() -> Unit) {
     Rule()
     Box {
         ToolbarIcon(XnotesIcons.settings, stringResource(R.string.settings), active = open) { onOpen(!open) }
-        DropdownMenu(expanded = open, onDismissRequest = { onOpen(false) }, shape = MaterialTheme.shapes.extraLarge) {
+        DropdownMenu(expanded = open, onDismissRequest = { onOpen(false) }, shape = MaterialTheme.shapes.extraLarge, containerColor = panelColors().sheet) {
             // Sized text keeps material's 24sp line otherwise, which the panel's fixed rows and tiles clip.
             ProvideTextStyle(LocalTextStyle.current.copy(lineHeight = 1.3.em)) {
                 Column(Modifier.width(PANEL_WIDTH).padding(horizontal = 12.dp, vertical = 4.dp), content = content)
@@ -113,7 +128,7 @@ internal fun PanelCard(
         modifier
             .fillMaxWidth()
             .clip(MaterialTheme.shapes.large)
-            .background(LocalPalette.current.surface.toComposeColor())
+            .background(panelColors().card)
             .padding(padding),
         content = content,
     )
@@ -180,7 +195,7 @@ internal fun RoundButton(icon: ImageVector, label: String, size: Dp = 44.dp, ena
             Modifier
                 .size(size)
                 .clip(CircleShape)
-                .background(palette.surfaceHi.toComposeColor())
+                .background(panelColors().raised)
                 .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
@@ -366,7 +381,7 @@ internal fun QuickTile(
         modifier
             .height(92.dp)
             .clip(MaterialTheme.shapes.large)
-            .background((if (active) palette.selectionBackground else palette.surface).toComposeColor())
+            .background(if (active) palette.selectionBackground.toComposeColor() else panelColors().card)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(start = 14.dp, top = 14.dp, end = 12.dp, bottom = 13.dp),
         verticalArrangement = Arrangement.SpaceBetween,
@@ -453,7 +468,7 @@ internal fun glyphInk(enabled: Boolean = true): GlyphInk {
     val palette = LocalPalette.current
     val a = if (enabled) 1f else 0.4f
     return GlyphInk(
-        page = palette.surface.toComposeColor().copy(alpha = a),
+        page = panelColors().card.copy(alpha = a),
         line = palette.textDim.toComposeColor().copy(alpha = a),
         accent = palette.accent.toComposeColor().copy(alpha = a),
     )
@@ -469,7 +484,7 @@ internal fun FitTile(label: String, modifier: Modifier = Modifier, enabled: Bool
             Modifier
                 .height(62.dp)
                 .clip(MaterialTheme.shapes.medium)
-                .background(palette.surfaceHi.toComposeColor())
+                .background(panelColors().raised)
                 .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,

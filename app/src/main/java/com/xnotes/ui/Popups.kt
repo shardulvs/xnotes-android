@@ -667,6 +667,7 @@ internal fun DropdownMenu(
     modifier: Modifier = Modifier,
     properties: PopupProperties = PopupProperties(focusable = true),
     shape: Shape = MaterialTheme.shapes.extraSmall,
+    containerColor: Color = LocalPalette.current.menuBg.toComposeColor(),
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val palette = LocalPalette.current
@@ -680,7 +681,7 @@ internal fun DropdownMenu(
         offset = LocalMenuOffset.current,
         properties = properties,
         shape = shape,
-        containerColor = palette.menuBg.toComposeColor(),
+        containerColor = containerColor,
         border = BorderStroke(1.dp, palette.border.toComposeColor()),
     ) {
         // A menu or tip opened from inside this one hangs off its own row, not beside the rail.

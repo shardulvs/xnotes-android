@@ -913,13 +913,13 @@ private fun filtersSummary(vs: ViewSettings): String {
 private fun ModeCard(mode: ViewingMode, label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val palette = LocalPalette.current
     val shape = MaterialTheme.shapes.large
-    val fill = (if (selected) palette.selectionForeground else palette.surfaceHi).toComposeColor()
+    val fill = if (selected) palette.selectionForeground.toComposeColor() else panelColors().raised
     val line = (if (selected) palette.selectionForeground else palette.textDim).toComposeColor()
     Column(
         modifier
             .height(92.dp)
             .clip(shape)
-            .background((if (selected) palette.selectionBackground else palette.surface).toComposeColor())
+            .background(if (selected) palette.selectionBackground.toComposeColor() else panelColors().card)
             .border(1.5.dp, if (selected) palette.accent.toComposeColor() else Color.Transparent, shape)
             .clickable(role = Role.RadioButton, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,

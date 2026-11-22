@@ -235,7 +235,7 @@ private fun PatternCard(p: PagePattern, bg: CanvasBackground, selected: Boolean,
         modifier
             .height(84.dp)
             .clip(shape)
-            .background((if (selected) palette.selectionBackground else palette.surface).toComposeColor())
+            .background(if (selected) palette.selectionBackground.toComposeColor() else panelColors().card)
             .border(1.5.dp, if (selected) palette.accent.toComposeColor() else Color.Transparent, shape)
             .clickable(role = Role.RadioButton, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
