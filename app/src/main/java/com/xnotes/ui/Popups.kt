@@ -163,19 +163,14 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
             // this tool to it regardless of the toolbar selection.
             StyleCaption(stringResource(R.string.caption_colour))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                ModeChip(stringResource(R.string.default_choice), colorOverride == null) { colorOverride = null; emit() }
-                ColorPickerDot(
+                val active = editor.hostToolbarColors.getOrNull(editor.hostActiveColorIndex)
+                ColorOrNone(
+                    stringResource(R.string.default_choice),
                     colorOverride,
-                    custom = colorOverride != null,
-                    onPick = { colorOverride = it; emit() },
-                    dismissOnPick = false,
+                    suggested = active ?: LocalPalette.current.text,
+                    onChange = { colorOverride = it; emit() },
                 ) { d, p ->
-                    ColorPickerPopup(
-                        initial = colorOverride ?: editor.hostToolbarColors.getOrNull(editor.hostActiveColorIndex),
-                        recents = editor.hostRecentColors,
-                        onDismiss = d,
-                        onPick = p,
-                    )
+                    ColorPickerPopup(initial = colorOverride ?: active, recents = editor.hostRecentColors, onDismiss = d, onPick = p)
                 }
             }
             Spacer(Modifier.size(12.dp))
@@ -448,19 +443,14 @@ fun TapeConfigPopup(editor: ToolPopupHost, onDismiss: () -> Unit) {
             Spacer(Modifier.size(8.dp))
             StyleCaption(stringResource(R.string.caption_colour))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                ModeChip(stringResource(R.string.default_choice), colorOverride == null) { colorOverride = null; emit() }
-                ColorPickerDot(
+                val active = editor.hostToolbarColors.getOrNull(editor.hostActiveColorIndex)
+                ColorOrNone(
+                    stringResource(R.string.default_choice),
                     colorOverride,
-                    custom = colorOverride != null,
-                    onPick = { colorOverride = it; emit() },
-                    dismissOnPick = false,
+                    suggested = active ?: LocalPalette.current.text,
+                    onChange = { colorOverride = it; emit() },
                 ) { d, p ->
-                    ColorPickerPopup(
-                        initial = colorOverride ?: editor.hostToolbarColors.getOrNull(editor.hostActiveColorIndex),
-                        recents = editor.hostRecentColors,
-                        onDismiss = d,
-                        onPick = p,
-                    )
+                    ColorPickerPopup(initial = colorOverride ?: active, recents = editor.hostRecentColors, onDismiss = d, onPick = p)
                 }
             }
             Spacer(Modifier.size(8.dp))

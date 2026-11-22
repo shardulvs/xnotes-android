@@ -257,7 +257,7 @@ private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
     }
 }
 
-/** An Auto chip (null = follow the theme) plus the shared colour picker. */
+/** Auto (null = follow the theme) or a colour of its own. */
 @Composable
 private fun ColorRow(
     label: String,
@@ -269,11 +269,7 @@ private fun ColorRow(
     val palette = LocalPalette.current
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
         Text(label, color = palette.textDim.toComposeColor(), fontSize = 13.sp, modifier = Modifier.width(96.dp))
-        ModeChip(stringResource(R.string.auto), value == null) { onChange(null) }
-        Spacer(Modifier.width(8.dp))
-        ColorPickerDot(value, custom = value != null, onPick = { onChange(it) }, dismissOnPick = false) { d, p ->
-            ColorPickerPopup(value ?: auto, editor.recentColors, d, p)
-        }
+        ColorOrNone(stringResource(R.string.auto), value, auto, onChange) { d, p -> ColorPickerPopup(value ?: auto, editor.recentColors, d, p) }
     }
 }
 

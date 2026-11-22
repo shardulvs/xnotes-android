@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
@@ -61,6 +62,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
@@ -864,6 +866,83 @@ internal fun ColorPickerDot(
         // A live picker (e.g. the page/ink popup) edits across several taps, so it stays open until a
         // tap outside; a one-shot grid (the accent swatches) closes the moment a colour is chosen.
         if (open) grid({ open = false }, { onPick(it); if (dismissOnPick) open = false })
+    }
+}
+
+/**
+ * "None, or a colour" as one control: [noneLabel] (Off, Default, Auto) beside the colour, each a
+ * tap away. A tap on the colour while it is chosen opens [picker]. While none is chosen the colour
+ * side shows the one last used here, else [suggested], and a tap brings that back.
+ */
+@Composable
+internal fun ColorOrNone(
+    noneLabel: String,
+    value: Rgba?,
+    suggested: Rgba,
+    onChange: (Rgba?) -> Unit,
+    picker: @Composable (onDismiss: () -> Unit, onPick: (Rgba) -> Unit) -> Unit,
+) {
+    val palette = LocalPalette.current
+    val label = stringResource(R.string.material_custom_colour)
+    var kept by remember { mutableStateOf<Rgba?>(null) }
+    var open by remember { mutableStateOf(false) }
+    val on = value != null
+    val shown = value ?: kept ?: suggested
+    val outer = MaterialTheme.shapes.medium
+    val inner = MaterialTheme.shapes.small
+    val chosen = palette.selectionBackground.toComposeColor()
+    val onChosen = palette.selectionForeground.toComposeColor()
+    Row(
+        Modifier
+            .height(36.dp)
+            .clip(outer)
+            .background(palette.bg.toComposeColor())
+            .border(1.dp, palette.border.toComposeColor(), outer)
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Box(
+            Modifier
+                .fillMaxHeight()
+                .clip(inner)
+                .background(if (on) Color.Transparent else chosen)
+                .semantics { selected = !on }
+                .clickable(role = Role.RadioButton) {
+                    kept = value ?: kept
+                    onChange(null)
+                }
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                noneLabel,
+                color = if (on) palette.textDim.toComposeColor() else onChosen,
+                fontSize = 13.sp,
+                fontWeight = if (on) FontWeight.Normal else FontWeight.Medium,
+                maxLines = 1,
+            )
+        }
+        Box {
+            Row(
+                Modifier
+                    .width(52.dp)
+                    .fillMaxHeight()
+                    .clip(inner)
+                    .background(if (on) chosen else Color.Transparent)
+                    .semantics {
+                        selected = on
+                        contentDescription = label
+                    }
+                    .clickable(role = Role.RadioButton) { if (on) open = true else onChange(shown) },
+                horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(18.dp).clip(CircleShape).background(shown.toComposeColor()).border(1.dp, palette.border.toComposeColor(), CircleShape))
+                if (on) Icon(XnotesIcons.chevronDown, null, tint = onChosen, modifier = Modifier.size(12.dp))
+            }
+            // The picker edits live across several taps, so it stays until a tap outside.
+            if (open) picker({ open = false }, { onChange(it) })
+        }
     }
 }
 

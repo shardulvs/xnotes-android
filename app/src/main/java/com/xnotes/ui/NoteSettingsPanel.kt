@@ -973,9 +973,9 @@ private fun FiltersPage(editor: Editor, s: ViewState, onBack: () -> Unit) {
     }
     Spacer(Modifier.height(10.dp))
     PanelCard(padding = PaddingValues(vertical = 2.dp)) {
-        BlendRow(stringResource(R.string.filter_multiply), vs.multiply, PdfColorFilter.MULTIPLY_OFF) { c -> set { it.copy(multiply = c) } }
+        BlendRow(stringResource(R.string.filter_multiply), vs.multiply, PdfColorFilter.MULTIPLY_OFF, MULTIPLY_START) { c -> set { it.copy(multiply = c) } }
         CardDivider()
-        BlendRow(stringResource(R.string.filter_screen), vs.screen, PdfColorFilter.SCREEN_OFF) { c -> set { it.copy(screen = c) } }
+        BlendRow(stringResource(R.string.filter_screen), vs.screen, PdfColorFilter.SCREEN_OFF, SCREEN_START) { c -> set { it.copy(screen = c) } }
         CardDivider()
         PanelSwitch(stringResource(R.string.caption_keep_images), vs.keepImages) { on -> set { it.copy(keepImages = on) } }
     }
@@ -991,19 +991,22 @@ private fun HeldSlider(label: String, value: Int, max: Int, onSet: (Int) -> Unit
     PanelSlider(label, "$shown%", shown.toFloat(), 0f..max.toFloat(), onChangeFinished = { held?.let(onSet); held = null }) { held = it.roundToInt() }
 }
 
+/** What a blend's colour side offers before one is picked: warm paper to multiply, deep blue to screen. */
+private val MULTIPLY_START = Rgba(0xF4, 0xE8, 0xCC, 255)
+private val SCREEN_START = Rgba(0x1B, 0x2A, 0x41, 255)
+
 /**
- * A blend filter's row: the shared picker dot plus an Off chip that writes the blend's identity
- * colour (white for multiply, black for screen), so "no filter" needs no flag of its own.
+ * A blend filter's row. Off writes the blend's identity colour (white for multiply, black for
+ * screen), so "no filter" needs no flag of its own.
  */
 @Composable
-private fun BlendRow(label: String, value: Rgba, off: Rgba, onChange: (Rgba) -> Unit) {
+private fun BlendRow(label: String, value: Rgba, off: Rgba, suggested: Rgba, onChange: (Rgba) -> Unit) {
     val palette = LocalPalette.current
     val on = value != off
     Row(Modifier.fillMaxWidth().height(52.dp).padding(start = 16.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = palette.text.toComposeColor(), fontSize = 14.sp, modifier = Modifier.weight(1f))
-        ColorPickerDot(current = value, custom = on, onPick = onChange, dismissOnPick = false) { d, p -> PageColorGridPopup(value, d, p) }
-        Spacer(Modifier.width(8.dp))
-        PanelChip(stringResource(R.string.off), !on) { onChange(off) }
+        val own = value.takeIf { on }
+        ColorOrNone(stringResource(R.string.off), own, suggested, onChange = { onChange(it ?: off) }) { d, p -> PageColorGridPopup(own ?: suggested, d, p) }
     }
 }
 

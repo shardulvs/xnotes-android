@@ -70,14 +70,9 @@ internal fun TextToolConfigPopup(editor: Editor, onDismiss: () -> Unit) {
             SpinField(stringResource(R.string.size_pt), config.sizePt, min = 6.0, max = 96.0) { apply(config.copy(sizePt = it)) }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
                 Text(stringResource(R.string.colour), color = palette.textDim.toComposeColor(), fontSize = 13.sp, modifier = Modifier.width(74.dp))
-                ModeChip(stringResource(R.string.auto), config.color == null) { apply(config.copy(color = null)) }
-                Spacer(Modifier.width(8.dp))
-                ColorPickerDot(
-                    config.color,
-                    custom = config.color != null,
-                    onPick = { apply(config.copy(color = it)) },
-                    dismissOnPick = false,
-                ) { d, p -> ColorPickerPopup(config.color ?: editor.flowDefaultColor(), editor.recentColors, d, p) }
+                ColorOrNone(stringResource(R.string.auto), config.color, editor.flowDefaultColor(), onChange = { apply(config.copy(color = it)) }) { d, p ->
+                    ColorPickerPopup(config.color ?: editor.flowDefaultColor(), editor.recentColors, d, p)
+                }
             }
 
             Text(
