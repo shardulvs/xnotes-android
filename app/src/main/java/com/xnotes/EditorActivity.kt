@@ -1670,7 +1670,7 @@ private fun EditorPane(
                         onTakePhoto = { actions.onTakePhoto(editor) },
                     ) }
                 }
-                // The format strip sits along the bottom of the resized column, so right over the soft keyboard.
+                // The format bar runs along the bottom of the resized column, so right over the soft keyboard.
                 val strip: @Composable () -> Unit = { com.xnotes.ui.TextFormatBar(editor) }
                 ToolbarAround(bar, onCover = editor::setToolbarCover, onPlace = app::placeToolbar, strip = strip) { floatingBar ->
                     Row(modifier = Modifier.fillMaxSize()) {

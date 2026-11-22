@@ -76,8 +76,9 @@ import kotlin.math.roundToInt
 
 /**
  * The bottom text-format strip, shown while the inline text tool is armed, and for a
- * text box being typed in or selected with its tool (and no label edit is open). Docked along the bottom of its pane, over a toolbar
- * docked there; the adjustResize window lifts both over the soft keyboard. Controls, in
+ * text box being typed in or selected with its tool (and no label edit is open). It runs along the bottom as the toolbar does: a
+ * docked strip, or a pill floating over the page, and over the toolbar when that is at the bottom too. The adjustResize window lifts
+ * it over the soft keyboard. Controls, in
  * order: checkbox item, font colour, highlight, font face, size, bold/italic/
  * underline/strikethrough, heading level, ordered and unordered lists, code block
  * (tap toggles, long-press picks the language), table, alignment (cycles), indent,
@@ -96,15 +97,18 @@ fun TextFormatBar(editor: Editor) {
     val para = editor.flowCaretParagraph()
     val inCell = para?.table != null
     var tableDialog by remember { mutableStateOf(false) }
+    // Docked, the strip fills the bottom edge; floating, a pill only as long as its controls.
+    val floating = LocalToolbarLook.current.floating
+    val frame = if (floating) Modifier.barPill() else Modifier.fillMaxWidth().background(palette.panel.toComposeColor())
 
     // The bar rides the bottom edge, so its tips open upward.
     CompositionLocalProvider(LocalTipSide provides TipSide.ABOVE) {
         Row(
             modifier = Modifier
-                .fillMaxWidth()
                 .height(48.dp)
-                .background(palette.panel.toComposeColor())
-                .horizontalScroll(rememberScrollState()),
+                .then(frame)
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = if (floating) 4.dp else 0.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
