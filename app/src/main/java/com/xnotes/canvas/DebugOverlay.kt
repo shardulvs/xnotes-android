@@ -11,7 +11,7 @@ import com.xnotes.platform.PdfiumDocument
 /**
  * A translucent, non-interactive debug HUD pinned to the top-right of the canvas,
  * toggled by a four-finger tap (detected in [CanvasView]). It reports the live frame
- * rate, page-cache occupancy and Java heap use.
+ * rate, what the page caches hold and memory use.
  *
  * Frame timing is sampled in [CanvasView.onDraw]; while the HUD is up a low-rate idle ticker keeps
  * repainting it (independent of interaction), so the rate falls to 0 when idle instead of freezing and
@@ -91,6 +91,10 @@ class DebugOverlay {
     private fun fmtBytes(bytes: Long): String =
         if (bytes < 1024 * 1024) "%.0f KB".format(bytes / 1024.0) else "%.2f MB".format(bytes / MB)
 
+    /** One cached layer: the memory it holds, and the screens of it ready above and below the view. */
+    private fun layerRow(name: String, layer: CanvasState.LayerSnapshot): String =
+        "%s  %.0f MB \u2191%.1f \u2193%.1f".format(name, layer.bytes / MB, layer.above, layer.below)
+
     fun draw(r: AndroidRenderer, state: CanvasState) {
         if (!enabled) return
         sampleMemory(System.nanoTime())
@@ -99,16 +103,13 @@ class DebugOverlay {
         val heapUsedMb = (rt.totalMemory() - rt.freeMemory()) / MB
         val heapMaxMb = rt.maxMemory() / MB
 
-        val (rw, rh) = state.targetRasterSize()
-        val res = if (rw > 0) "$rw x $rh" else "-"
+        val pdf = state.document.pages.getOrNull(state.currentPageIndex())?.pdfPage != null
         val lines = buildList {
             autoScrollHud()?.let { add("end in     ${fmtDuration(it)}") }
             add("%.0f fps   %.1f ms".format(fps, frameMs))
-            add("cache res  $res")
-            add("visible    ${snap.visiblePages} pg")
-            add("ink cache  ${snap.inkPages} pg")
-            add("bg  cache  ${snap.bgPages} pg")
-            add("cache mem  %.1f / %.0f MB".format(snap.bytes / MB, snap.budget / MB))
+            add("cache  %.0f / %.0f MB".format(snap.bytes / MB, snap.budget / MB))
+            add(layerRow("ink", snap.ink))
+            if (snap.background.bytes > 0) add(layerRow(if (pdf) "pdf" else "bg ", snap.background))
             add("heap  %.0f / %.0f MB".format(heapUsedMb, heapMaxMb))
             add("pss    %.0f MB".format(pssMb))
             add("native %.0f MB".format(nativeMb))

@@ -2437,31 +2437,63 @@ class CanvasState(
         )
     }
 
-    /** A read-only count of the live page caches and their bitmap bytes, for the debug overlay. */
-    class CacheSnapshot(
-        val visiblePages: Int,
-        val inkPages: Int,
-        val bgPages: Int,
-        val bytes: Long,
-        val budget: Long,
-    )
+    /** One layer's share of the page caches: its bytes, and the screens of it built without a gap above and below the view. */
+    class LayerSnapshot(val bytes: Long, val above: Double, val below: Double)
+
+    /** What the page caches hold, for the debug overlay: each layer, and the bytes held in all against the budget. */
+    class CacheSnapshot(val ink: LayerSnapshot, val background: LayerSnapshot, val bytes: Long, val budget: Long)
 
     fun cacheSnapshot(): CacheSnapshot {
-        var bytes = 0L
-        for (store in arrayOf(ink, bg)) {
-            for (l in store.now.values) bytes += l.bytes()
-            for (l in store.before.values) bytes += l.bytes()
+        val layers = stores.map { store ->
+            val held = store.now.values.sumOf { it.bytes() } + store.before.values.sumOf { it.bytes() }
+            LayerSnapshot(held, reach(store, down = false), reach(store, down = true))
         }
+        var bytes = layers.sumOf { it.bytes }
         for (e in hlCaches.values) bytes += e.surface.width.toLong() * e.surface.height * 4L
-        val visible = visiblePageRange()?.let { it.last - it.first + 1 } ?: 0
-        return CacheSnapshot(visible, pagesBuilt(ink), pagesBuilt(bg), bytes, cacheBudget())
+        return CacheSnapshot(layers[0], layers[1], bytes, cacheBudget())
     }
 
-    /** Pages with a band of [store] built, in the layer they show at or the one before it. */
-    private fun pagesBuilt(store: Layers): Int {
-        var n = store.now.values.count { it.built() > 0 }
-        for ((page, old) in store.before) if (old.built() > 0 && (store.now[page]?.built() ?: 0) == 0) n++
-        return n
+    /**
+     * Screens of [store]'s layer built without a gap from the view's edge on, downward or upward.
+     * A page with no such layer is no gap, nor is the end of the note; paginated, the row shown.
+     */
+    private fun reach(store: Layers, down: Boolean): Double {
+        if (pageRects.size != document.pages.size || viewportH <= 0) return 0.0
+        val view = visibleContentRect()
+        val edge = if (down) view.bottom else view.top
+        var end = edge
+        val rows = if (verticalScroll) rowRanges() else listOf(drawablePageRange())
+        for (row in if (down) rows else rows.asReversed()) {
+            var gap: Double? = null
+            var far: Double? = null
+            for (i in row) {
+                val pr = pageRects[i]
+                if (if (down) pr.bottom <= edge else pr.top >= edge) continue
+                far = if (down) max(far ?: pr.bottom, pr.bottom) else min(far ?: pr.top, pr.top)
+                val g = gapPast(store, i, edge, down) ?: continue
+                gap = if (gap == null) g else if (down) min(gap, g) else max(gap, g)
+            }
+            end = gap ?: far ?: continue
+            if (gap != null) break
+        }
+        return abs(end - edge) * zoom / viewportH
+    }
+
+    /** Where page [i]'s first unbuilt band of [store] past [edge] begins (content space), or null with none. */
+    private fun gapPast(store: Layers, i: Int, edge: Double, down: Boolean): Double? {
+        val page = document.pages[i]
+        if (store === bg && !hasPageBackground(page)) return null
+        val pr = pageRects[i]
+        val layer = store.now[page]?.takeIf { it.fits(page) } ?: return if (down) max(pr.top, edge) else min(pr.bottom, edge)
+        var gap: Double? = null
+        for (k in layer.bands.indices) {
+            if (layer.bands[k] != null) continue
+            val at = fromPageSpaceRect(i, layer.grid.onPage(k))
+            if (if (down) at.bottom <= edge else at.top >= edge) continue
+            val from = if (down) max(at.top, edge) else min(at.bottom, edge)
+            gap = if (gap == null) from else if (down) min(gap, from) else max(gap, from)
+        }
+        return gap
     }
 
     /** Last note-open timings (ms), for the debug overlay; -1 until the first open. [lastOpenReadMs]
@@ -2506,22 +2538,6 @@ class CanvasState(
     /** Autosave status for the debug overlay, set by the editor: "idle", "pending", "in progress",
      *  "done" or "failed". */
     var autosaveStatus = "idle"
-
-    /**
-     * The pixel dimensions the current page's cache *would* be built at for the current
-     * zoom (i.e. [clampedRes] applied). Tracks live while zooming — unlike the actual
-     * cached surface, which is blitted stale-scaled during a pinch and only rebuilt when
-     * the gesture ends. Used by the debug overlay's `res` line; returns 0×0 with no pages.
-     */
-    fun targetRasterSize(): Pair<Int, Int> {
-        val pages = document.pages
-        if (pages.isEmpty()) return 0 to 0
-        val page = pages[currentPageIndex()]
-        val res = clampedRes(page)
-        val w = ceil(outerW(page) * res).toInt().coerceAtLeast(1)
-        val h = ceil(outerH(page) * res).toInt().coerceAtLeast(1)
-        return w to h
-    }
 
     companion object {
         const val MARGIN = 48.0

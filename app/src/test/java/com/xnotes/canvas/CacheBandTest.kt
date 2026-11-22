@@ -254,6 +254,39 @@ class CacheBandTest {
         assertTrue(!h.aBuiltBandWasGivenBack())
     }
 
+    @Test fun theReadoutSaysHowMuchOfEachLayerIsReadyEitherSideOfTheView() {
+        val h = Harness(60, 1440, 2204)
+        h.st.goToPage(10)
+        h.frame()
+        h.frame()
+        val snap = h.st.cacheSnapshot()
+        assertTrue("ink is ready more than a screen below: ${snap.ink.below}", snap.ink.below > 1.0)
+        assertTrue("and above: ${snap.ink.above}", snap.ink.above > 1.0)
+        assertTrue("the PDF layer likewise: ${snap.background.below}", snap.background.below > 1.0)
+        assertTrue(snap.ink.bytes > 0 && snap.background.bytes > 0)
+        assertEquals("the two layers are all that is held here", snap.bytes, snap.ink.bytes + snap.background.bytes)
+        assertTrue(snap.bytes <= snap.budget)
+
+        // Jumped to where nothing is built yet: only the bare gap to the next page is ready past the view.
+        h.st.goToPage(40)
+        val cold = h.st.cacheSnapshot()
+        assertTrue("${cold.ink.below}", cold.ink.below < 0.1)
+        assertTrue("${cold.background.above}", cold.background.above < 0.1)
+    }
+
+    @Test fun aShortNoteReadsAsReadyToBothItsEnds() {
+        val h = Harness(3, 1440, 2204)
+        h.frame()
+        h.frame()
+        val st = h.st
+        val view = st.visibleContentRect()
+        val snap = st.cacheSnapshot()
+        val toEnd = (st.pageRects.last().bottom - view.bottom) * st.zoom / st.viewportH
+        assertEquals(toEnd, snap.ink.below, 1e-6)
+        assertEquals(toEnd, snap.background.below, 1e-6)
+        assertEquals("the view starts above the first page", 0.0, snap.ink.above, 1e-6)
+    }
+
     @Test fun anAutomaticBudgetIsTwelveScreensBetweenAFloorAndAShareOfMemory() {
         val mb = 1L shl 20
         assertEquals(12L * 4 * 1440 * 2304, CacheBudget.automatic(1440, 2304))
