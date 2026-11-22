@@ -158,14 +158,10 @@ class CanvasState(
     var minZoom: Double = MIN_ZOOM
     var maxZoom: Double = MAX_ZOOM
 
-    /** Bytes the page caches may hold, or 0 to size them from the viewport ([CacheBudget.automatic]). */
-    var cacheLimit: Long = 0
+    /** Bytes the page caches may hold, as the host has it; unset or 0, they are sized from the viewport ([CacheBudget.automatic]). */
+    var cacheLimit: (() -> Long)? = null
 
-    /** The most an automatic budget may come to: a share of the device's memory, set by the host. */
-    var cacheCeiling: Long = Long.MAX_VALUE
-
-    fun cacheBudget(): Long =
-        if (cacheLimit > 0) cacheLimit else CacheBudget.automatic(viewportW, viewportH, cacheCeiling)
+    fun cacheBudget(): Long = cacheLimit?.invoke()?.takeIf { it > 0 } ?: CacheBudget.automatic(viewportW, viewportH)
 
     /**
      * Elastic overscroll past the document's **bottom** end (viewport px, already damped). Positive
@@ -2410,7 +2406,6 @@ class CanvasState(
         val inkPages: Int,
         val bgPages: Int,
         val bytes: Long,
-        val bands: Int,
         val budget: Long,
     )
 
@@ -2422,8 +2417,7 @@ class CanvasState(
         }
         for (e in hlCaches.values) bytes += e.surface.width.toLong() * e.surface.height * 4L
         val visible = visiblePageRange()?.let { it.last - it.first + 1 } ?: 0
-        val bands = stores.sumOf { store -> store.now.values.sumOf { it.built() } + store.before.values.sumOf { it.built() } }
-        return CacheSnapshot(visible, pagesBuilt(ink), pagesBuilt(bg), bytes, bands, cacheBudget())
+        return CacheSnapshot(visible, pagesBuilt(ink), pagesBuilt(bg), bytes, cacheBudget())
     }
 
     /** Pages with a band of [store] built, in the layer they show at or the one before it. */

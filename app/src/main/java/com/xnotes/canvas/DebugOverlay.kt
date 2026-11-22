@@ -108,7 +108,7 @@ class DebugOverlay {
             add("visible    ${snap.visiblePages} pg")
             add("ink cache  ${snap.inkPages} pg")
             add("bg  cache  ${snap.bgPages} pg")
-            add("cache mem  %.1f MB".format(snap.bytes / MB))
+            add("cache mem  %.1f / %.0f MB".format(snap.bytes / MB, snap.budget / MB))
             add("heap  %.0f / %.0f MB".format(heapUsedMb, heapMaxMb))
             add("pss    %.0f MB".format(pssMb))
             add("native %.0f MB".format(nativeMb))

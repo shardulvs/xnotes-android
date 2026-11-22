@@ -223,11 +223,21 @@ class CacheBandTest {
         assertEquals("a small screen still gets the floor", 64 * mb, CacheBudget.automatic(800, 1280))
         assertEquals("a large one stops at the device's share", 128 * mb, CacheBudget.automatic(2560, 1600, ceiling = 128 * mb))
         assertEquals("which never undercuts the floor", 64 * mb, CacheBudget.automatic(2560, 1600, ceiling = 32 * mb))
+        assertEquals("a sixteenth of the device's memory", 256 * mb, CacheBudget.ceiling(4096 * mb))
+    }
+
+    @Test fun aUserMaySetUpToAQuarterOfTheDevicesMemory() {
+        val mb = 1L shl 20
+        assertEquals(1024, CacheBudget.maxMb(8192 * mb))
+        assertEquals(1024, CacheBudget.maxMb(4096 * mb))
+        assertEquals(512, CacheBudget.maxMb(2048 * mb))
+        assertEquals("a whole step under a device that reports a little short of 3 GB", 704, CacheBudget.maxMb(2850 * mb))
+        assertEquals(1024, CacheBudget.maxMb(0))
     }
 
     @Test fun aLimitTheUserSetReplacesTheAutomaticOne() {
         val h = Harness(60, 1440, 2204)
-        h.st.cacheLimit = 80L shl 20
+        h.st.cacheLimit = { 80L shl 20 }
         assertEquals(80L shl 20, h.st.cacheBudget())
         h.st.goToPage(3)
         h.frame()

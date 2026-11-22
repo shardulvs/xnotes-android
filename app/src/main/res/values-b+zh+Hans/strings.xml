@@ -362,7 +362,7 @@
     <string name="pref_pdf_export">PDF 导出</string>
     <string name="pref_pdf_heading_bookmarks">根据标题生成书签</string>
     <string name="pref_performance">性能</string>
-    <string name="pref_cache_help">设置越高，平移和缩放越流畅，但会使用更多内存。无论如何设置，墨迹和 PDF 都会保持清晰。</string>
+    <string name="pref_cache_help">设置越高，滚动时已准备好的内容越多。“自动”会按此设备调整。</string>
     <string name="pref_disable_front_buffering">禁用前缓冲绘制</string>
     <string name="pref_front_buffering_help">前缓冲绘制可降低笔迹延迟。部分屏幕可能出现笔迹闪烁或跟笔延迟，遇到这些问题时可关闭此功能，使用常规画布绘制。</string>
     <string name="pref_code_highlighting">代码高亮</string>
@@ -386,7 +386,8 @@
     <string name="pref_filename_template_help">YYYY YY MM DD HH mm ss 会展开为创建日期和时间。# 会变为序号以确保文件夹中的名称不重复。</string>
     <string name="pref_next_note_named">下一个笔记将命名为 %1$s</string>
     <string name="pref_side_margin_px">"侧边距  %1$d px"</string>
-    <string name="pref_max_cache_px">"最大缓存分辨率  %1$d px"</string>
+    <string name="pref_cache_memory_auto">"缓存内存  自动（%1$d MB）"</string>
+    <string name="pref_cache_memory_mb">"缓存内存  %1$d MB"</string>
     <string name="pref_toolbar_colours_n">"工具栏颜色  %1$d"</string>
 
     <!-- Home screen and explorer -->

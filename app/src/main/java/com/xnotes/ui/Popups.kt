@@ -1265,7 +1265,7 @@ internal fun SliderRow(
     }
 }
 
-private val NoTicks
+internal val NoTicks
     @Composable get() = SliderDefaults.colors(
         activeTickColor = Color.Transparent,
         inactiveTickColor = Color.Transparent,

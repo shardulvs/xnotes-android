@@ -14,7 +14,7 @@ class SettingsBackupTest {
         browseRoot = "content://tree/mine",
         toolbarColorCount = 3,
         recentDocs = listOf(RecentDoc("content://a", "a", 1L)),
-        prefs = Preferences(fingerDraws = true, maxCacheResolution = 4096, codeThemePath = "/data/mine.toml"),
+        prefs = Preferences(fingerDraws = true, cacheMemoryMb = 512, codeThemePath = "/data/mine.toml"),
     )
 
     @Test fun anExportLeavesThisDeviceBehind() {
@@ -24,7 +24,7 @@ class SettingsBackupTest {
         assertEquals(3, out.getInt("toolbar_color_count"))
         val prefs = out.getJSONObject("prefs")
         assertTrue(prefs.getBoolean("finger_draws"))
-        assertFalse(prefs.has("max_cache_resolution"))
+        assertFalse(prefs.has("cache_memory_mb"))
         assertFalse(prefs.has("code_theme_path"))
     }
 
@@ -32,7 +32,7 @@ class SettingsBackupTest {
         val theirs = Settings(
             browseRoot = "content://tree/theirs",
             toolbarColorCount = 9,
-            prefs = Preferences(fingerDraws = false, maxCacheResolution = 1024, pageColor = Rgba(1, 2, 3, 255)),
+            prefs = Preferences(fingerDraws = false, cacheMemoryMb = 96, pageColor = Rgba(1, 2, 3, 255)),
         )
         val incoming = SettingsBackup.portable(theirs.toJson())
         incoming.remove("toolbar_layout")
@@ -44,7 +44,7 @@ class SettingsBackupTest {
         // This device's own folder, recents, cache size and code theme stay.
         assertEquals("content://tree/mine", next.browseRoot)
         assertEquals(1, next.recentDocs.size)
-        assertEquals(4096, next.prefs.maxCacheResolution)
+        assertEquals(512, next.prefs.cacheMemoryMb)
         assertEquals("/data/mine.toml", next.prefs.codeThemePath)
         assertEquals(mine.toolbarLayout, next.toolbarLayout)
     }

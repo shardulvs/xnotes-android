@@ -2849,11 +2849,31 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         controller.penButtonHover = p.penButtonHover
         state.sideMargin = p.sideMargin
         state.pageBorders = !p.hidePageBorders
+        cacheMemoryMb = p.cacheMemoryMb
+        state.cacheLimit = { cacheBudget() }
         state.minZoom = if (p.minZoomEnabled) p.minZoomPercent / 100.0 else CanvasState.MIN_ZOOM
         state.maxZoom = (if (p.maxZoomEnabled) p.maxZoomPercent / 100.0 else CanvasState.MAX_ZOOM)
             .coerceAtLeast(state.minZoom)
         state.clampZoomToLimits()
         state.relayout()
+    }
+
+    private var cacheMemoryMb = settings.prefs.cacheMemoryMb
+
+    /** What an automatic page-cache budget comes to in this window, in bytes. */
+    fun automaticCacheBudget(): Long {
+        val m = viewContext.resources.displayMetrics
+        val ram = com.xnotes.platform.DeviceMemory.total(viewContext)
+        return com.xnotes.canvas.CacheBudget.automatic(m.widthPixels, m.heightPixels, com.xnotes.canvas.CacheBudget.ceiling(ram))
+    }
+
+    /** The most cache memory a user may set on this device, in MB. */
+    fun maxCacheMemoryMb(): Int = com.xnotes.canvas.CacheBudget.maxMb(com.xnotes.platform.DeviceMemory.total(viewContext))
+
+    /** This pane's page-cache budget in bytes: the user's figure or the automatic one, halved while two panes show. */
+    private fun cacheBudget(): Long {
+        val whole = if (cacheMemoryMb > 0) cacheMemoryMb.toLong() shl 20 else automaticCacheBudget()
+        return if (noteOpen && sibling?.noteOpen == true) whole / 2 else whole
     }
 
     /** Whether typed markdown markers convert; the text tool's config popup toggles it. */

@@ -75,8 +75,8 @@ data class Preferences(
      *  read at both a wall's scale and a hair's. */
     val canvasMinZoomPercent: Int = 2,
     val canvasMaxZoomPercent: Int = 6400,
-    /** Long-edge cap (px) for the on-screen page cache; higher holds more of the page ready at deep zoom. */
-    val maxCacheResolution: Int = 2048,
+    /** Memory (MB) the page caches may hold, or 0 to size it to the device ([com.xnotes.canvas.CacheBudget]). */
+    val cacheMemoryMb: Int = 0,
     /** Whether wet ink keeps off the front buffer, so every stroke takes the ordinary canvas path. */
     val disableFrontBuffering: Boolean = false,
     /** Open in fullscreen; null ⇒ auto (on unless the display has a camera cutout). */
@@ -158,7 +158,7 @@ data class Preferences(
         .put("max_zoom_percent", maxZoomPercent)
         .put("canvas_min_zoom_percent", canvasMinZoomPercent)
         .put("canvas_max_zoom_percent", canvasMaxZoomPercent)
-        .put("max_cache_resolution", maxCacheResolution)
+        .put("cache_memory_mb", cacheMemoryMb)
         .put("disable_front_buffering", disableFrontBuffering)
         .apply {
             if (materialMode != MaterialColourMode.SYSTEM) put("material_mode", materialMode.id)
@@ -298,7 +298,9 @@ data class Preferences(
                 maxZoomPercent = o.optInt("max_zoom_percent", 400).coerceIn(ZOOM_LIMIT_MIN_PCT, ZOOM_LIMIT_MAX_PCT),
                 canvasMinZoomPercent = o.optInt("canvas_min_zoom_percent", 2).coerceIn(1, 100),
                 canvasMaxZoomPercent = o.optInt("canvas_max_zoom_percent", 6400).coerceIn(200, 100000),
-                maxCacheResolution = o.optInt("max_cache_resolution", 2048).coerceIn(1024, 4096),
+                cacheMemoryMb = o.optInt("cache_memory_mb", 0).let {
+                    if (it <= 0) 0 else it.coerceIn(com.xnotes.canvas.CacheBudget.MIN_MB, com.xnotes.canvas.CacheBudget.MAX_MB)
+                },
                 disableFrontBuffering = o.optBoolean("disable_front_buffering", false),
                 startFullscreen = if (o.has("start_fullscreen")) o.getBoolean("start_fullscreen") else null,
                 codeThemePath = o.optString("code_theme_path").ifEmpty { null },
