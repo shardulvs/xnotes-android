@@ -36,14 +36,10 @@ enum class ToolbarItem(val id: String) {
     IMAGE("image"),
     UNDO("undo"),
     REDO("redo"),
-    PAGE_NAV("page_nav"),
     STYLES("styles"),
-    MARGINS("margins"),
-    VIEW("view"),
     ZOOM("zoom"),
     FIT("fit"),
     ZOOM_LOCK("zoom_lock"),
-    FULLSCREEN("fullscreen"),
     COLORS("colors"),
 
     /** Canvas only: saved views, which are what page numbers are on an unbounded surface. */
@@ -153,8 +149,6 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
         /** Later-added items that belong beside an existing one in stored layouts. */
         private val INSERT_AFTER = mapOf(
             ToolbarItem.TEXT_BOX to ToolbarItem.TEXT,
-            ToolbarItem.VIEW to ToolbarItem.STYLES,
-            ToolbarItem.MARGINS to ToolbarItem.STYLES,
             ToolbarItem.WAND to ToolbarItem.LASSO,
             ToolbarItem.TAPE to ToolbarItem.WAND,
             ToolbarItem.INSERT_SPACE to ToolbarItem.LASSO,
@@ -178,11 +172,13 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
             ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK,
         )
 
-        /** Everything the paged bar can hold: the whole enum bar the two canvas-only additions. Insert space is the note bar's alone. */
-        val NOTE_ITEMS: Set<ToolbarItem> =
-            ToolbarItem.entries.toSet() - setOf(ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP)
+        /** Everything the paged bar can hold: the whole enum bar the canvas's own. Insert space is the note bar's alone; page and view settings live behind the gear. */
+        val NOTE_ITEMS: Set<ToolbarItem> = ToolbarItem.entries.toSet() - setOf(
+            ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP,
+            ToolbarItem.STYLES, ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK,
+        )
 
-        /** Mirrors the hardcoded bar exactly (see Toolbar.kt) so existing users see no change. */
+        /** The note bar as it ships; the gear after it is pinned to the bar, not part of the layout. */
         val DEFAULT: ToolbarLayout = of(
             listOf(ToolbarItem.HOME, ToolbarItem.TITLE),
             listOf(ToolbarItem.SIDEBAR),
@@ -195,9 +191,6 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
             listOf(ToolbarItem.IMAGE),
             listOf(ToolbarItem.COLORS),
             listOf(ToolbarItem.UNDO, ToolbarItem.REDO),
-            listOf(ToolbarItem.PAGE_NAV, ToolbarItem.STYLES, ToolbarItem.MARGINS, ToolbarItem.VIEW),
-            listOf(ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK),
-            listOf(ToolbarItem.FULLSCREEN),
         )
 
         /** Mirrors the hardcoded canvas bar (see InfiniteToolbar.kt). */

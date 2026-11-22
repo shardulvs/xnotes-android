@@ -105,14 +105,10 @@ val ToolbarItem.labelRes: Int
         ToolbarItem.IMAGE -> R.string.insert
         ToolbarItem.UNDO -> R.string.undo
         ToolbarItem.REDO -> R.string.redo
-        ToolbarItem.PAGE_NAV -> R.string.toolbar_page_nav
         ToolbarItem.STYLES -> R.string.toolbar_styles
-        ToolbarItem.MARGINS -> R.string.toolbar_margins
-        ToolbarItem.VIEW -> R.string.toolbar_view
         ToolbarItem.ZOOM -> R.string.toolbar_zoom
         ToolbarItem.FIT -> R.string.toolbar_fit
         ToolbarItem.ZOOM_LOCK -> R.string.toolbar_zoom_lock
-        ToolbarItem.FULLSCREEN -> R.string.toolbar_fullscreen
         ToolbarItem.COLORS -> R.string.toolbar_colours
         ToolbarItem.WAYPOINTS -> R.string.toolbar_waypoints
         ToolbarItem.MINIMAP -> R.string.toolbar_minimap

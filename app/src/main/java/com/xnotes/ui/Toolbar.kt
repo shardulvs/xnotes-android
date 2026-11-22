@@ -150,8 +150,6 @@ fun Toolbar(
                     onOpenBackstage = onOpenBackstage,
                     onInsertImage = onInsertImage,
                     onAddStickers = onAddStickers,
-                    onToggleFullscreen = onToggleFullscreen,
-                    onImportTemplate = onImportTemplate,
                     onInsertAudio = onInsertAudio,
                     onRecordAudio = onRecordAudio,
                     onTakePhoto = onTakePhoto,
@@ -187,15 +185,13 @@ private fun ToolbarItemView(
     onOpenBackstage: () -> Unit,
     onInsertImage: () -> Unit,
     onAddStickers: () -> Unit,
-    onToggleFullscreen: () -> Unit,
-    onImportTemplate: () -> Unit,
     onInsertAudio: () -> Unit,
     onRecordAudio: () -> Unit,
     onTakePhoto: () -> Unit,
 ) {
     when (item) {
         // Canvas-only items; a stored paged layout can never hold one, so nothing is drawn.
-        ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP -> Unit
+        ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP, ToolbarItem.STYLES, ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK -> Unit
 
         ToolbarItem.HOME -> ToolbarIcon(XnotesIcons.prev, stringResource(R.string.toolbar_home)) { onOpenBackstage() }
         // A name has no room down a side rail.
@@ -232,52 +228,6 @@ private fun ToolbarItemView(
 
         ToolbarItem.UNDO -> ToolbarIcon(XnotesIcons.undo, stringResource(R.string.undo), enabled = editor.canUndo, shortcut = Keys.UNDO) { editor.undo() }
         ToolbarItem.REDO -> ToolbarIcon(XnotesIcons.redo, stringResource(R.string.redo), enabled = editor.canRedo, shortcut = Keys.REDO) { editor.redo() }
-
-        ToolbarItem.PAGE_NAV -> {
-            ToolbarIcon(XnotesIcons.prev, stringResource(R.string.previous_page), shortcut = Keys.PREV_PAGE) { editor.prevPage() }
-            var jumpOpen by remember { mutableStateOf(false) }
-            Box {
-                Tooltip(stringResource(R.string.title_go_to_page)) {
-                    PageCounter(
-                        editor.pageIndex + 1,
-                        editor.pageCount,
-                        Modifier
-                            .clip(MaterialTheme.shapes.extraSmall)
-                            .clickable { jumpOpen = true },
-                    )
-                }
-                if (jumpOpen) PageJumpPopup(editor) { jumpOpen = false }
-            }
-            ToolbarIcon(XnotesIcons.next, stringResource(R.string.next_page), shortcut = Keys.NEXT_PAGE) { editor.nextPage() }
-        }
-        ToolbarItem.STYLES -> StylesButton(editor, onImportTemplate)
-        ToolbarItem.MARGINS -> MarginsButton(editor)
-        ToolbarItem.VIEW -> ViewButton(editor)
-
-        ToolbarItem.ZOOM -> {
-            ToolbarIcon(XnotesIcons.zoomOut, stringResource(R.string.zoom_out), enabled = !editor.zoomLocked, shortcut = Keys.ZOOM_OUT) { editor.zoomOut() }
-            var zoomMenuOpen by remember { mutableStateOf(false) }
-            Box {
-                Tooltip(stringResource(R.string.title_zoom)) {
-                    Label(
-                        "${editor.zoomPercent}%",
-                        modifier = Modifier
-                            .clip(MaterialTheme.shapes.extraSmall)
-                            .clickable { zoomMenuOpen = true },
-                    )
-                }
-                if (zoomMenuOpen) ZoomMenuPopup(editor) { zoomMenuOpen = false }
-            }
-            ToolbarIcon(XnotesIcons.zoomIn, stringResource(R.string.zoom_in), enabled = !editor.zoomLocked, shortcut = Keys.ZOOM_IN) { editor.zoomIn() }
-        }
-        ToolbarItem.FIT -> FitMenu(editor)
-        ToolbarItem.ZOOM_LOCK -> ToolbarIcon(
-            if (editor.zoomLocked) XnotesIcons.lock else XnotesIcons.unlock,
-            stringResource(if (editor.zoomLocked) R.string.unlock_zoom else R.string.lock_zoom),
-            active = editor.zoomLocked,
-        ) { editor.toggleZoomLock() }
-
-        ToolbarItem.FULLSCREEN -> ToolbarIcon(XnotesIcons.fullscreen, stringResource(R.string.toolbar_fullscreen), shortcut = Keys.FULLSCREEN) { onToggleFullscreen() }
 
         ToolbarItem.COLORS -> editor.toolbarColors.take(editor.toolbarColorCount).forEachIndexed { i, color ->
             Box {
@@ -372,37 +322,6 @@ private fun RenameDialog(initial: String, onConfirm: (String) -> Unit, onDismiss
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
-}
-
-/** Opens the page-styles popup (paper colour + ruling) for the document and the current page. */
-@Composable
-private fun StylesButton(editor: Editor, onImportTemplate: () -> Unit) {
-    var open by remember { mutableStateOf(false) }
-    PrewarmTemplateThumbs(editor, open)
-    Box {
-        ToolbarIcon(XnotesIcons.sliders, stringResource(R.string.toolbar_styles)) { open = true }
-        if (open) StylesPopup(editor, onImportTemplate) { open = false }
-    }
-}
-
-/** Opens the page-margins popup (extra paper on any edge, for the document or the current page). */
-@Composable
-private fun MarginsButton(editor: Editor) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        ToolbarIcon(XnotesIcons.margins, stringResource(R.string.toolbar_margins)) { open = true }
-        if (open) MarginsPopup(editor) { open = false }
-    }
-}
-
-/** Opens the view menu (viewing mode, scroll direction, free movement, PDF filters, rotation, scrollbar). */
-@Composable
-private fun ViewButton(editor: Editor) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        ToolbarIcon(XnotesIcons.view, stringResource(R.string.toolbar_view)) { open = true }
-        if (open) ViewMenuPopup(editor) { open = false }
-    }
 }
 
 private const val SELECT_FADE_MS = 150
@@ -615,20 +534,6 @@ internal fun Rule() {
     )
 }
 
-/** "3 / 12" along the bar; down a side rail, where that is too wide, the two numbers stack. */
-@Composable
-private fun PageCounter(current: Int, count: Int, modifier: Modifier) {
-    if (!LocalBar.current.vertical) {
-        Label("$current / $count", modifier)
-        return
-    }
-    Column(modifier.padding(vertical = 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Label("$current")
-        Rule()
-        Label("$count")
-    }
-}
-
 @Composable
 private fun NoteInsertMenu(editor: Editor, onInsertImage: () -> Unit, onTakePhoto: () -> Unit, onAddStickers: () -> Unit, onInsertAudio: () -> Unit, onRecordAudio: () -> Unit) {
     var stickersOpen by remember { mutableStateOf(false) }
@@ -728,16 +633,4 @@ private fun StickerTile(file: java.io.File, onInsert: () -> Unit, onRemove: () -
     }
 }
 
-@Composable
-private fun FitMenu(editor: Editor) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        ToolbarIcon(XnotesIcons.fit, stringResource(R.string.toolbar_fit)) { expanded = true }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(text = { Text(stringResource(R.string.fit_page)) }, onClick = { editor.fitPage(); expanded = false })
-            DropdownMenuItem(text = { Text(stringResource(R.string.fit_width)) }, onClick = { editor.fitWidth(); expanded = false })
-            DropdownMenuItem(text = { Text(stringResource(R.string.fit_height)) }, onClick = { editor.fitHeight(); expanded = false })
-        }
-    }
-}
 
