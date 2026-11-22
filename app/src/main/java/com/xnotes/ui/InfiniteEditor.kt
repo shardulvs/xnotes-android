@@ -1091,7 +1091,7 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
 
     override val hostToolbarColors: List<Rgba> get() = toolbarColors
     override val hostActiveColorIndex: Int get() = activeColorIndex
-    override val hostRecentColors: List<Rgba> get() = recentColors
+    override val hostRecentColors: List<Rgba> get() = recentsWith(recentColors, toolbarColors)
     override val hostPaperColor: Rgba get() = view.paperColor
     override val hostZoom: Double get() = viewport.zoom
 

@@ -779,7 +779,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             for (t in ToolDefaults.persistedTools) it.setToolConfig(t, settings.configFor(t))
             it.armShapeConfig(settings.shapeConfig)
             it.toolbarColors = toolbarColors
-            it.recentColors = recentColors
+            it.recentColors = settings.recentColors
             it.toolbarColorCount = toolbarColorCount
             it.toolbarLayout = canvasToolbarLayout
             it.pad.frontBuffering = !settings.prefs.disableFrontBuffering
@@ -797,7 +797,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             it.swatchStore = this
             it.onColorRemembered = { color ->
                 settings = settings.rememberColor(color)
-                it.recentColors = recentColors
+                it.recentColors = settings.recentColors
             }
             it.onSay = { text -> say(text) }
             it.view.onTwoFingerTap = { dispatchTapGesture(preferences.twoFingerTap) }
@@ -3011,7 +3011,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         for (t in ToolDefaults.persistedTools) canvas.setToolConfig(t, settings.configFor(t))
         canvas.armShapeConfig(settings.shapeConfig)
         canvas.toolbarColors = toolbarColors
-        canvas.recentColors = recentColors
+        canvas.recentColors = settings.recentColors
         canvas.toolbarColorCount = toolbarColorCount
         canvas.toolbarLayout = canvasToolbarLayout
         canvas.pickColor(activeColorIndex)
@@ -7621,7 +7621,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         controller.setToolConfig(tool, config.copy(rgba = controller.inkColor))
     }
 
-    val recentColors: List<Rgba> get() = settings.recentColors
+    /** The colours a picker offers as recent: the ones used, then the toolbar's own. */
+    val recentColors: List<Rgba> get() = recentsWith(settings.recentColors, toolbarColors)
 
     // --- history ---
 

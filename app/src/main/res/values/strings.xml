@@ -960,7 +960,6 @@
     <!-- Colour picker -->
     <string name="swatches">Swatches</string>
     <string name="spectrum">Spectrum</string>
-    <string name="caption_recent">Recent</string>
     <string name="eyedropper">Pick a colour from the screen</string>
     <string name="hex" translatable="false">Hex</string>
     <string name="previous_colour">Previous colour</string>

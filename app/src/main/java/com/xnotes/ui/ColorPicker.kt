@@ -108,8 +108,15 @@ private val SWATCHES: List<List<Rgba>> =
 
 private val DIALOG_WIDTH = 300.dp
 
-/** The recents block over the matrix: its caption, its row and the gaps around them. */
-private val RECENTS_HEIGHT = 56.dp
+/** How many recent colours the row over the matrix holds, each a circle this wide. */
+private const val RECENTS = 8
+private val RECENT_SIZE = 26.dp
+
+/** The gap between the recents and the matrix. */
+private val RECENTS_GAP = 10.dp
+
+/** [recents] filled out with the [toolbar]'s colours it lacks, so a new user's row is not empty. */
+internal fun recentsWith(recents: List<Rgba>, toolbar: List<Rgba>): List<Rgba> = (recents + toolbar).distinct()
 
 /**
  * The shared colour picker (spec 10 §4). Two tabs over one live colour:
@@ -122,7 +129,7 @@ private val RECENTS_HEIGHT = 56.dp
  * highlighter, own their own opacity control). [onPick] fires on every *commit* — a swatch tap, a
  * spectrum release, or a field edit — never on each drag sample, so it won't flood undo history or
  * re-rasterise a page background mid-drag. [recents] may be empty (the page/pattern picker keeps no
- * recents). The popup stays open across picks and closes only via [onDismiss] (a tap outside).
+ * recents); the row shows its first [RECENTS]. The popup stays open across picks and closes only via [onDismiss] (a tap outside).
  */
 @Composable
 internal fun ColorPickerPopup(
@@ -163,7 +170,7 @@ internal fun ColorPickerPopup(
                 }
                 // The matrix is a square of the card's width, and both tabs take its height, so
                 // switching tabs never resizes the dialog.
-                val body = DIALOG_WIDTH - 40.dp + if (recents.isEmpty()) 0.dp else RECENTS_HEIGHT
+                val body = DIALOG_WIDTH - 40.dp + if (recents.isEmpty()) 0.dp else RECENT_SIZE + RECENTS_GAP
                 PanelCard(padding = PaddingValues(10.dp)) {
                     when (tab) {
                         0 -> SwatchesTab(recents, current, Modifier.height(body)) { commit(it) }
@@ -210,17 +217,13 @@ private fun EyedropperButton(onClick: () -> Unit) {
 private fun SwatchesTab(recents: List<Rgba>, current: Rgba, modifier: Modifier = Modifier, onPick: (Rgba) -> Unit) {
     Column(modifier) {
         if (recents.isNotEmpty()) {
-            PanelCaption(stringResource(R.string.caption_recent))
-            Spacer(Modifier.height(6.dp))
-            // The recents sit on the matrix's own columns, so each lines up with the hue under it.
-            Row {
-                for (i in 0 until COLUMNS) {
-                    Box(Modifier.weight(1f).height(20.dp), contentAlignment = Alignment.Center) {
-                        recents.getOrNull(i)?.let { c -> RecentDot(c, c == current) { onPick(c) } }
-                    }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                // A short row keeps its circles on the full row's slots, from the start.
+                for (i in 0 until RECENTS) {
+                    Box(Modifier.size(RECENT_SIZE)) { recents.getOrNull(i)?.let { c -> RecentDot(c, c == current) { onPick(c) } } }
                 }
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(RECENTS_GAP))
         }
         SwatchMatrix(current, onPick, Modifier.fillMaxWidth().aspectRatio(1f))
     }
@@ -230,9 +233,9 @@ private fun SwatchesTab(recents: List<Rgba>, current: Rgba, modifier: Modifier =
 @Composable
 private fun RecentDot(color: Rgba, selected: Boolean, onClick: () -> Unit) {
     val palette = LocalPalette.current
-    val base = Modifier.size(18.dp).clip(CircleShape).clickable(onClick = onClick)
+    val base = Modifier.size(RECENT_SIZE).clip(CircleShape).clickable(onClick = onClick)
     Box(
-        if (selected) base.border(2.dp, palette.text.toComposeColor(), CircleShape).padding(4.dp).background(color.toComposeColor(), CircleShape)
+        if (selected) base.border(2.dp, palette.text.toComposeColor(), CircleShape).padding(5.dp).background(color.toComposeColor(), CircleShape)
         else base.background(color.toComposeColor()).border(1.dp, palette.border.toComposeColor(), CircleShape),
     )
 }
