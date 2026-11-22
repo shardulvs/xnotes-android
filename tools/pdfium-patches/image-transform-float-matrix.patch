@@ -1,0 +1,41 @@
+--- a/core/fxge/dib/cfx_imagetransformer.cpp
++++ b/core/fxge/dib/cfx_imagetransformer.cpp
+@@ -52,12 +52,12 @@
+ class CFX_BilinearMatrix {
+  public:
+   explicit CFX_BilinearMatrix(const CFX_Matrix& src)
+-      : a(FXSYS_roundf(src.a * kBase)),
+-        b(FXSYS_roundf(src.b * kBase)),
+-        c(FXSYS_roundf(src.c * kBase)),
+-        d(FXSYS_roundf(src.d * kBase)),
+-        e(FXSYS_roundf(src.e * kBase)),
+-        f(FXSYS_roundf(src.f * kBase)) {}
++      : a(src.a * kBase),
++        b(src.b * kBase),
++        c(src.c * kBase),
++        d(src.d * kBase),
++        e(src.e * kBase),
++        f(src.f * kBase) {}
+ 
+   void Transform(int x, int y, int* x1, int* y1, int* res_x, int* res_y) const {
+     CFX_PointF val = TransformInternal(CFX_PointF(x, y));
+@@ -79,12 +79,13 @@
+                       b * pt.x + d * pt.y + f + kBase / 2);
+   }
+ 
+-  const int a;
+-  const int b;
+-  const int c;
+-  const int d;
+-  const int e;
+-  const int f;
++  // xnotes: floats; rounded to 1/256 they let a turned picture drift sideways.
++  const float a;
++  const float b;
++  const float c;
++  const float d;
++  const float e;
++  const float f;
+ };
+ 
+ bool InStretchBounds(const FX_RECT& clip_rect, int col, int row) {
