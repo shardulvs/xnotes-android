@@ -21,7 +21,8 @@ object FlowPainter {
      * [breaks] holds, per paragraph, offsets where a backend writing text needs a run to end and
      * the next begin, so each piece can be tagged on its own (a link inside a word, for one).
      * Without [math] the formulas are left out, for a caller that draws them with [paintMath].
-     * [chrome] adds what only the screen shows, such as where page breaks sit.
+     * [chrome] adds what only the screen shows, such as where page breaks sit. Without [marks]
+     * nothing is announced to a backend recording structure, for a caller that marks the lot as one.
      */
     fun paintPage(
         r: Renderer,
@@ -31,12 +32,14 @@ object FlowPainter {
         breaks: Map<Int, IntArray> = emptyMap(),
         math: Boolean = true,
         chrome: Boolean = false,
+        marks: Boolean = true,
     ) {
         val page = frame.pages.getOrNull(pageIndex) ?: return
         if (chrome) {
             for (b in page.breaks) if (b.y >= region.top - b.font.pointSize && b.y <= region.bottom + b.font.pointSize) paintBreak(r, frame, b)
         }
-        if (r.writesText) r.beginMark(Mark.Decoration)
+        val tag = r.writesText && marks
+        if (tag) r.beginMark(Mark.Decoration)
         for (table in page.tables) {
             if (table.bottom < region.top || table.top > region.bottom) continue
             paintTableFills(r, table)
@@ -44,14 +47,14 @@ object FlowPainter {
         }
         paintCodeChips(r, frame, page.lines, region)
         paintQuoteBars(r, frame, page)
-        if (r.writesText) r.endMark()
+        if (tag) r.endMark()
         for (t in page.callouts) {
             if (t.bottom < region.top || t.top > region.bottom) continue
             paintCalloutTitle(r, frame, t)
         }
         for (line in page.lines) {
             if (line.bottom < region.top || line.top > region.bottom) continue
-            paintLine(r, frame, line, breaks[line.paraIndex], math)
+            paintLine(r, frame, line, breaks[line.paraIndex], math, marks)
         }
     }
 
@@ -219,9 +222,11 @@ object FlowPainter {
         }
     }
 
-    private fun paintLine(r: Renderer, frame: FlowFrame, line: PlacedLine, breaks: IntArray?, math: Boolean) {
+    private fun paintLine(r: Renderer, frame: FlowFrame, line: PlacedLine, breaks: IntArray?, math: Boolean, marks: Boolean) {
         // Marks are only for a backend recording structure; the screen never allocates one.
-        val tag = r.writesText
+        // A text box is one mark its painter opened, so its lines write their text without any.
+        val writes = r.writesText
+        val tag = writes && marks
         val para = line.paraIndex
         if (tag) r.beginMark(Mark.Decoration)
         for (deco in line.decos) {
@@ -254,18 +259,18 @@ object FlowPainter {
         var next = line.startChar
         for (seg in line.segs) {
             val color = inkOf(seg.style, frame)
-            if (tag) {
+            if (writes) {
                 for (k in next until seg.start) {
-                    r.beginMark(Mark.FlowText(para, k, k + 1))
+                    if (tag) r.beginMark(Mark.FlowText(para, k, k + 1))
                     r.drawTextRun(" ", line.caretX(k), line.baseline, seg.font, color)
-                    r.endMark()
+                    if (tag) r.endMark()
                 }
                 next = seg.end
-                if (!seg.math && breaks != null && breaks.any { it > seg.start && it < seg.end }) {
+                if (tag && !seg.math && breaks != null && breaks.any { it > seg.start && it < seg.end }) {
                     paintPieces(r, line, seg, color, breaks)
                     continue
                 }
-                r.beginMark(Mark.FlowText(para, seg.start, seg.end))
+                if (tag) r.beginMark(Mark.FlowText(para, seg.start, seg.end))
             }
             if (seg.math) {
                 if (math) drawFormula(r, line, seg, color)
@@ -274,14 +279,14 @@ object FlowPainter {
             }
             if (tag) r.endMark()
         }
-        if (tag) {
+        if (writes) {
             // A line wrapped at a space keeps it, so the words either side of the break stay two words.
             val last = line.segs.lastOrNull()
             val color = last?.style?.let { inkOf(it, frame) } ?: frame.defaultColor
             for (k in next until line.endChar) {
-                r.beginMark(Mark.FlowText(para, k, k + 1))
+                if (tag) r.beginMark(Mark.FlowText(para, k, k + 1))
                 r.drawTextRun(" ", line.caretX(k), line.baseline, last?.font ?: line.font, color)
-                r.endMark()
+                if (tag) r.endMark()
             }
         }
         // A blank line inside a code block has to exist in the copy, or the code pastes back squashed.

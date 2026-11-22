@@ -2267,8 +2267,8 @@ class InteractionController(
             is ImageItem -> item.setGeometry(RectHandle(ResizeMath.resizeImage(item.rect, handle, local)))
             is TextItem -> {
                 // Resize against the displayed bounds (grown-to-fit height) so handles track the box.
-                val (pos, w, h) = ResizeMath.resizeText(item.pos, item.width, item.bounds().h, handle, local)
-                item.setGeometry(TextHandle(pos, w, h))
+                val (pos, w, _) = ResizeMath.resizeText(item.pos, item.width, item.textRect().h, handle, local)
+                item.setGeometry(TextHandle(pos, w))
             }
             is TapeItem -> {
                 val s = item.shape
@@ -2955,10 +2955,9 @@ class InteractionController(
             val left = if (draggedX) rect.left else startLocal.x
             val maxW = (pageRight - left - 8.0).coerceAtLeast(40.0)
             val w = if (draggedX) rect.w.coerceIn(40.0, maxW) else defaultTextWidth(pageRight, left)
-            val h = if (draggedY) rect.h else 0.0
-            newTextItem(Pt(left, rect.top), w, h)
+            newTextItem(Pt(left, rect.top), w)
         } else {
-            newTextItem(startLocal, defaultTextWidth(pageRight, startLocal.x), 0.0)
+            newTextItem(startLocal, defaultTextWidth(pageRight, startLocal.x))
         }
         startEditing(item, pi, isNew = true)
     }
@@ -2966,8 +2965,8 @@ class InteractionController(
     private fun defaultTextWidth(pageRight: Double, left: Double): Double =
         (pageRight - left - 14.0).coerceIn(80.0, 300.0)
 
-    private fun newTextItem(pos: Pt, width: Double, height: Double): TextItem =
-        TextItem(pos, width, height, "", inkColor, textPointSize, textFace, textMeasurer)
+    private fun newTextItem(pos: Pt, width: Double): TextItem =
+        TextItem(pos, width, "", inkColor, textPointSize, textFace, textMeasurer)
 
     /** Open the in-place editor on [item] (a new draft, or an existing box being re-edited). */
     private fun startEditing(item: TextItem, pi: Int, isNew: Boolean) {
@@ -3021,7 +3020,7 @@ class InteractionController(
             x = topLeft.x,
             y = topLeft.y,
             width = item.width,
-            height = item.bounds().h,
+            height = item.textRect().h,
             fontPx = item.pointSize * com.xnotes.platform.AndroidText.POINTS_TO_PX,
             zoom = state.zoom,
             face = item.face,

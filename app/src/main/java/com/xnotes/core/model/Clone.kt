@@ -14,7 +14,7 @@ fun CanvasItem.deepCopy(measurer: TextMeasurer): CanvasItem = when (this) {
     is AudioItem -> AudioItem(audio, rect, name, rid, measurer)
     // The shape is immutable, so the copy can share it; a copy starts covered.
     is TapeItem -> TapeItem(shape, rgba, pattern)
-    is TextItem -> TextItem(pos, width, height, text, rgba, pointSize, face, measurer)
+    is TextItem -> copy()
     is ShapeItem ->
         ShapeItem(
             shape, start, end, strokeRgba, strokeWidth, fillRgba, neon, neonStrength, path,

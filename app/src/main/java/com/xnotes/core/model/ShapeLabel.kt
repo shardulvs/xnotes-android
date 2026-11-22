@@ -59,7 +59,7 @@ class ShapeLabel(val text: String, val style: TextStyle, val measurer: TextMeasu
     fun asTextBox(frame: Rect, toPage: (Pt) -> Pt): TextItem? {
         if (text.isBlank()) return null
         val c = toPage(frame.center)
-        return TextItem(Pt(c.x - frame.w / 2.0, c.y - frame.h / 2.0), frame.w, 0.0, text, style.rgba, style.pointSize, style.face, measurer)
+        return TextItem(Pt(c.x - frame.w / 2.0, c.y - frame.h / 2.0), frame.w, text, style.rgba, style.pointSize, style.face, measurer)
     }
 
     /**

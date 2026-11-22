@@ -90,7 +90,8 @@ sealed interface GeometrySnapshot
 sealed interface GeoHandle
 
 data class RectHandle(val rect: Rect) : GeoHandle
-data class TextHandle(val pos: Pt, val width: Double, val height: Double) : GeoHandle
+/** A text box's text frame: where it starts, what it wraps at, and whether it hugs its text instead. */
+data class TextHandle(val pos: Pt, val width: Double, val autoWidth: Boolean = false) : GeoHandle
 data class ShapeHandle(val start: Pt, val end: Pt) : GeoHandle
 
 /** A resizable item exchanges its geometry through a [GeoHandle]. */

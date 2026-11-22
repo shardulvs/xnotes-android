@@ -3,29 +3,82 @@ package com.xnotes.core.model
 import com.xnotes.core.geometry.Affine
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
+import com.xnotes.core.pal.BoxTextHost
 import com.xnotes.core.pal.FontFace
 import com.xnotes.core.pal.FontSpec
+import com.xnotes.core.pal.Pen
 import com.xnotes.core.pal.Renderer
-import com.xnotes.core.pal.TextFlags
 import com.xnotes.core.pal.TextMeasurer
+import com.xnotes.core.text.FlowFrame
+import com.xnotes.core.text.FlowLayout
+import com.xnotes.core.text.FlowMargins
+import com.xnotes.core.text.FlowPainter
+import com.xnotes.core.text.PageBox
+import com.xnotes.core.text.Paragraph
+import com.xnotes.core.text.Run
+import com.xnotes.core.text.TextFlow
+import kotlin.math.PI
+import kotlin.math.ceil
+import kotlin.math.cos
+import kotlin.math.sin
+
+/** A text box's own frame: what is painted behind and around its text. All off by default. */
+data class BoxStyle(
+    val fill: Rgba? = null,
+    val border: Rgba? = null,
+    val borderWidth: Double = 0.0,
+    val corner: Double = 0.0,
+) {
+    /** Whether the frame draws an outline of its own. */
+    val outlined: Boolean get() = border != null && borderWidth > 0.0
+
+    /** Whether there is anything to see of the frame at all. */
+    val visible: Boolean get() = fill != null || outlined
+
+    companion object {
+        val NONE = BoxStyle()
+        const val MAX_BORDER = 12.0
+        const val MAX_CORNER = 48.0
+    }
+}
+
+/** What a text box last set: its lines, the size they take, and a copy of the text no edit can reach. */
+class BoxContent(
+    val frame: FlowFrame,
+    val w: Double,
+    val h: Double,
+    val frozen: TextFlow,
+    val plain: String,
+)
 
 /**
- * A wrapped plain-text box (spec 02 §5.3). [width] is the wrap width; the box
- * grows to fit its text, so [height] is a *reserved minimum* — the rendered box
- * is `max(height, content height)` tall and never clips. A box created by a tap
- * has `height == 0` (pure auto-height, as before); one dragged out reserves the
- * dragged height. The [measurer] lays out text identically for bounds and paint.
+ * A box of rich text placed on the page: a small [flow] of its own, set by the same engine as the
+ * note's flowing text. [pos] is the top-left of the text and [width] what it wraps at; the box
+ * stands [PAD_X] and [PAD_Y] out from that, so a file written before boxes had an inset still puts
+ * every word where it was. With [autoWidth] nothing wraps and the box is as wide as its text.
+ *
+ * The flow is only edited on the main thread, and [reflow] must follow every edit: it publishes
+ * [content], which is all that painting, bounds and saving read, on any thread.
  */
 class TextItem(
     var pos: Pt,
-    var width: Double = DEFAULT_WIDTH,
-    var height: Double = 0.0,
-    var text: String = "",
-    var rgba: Rgba = DEFAULT_COLOR,
-    var pointSize: Double = DEFAULT_POINT_SIZE,
-    var face: FontFace = DEFAULT_FACE,
+    width: Double,
+    autoWidth: Boolean,
+    val flow: TextFlow,
     private val measurer: TextMeasurer,
 ) : CanvasItem, Resizable {
+
+    /** A box of plain [text] in one style, as files before rich text held and tests build. */
+    constructor(
+        pos: Pt,
+        width: Double = DEFAULT_WIDTH,
+        text: String = "",
+        rgba: Rgba? = DEFAULT_COLOR,
+        pointSize: Double = DEFAULT_POINT_SIZE,
+        face: FontFace = DEFAULT_FACE,
+        measurer: TextMeasurer,
+        autoWidth: Boolean = false,
+    ) : this(pos, width, autoWidth, plainFlow(text, rgba, pointSize, face), measurer)
 
     override val kind = KIND
     override val mirrorable = false
@@ -34,16 +87,122 @@ class TextItem(
     override var group: Int? = null
     override var sync: SyncMark? = null
 
+    private val host = measurer as? BoxTextHost
+    private val layout = FlowLayout(measurer, host?.math).also { l -> l.autoColor = { host?.autoColor() } }
+
+    private var wrapWidth = width
+    private var hugs = autoWidth
+
+    /** The wrap width of the text; ignored while [autoWidth] is on. */
+    var width: Double
+        get() = wrapWidth
+        set(value) = wrap(value, hugs)
+
+    /** Whether the box is as wide as its text, with nothing wrapped. */
+    var autoWidth: Boolean
+        get() = hugs
+        set(value) = wrap(wrapWidth, value)
+
+    var box: BoxStyle = BoxStyle.NONE
+
+    @Volatile
+    var content: BoxContent = typeset()
+        private set
+
+    /** The base text colour, or null to follow the host's theme. */
+    var color: Rgba?
+        get() = flow.defaultColor
+        set(value) {
+            flow.defaultColor = value
+            reflow()
+        }
+
+    /** The base colour as drawn: [color], or what following the theme resolves to. */
+    var rgba: Rgba
+        get() = content.frame.defaultColor
+        set(value) {
+            color = value
+        }
+
+    var pointSize: Double
+        get() = flow.defaultSizePt
+        set(value) {
+            flow.defaultSizePt = value
+            reflow()
+        }
+
+    var face: FontFace
+        get() = flow.defaultFace
+        set(value) {
+            flow.defaultFace = value
+            reflow()
+        }
+
+    /** The words alone. Setting them drops every style but the box's base one. */
+    var text: String
+        get() = content.plain
+        set(value) {
+            flow.paragraphs.clear()
+            flow.paragraphs.addAll(plainParagraphs(value))
+            reflow()
+        }
+
     val font get() = FontSpec(pointSize, face)
 
-    /** Height the current text needs at the current width (empty ⇒ one line). */
-    fun contentHeight(): Double = measurer.measure(text.ifEmpty { " " }, font, width, FLAGS).h
+    /** Lay the flow out afresh and publish it. Call after anything that changes the text or its styles. */
+    fun reflow() {
+        content = typeset()
+    }
 
-    override fun bounds(): Rect = Rect(pos.x, pos.y, width, maxOf(height, contentHeight()))
+    /** Set the wrap width and whether the box hugs its text, in one layout. */
+    fun wrap(width: Double, autoWidth: Boolean) {
+        if (width == wrapWidth && autoWidth == hugs) return
+        wrapWidth = width
+        hugs = autoWidth
+        reflow()
+    }
+
+    private fun typeset(): BoxContent {
+        if (flow.paragraphs.isEmpty()) flow.paragraphs.add(Paragraph())
+        val w = if (hugs) {
+            maxOf(ceil(layout.naturalWidth(flow)) + HUG_SLACK, MIN_TEXT_WIDTH)
+        } else {
+            wrapWidth.coerceAtLeast(MIN_TEXT_WIDTH)
+        }
+        val frame = layout.layout(flow, listOf(PageBox(w, TALL)), LAYOUT_DPI)
+        val h = frame.lastLineEnd()?.second ?: layout.defaultSlotHeight(flow)
+        return BoxContent(frame, w, h, flow.deepCopy(), flow.plainText())
+    }
+
+    /** Where the text itself sits, inside the inset. */
+    fun textRect(): Rect = content.let { Rect(pos.x, pos.y, it.w, it.h) }
+
+    override fun bounds(): Rect = content.let { Rect(pos.x - PAD_X, pos.y - PAD_Y, it.w + 2 * PAD_X, it.h + 2 * PAD_Y) }
+
+    override fun paintBounds(): Rect = if (box.outlined) bounds().outset(box.borderWidth / 2.0) else bounds()
 
     override fun paint(r: Renderer) {
-        if (text.isEmpty()) return
-        r.drawText(text, bounds(), font, rgba, FLAGS)
+        val c = content
+        paintFrame(r)
+        r.save()
+        r.translate(pos.x, pos.y)
+        FlowPainter.paintPage(r, c.frame, 0, Rect(0.0, 0.0, c.w, c.h), marks = false)
+        r.restore()
+    }
+
+    private fun paintFrame(r: Renderer) {
+        val s = box
+        if (!s.visible) return
+        val b = bounds()
+        val corner = s.corner.coerceIn(0.0, minOf(b.w, b.h) / 2.0)
+        if (corner <= 0.0) {
+            s.fill?.let { r.fillRect(b, it) }
+            if (s.outlined) r.strokeRect(b, Pen(s.border!!, s.borderWidth, cosmetic = false))
+            return
+        }
+        val ring = roundedRect(b, corner)
+        s.fill?.let { r.fillPolygon(ring, it) }
+        if (s.outlined) r.strokePolygon(ring, Pen(s.border!!, s.borderWidth, cosmetic = false))
     }
 
     override fun translate(dx: Double, dy: Double) {
@@ -57,36 +216,71 @@ class TextItem(
     override fun intersectsCircle(cx: Double, cy: Double, radius: Double): Boolean =
         bounds().distanceTo(Pt(cx, cy)) <= radius
 
-    override fun geometry(): GeoHandle = TextHandle(pos, width, height)
+    override fun geometry(): GeoHandle = TextHandle(pos, content.w, autoWidth)
 
     override fun setGeometry(handle: GeoHandle) {
-        if (handle is TextHandle) {
-            pos = handle.pos
-            width = handle.width
-            height = handle.height
-        }
+        if (handle !is TextHandle) return
+        pos = handle.pos
+        wrap(if (handle.autoWidth) wrapWidth else handle.width, handle.autoWidth)
     }
 
-    override fun snapshotGeometry(): GeometrySnapshot = TextSnapshot(pos, width, height, pointSize)
+    override fun snapshotGeometry(): GeometrySnapshot =
+        TextSnapshot(pos, width, autoWidth, flow.defaultSizePt, flow.paragraphs.flatMap { p -> p.runs.map { it.style.sizePt } })
 
     override fun restoreGeometry(snap: GeometrySnapshot) {
         if (snap !is TextSnapshot) return
         pos = snap.pos
-        width = snap.width
-        height = snap.height
-        pointSize = snap.pointSize
+        flow.defaultSizePt = snap.baseSize
+        val runs = flow.paragraphs.flatMap { p -> p.runs.map { p to it } }
+        if (runs.size == snap.runSizes.size) {
+            for ((i, pr) in runs.withIndex()) {
+                val (para, run) = pr
+                if (run.style.sizePt != snap.runSizes[i]) {
+                    run.style = run.style.copy(sizePt = snap.runSizes[i])
+                    para.touch()
+                }
+            }
+        }
+        wrapWidth = snap.width
+        hugs = snap.autoWidth
+        reflow()
     }
 
-    /** Text never rotates. A uniform (corner) scale grows the wrap width, reserved height, and font
-     *  size together; a single-axis (edge) scale changes only the wrap width or the reserved height
-     *  and leaves the font size alone. The vertical scale reserves at least the current content
-     *  height first, so dragging the bottom edge of an auto-height box actually grows it. */
+    /**
+     * Text never rotates. A uniform (corner) scale grows every text size with the box; a scale
+     * along x alone sets the wrap width, which ends the box hugging its text. Height always
+     * follows the text, so a scale along y alone only moves the box. The inset does not scale.
+     */
     override fun applyTransform(t: Affine) {
-        pos = t.apply(pos)
-        width *= t.scaleX
-        if (t.scaleY != 1.0) height = maxOf(height, contentHeight()) * t.scaleY
-        if (t.isUniformScale) pointSize *= t.scaleX
+        val b = bounds()
+        val corner = t.apply(Pt(b.left, b.top))
+        pos = Pt(corner.x + PAD_X, corner.y + PAD_Y)
+        if (t.isUniformScale) {
+            if (t.scaleX == 1.0) return
+            scaleText(t.scaleX)
+            if (!hugs) wrapWidth = (b.w * t.scaleX - 2 * PAD_X).coerceAtLeast(MIN_TEXT_WIDTH)
+            reflow()
+        } else if (t.scaleX != 1.0) {
+            wrap((b.w * t.scaleX - 2 * PAD_X).coerceAtLeast(MIN_TEXT_WIDTH), false)
+        }
     }
+
+    /** Multiply every text size in the box by [s]; the caller sets the text afresh. */
+    private fun scaleText(s: Double) {
+        flow.defaultSizePt *= s
+        for (para in flow.paragraphs) {
+            var any = false
+            for (run in para.runs) {
+                val size = run.style.sizePt ?: continue
+                run.style = run.style.copy(sizePt = size * s)
+                any = true
+            }
+            if (any) para.touch()
+        }
+    }
+
+    /** An independent copy: its own flow, the same place, look and frame. */
+    fun copy(): TextItem = TextItem(pos, width, autoWidth, flow.deepCopy(), measurer).also { it.box = box }
 
     companion object {
         const val KIND = "text"
@@ -94,16 +288,65 @@ class TextItem(
         const val DEFAULT_POINT_SIZE = 13.0
         val DEFAULT_FACE = FontFace.MONO
         val DEFAULT_COLOR = Rgba(236, 236, 236, 255)
-        val FLAGS = TextFlags(wordWrap = true, alignLeft = true, alignTop = true)
+
+        /** The inset between the box's edge and its text: about 2 mm of paper, a little less above and below. */
+        const val PAD_X = 12.0
+        const val PAD_Y = 8.0
+
+        /** The narrowest text a box holds, which is also what an empty one takes. */
+        const val MIN_TEXT_WIDTH = FlowLayout.MIN_LINE_WIDTH
+
+        /** Room past the measured text of a hugging box, so rounding never wraps its last word. */
+        private const val HUG_SLACK = 1.0
+
+        /** A page no box runs off the end of. */
+        private const val TALL = 1.0e7
+
+        /** Margins are zero, so the dpi they would be read at does not matter. */
+        private const val LAYOUT_DPI = 150
+
+        private const val CORNER_STEPS = 6
+
+        private fun plainParagraphs(text: String): List<Paragraph> =
+            text.split('\n').map { line -> if (line.isEmpty()) Paragraph() else Paragraph(mutableListOf(Run(line))) }
+
+        private fun plainFlow(text: String, rgba: Rgba?, pointSize: Double, face: FontFace): TextFlow = boxFlow(rgba, pointSize, face).also {
+            it.paragraphs.addAll(plainParagraphs(text))
+        }
+
+        /** An empty flow set up for a box: no margins, the box's base style. */
+        fun boxFlow(rgba: Rgba?, pointSize: Double, face: FontFace): TextFlow = TextFlow().also {
+            it.margins = FlowMargins(0.0, 0.0, 0.0, 0.0)
+            it.defaultColor = rgba
+            it.defaultSizePt = pointSize
+            it.defaultFace = face
+        }
+
+        /** [b] with its corners rounded to [radius], as a closed ring. */
+        internal fun roundedRect(b: Rect, radius: Double): List<Pt> {
+            val out = ArrayList<Pt>(4 * (CORNER_STEPS + 1))
+            fun arc(cx: Double, cy: Double, from: Double) {
+                for (k in 0..CORNER_STEPS) {
+                    val a = from + (PI / 2.0) * k / CORNER_STEPS
+                    out += Pt(cx + radius * cos(a), cy + radius * sin(a))
+                }
+            }
+            arc(b.right - radius, b.top + radius, -PI / 2.0)
+            arc(b.right - radius, b.bottom - radius, 0.0)
+            arc(b.left + radius, b.bottom - radius, PI / 2.0)
+            arc(b.left + radius, b.top + radius, PI)
+            return out
+        }
     }
 }
 
 /** A snapshot of a text box's restylable properties (colour, size, face) for undo. */
 data class TextStyle(val rgba: Rgba, val pointSize: Double, val face: FontFace) {
     fun applyTo(t: TextItem) {
-        t.rgba = rgba
-        t.pointSize = pointSize
-        t.face = face
+        // A box following the theme stays following it unless the colour really changed.
+        if (t.rgba != rgba) t.rgba = rgba
+        if (t.pointSize != pointSize) t.pointSize = pointSize
+        if (t.face != face) t.face = face
     }
 
     companion object {
@@ -111,10 +354,11 @@ data class TextStyle(val rgba: Rgba, val pointSize: Double, val face: FontFace) 
     }
 }
 
-/** Snapshot of a text box's transformable geometry (position, wrap width, reserved height, size). */
-private data class TextSnapshot(
+/** Snapshot of a text box's transformable geometry: place, wrap width, and every text size a scale changes. */
+private class TextSnapshot(
     val pos: Pt,
     val width: Double,
-    val height: Double,
-    val pointSize: Double,
+    val autoWidth: Boolean,
+    val baseSize: Double,
+    val runSizes: List<Double?>,
 ) : GeometrySnapshot

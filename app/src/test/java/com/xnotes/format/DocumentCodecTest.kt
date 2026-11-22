@@ -141,7 +141,7 @@ class DocumentCodecTest {
         page.items.add(pinnedStroke)
         page.items.add(freeStroke)
         page.items.add(ImageItem(ImageData(imageFile(), 20, 10), Rect(0.0, 0.0, 20.0, 10.0)).apply { locked = true })
-        page.items.add(TextItem(Pt(1.0, 1.0), 100.0, 0.0, "hi", Rgba(0, 0, 0), 12.0, measurer = FakeTextMeasurer()).apply { locked = true })
+        page.items.add(TextItem(Pt(1.0, 1.0), 100.0, "hi", Rgba(0, 0, 0), 12.0, measurer = FakeTextMeasurer()).apply { locked = true })
         page.items.add(
             ShapeItem(ShapeKind.RECTANGLE, Pt(0.0, 0.0), Pt(9.0, 9.0), Rgba(1, 2, 3, 255)).apply { locked = true },
         )

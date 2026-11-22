@@ -91,7 +91,7 @@ class ResizeMathTest {
     }
 
     @Test fun textHandlesAreEightAroundTheBox() {
-        val t = TextItem(Pt(0.0, 0.0), width = 100.0, height = 50.0, text = "x", measurer = FakeTextMeasurer())
+        val t = TextItem(Pt(0.0, 0.0), width = 100.0, text = "x", measurer = FakeTextMeasurer())
         val handles = ResizeMath.handles(t, Pt(0.0, 0.0))
         assertEquals(8, handles.size)
         val ids = handles.map { it.id }.toSet()

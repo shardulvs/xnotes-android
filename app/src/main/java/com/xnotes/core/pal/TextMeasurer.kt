@@ -39,3 +39,14 @@ interface TextMeasurer {
      */
     fun outline(text: String, font: FontSpec, wrapWidth: Double, flags: TextFlags = TextFlags()): List<VectorContour> = emptyList()
 }
+
+/**
+ * What a text box needs of its host beyond measuring. A measurer that also implements this hands
+ * the boxes it builds their maths and the colour text following the theme takes.
+ */
+interface BoxTextHost {
+    val math: MathTypesetter? get() = null
+
+    /** The colour of text with none of its own, or null for the format's built-in. */
+    fun autoColor(): com.xnotes.core.model.Rgba? = null
+}

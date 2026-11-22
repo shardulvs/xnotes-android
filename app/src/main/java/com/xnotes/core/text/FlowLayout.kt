@@ -456,6 +456,13 @@ class FlowLayout(private val measurer: TextMeasurer, private val math: MathTypes
         return best
     }
 
+    /** How wide [flow] sets with no line wrapped: its widest paragraph, indent and trailing spaces included. */
+    fun naturalWidth(flow: TextFlow): Double {
+        var widest = 0.0
+        for (para in flow.paragraphs) widest = maxOf(widest, indentOf(para) + shapeOf(flow, para).adv.sum())
+        return widest
+    }
+
     /** Drop cached measurements for paragraphs no longer in [flow] (call after big splices). */
     fun pruneCaches(flow: TextFlow) {
         val live = HashSet<Paragraph>(flow.paragraphs)

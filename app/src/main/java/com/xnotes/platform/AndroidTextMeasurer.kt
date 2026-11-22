@@ -2,14 +2,25 @@ package com.xnotes.platform
 
 import android.graphics.Path
 import com.xnotes.core.geometry.Rect
+import com.xnotes.core.model.Rgba
+import com.xnotes.core.pal.BoxTextHost
 import com.xnotes.core.pal.FontSpec
 import com.xnotes.core.pal.LineMetrics
+import com.xnotes.core.pal.MathTypesetter
 import com.xnotes.core.pal.TextFlags
 import com.xnotes.core.pal.TextMeasurer
 import com.xnotes.core.vector.VectorContour
 
 /** Measures text with the same layout pipeline the renderer draws with. */
-class AndroidTextMeasurer : TextMeasurer {
+class AndroidTextMeasurer : TextMeasurer, BoxTextHost {
+
+    /** Text boxes lay out on the main thread and bake off it, so their formulas are set at once. */
+    override val math: MathTypesetter get() = MathRendering.Blocking
+
+    /** The colour text following the theme takes in a box, installed by the editor. */
+    var autoTextColor: () -> Rgba? = { null }
+
+    override fun autoColor(): Rgba? = autoTextColor()
 
     override fun measure(text: String, font: FontSpec, wrapWidth: Double, flags: TextFlags): Rect {
         val probe = text.ifEmpty { " " }

@@ -65,11 +65,12 @@ class PageTurnTest {
         val doc = Document()
         val page = Page(200.0, 100.0)
         doc.pages.add(page)
-        val box = TextItem(Pt(0.0, 0.0), width = 40.0, height = 20.0, measurer = FakeTextMeasurer())
+        val box = TextItem(Pt(0.0, 0.0), width = 40.0, measurer = FakeTextMeasurer())
         page.items.add(box)
+        val c = box.bounds().center
         PageTurn.turn(page, doc, 1)
-        // Its centre (20, 10) goes to (90, 20); the box stays 40 wide around it.
-        assertPt(Pt(70.0, 10.0), box.pos)
+        // Its centre (x, y) goes to (100 - y, x); the box stays 40 wide around it.
+        assertPt(Pt(100.0 - c.y, c.x), box.bounds().center)
         assertEquals(40.0, box.width, eps)
     }
 

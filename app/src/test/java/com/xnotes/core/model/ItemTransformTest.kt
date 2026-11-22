@@ -172,18 +172,21 @@ class ItemTransformTest {
     // --- text ---
 
     @Test fun cornerScaleGrowsFontAndBox() {
-        val t = TextItem(Pt(0.0, 0.0), width = 100.0, height = 40.0, text = "x", pointSize = 10.0, measurer = FakeTextMeasurer())
-        t.applyTransform(Affine.scaleAbout(Pt.ZERO, 2.0, 2.0))
-        assertEquals(200.0, t.width, 1e-9)
+        val t = TextItem(Pt(0.0, 0.0), width = 100.0, text = "x", pointSize = 10.0, measurer = FakeTextMeasurer())
+        val before = t.bounds()
+        t.applyTransform(Affine.scaleAbout(Pt(before.left, before.top), 2.0, 2.0))
+        // The box doubles about its corner; the inset inside it stays what it was.
+        assertEquals(before.left, t.bounds().left, 1e-9)
+        assertEquals(before.w * 2.0, t.bounds().w, 1e-9)
         assertEquals(20.0, t.pointSize, 1e-9)
-        assertEquals(80.0, t.height, 1e-9) // max(40, content) * 2
     }
 
     @Test fun edgeScaleLeavesFontAlone() {
-        val t = TextItem(Pt(0.0, 0.0), width = 100.0, height = 40.0, text = "x", pointSize = 10.0, measurer = FakeTextMeasurer())
-        t.applyTransform(Affine.scaleAbout(Pt.ZERO, 2.0, 1.0)) // a horizontal edge drag
-        assertEquals(200.0, t.width, 1e-9)
+        val t = TextItem(Pt(0.0, 0.0), width = 100.0, text = "x", pointSize = 10.0, measurer = FakeTextMeasurer())
+        val before = t.bounds()
+        t.applyTransform(Affine.scaleAbout(Pt(before.left, before.top), 2.0, 1.0)) // a horizontal edge drag
+        assertEquals(before.w * 2.0, t.bounds().w, 1e-9)
         assertEquals(10.0, t.pointSize, 1e-9) // font unchanged
-        assertEquals(40.0, t.height, 1e-9) // vertical axis untouched
+        assertEquals(before.h, t.bounds().h, 1e-9) // height follows the text alone
     }
 }

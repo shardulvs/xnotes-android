@@ -97,12 +97,13 @@ class RoomCutTest {
 
     @Test fun whatCannotBeCutStaysWithTheUpperBand() {
         val across = box(10.0, 100.0, 90.0, 200.0)
-        val text = TextItem(Pt(100.0, 140.0), 100.0, 20.0, "hi", ink, 12.0, measurer = FakeTextMeasurer())
+        val text = TextItem(Pt(100.0, 140.0), 100.0, "hi", ink, 12.0, measurer = FakeTextMeasurer())
+        val textTop = text.bounds().top
         val under = box(10.0, 300.0, 90.0, 350.0)
         val p = page(across, text, under)
         RoomCut.open(p, 150.0, 40.0)
         assertEquals(100.0, across.bounds().top, 3.0)
-        assertEquals(140.0, text.bounds().top, eps)
+        assertEquals(textTop, text.bounds().top, eps)
         assertEquals(340.0, under.bounds().top, 3.0)
         assertEquals(3, p.items.size)
     }

@@ -87,10 +87,13 @@ class ModelItemsTest {
         val m = FakeTextMeasurer()
         val t = TextItem(Pt(5.0, 5.0), width = 300.0, text = "a\nb\nc", measurer = m)
         val lh = m.lineHeight(t.font)
-        assertEquals(Rect(5.0, 5.0, 300.0, 3 * lh), t.bounds())
+        assertEquals(Pt(5.0, 5.0), Pt(t.textRect().left, t.textRect().top))
+        assertEquals(300.0, t.textRect().w, 1e-9)
+        assertEquals(3 * lh, t.textRect().h, 1e-9)
+        assertEquals(3 * lh + 2 * TextItem.PAD_Y, t.bounds().h, 1e-9)
         // Empty text still measures one line tall.
         t.text = ""
-        assertEquals(1 * lh, t.bounds().h, 1e-9)
+        assertEquals(1 * lh, t.textRect().h, 1e-9)
     }
 
     @Test fun textItemEmptyPaintsNothing() {

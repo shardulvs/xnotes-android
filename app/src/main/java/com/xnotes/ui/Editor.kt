@@ -2818,6 +2818,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         cornerStyle = p.cornerStyle
         toolbarLook = p.toolbarLook
         state.palette = palette
+        textMeasurer.autoTextColor = { defaultTextColor() }
+        // Boxes following the theme take its text colour afresh.
+        for (page in state.document.pages) for (item in page.items) if (item is TextItem) item.reflow()
         com.xnotes.core.model.AudioLook.current = palette.audioLook()
         infiniteOrNull?.applyPalette(palette)
         infiniteOrNull?.applyInputPrefs(

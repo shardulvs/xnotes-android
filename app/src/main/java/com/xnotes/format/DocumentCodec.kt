@@ -509,7 +509,6 @@ class DocumentCodec(
         j.name("point_size").value(t.pointSize)
         // Additive fields: written only when set, so older readers stay compatible
         // and notes that use neither serialize exactly as before.
-        if (t.height > 0.0) j.name("height").value(t.height)
         if (t.face != TextItem.DEFAULT_FACE) j.name("font_face").value(t.face.id)
         t.sync?.let { writeSync(j, it) }
         if (t.locked) j.name("locked").value(true)
@@ -1297,7 +1296,6 @@ class DocumentCodec(
                 TextItem(
                     pos = s.pos ?: Pt.ZERO,
                     width = s.width,
-                    height = s.height,
                     text = s.text,
                     rgba = s.rgba ?: TextItem.DEFAULT_COLOR,
                     pointSize = s.pointSize,
