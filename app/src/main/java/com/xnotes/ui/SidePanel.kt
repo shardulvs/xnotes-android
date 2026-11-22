@@ -32,9 +32,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -55,7 +53,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.ImageBitmap
@@ -610,27 +607,16 @@ private fun PageContextMenu(
 private fun ExtractDialog(editor: Editor, indices: List<Int>, move: Boolean, onDismiss: () -> Unit) {
     val suggested = remember(indices) { editor.extractName(indices) }
     var name by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(suggested, androidx.compose.ui.text.TextRange(0, suggested.length))) }
-    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(if (move) R.string.move_to_new_note_title else R.string.extract_to_new_note_title)) },
-        text = {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                singleLine = true,
-                label = { Text(stringResource(R.string.new_note_name)) },
-                modifier = Modifier.focusRequester(focus),
-            )
+    val extract = { if (name.text.isNotBlank()) { onDismiss(); editor.extractPages(indices, name.text.trim(), move) } }
+    SheetDialog(
+        title = stringResource(if (move) R.string.move_to_new_note_title else R.string.extract_to_new_note_title),
+        onDismiss = onDismiss,
+        foot = {
+            ConfirmButtons(stringResource(if (move) R.string.move else R.string.extract), onDismiss, enabled = name.text.isNotBlank(), onConfirm = extract)
         },
-        confirmButton = {
-            TextButton(enabled = name.text.isNotBlank(), onClick = { onDismiss(); editor.extractPages(indices, name.text.trim(), move) }) {
-                Text(stringResource(if (move) R.string.move else R.string.extract))
-            }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
-    )
+    ) {
+        DialogField(name, { name = it }, label = stringResource(R.string.new_note_name), autoFocus = true, onDone = extract, onEscape = onDismiss)
+    }
 }
 
 /** A Share or Save as sub-page: its back row, then Image (PNG) and PDF; [onPick] says which. */
@@ -917,29 +903,27 @@ private fun BookmarksTab(editor: Editor) {
 
     renaming?.let { mark ->
         var label by remember(mark) { mutableStateOf(mark.label) }
-        AlertDialog(
-            onDismissRequest = { renaming = null },
-            title = { Text(stringResource(R.string.rename_bookmark)) },
-            text = { OutlinedTextField(value = label, onValueChange = { label = it }, singleLine = true) },
-            confirmButton = {
-                TextButton(onClick = { editor.renameBookmark(mark, label); renaming = null }, enabled = label.isNotBlank()) { Text(stringResource(R.string.rename)) }
-            },
-            dismissButton = { TextButton(onClick = { renaming = null }) { Text(stringResource(R.string.cancel)) } },
-        )
+        val rename = { if (label.isNotBlank()) { editor.renameBookmark(mark, label); renaming = null } }
+        SheetDialog(
+            title = stringResource(R.string.rename_bookmark),
+            onDismiss = { renaming = null },
+            foot = { ConfirmButtons(stringResource(R.string.rename), { renaming = null }, enabled = label.isNotBlank(), onConfirm = rename) },
+        ) {
+            DialogField(label, { label = it }, onDone = rename)
+        }
     }
 
     if (showAdd) {
         val defaultLabel = stringResource(R.string.page_n, editor.pageIndex + 1)
         var label by remember { mutableStateOf(defaultLabel) }
-        AlertDialog(
-            onDismissRequest = { showAdd = false },
-            title = { Text(stringResource(R.string.add_bookmark)) },
-            text = { OutlinedTextField(value = label, onValueChange = { label = it }, singleLine = true) },
-            confirmButton = {
-                TextButton(onClick = { editor.addBookmark(label.ifBlank { defaultLabel }); showAdd = false }) { Text(stringResource(R.string.add)) }
-            },
-            dismissButton = { TextButton(onClick = { showAdd = false }) { Text(stringResource(R.string.cancel)) } },
-        )
+        val add = { editor.addBookmark(label.ifBlank { defaultLabel }); showAdd = false }
+        SheetDialog(
+            title = stringResource(R.string.add_bookmark),
+            onDismiss = { showAdd = false },
+            foot = { ConfirmButtons(stringResource(R.string.add), { showAdd = false }, onConfirm = add) },
+        ) {
+            DialogField(label, { label = it }, onDone = add)
+        }
     }
 }
 

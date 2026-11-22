@@ -59,9 +59,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -88,11 +86,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -1860,16 +1854,16 @@ private fun ExplorerSection(
                 if (n > 0) editor.message = context.resources.getQuantityString(R.plurals.imported_pdfs, n, n)
             }
         }
-        AlertDialog(
-            onDismissRequest = { editor.requestImports(emptyList()) },
-            title = { Text(pluralStringResource(R.plurals.import_pdfs_title, pendingImports.size, pendingImports.size)) },
-            confirmButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = { land(asPdf = true) }) { Text(stringResource(R.string.keep_as_pdf)) }
-                    TextButton(onClick = { land(asPdf = false) }) { Text(stringResource(R.string.make_a_note)) }
+        SheetDialog(
+            title = pluralStringResource(R.plurals.import_pdfs_title, pendingImports.size, pendingImports.size),
+            onDismiss = { editor.requestImports(emptyList()) },
+            foot = {
+                DialogButtons {
+                    DialogButton(stringResource(R.string.keep_as_pdf), ButtonKind.CHOICE) { land(asPdf = true) }
+                    DialogButton(stringResource(R.string.make_a_note), ButtonKind.CHOICE) { land(asPdf = false) }
                 }
+                SheetButton(stringResource(R.string.cancel), Modifier.fillMaxWidth()) { editor.requestImports(emptyList()) }
             },
-            dismissButton = { TextButton(onClick = { editor.requestImports(emptyList()) }) { Text(stringResource(R.string.cancel)) } },
         )
     }
 
@@ -2030,17 +2024,13 @@ private fun ExplorerSection(
     previewing?.let { e -> FilePreviewDialog(body, e, pathText.takeIf { !flat }, previewActions(e)) { previewing = null } }
 
     pendingDelete?.let { targets ->
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text(stringResource(R.string.delete_confirm_title)) },
-            text = {
-                Text(
-                    if (targets.size == 1) stringResource(R.string.delete_one_confirm, entryLabel(targets.first()))
-                    else pluralStringResource(R.plurals.delete_items_confirm, targets.size, targets.size),
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
+        SheetDialog(
+            title = stringResource(R.string.delete_confirm_title),
+            onDismiss = { pendingDelete = null },
+            text = if (targets.size == 1) stringResource(R.string.delete_one_confirm, entryLabel(targets.first()))
+            else pluralStringResource(R.plurals.delete_items_confirm, targets.size, targets.size),
+            foot = {
+                ConfirmButtons(stringResource(R.string.delete), { pendingDelete = null }, ButtonKind.DESTROY) {
                     val items = targets.toList()
                     pendingDelete = null; selection.clear(); opError = null
                     scope.launch {
@@ -2060,9 +2050,8 @@ private fun ExplorerSection(
                         refreshKey++
                         if (!allOk) opError = context.getString(R.string.err_delete_some)
                     }
-                }) { Text(stringResource(R.string.delete)) }
+                }
             },
-            dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text(stringResource(R.string.cancel)) } },
         )
     }
 }
@@ -2320,54 +2309,34 @@ private fun NameDialog(
     secondLabel: String? = null,
     onSecond: (String) -> Unit = {},
 ) {
-    val palette = LocalPalette.current
     var text by remember { mutableStateOf(TextFieldValue(initial, selection = TextRange(0, initial.length))) }
-    val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     val confirm = {
         val n = text.text.trim()
         // With two ways to confirm, the keyboard's Done picks neither: the choice is the user's to make.
         if (secondLabel == null && (allowEmpty || n.isNotEmpty())) onConfirm(n)
     }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                singleLine = true,
-                isError = error != null,
-                placeholder = placeholder?.let { { Text(it) } },
-                supportingText = error?.let { { Text(it) } },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { confirm() }),
-                modifier = Modifier
-                    .focusRequester(focus)
-                    .onPreviewKeyEvent { ev ->
-                        when {
-                            ev.type != KeyEventType.KeyDown -> false
-                            ev.key == Key.Enter || ev.key == Key.NumPadEnter -> { confirm(); true }
-                            ev.key == Key.Escape -> { onDismiss(); true }
-                            else -> false
-                        }
-                    },
-            )
-        },
-        confirmButton = {
+    SheetDialog(
+        title = title,
+        onDismiss = onDismiss,
+        foot = {
             val ready = allowEmpty || text.text.isNotBlank()
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (secondLabel != null) TextButton(onClick = { onSecond(text.text.trim()) }, enabled = ready) { Text(secondLabel) }
-                TextButton(onClick = { onConfirm(text.text.trim()) }, enabled = ready) { Text(confirmLabel) }
+            if (secondLabel != null) {
+                DialogButtons {
+                    DialogButton(secondLabel, ButtonKind.CHOICE, ready) { onSecond(text.text.trim()) }
+                    DialogButton(confirmLabel, ButtonKind.CHOICE, ready) { onConfirm(text.text.trim()) }
+                }
+                SheetButton(stringResource(R.string.cancel), Modifier.fillMaxWidth(), onClick = onDismiss)
+            } else {
+                DialogButtons {
+                    if (onRemove != null) DialogButton(stringResource(R.string.delete), ButtonKind.DISCARD, onClick = onRemove)
+                    DialogButton(stringResource(R.string.cancel), onClick = onDismiss)
+                    DialogButton(confirmLabel, ButtonKind.CONFIRM, ready) { onConfirm(text.text.trim()) }
+                }
             }
         },
-        dismissButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (onRemove != null) TextButton(onClick = onRemove) { Text(stringResource(R.string.delete)) }
-                TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
-            }
-        },
-    )
+    ) {
+        DialogField(text, { text = it }, placeholder = placeholder, error = error, autoFocus = true, onDone = confirm, onEscape = onDismiss)
+    }
 }
 
 private const val PRESS_FILL_MS = 120L

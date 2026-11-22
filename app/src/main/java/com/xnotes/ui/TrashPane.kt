@@ -27,7 +27,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -194,12 +193,12 @@ internal fun TrashPane(editor: Editor, sidebarOpen: Boolean, onShowSidebar: () -
     }
 
     if (confirmEmpty && root != null) {
-        AlertDialog(
-            onDismissRequest = { confirmEmpty = false },
-            title = { Text(stringResource(R.string.empty_trash_confirm)) },
-            text = { Text(stringResource(R.string.empty_trash_body)) },
-            confirmButton = {
-                TextButton(onClick = {
+        SheetDialog(
+            title = stringResource(R.string.empty_trash_confirm),
+            onDismiss = { confirmEmpty = false },
+            text = stringResource(R.string.empty_trash_body),
+            foot = {
+                ConfirmButtons(stringResource(R.string.empty_trash), { confirmEmpty = false }, ButtonKind.DESTROY) {
                     confirmEmpty = false
                     busy = true
                     scope.launch {
@@ -207,27 +206,25 @@ internal fun TrashPane(editor: Editor, sidebarOpen: Boolean, onShowSidebar: () -
                         busy = false
                         refresh++
                     }
-                }) { Text(stringResource(R.string.empty_trash)) }
+                }
             },
-            dismissButton = { TextButton(onClick = { confirmEmpty = false }) { Text(stringResource(R.string.cancel)) } },
         )
     }
     confirmDelete?.let { item ->
         if (root == null) return@let
-        AlertDialog(
-            onDismissRequest = { confirmDelete = null },
-            title = { Text(stringResource(R.string.delete_permanently_confirm)) },
-            text = { Text(stringResource(R.string.delete_permanently_body, label(item))) },
-            confirmButton = {
-                TextButton(onClick = {
+        SheetDialog(
+            title = stringResource(R.string.delete_permanently_confirm),
+            onDismiss = { confirmDelete = null },
+            text = stringResource(R.string.delete_permanently_body, label(item)),
+            foot = {
+                ConfirmButtons(stringResource(R.string.delete), { confirmDelete = null }, ButtonKind.DESTROY) {
                     confirmDelete = null
                     scope.launch {
                         withContext(Dispatchers.IO) { editor.deleteTrash(root, item) }
                         refresh++
                     }
-                }) { Text(stringResource(R.string.delete)) }
+                }
             },
-            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text(stringResource(R.string.cancel)) } },
         )
     }
 }

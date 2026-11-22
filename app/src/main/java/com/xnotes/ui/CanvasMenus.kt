@@ -1,6 +1,5 @@
 package com.xnotes.ui
 
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.border
@@ -21,8 +20,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.GridOff
 import androidx.compose.material.icons.outlined.TableChart
@@ -331,25 +328,14 @@ private val ARRANGE_ROWS = listOf(
 @Composable
 private fun AudioNameDialog(initial: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
     var text by remember { mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(initial, androidx.compose.ui.text.TextRange(0, initial.length))) }
-    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
-    androidx.compose.runtime.LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.rename_recording)) },
-        text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                singleLine = true,
-                label = { Text(stringResource(R.string.audio_name)) },
-                modifier = Modifier.focusRequester(focus),
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = { if (text.text.isBlank()) onDismiss() else onConfirm(text.text) }) { Text(stringResource(R.string.rename)) }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
-    )
+    val rename = { if (text.text.isBlank()) onDismiss() else onConfirm(text.text) }
+    SheetDialog(
+        title = stringResource(R.string.rename_recording),
+        onDismiss = onDismiss,
+        foot = { ConfirmButtons(stringResource(R.string.rename), onDismiss, onConfirm = rename) },
+    ) {
+        DialogField(text, { text = it }, label = stringResource(R.string.audio_name), autoFocus = true, onDone = rename, onEscape = onDismiss)
+    }
 }
 
 /**
@@ -879,28 +865,19 @@ private const val NOTE_PEEK_MAX_HEIGHT = 0.4f
 fun MarkupNoteDialog(editor: Editor) {
     val target = editor.markupNote ?: return
     var text by remember(target) { mutableStateOf(target.markup.note.orEmpty()) }
-    AlertDialog(
-        onDismissRequest = { editor.dismissMarkupNote() },
-        title = { Text(stringResource(R.string.markup_note)) },
-        text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                placeholder = { Text(stringResource(R.string.markup_note_hint)) },
-                minLines = 3,
-                maxLines = 10,
-            )
-        },
-        confirmButton = { TextButton(onClick = { editor.saveMarkupNote(text) }) { Text(stringResource(R.string.save)) } },
-        dismissButton = {
-            Row {
-                if (target.markup.note != null) {
-                    TextButton(onClick = { editor.saveMarkupNote("") }) { Text(stringResource(R.string.delete)) }
-                }
-                TextButton(onClick = { editor.dismissMarkupNote() }) { Text(stringResource(R.string.cancel)) }
+    SheetDialog(
+        title = stringResource(R.string.markup_note),
+        onDismiss = { editor.dismissMarkupNote() },
+        foot = {
+            DialogButtons {
+                if (target.markup.note != null) DialogButton(stringResource(R.string.delete), ButtonKind.DISCARD) { editor.saveMarkupNote("") }
+                DialogButton(stringResource(R.string.cancel)) { editor.dismissMarkupNote() }
+                DialogButton(stringResource(R.string.save), ButtonKind.CONFIRM) { editor.saveMarkupNote(text) }
             }
         },
-    )
+    ) {
+        DialogField(text, { text = it }, placeholder = stringResource(R.string.markup_note_hint), lines = 3)
+    }
 }
 
 @Composable
