@@ -372,120 +372,123 @@ private fun SelectionStylePopup(host: SelectionMenuHost, onDismiss: () -> Unit) 
     val fillsOnly = first == null
     if (fillsOnly && fills.isEmpty()) return
 
-    DropdownMenu(expanded = true, onDismissRequest = onDismiss, properties = PopupProperties(focusable = false)) {
-        Column(Modifier.width(250.dp).padding(horizontal = 14.dp, vertical = 8.dp)) {
-            PopupTitle(stringResource(R.string.title_change_style))
-            if (!fillsOnly) StyleCaption(stringResource(R.string.caption_colour))
-            if (!fillsOnly) FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                host.hostToolbarColors.forEach { c ->
-                    ColorDot(c.toComposeColor(), selected = color == c) {
-                        color = c
-                        host.restyleSelection(c, null)
+    ToolMenu(stringResource(R.string.title_change_style), onDismiss, focusable = false) {
+        MenuCard(buildList<MenuGroup> {
+            if (!fillsOnly) add {
+                Column(Modifier.padding(10.dp)) {
+                    PanelCaption(stringResource(R.string.caption_colour))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        host.hostToolbarColors.forEach { c ->
+                            ColorDot(c.toComposeColor(), selected = color == c) {
+                                color = c
+                                host.restyleSelection(c, null)
+                            }
+                        }
+                        ColorPickerDot(
+                            color,
+                            custom = color !in host.hostToolbarColors,
+                            onPick = { color = it; host.restyleSelection(it, null) },
+                            dismissOnPick = false,
+                        ) { dismiss, pick ->
+                            ColorPickerPopup(
+                                initial = color,
+                                recents = host.hostRecentColors,
+                                onDismiss = dismiss,
+                                onPick = pick,
+                            )
+                        }
                     }
-                }
-                ColorPickerDot(
-                    color,
-                    custom = color !in host.hostToolbarColors,
-                    onPick = { color = it; host.restyleSelection(it, null) },
-                    dismissOnPick = false,
-                ) { dismiss, pick ->
-                    ColorPickerPopup(
-                        initial = color,
-                        recents = host.hostRecentColors,
-                        onDismiss = dismiss,
-                        onPick = pick,
-                    )
                 }
             }
             host.selectionTapePattern()?.let { opened ->
-                var pattern by remember { mutableStateOf(opened) }
-                StyleCaption(stringResource(R.string.caption_pattern))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for (p in com.xnotes.core.model.TapePattern.entries) {
-                        ModeChip(stringResource(p.labelRes), selected = pattern == p) {
-                            pattern = p
-                            host.setSelectionTapePattern(p)
-                        }
+                add {
+                    var pattern by remember { mutableStateOf(opened) }
+                    val patterns = com.xnotes.core.model.TapePattern.entries
+                    Column(Modifier.padding(10.dp)) {
+                        PanelCaption(stringResource(R.string.caption_pattern))
+                        PanelSegmented(patterns.map { stringResource(it.labelRes) }, patterns.indexOf(pattern), { pattern = patterns[it]; host.setSelectionTapePattern(patterns[it]) })
                     }
                 }
             }
-            if (fills.isNotEmpty()) {
+            if (fills.isNotEmpty()) add {
                 var fill by remember { mutableStateOf<Rgba?>(fills.first().copy(a = 255)) }
                 var editingFill by remember { mutableStateOf<Int?>(null) }
                 val outline = color
-                StyleCaption(stringResource(R.string.caption_fill_colour))
-                // The toolbar's own swatches; tapping the chosen one again opens the picker on it, as the toolbar does.
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (!fillsOnly) {
-                        MatchDot(outline, selected = fill == null || fill == outline) {
-                            fill = null
-                            host.refillSelection(null)
-                        }
-                    }
-                    host.shownSwatches.forEachIndexed { i, c ->
-                        val on = fill == c
-                        Box {
-                            ColorDot(c.toComposeColor(), selected = on) {
-                                if (on) {
-                                    editingFill = i
-                                } else {
-                                    fill = c
-                                    host.refillSelection(c)
-                                }
+                Column(Modifier.padding(10.dp)) {
+                    PanelCaption(stringResource(R.string.caption_fill_colour))
+                    // The toolbar's own swatches; tapping the chosen one again opens the picker on it, as the toolbar does.
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (!fillsOnly) {
+                            MatchDot(outline, selected = fill == null || fill == outline) {
+                                fill = null
+                                host.refillSelection(null)
                             }
-                            if (editingFill == i) {
-                                // However the picker closes, the drag through it settles as one undo step.
-                                val latest by rememberUpdatedState(fill)
-                                DisposableEffect(Unit) { onDispose { host.refillSelection(latest) } }
-                                ColorPickerPopup(
-                                    initial = c,
-                                    recents = host.hostRecentColors,
-                                    onDismiss = {
-                                        host.rememberSwatchColor(i)
-                                        editingFill = null
-                                    },
-                                    onPick = { picked ->
-                                        host.recolorSwatch(i, picked)
-                                        fill = picked
-                                        host.refillSelection(picked, preview = true)
-                                    },
-                                )
+                        }
+                        host.shownSwatches.forEachIndexed { i, c ->
+                            val on = fill == c
+                            Box {
+                                ColorDot(c.toComposeColor(), selected = on) {
+                                    if (on) {
+                                        editingFill = i
+                                    } else {
+                                        fill = c
+                                        host.refillSelection(c)
+                                    }
+                                }
+                                if (editingFill == i) {
+                                    // However the picker closes, the drag through it settles as one undo step.
+                                    val latest by rememberUpdatedState(fill)
+                                    DisposableEffect(Unit) { onDispose { host.refillSelection(latest) } }
+                                    ColorPickerPopup(
+                                        initial = c,
+                                        recents = host.hostRecentColors,
+                                        onDismiss = {
+                                            host.rememberSwatchColor(i)
+                                            editingFill = null
+                                        },
+                                        onPick = { picked ->
+                                            host.recolorSwatch(i, picked)
+                                            fill = picked
+                                            host.refillSelection(picked, preview = true)
+                                        },
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
             host.selectionCount()?.let { sc ->
-                val count = sc.n
-                val range = sc.range
-                Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    StyleCaption(stringResource(countLabel(sc.kind)))
-                    Spacer(Modifier.width(12.dp))
-                    StepDot("\u2212", stringResource(R.string.count_fewer), enabled = count > range.first) { host.setSelectionCount(count - 1) }
-                    Text("$count", color = palette.text.toComposeColor(), fontSize = 14.sp, modifier = Modifier.padding(horizontal = 10.dp))
-                    StepDot("+", stringResource(R.string.count_more), enabled = count < range.last) { host.setSelectionCount(count + 1) }
+                add {
+                    MenuRow(stringResource(countLabel(sc.kind))) {
+                        MenuStepper(
+                            "${sc.n}", stringResource(R.string.count_fewer), stringResource(R.string.count_more), Modifier.width(116.dp),
+                            canLess = sc.n > sc.range.first, canMore = sc.n < sc.range.last,
+                            onLess = { host.setSelectionCount(sc.n - 1) }, onMore = { host.setSelectionCount(sc.n + 1) },
+                        )
+                    }
                 }
             }
-            if (fillsOnly) return@Column
-            Spacer(Modifier.size(8.dp))
             // The drag previews live and commits on release, so it is one undo step, not fifty.
-            SliderRow(
-                stringResource(R.string.caption_thickness),
-                width,
-                DrawStyle.MIN_WIDTH.toFloat()..DrawStyle.MAX_WIDTH.toFloat(),
-                step = ToolConversions.WIDTH_STEP.toFloat(),
-                onChangeFinished = { host.restyleSelection(null, null) },
-            ) { w ->
-                width = w
-                host.restyleSelection(null, w.toDouble(), preview = true)
+            if (!fillsOnly) add {
+                MenuSlider(
+                    stringResource(R.string.caption_thickness),
+                    width,
+                    DrawStyle.MIN_WIDTH.toFloat()..DrawStyle.MAX_WIDTH.toFloat(),
+                    step = ToolConversions.WIDTH_STEP.toFloat(),
+                    onChangeFinished = { host.restyleSelection(null, null) },
+                ) { w ->
+                    width = w
+                    host.restyleSelection(null, w.toDouble(), preview = true)
+                }
             }
+        })
+        if (!fillsOnly) {
             Text(
                 stringResource(R.string.change_style_hint),
                 color = palette.textDim.toComposeColor(),
-                fontSize = 11.sp,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(start = 6.dp, end = 6.dp, bottom = 2.dp),
             )
         }
     }
@@ -515,20 +518,6 @@ private fun MatchDot(outline: Rgba, selected: Boolean, onClick: () -> Unit) {
         ) {
             val tint = if (outline.luminance() > 0.55) Rgba(0, 0, 0) else Rgba(255, 255, 255)
             Icon(XnotesIcons.link, contentDescription = null, tint = tint.toComposeColor(), modifier = Modifier.size(14.dp))
-        }
-    }
-}
-
-@Composable
-private fun StepDot(glyph: String, label: String, enabled: Boolean, onClick: () -> Unit) {
-    val palette = LocalPalette.current
-    Tooltip(label) {
-        Box(
-            Modifier.size(30.dp).clip(CircleShape).border(1.dp, palette.border.toComposeColor(), CircleShape)
-                .clickable(enabled = enabled, onClick = onClick),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(glyph, color = (if (enabled) palette.text else palette.textDim).toComposeColor(), fontSize = 16.sp)
         }
     }
 }
