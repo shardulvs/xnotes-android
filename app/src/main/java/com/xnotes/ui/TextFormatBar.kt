@@ -76,8 +76,8 @@ import kotlin.math.roundToInt
 
 /**
  * The bottom text-format strip, shown while the inline text tool is armed, and for a
- * text box being typed in or selected with its tool (and no label edit is open). Sits as the last child of the editor column, so the
- * adjustResize window floats it directly above the soft keyboard. Controls, in
+ * text box being typed in or selected with its tool (and no label edit is open). Docked along the bottom of its pane, over a toolbar
+ * docked there; the adjustResize window lifts both over the soft keyboard. Controls, in
  * order: checkbox item, font colour, highlight, font face, size, bold/italic/
  * underline/strikethrough, heading level, ordered and unordered lists, code block
  * (tap toggles, long-press picks the language), table, alignment (cycles), indent,

@@ -1670,7 +1670,9 @@ private fun EditorPane(
                         onTakePhoto = { actions.onTakePhoto(editor) },
                     ) }
                 }
-                ToolbarAround(bar, onCover = editor::setToolbarCover, onPlace = app::placeToolbar) { floatingBar ->
+                // The format strip sits along the bottom of the resized column, so right over the soft keyboard.
+                val strip: @Composable () -> Unit = { com.xnotes.ui.TextFormatBar(editor) }
+                ToolbarAround(bar, onCover = editor::setToolbarCover, onPlace = app::placeToolbar, strip = strip) { floatingBar ->
                     Row(modifier = Modifier.fillMaxSize()) {
                         if (editor.sidebarVisible) {
                             com.xnotes.ui.SidePanel(
@@ -1716,8 +1718,6 @@ private fun EditorPane(
                         }
                     }
                 }
-                // Last child of the resized column: rides directly above the soft keyboard.
-                com.xnotes.ui.TextFormatBar(editor)
             }
         }
         com.xnotes.ui.ColorDropOverlay(if (editor.canvasOpen) editor.infinite else editor)

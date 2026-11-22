@@ -101,13 +101,15 @@ internal val LocalToolbarCover = compositionLocalOf { PaddingValues(0.dp) }
  * Lays a pane out with its [bar] along the edge it was last put on and [content] in the rest. A
  * floating bar is handed to [content] to lay over its canvas instead, and [onCover] learns how many
  * px of each edge (left, top, right, bottom) it covers so the canvas keeps its pages clear of it.
- * A long press on the bar lifts it, and [onPlace] hears where it was put down.
+ * [strip] is docked along the bottom, over a bar docked there. A long press on the bar lifts it,
+ * and [onPlace] hears where it was put down.
  */
 @Composable
 internal fun ColumnScope.ToolbarAround(
     bar: @Composable () -> Unit,
     onCover: (Double, Double, Double, Double) -> Unit,
     onPlace: (ToolbarPosition, floating: Boolean) -> Unit,
+    strip: @Composable () -> Unit = {},
     content: @Composable (floatingBar: @Composable BoxScope.() -> Unit) -> Unit,
 ) {
     val look = LocalToolbarLook.current
@@ -129,26 +131,33 @@ internal fun ColumnScope.ToolbarAround(
     }
     CompositionLocalProvider(LocalToolbarMove provides move) {
         Box(Modifier.weight(1f).fillMaxWidth().onGloballyPositioned { move.area = it }) {
-            if (!look.floating) {
-                val docked = NoFloatingBar
-                // Left and right are the screen's, as the canvas insets are, whatever the language.
-                val across = Arrangement.Absolute.Left
-                when (position) {
-                    ToolbarPosition.TOP -> Column(Modifier.fillMaxSize()) { bar(); Box(Modifier.weight(1f).fillMaxWidth()) { body(docked) } }
-                    ToolbarPosition.BOTTOM -> Column(Modifier.fillMaxSize()) { Box(Modifier.weight(1f).fillMaxWidth()) { body(docked) }; bar() }
-                    ToolbarPosition.LEFT -> Row(Modifier.fillMaxSize(), across) { bar(); Box(Modifier.weight(1f).fillMaxHeight()) { body(docked) } }
-                    ToolbarPosition.RIGHT -> Row(Modifier.fillMaxSize(), across) { Box(Modifier.weight(1f).fillMaxHeight()) { body(docked) }; bar() }
+            Column(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    if (!look.floating) {
+                        val docked = NoFloatingBar
+                        // Left and right are the screen's, as the canvas insets are, whatever the language.
+                        val across = Arrangement.Absolute.Left
+                        when (position) {
+                            ToolbarPosition.TOP -> Column(Modifier.fillMaxSize()) { bar(); Box(Modifier.weight(1f).fillMaxWidth()) { body(docked) } }
+                            ToolbarPosition.BOTTOM -> body(docked)
+                            ToolbarPosition.LEFT -> Row(Modifier.fillMaxSize(), across) { bar(); Box(Modifier.weight(1f).fillMaxHeight()) { body(docked) } }
+                            ToolbarPosition.RIGHT -> Row(Modifier.fillMaxSize(), across) { Box(Modifier.weight(1f).fillMaxHeight()) { body(docked) }; bar() }
+                        }
+                    } else {
+                        val cover = when (position) {
+                            ToolbarPosition.TOP -> PaddingValues(top = depth)
+                            ToolbarPosition.BOTTOM -> PaddingValues(bottom = depth)
+                            ToolbarPosition.LEFT -> PaddingValues.Absolute(left = depth)
+                            ToolbarPosition.RIGHT -> PaddingValues.Absolute(right = depth)
+                        }
+                        CompositionLocalProvider(LocalToolbarCover provides cover) {
+                            Box(Modifier.fillMaxSize()) { body { Box(Modifier.align(edgeOf(position)).padding(FLOAT_MARGIN)) { bar() } } }
+                        }
+                    }
                 }
-            } else {
-                val cover = when (position) {
-                    ToolbarPosition.TOP -> PaddingValues(top = depth)
-                    ToolbarPosition.BOTTOM -> PaddingValues(bottom = depth)
-                    ToolbarPosition.LEFT -> PaddingValues.Absolute(left = depth)
-                    ToolbarPosition.RIGHT -> PaddingValues.Absolute(right = depth)
-                }
-                CompositionLocalProvider(LocalToolbarCover provides cover) {
-                    Box(Modifier.fillMaxSize()) { body { Box(Modifier.align(edgeOf(position)).padding(FLOAT_MARGIN)) { bar() } } }
-                }
+                Box(Modifier.onSizeChanged { move.under = it.height }) { strip() }
+                // The bar keeps the edge it is docked on, so the strip shows over it and never moves it.
+                if (!look.floating && position == ToolbarPosition.BOTTOM) bar()
             }
             ToolbarLandingMark(move, look.size)
         }
@@ -175,6 +184,9 @@ internal class ToolbarMove {
     /** How long the bar is when it hugs its tools, in px along its edge. */
     var hug by mutableFloatStateOf(0f)
 
+    /** How many px of [area]'s bottom the strip takes; the bottom edge the bar is carried to is over it. */
+    var under by mutableIntStateOf(0)
+
     /** Where the bar would land if put down now; null while it rests. */
     var landing by mutableStateOf<ToolbarLanding?>(null)
         private set
@@ -190,7 +202,7 @@ internal class ToolbarMove {
         val home = from ?: return
         val size = area?.size ?: return
         landing = toolbarLanding(
-            at.x, at.y, size.width.toFloat(), size.height.toFloat(), home,
+            at.x, at.y, size.width.toFloat(), size.height.toFloat() - under, home,
             pull = thickness + PULL_CLEAR_DP * density, push = PUSH_IN_DP * density, other = OTHER_EDGE_DP * density,
         )
     }
@@ -237,7 +249,9 @@ private fun BoxScope.ToolbarLandingMark(move: ToolbarMove, size: ToolbarSize) {
         vertical -> Modifier.padding(FLOAT_MARGIN).height(length).width(thickness)
         else -> Modifier.padding(FLOAT_MARGIN).width(length).height(thickness)
     }
-    Box(Modifier.align(edgeOf(landing.position)).then(frame).background(accent.copy(alpha = 0.22f), shape).border(2.dp, accent, shape))
+    // Only a bar docked along the bottom lands under the strip there.
+    val strip = if (landing.position == ToolbarPosition.BOTTOM && !landing.floating) 0.dp else with(LocalDensity.current) { move.under.toDp() }
+    Box(Modifier.align(edgeOf(landing.position)).padding(bottom = strip).then(frame).background(accent.copy(alpha = 0.22f), shape).border(2.dp, accent, shape))
 }
 
 /**
