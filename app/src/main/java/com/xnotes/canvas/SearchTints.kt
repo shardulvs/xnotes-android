@@ -1,6 +1,5 @@
 package com.xnotes.canvas
 
-import android.text.StaticLayout
 import com.xnotes.core.geometry.Pt
 import com.xnotes.core.geometry.Rect
 import com.xnotes.core.model.Labelled
@@ -50,10 +49,6 @@ class SearchTints(
 
     /** A match waiting on its page's text to be brought into view. */
     private var revealing: SearchHit? = null
-
-    private var layoutOf: TextItem? = null
-    private var layoutKey: Pair<String, Double>? = null
-    private var layout: StaticLayout? = null
 
     fun show(results: SearchResults?, current: SearchHit?) {
         if (results == null || results.query != this.results?.query) {
@@ -150,7 +145,7 @@ class SearchTints(
         val target = hit.target
         boxes[hit]?.let { b ->
             val fresh = when (target) {
-                is SearchTarget.Box -> b.width == target.item.width
+                is SearchTarget.Box -> b.width == target.item.textRect().w
                 is SearchTarget.Label -> b.width == target.item.labelFrame()?.w
                 else -> true
             }
@@ -203,26 +198,12 @@ class SearchTints(
         return Boxes(IntArray(rects.size) { rects[it].first }, Array(rects.size) { rects[it].second })
     }
 
-    /** The match's line pieces in the box's own layout, the one it is drawn with, from its top-left corner. */
+    /** The match's line pieces in the box's own layout, the one it is drawn with, from the top-left of its text. */
     private fun textBoxBoxes(hit: SearchHit, item: TextItem): Boxes {
-        val text = item.text
-        val l = layoutFor(item)
-        val a = hit.sourceStart.coerceIn(0, text.length)
-        val b = hit.sourceEnd.coerceIn(a, text.length)
-        val out = ArrayList<Rect>()
-        if (b > a) {
-            for (line in l.getLineForOffset(a)..l.getLineForOffset(b - 1)) {
-                val s = maxOf(a, l.getLineStart(line))
-                val e = minOf(b, l.getLineEnd(line))
-                if (e <= s) continue
-                val x0 = l.getPrimaryHorizontal(s).toDouble()
-                // An end on a wrap belongs to the next line, so it is measured as this line's right edge.
-                val x1 = if (e == l.getLineEnd(line) && line + 1 < l.lineCount) l.getLineRight(line).toDouble() else l.getPrimaryHorizontal(e).toDouble()
-                val top = l.getLineTop(line).toDouble()
-                out += Rect(minOf(x0, x1), top, kotlin.math.abs(x1 - x0), l.getLineBottom(line) - top)
-            }
-        }
-        return Boxes(IntArray(0), out.toTypedArray(), item.width)
+        val c = item.content
+        val range = FlowRange(c.frozen.posAtGlobal(hit.sourceStart), c.frozen.posAtGlobal(hit.sourceEnd))
+        val rects = c.frame.selectionRects(range).map { it.second }
+        return Boxes(IntArray(0), rects.toTypedArray(), c.w)
     }
 
     /** The match's line pieces in the label's own centred layout, from the top-left of its frame. */
@@ -255,16 +236,6 @@ class SearchTints(
         val r = Rect(frame.left + rel.left, frame.top + rel.top, rel.w, rel.h)
         return listOf(r.topLeft, Pt(r.right, r.top), Pt(r.right, r.bottom), Pt(r.left, r.bottom))
             .map { state.fromPageSpace(hit.page, item.labelToPage(it)) }
-    }
-
-    private fun layoutFor(item: TextItem): StaticLayout {
-        val key = item.text to item.width
-        layout?.let { if (layoutOf === item && layoutKey == key) return it }
-        return AndroidText.layout(item.text, item.width.toInt(), AndroidText.textPaint(item.font)).also {
-            layoutOf = item
-            layoutKey = key
-            layout = it
-        }
     }
 
     /** Scrolls the least that centres [c] on whichever axis it is off screen. */

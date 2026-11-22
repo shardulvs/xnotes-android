@@ -544,6 +544,15 @@ internal class PdfBoxRenderer(
         return true
     }
 
+    override fun linkArea(index: Int, rect: Rect, uri: String) {
+        // A link's clickable area is an upright rect in the page's own space, so turned text goes without.
+        if (turning) return
+        val annot = linkAnnotation(rect, uri) ?: return
+        tagger?.boxLink = index
+        tagger?.annotate(annot.cosObject)
+        tagger?.boxLink = -1
+    }
+
     /** Make [link]'s share of the flow open its address when clicked. */
     fun addFlowLink(link: PlacedLink) {
         val annot = linkAnnotation(link.rect, link.uri) ?: return

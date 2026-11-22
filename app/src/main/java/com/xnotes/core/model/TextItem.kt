@@ -9,6 +9,7 @@ import com.xnotes.core.pal.FontSpec
 import com.xnotes.core.pal.Pen
 import com.xnotes.core.pal.Renderer
 import com.xnotes.core.pal.TextMeasurer
+import com.xnotes.core.pdf.FlowLinks
 import com.xnotes.core.text.FlowFrame
 import com.xnotes.core.text.FlowLayout
 import com.xnotes.core.text.FlowMargins
@@ -220,6 +221,14 @@ class TextItem(
         r.translate(pos.x, pos.y)
         FlowPainter.paintPage(r, c.frame, 0, Rect(0.0, 0.0, c.w, c.h), marks = false)
         r.restore()
+        // A backend writing real text also gets the box's links, each a piece per line it runs over.
+        if (!r.writesText) return
+        val links = FlowLinks.find(c.frozen)
+        if (links.isEmpty()) return
+        val order = links.values.flatten()
+        for (placed in FlowLinks.place(c.frozen, c.frame, links)) {
+            r.linkArea(order.indexOfFirst { it === placed.link }, placed.rect.translate(pos.x, pos.y), placed.uri)
+        }
     }
 
     private fun paintFrame(r: Renderer) {

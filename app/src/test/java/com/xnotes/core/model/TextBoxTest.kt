@@ -263,4 +263,47 @@ class TextBoxTest {
         cmd.undo()
         assertEquals(BoxStyle.NONE, t.box)
     }
+
+    /** A backend that writes real text, as the PDF export does, recording what a box asks of it. */
+    private class Writer(val inner: FakeRenderer = FakeRenderer()) : com.xnotes.core.pal.Renderer by inner {
+        val links = mutableListOf<Triple<Int, com.xnotes.core.geometry.Rect, String>>()
+        var marks = 0
+        override val writesText: Boolean get() = true
+
+        override fun beginMark(mark: com.xnotes.core.pal.Mark) {
+            marks++
+        }
+
+        override fun linkArea(index: Int, rect: com.xnotes.core.geometry.Rect, uri: String) {
+            links += Triple(index, rect, uri)
+        }
+    }
+
+    @Test fun aWrittenBoxKeepsItsSpacesAndAnnouncesNoMarksOfItsOwn() {
+        val w = Writer()
+        box("one two").paint(w)
+        val runs = w.inner.ops.filter { it.startsWith("drawTextRun:") }.map { it.substringBefore('@') }
+        assertEquals(listOf("drawTextRun:one", "drawTextRun: ", "drawTextRun:two"), runs)
+        // The exporter marks the whole box as one; its lines add none inside that.
+        assertEquals(0, w.marks)
+    }
+
+    @Test fun anAddressInABoxIsALinkWhereItIsDrawn() {
+        val t = box("see https://example.org now")
+        val w = Writer()
+        t.paint(w)
+        assertEquals(1, w.links.size)
+        val (index, rect, uri) = w.links[0]
+        assertEquals(0, index)
+        assertEquals("https://example.org", uri)
+        assertEquals(t.pos.x + 4 * adv, rect.left, 1e-6)
+        assertEquals(19 * adv, rect.w, 1e-6)
+        assertTrue(t.textRect().outset(1e-6).contains(Pt(rect.left, rect.top)))
+    }
+
+    @Test fun theScreenIsAskedForNoLinks() {
+        val r = FakeRenderer()
+        box("see https://example.org now").paint(r)
+        assertFalse(r.ops.any { it.startsWith("linkArea") })
+    }
 }

@@ -271,6 +271,12 @@ interface Renderer {
      */
     val writesText: Boolean get() = false
 
+    /**
+     * Make [rect] open [uri] when clicked, drawing nothing, for a backend whose pages carry links:
+     * the [index]th link of the text box being drawn. Everything else ignores it.
+     */
+    fun linkArea(index: Int, rect: Rect, uri: String) {}
+
     /** What the drawing from here to [endMark] is. Only a structure-recording backend cares. */
     fun beginMark(mark: Mark) {}
 
