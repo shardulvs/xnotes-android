@@ -54,6 +54,9 @@ class Band(val surface: RasterSurface) {
  */
 class PageLayer(val grid: BandGrid) {
     val bands = arrayOfNulls<Band>(grid.count)
+
+    /** For each band, the frame that last wanted it built (see [CanvasState.prefetchAndPrune]). */
+    val wantedAt = IntArray(grid.count)
     val cover: Rect get() = grid.cover
     val res: Double get() = grid.res
 
@@ -160,6 +163,15 @@ class CanvasState(
      * region live (the sharp viewport) instead of caching the whole page. User-set in preferences.
      */
     var maxCachePx: Double = 2048.0
+
+    /** Bytes the page caches may hold, or 0 to size them from the viewport ([CacheBudget.automatic]). */
+    var cacheLimit: Long = 0
+
+    /** The most an automatic budget may come to: a share of the device's memory, set by the host. */
+    var cacheCeiling: Long = Long.MAX_VALUE
+
+    fun cacheBudget(): Long =
+        if (cacheLimit > 0) cacheLimit else CacheBudget.automatic(viewportW, viewportH, cacheCeiling)
 
     /**
      * Elastic overscroll past the document's **bottom** end (viewport px, already damped). Positive
@@ -392,7 +404,7 @@ class CanvasState(
 
     /** The part of [page] on screen, in its page space, or null when none of it is. */
     fun seenOf(page: Page): Rect? {
-        val pr = pageRects.getOrNull(document.pages.indexOf(page)) ?: return null
+        val pr = pageRects.getOrNull(indexOfPage[page] ?: return null) ?: return null
         val visible = visibleContentRect()
         if (!pr.intersects(visible)) return null
         return displayRectToPage(page, visible.translate(-pr.left, -pr.top))
@@ -614,6 +626,24 @@ class CanvasState(
 
     private val ink = Layers(INK_BAND_PX, INK_GUTTER_PX)
     private val bg = Layers(BG_BAND_PX, BG_GUTTER_PX)
+    private val stores = arrayOf(ink, bg)
+
+    /** A band the view wants built: how far it is from the screen (viewport px) and what it costs. */
+    private class Want(val store: Layers, val page: Page, val layer: PageLayer, val index: Int, val distance: Double, val bytes: Long)
+
+    /** The bands wanted as of the last frame, nearest first, and the number that marks them in [PageLayer.wantedAt]. */
+    private var wanted: List<Want> = emptyList()
+    private var stamp = 0
+
+    /** The pages those bands are on: the ones whose ribbons and highlighter bitmaps are kept. */
+    private var near: Set<Page> = emptySet()
+
+    /** True while a build ahead of the screen is in flight; they run one at a time, so a band the screen needs never queues behind many. */
+    private var prefetching = false
+    private var pumping = false
+
+    /** Where each page is in the document, as of the last [relayout]. */
+    private val indexOfPage = HashMap<Page, Int>()
 
     /**
      * Per-highlighter opaque-ribbon bitmaps. Highlighters can't be baked into the ink layer (they
@@ -737,6 +767,7 @@ class CanvasState(
         val pages = document.pages
         if (pages.isEmpty()) {
             pageRects = emptyList()
+            indexOfPage.clear()
             contentW = 2 * sideMargin
             contentH = 2 * vertMargin
             currentRow = 0
@@ -778,6 +809,8 @@ class CanvasState(
             contentH = maxH + 2 * vertMargin
         }
         pageRects = rects.map { it!! }
+        indexOfPage.clear()
+        for (i in pages.indices) indexOfPage[pages[i]] = i
         currentRow = currentRow.coerceIn(0, rows.lastIndex)
         clampScroll()
     }
@@ -1387,9 +1420,10 @@ class CanvasState(
     }
 
     /** Rasterize band [k] of [layer] off the calling thread, unless a build of that band of [page] is in flight. */
-    private fun schedule(store: Layers, page: Page, layer: PageLayer, k: Int) {
+    private fun schedule(store: Layers, page: Page, layer: PageLayer, k: Int, ahead: Boolean = false) {
         val key = BandKey(page, k)
         if (!store.pending.add(key)) return
+        if (ahead) prefetching = true
         val gen = store.gen
         val grid = layer.grid
         val build: () -> Band
@@ -1405,6 +1439,7 @@ class CanvasState(
             val band = build()
             postToMain {
                 store.pending.remove(key)
+                if (ahead) prefetching = false
                 val meanwhile = store.meanwhile.remove(key)
                 if (gen == store.gen && store.now[page] === layer) {
                     layer.bands[k] = band
@@ -1419,7 +1454,28 @@ class CanvasState(
                 // its replacement — but every frame while this one was in flight was turned away by
                 // [Layers.pending], so without this the page would sit blank until something else drew.
                 onCacheReady?.invoke()
+                // Made room for before the next is begun, so builds landing between frames never pile up over the budget.
+                if (stamp > 0) prune()
+                pump()
             }
+        }
+    }
+
+    /** Start the build of the nearest wanted band that lacks one, if none ahead of the screen is in flight. */
+    private fun pump() {
+        if (pumping) return
+        pumping = true
+        try {
+            // An inline [runAsync] lands each build before the next is looked for, hence the loop.
+            while (!prefetching && !zoomingInProgress) {
+                val w = wanted.firstOrNull {
+                    it.store.now[it.page] === it.layer && it.layer.bands[it.index]?.stale != false &&
+                        BandKey(it.page, it.index) !in it.store.pending
+                } ?: break
+                schedule(w.store, w.page, w.layer, w.index, ahead = true)
+            }
+        } finally {
+            pumping = false
         }
     }
 
@@ -1645,19 +1701,26 @@ class CanvasState(
         bg.gen++
         if (pendingSharp) sharpAgain = true else if (sharpFrame?.gen == sharpGen) requestSharpViewport()
         val layer = bg.now[page] ?: return
-        if (!layer.fits(page)) return // the draw loop builds it anew
-        for (k in layer.bands.indices) {
-            val band = layer.bands[k] ?: continue
-            band.stale = true
-            schedule(bg, page, layer, k)
-        }
+        for (band in layer.bands) band?.stale = true
+        askAgain(bg, page, layer)
     }
 
-    /** The last markup edit every built band of [page]'s background holds, 0 with none to draw. */
+    /** Ask for the out-of-date bands of [layer] on screen at once, and the rest in their turn. */
+    private fun askAgain(store: Layers, page: Page, layer: PageLayer) {
+        if (!layer.fits(page)) return // the draw loop begins a layer anew
+        val seen = seenOf(page)
+        if (seen != null) for (k in layer.grid.meeting(seen)) if (layer.bands[k]?.stale == true) schedule(store, page, layer, k)
+        pump()
+    }
+
+    /** The last markup edit held by every built band of [page]'s background that shows, 0 with none to draw. */
     private fun heldSeq(page: Page): Int {
         val layer = bg.now[page]?.takeIf { it.cover == footprint(page) } ?: return 0
+        val seen = seenOf(page)
         var held = Int.MAX_VALUE
-        for (band in layer.bands) if (band != null) held = min(held, band.seq)
+        for (k in if (seen == null) layer.bands.indices else layer.grid.meeting(seen)) {
+            layer.bands[k]?.let { held = min(held, it.seq) }
+        }
         return if (held == Int.MAX_VALUE) 0 else held
     }
 
@@ -1738,6 +1801,7 @@ class CanvasState(
         r.clear()
         paintInk(page, r, rect)
         r.restore()
+        noteGeometryBuilt(page) // a repaint builds ribbons too, on a page that may be out of reach by now
     }
 
     /** Repaint [page]'s cached ink where it meets [region]: the fills under its typed text, the text, then the rest. */
@@ -1886,18 +1950,14 @@ class CanvasState(
         for (page in pages) staleInk(page, null)
     }
 
-    /** Mark [page]'s ink bands that hold [rect] (all of them when null) out of date and ask for them again. */
+    /** Mark [page]'s ink bands that hold [rect] (all of them when null) out of date, to be built again nearest the screen first. */
     private fun staleInk(page: Page, rect: Rect?) {
         ink.before[page]?.let { old ->
             for (k in if (rect == null) old.bands.indices else old.grid.meeting(rect, held = true)) old.bands[k]?.stale = true
         }
         val layer = ink.now[page] ?: return
-        val again = layer.fits(page) // else the draw loop begins a layer anew
-        for (k in if (rect == null) layer.bands.indices else layer.grid.meeting(rect, held = true)) {
-            val band = layer.bands[k] ?: continue
-            band.stale = true
-            if (again) schedule(ink, page, layer, k)
-        }
+        for (k in if (rect == null) layer.bands.indices else layer.grid.meeting(rect, held = true)) layer.bands[k]?.stale = true
+        askAgain(ink, page, layer)
     }
 
     /**
@@ -1955,78 +2015,161 @@ class CanvasState(
         bg.gen++
     }
 
-    fun dropCachesExcept(visible: Set<Page>) {
-        for (store in arrayOf(ink, bg)) {
-            store.now.keys.retainAll(visible)
-            store.before.keys.retainAll(visible)
+    /** [page]'s ink layer as it stands, built or not. */
+    fun inkLayer(page: Page): PageLayer? = ink.now[page]
+
+    /** [page]'s background layer as it stands, built or not. */
+    fun backgroundLayer(page: Page): PageLayer? = bg.now[page]
+
+    /** The pages with a band wanted as of the last frame, nearest the screen first. */
+    fun wantedPages(): List<Page> = wanted.map { it.page }.distinct()
+
+    /** How far band [k] of [grid], a layer of page [i], is from [view] (content space), in viewport px; 0 when it shows. */
+    private fun distance(i: Int, grid: BandGrid, k: Int, view: Rect): Double {
+        val at = fromPageSpaceRect(i, grid.shown(k))
+        val dx = max(max(view.left - at.right, at.left - view.right), 0.0)
+        val dy = max(max(view.top - at.bottom, at.top - view.bottom), 0.0)
+        return max(dx, dy) * zoom
+    }
+
+    /** Every band of the layers of [row]'s pages, each as far from [view] as it lies, plus [extra]. */
+    private fun wantRow(row: IntRange, view: Rect, extra: Double, into: MutableList<Want>) {
+        for (i in row) {
+            val page = document.pages[i]
+            for (store in arrayOf(bg, ink)) {
+                if (store === bg && !hasPageBackground(page)) continue
+                val layer = layerFor(store, page)
+                val g = layer.grid
+                for (k in 0 until g.count) into += Want(store, page, layer, k, distance(i, g, k, view) + extra, g.bytes(k))
+            }
+        }
+    }
+
+    /**
+     * The bands to have built, nearest the screen first: those on it, then outward below and above
+     * until [FILL_SHARE] of the budget is spoken for. Paginated, the row shown and then each
+     * neighbour as a turn to it would show it. Sized in bytes and never by a count of pages, which
+     * flips as page edges cross the screen and used to evict what had just been built. Null while
+     * the note is not laid out.
+     */
+    private fun plan(): List<Want>? {
+        val pages = document.pages
+        val rows = rowRanges()
+        if (rows.isEmpty() || pageRects.size != pages.size || viewportW <= 0 || viewportH <= 0) return null
+        stamp++
+        val view = visibleContentRect()
+        val fill = (cacheBudget() * FILL_SHARE).toLong()
+        val wants = ArrayList<Want>()
+        if (verticalScroll) {
+            fun top(r: Int) = rows[r].minOf { pageRects[it].top }
+            fun bottom(r: Int) = rows[r].maxOf { pageRects[it].bottom }
+            // Rows on screen are first..last (last = first - 1 when the view sits in a gap).
+            var first = 0
+            while (first < rows.size && bottom(first) < view.top) first++
+            var last = rows.lastIndex
+            while (last >= 0 && top(last) > view.bottom) last--
+            for (r in first..last) wantRow(rows[r], view, 0.0, wants)
+            var lo = first - 1
+            var hi = last + 1
+            while (lo >= 0 || hi <= rows.lastIndex) {
+                val below = if (hi <= rows.lastIndex) (top(hi) - view.bottom) * zoom else Double.MAX_VALUE
+                val above = if (lo >= 0) (view.top - bottom(lo)) * zoom else Double.MAX_VALUE
+                // A row further out holds only bands further out: stop once the nearer ones take the share.
+                val reach = min(below, above)
+                if (wants.sumOf { if (it.distance <= reach) it.bytes else 0L } >= fill) break
+                if (below <= above) wantRow(rows[hi++], view, 0.0, wants) else wantRow(rows[lo--], view, 0.0, wants)
+            }
+        } else {
+            val shown = currentRow.coerceIn(0, rows.lastIndex)
+            wantRow(rows[shown], view, 0.0, wants)
+            for (r in intArrayOf(shown + 1, shown - 1)) {
+                if (r !in rows.indices) continue
+                // Where a turn to it lands, and a screen further off than the row shown.
+                val landing = visibleFor(rowTargetScroll(r).x, flipLandingScrollY(r), zoom)
+                wantRow(rows[r], landing, viewportH.toDouble(), wants)
+            }
+        }
+        wants.sortBy { it.distance }
+        var held = 0L
+        var n = 0
+        while (n < wants.size && (wants[n].distance <= 0.0 || held + wants[n].bytes <= fill)) held += wants[n++].bytes
+        for (k in 0 until n) wants[k].let { it.layer.wantedAt[it.index] = stamp }
+        return if (n == wants.size) wants else ArrayList(wants.subList(0, n))
+    }
+
+    /**
+     * Runs after the frame has drawn, and asked for, the bands on screen: builds outward from them
+     * one at a time, and lets go of what the budget cannot hold. A pinch moving the zoom keeps what
+     * is cached but builds nothing ahead.
+     */
+    fun prefetchAndPrune() {
+        wanted = plan() ?: return
+        near = wanted.mapTo(HashSet()) { it.page }
+        prune()
+        if (!zoomingInProgress) {
+            pump()
+            prefetchMath?.let { fetch -> for (page in near) fetch(page, zoom) }
+        }
+    }
+
+    private class Spare(val layer: PageLayer, val index: Int, val distance: Double, val bytes: Long)
+
+    /**
+     * Let go of what the last [plan] has no use for: the layers of pages that are gone, a page's
+     * old layer once the new one has every band wanted of it, bands out of date and out of reach,
+     * and, over budget, the unwanted bands furthest from the screen. Ribbons and highlighter
+     * bitmaps go with the pages no wanted band is on.
+     */
+    private fun prune() {
+        val unfinished = HashSet<PageLayer>()
+        for (w in wanted) if (w.layer.bands[w.index] == null) unfinished += w.layer
+        var total = 0L
+        for (store in stores) {
+            store.before.keys.removeAll { page -> store.now[page]?.let { it !in unfinished } ?: true }
+            for (map in arrayOf(store.now, store.before)) {
+                val each = map.entries.iterator()
+                while (each.hasNext()) {
+                    val (page, layer) = each.next()
+                    if (page !in indexOfPage) {
+                        each.remove()
+                        continue
+                    }
+                    var keep = false
+                    for (k in layer.bands.indices) {
+                        val wantedNow = layer.wantedAt[k] == stamp
+                        val band = layer.bands[k]
+                        if (band != null && band.stale && !wantedNow && map === store.now) layer.bands[k] = null
+                        else if (band != null) total += layer.grid.bytes(k)
+                        if (wantedNow || layer.bands[k] != null) keep = true
+                    }
+                    if (!keep) each.remove()
+                }
+            }
+        }
+        val budget = cacheBudget()
+        if (total > budget) {
+            val view = visibleContentRect()
+            val spare = ArrayList<Spare>()
+            for (store in stores) for (map in arrayOf(store.now, store.before)) for ((page, layer) in map) {
+                val i = indexOfPage[page] ?: continue
+                for (k in layer.bands.indices) {
+                    if (layer.bands[k] == null || layer.wantedAt[k] == stamp) continue
+                    spare += Spare(layer, k, distance(i, layer.grid, k, view), layer.grid.bytes(k))
+                }
+            }
+            spare.sortByDescending { it.distance }
+            for (s in spare) {
+                if (total <= budget || s.distance <= 0.0) break
+                s.layer.bands[s.index] = null
+                total -= s.bytes
+            }
         }
         if (hlCaches.isNotEmpty()) {
             val keep = HashSet<Stroke>()
-            for (p in visible) for (it in p.items) if (it is Stroke && it.tool == Tool.HIGHLIGHTER) keep.add(it)
+            for (p in near) for (it in p.items) if (it is Stroke && it.tool == Tool.HIGHLIGHTER) keep.add(it)
             hlCaches.keys.retainAll(keep)
         }
-        releaseGeometryExcept(visible)
-    }
-
-    /** Pages to build ahead of the viewport ([prefetch], nearest first) and pages whose caches survive the frame ([keep]). */
-    class CacheBand(val prefetch: List<Page>, val keep: Set<Page>)
-
-    /**
-     * Rows within a screenful of the viewport (at least the adjacent one; paginated, one row either side), kept one
-     * row further. Never sized by the visible page count: that flips as page edges cross the viewport, and every
-     * flip evicted the pages just prefetched.
-     */
-    fun cacheBand(): CacheBand {
-        val pages = document.pages
-        val rows = rowRanges()
-        if (rows.isEmpty()) return CacheBand(emptyList(), emptySet())
-        if (pageRects.size != pages.size) return CacheBand(emptyList(), pages.toHashSet()) // not laid out yet
-        // Rows on screen are first..last (last = first - 1 when the view sits in a gap); lo..hi adds the prefetch.
-        var first: Int
-        var last: Int
-        var lo: Int
-        var hi: Int
-        if (verticalScroll) {
-            val v = visibleContentRect()
-            fun top(r: Int) = rows[r].minOf { pageRects[it].top }
-            fun bottom(r: Int) = rows[r].maxOf { pageRects[it].bottom }
-            first = 0
-            while (first < rows.size && bottom(first) < v.top) first++
-            last = rows.lastIndex
-            while (last >= 0 && top(last) > v.bottom) last--
-            hi = last + 1
-            while (hi < rows.lastIndex && top(hi + 1) <= v.bottom + v.h) hi++
-            lo = first - 1
-            while (lo > 0 && bottom(lo - 1) >= v.top - v.h) lo--
-        } else {
-            first = currentRow.coerceIn(0, rows.lastIndex)
-            last = first
-            lo = first - 1
-            hi = first + 1
-        }
-        val prefetch = ArrayList<Page>()
-        for (r in first..last) for (i in rows[r]) prefetch += pages[i]
-        for (d in 1..max(hi - last, first - lo)) {
-            for (r in intArrayOf(last + d, first - d)) {
-                if (r in lo..hi && r in rows.indices) for (i in rows[r]) prefetch += pages[i]
-            }
-        }
-        val keep = HashSet<Page>()
-        for (r in max(lo - 1, 0)..min(hi + 1, rows.lastIndex)) for (i in rows[r]) keep += pages[i]
-        return CacheBand(prefetch, keep)
-    }
-
-    /** Runs after the visible pages are scheduled, so they build first; a pinch moving the zoom keeps the band but prefetches nothing. */
-    fun prefetchAndPrune() {
-        val band = cacheBand()
-        if (!zoomingInProgress) {
-            for (page in band.prefetch) {
-                backgroundForOrSchedule(page)
-                cacheForOrSchedule(page)
-                prefetchMath?.invoke(page, zoom)
-            }
-        }
-        dropCachesExcept(band.keep)
+        releaseGeometryExcept(near)
     }
 
     /**
@@ -2260,6 +2403,8 @@ class CanvasState(
         val inkPages: Int,
         val bgPages: Int,
         val bytes: Long,
+        val bands: Int,
+        val budget: Long,
     )
 
     fun cacheSnapshot(): CacheSnapshot {
@@ -2270,7 +2415,8 @@ class CanvasState(
         }
         for (e in hlCaches.values) bytes += e.surface.width.toLong() * e.surface.height * 4L
         val visible = visiblePageRange()?.let { it.last - it.first + 1 } ?: 0
-        return CacheSnapshot(visible, pagesBuilt(ink), pagesBuilt(bg), bytes)
+        val bands = stores.sumOf { store -> store.now.values.sumOf { it.built() } + store.before.values.sumOf { it.built() } }
+        return CacheSnapshot(visible, pagesBuilt(ink), pagesBuilt(bg), bytes, bands, cacheBudget())
     }
 
     /** Pages with a band of [store] built, in the layer they show at or the one before it. */
@@ -2356,6 +2502,9 @@ class CanvasState(
         const val BG_BAND_PX = 2048
 
         const val INK_GUTTER_PX = 1
+
+        /** The share of the budget built ahead of the screen. The rest is what scrolling back finds still there. */
+        const val FILL_SHARE = 0.75
 
         /** Wide enough that a picture a PDF enlarges many times over samples the same either side of a seam. */
         const val BG_GUTTER_PX = 32

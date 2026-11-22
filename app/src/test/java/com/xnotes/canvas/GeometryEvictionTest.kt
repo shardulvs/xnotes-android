@@ -50,7 +50,7 @@ class GeometryEvictionTest {
         assertTrue(kept.anyGeometry())
         assertTrue(gone.anyGeometry())
 
-        st.dropCachesExcept(setOf(kept))
+        st.releaseGeometryExcept(setOf(kept))
         assertTrue("a page still in the band keeps its ribbons", kept.anyGeometry())
         assertFalse("a page that left the band must give them back", gone.anyGeometry())
     }
@@ -62,7 +62,7 @@ class GeometryEvictionTest {
         val stroke = page.items[0] as Stroke
         val before = stroke.bounds()
 
-        st.dropCachesExcept(emptySet())
+        st.releaseGeometryExcept(emptySet())
         assertFalse(stroke.hasGeometry)
 
         // The bounds must still answer, and answering must not silently rebuild the ribbon we just
@@ -78,7 +78,7 @@ class GeometryEvictionTest {
         val stroke = page.items[0] as Stroke
         val before = stroke.geometry().centerline.toList()
 
-        st.dropCachesExcept(emptySet())
+        st.releaseGeometryExcept(emptySet())
         assertFalse(stroke.hasGeometry)
 
         assertEquals("a rebuilt ribbon must be the one we threw away", before, stroke.geometry().centerline.toList())
@@ -90,7 +90,7 @@ class GeometryEvictionTest {
         val pages = st.document.pages
         val far = pages.last()
         for (p in pages) st.cacheFor(p)
-        st.dropCachesExcept(setOf(pages[0]))
+        st.releaseGeometryExcept(setOf(pages[0]))
         assertFalse(far.anyGeometry())
 
         // A band drawn over the first page only. Without the page guard this walked every page and
