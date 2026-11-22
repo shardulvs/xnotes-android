@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.PopupProperties
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
@@ -64,10 +65,17 @@ internal fun ToolMenu(
     title: String,
     onDismiss: () -> Unit,
     width: Dp = TOOL_MENU_WIDTH,
+    focusable: Boolean = true,
     action: (@Composable RowScope.() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    DropdownMenu(expanded = true, onDismissRequest = onDismiss, shape = MaterialTheme.shapes.extraLarge, containerColor = panelColors().sheet) {
+    DropdownMenu(
+        expanded = true,
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = focusable),
+        shape = MaterialTheme.shapes.extraLarge,
+        containerColor = panelColors().sheet,
+    ) {
         // Sized text keeps material's 24sp line otherwise, which the fixed rows clip.
         ProvideTextStyle(LocalTextStyle.current.copy(lineHeight = 1.3.em)) {
             Column(Modifier.width(width).padding(horizontal = 10.dp, vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -155,6 +163,7 @@ internal fun MenuSlider(
     range: ClosedFloatingPointRange<Float>,
     step: Float = 0f,
     child: Boolean = false,
+    onChangeFinished: (() -> Unit)? = null,
     onChange: (Float) -> Unit,
 ) {
     val shown = if (step > 0f) snapTo(value, range, step) else value.coerceIn(range.start, range.endInclusive)
@@ -164,6 +173,7 @@ internal fun MenuSlider(
         Slider(
             value = shown,
             onValueChange = { onChange(if (step > 0f) snapTo(it, range, step) else it) },
+            onValueChangeFinished = onChangeFinished,
             valueRange = range,
             steps = if (step > 0f) (((range.endInclusive - range.start) / step).roundToInt() - 1).coerceAtLeast(0) else 0,
             // Stops this fine would draw as a speckled track; the value already names each one.
