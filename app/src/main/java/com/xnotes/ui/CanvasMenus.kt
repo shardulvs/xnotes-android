@@ -80,6 +80,18 @@ interface SelectionMenuHost : SwatchHost {
     fun arrange(how: com.xnotes.core.model.Arrange)
     fun duplicateSelection()
 
+    /** The text box selected on its own, which the bar offers to open and to frame. */
+    fun selectedTextBox(): com.xnotes.core.model.TextItem? = null
+
+    /** Open [selectedTextBox] for typing, arming the Text box tool. */
+    fun editSelectedTextBox() {}
+
+    /**
+     * Give [selectedTextBox] the frame [style]. A [preview] call skips history, and the next call
+     * without it records everything since as one undo step.
+     */
+    fun setSelectedBoxStyle(style: com.xnotes.core.model.BoxStyle, preview: Boolean = false) {}
+
     /** The audio pill selected on its own, which the bar offers to play. */
     fun selectedAudio(): com.xnotes.core.model.AudioItem?
 
@@ -190,12 +202,14 @@ fun SelectionMenu(
     var overflowOpen by remember { mutableStateOf(false) }
     var arrangeOpen by remember { mutableStateOf(false) }
     var styleOpen by remember { mutableStateOf(false) }
+    var boxStyleOpen by remember { mutableStateOf(false) }
     var renamingAudio by remember { mutableStateOf<com.xnotes.core.model.AudioItem?>(null) }
 
     val audio = host.selectedAudio()
     val crops = host.canCropSelection()
+    val textBox = host.selectedTextBox()
     val barHeightPx = with(density) { 48.dp.toPx() }
-    val barWidthPx = with(density) { ((6 + (if (audio != null) 1 else 0) + (if (crops) 1 else 0)) * 46).dp.toPx() }
+    val barWidthPx = with(density) { ((6 + (if (audio != null) 1 else 0) + (if (crops) 1 else 0) + (if (textBox != null) 2 else 0)) * 46).dp.toPx() }
     val gap = with(density) { 10.dp.toPx() }
     val centerX = ((rect.left + rect.right) / 2.0).toFloat()
     val xPx = (centerX - barWidthPx / 2f).coerceAtLeast(with(density) { 8.dp.toPx() })
@@ -221,6 +235,13 @@ fun SelectionMenu(
                 ActionIcon(if (playing) XnotesIcons.pause else XnotesIcons.play, stringResource(if (playing) R.string.audio_pause else R.string.audio_play)) { host.playSelectedAudio() }
             }
             if (crops) ActionIcon(XnotesIcons.crop, stringResource(R.string.crop)) { host.startCrop() }
+            if (textBox != null) {
+                ActionIcon(XnotesIcons.edit, stringResource(R.string.edit_text)) { host.editSelectedTextBox() }
+                Box {
+                    ActionIcon(XnotesIcons.palette, stringResource(R.string.box_style)) { boxStyleOpen = true }
+                    if (boxStyleOpen) BoxStylePopup(host) { boxStyleOpen = false }
+                }
+            }
             ActionIcon(XnotesIcons.trash, stringResource(R.string.delete), shortcut = Keys.DELETE) { host.deleteSelection() }
             ActionIcon(XnotesIcons.cut, stringResource(R.string.cut)) { host.cutSelection() }
             ActionIcon(XnotesIcons.copy, stringResource(R.string.copy)) { host.copySelection(); host.dismissSelectionMenu() }

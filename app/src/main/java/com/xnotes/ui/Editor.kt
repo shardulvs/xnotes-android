@@ -3227,6 +3227,34 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         private set
 
     /** Save (or, passing [factoryFlow], forget) the flow defaults new notes start with. */
+    /** What a new text box starts as before anyone sets it: the note text's own font and size, bare. */
+    val factoryBox: com.xnotes.core.model.BoxDefaults get() = com.xnotes.core.model.BoxDefaults(factoryFlow.face, factoryFlow.sizePt)
+
+    /** What a new text box starts as: the Text box tool's popup. App-wide. */
+    var boxDefaults by mutableStateOf(settings.textBox ?: factoryBox)
+        private set
+
+    init {
+        controller.boxDefaults = boxDefaults
+    }
+
+    fun saveBoxDefaults(defaults: com.xnotes.core.model.BoxDefaults) {
+        if (boxDefaults == defaults) return
+        boxDefaults = defaults
+        controller.boxDefaults = defaults
+        settings = settings.copy(textBox = defaults.takeIf { it != factoryBox })
+        settingsRepo.save(settings)
+    }
+
+    override fun selectedTextBox(): TextItem? = if (hasSelection) controller.selectedItems().singleOrNull() as? TextItem else null
+
+    override fun editSelectedTextBox() {
+        selectionMenu = null
+        controller.editSelectedText()
+    }
+
+    override fun setSelectedBoxStyle(style: com.xnotes.core.model.BoxStyle, preview: Boolean) = controller.restyleSelectedBox(style, preview)
+
     fun saveNewNoteFlow(defaults: FlowDefaults) {
         if (newNoteFlow == defaults) return
         newNoteFlow = defaults

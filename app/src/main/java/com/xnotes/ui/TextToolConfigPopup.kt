@@ -133,7 +133,7 @@ internal fun TextToolConfigPopup(editor: Editor, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun FaceDropdown(current: FontFace, monoOnly: Boolean = false, onPick: (FontFace) -> Unit) {
+internal fun FaceDropdown(current: FontFace, monoOnly: Boolean = false, onPick: (FontFace) -> Unit) {
     val palette = LocalPalette.current
     var open by remember { mutableStateOf(false) }
     Box {
@@ -156,7 +156,7 @@ private fun FaceDropdown(current: FontFace, monoOnly: Boolean = false, onPick: (
 
 /** A labelled numeric spinfield: minus / value / plus, stepping by 1. */
 @Composable
-private fun SpinField(label: String, value: Double, min: Double, max: Double, onChange: (Double) -> Unit) {
+internal fun SpinField(label: String, value: Double, min: Double, max: Double, onChange: (Double) -> Unit) {
     val palette = LocalPalette.current
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = palette.textDim.toComposeColor(), fontSize = 13.sp, modifier = Modifier.width(74.dp))

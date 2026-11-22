@@ -21,6 +21,13 @@
     <string name="tool_ruler">Ruler</string>
     <string name="tool_text">Text</string>
     <string name="tool_text_box">Text box</string>
+    <string name="box_defaults_hint">New text boxes start like this.</string>
+    <string name="box_fill">Fill</string>
+    <string name="box_border">Border</string>
+    <string name="box_thickness">Thickness</string>
+    <string name="box_corners">Corners</string>
+    <string name="box_style">Box style</string>
+    <string name="edit_text">Edit text</string>
     <string name="tool_markup">PDF text markup</string>
     <string name="markup_highlight">Highlight</string>
     <string name="markup_squiggly">Squiggly</string>

@@ -297,7 +297,7 @@ private fun ToolButton(
 ) {
     if (icon == null) return
     val armed = editor.tool == tool
-    val configurable = tool.isStroke || tool == Tool.SHAPE || tool == Tool.ERASER || tool == Tool.SELECT || tool == Tool.TEXT || tool == Tool.MARKUP || tool == Tool.TAPE || tool == Tool.INSERT_SPACE
+    val configurable = tool.isStroke || tool == Tool.SHAPE || tool == Tool.ERASER || tool == Tool.SELECT || tool == Tool.TEXT || tool == Tool.TEXT_BOX || tool == Tool.MARKUP || tool == Tool.TAPE || tool == Tool.INSERT_SPACE
     Box {
         ToolbarIcon(
             icon,
@@ -320,6 +320,7 @@ private fun ToolButton(
                 tool == Tool.ERASER -> EraserConfigPopup(editor) { setConfigForTool(null) }
                 tool == Tool.SELECT -> SelectConfigPopup(editor) { setConfigForTool(null) }
                 tool == Tool.TEXT -> TextToolConfigPopup(editor) { setConfigForTool(null) }
+                tool == Tool.TEXT_BOX -> TextBoxConfigPopup(editor) { setConfigForTool(null) }
                 tool == Tool.MARKUP -> MarkupToolPopup(editor) { setConfigForTool(null) }
                 tool == Tool.TAPE -> TapeConfigPopup(editor) { setConfigForTool(null) }
                 tool == Tool.INSERT_SPACE -> InsertSpaceConfigPopup(editor) { setConfigForTool(null) }

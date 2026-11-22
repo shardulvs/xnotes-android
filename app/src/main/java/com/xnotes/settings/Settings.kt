@@ -1,5 +1,7 @@
 package com.xnotes.settings
 
+import com.xnotes.core.model.BoxDefaults
+import com.xnotes.core.model.BoxStyle
 import com.xnotes.core.infinite.CanvasBackground
 import com.xnotes.core.model.PagePattern
 import com.xnotes.core.model.PageTemplates
@@ -84,6 +86,8 @@ data class Settings(
     val newNoteStyle: PageStyle = PageStyle(),
     /** Flow (text tool) defaults stamped onto every newly created note; null ⇒ none saved (the device's factory). */
     val newNoteFlow: FlowDefaults? = null,
+    /** What a new text box starts as; null is the factory's. */
+    val textBox: BoxDefaults? = null,
     /** Background stamped onto every newly created canvas; null ⇒ none saved. */
     val newCanvasBackground: CanvasBackground? = null,
     /** Size and look the insert-table dialog starts from ("Default for new tables"). */
@@ -143,6 +147,7 @@ data class Settings(
             .put("render_scale", renderScale)
             .apply { if (!newNoteStyle.isEmpty) put("new_note_style", pageStyleJson(newNoteStyle)) }
             .apply { newNoteFlow?.let { put("new_note_flow", flowDefaultsJson(it)) } }
+            .apply { textBox?.let { put("text_box", boxDefaultsJson(it)) } }
             .apply { newCanvasBackground?.let { put("new_canvas_background", canvasBackgroundJson(it)) } }
             .apply { if (!newTable.isFactory) put("new_table", tableDefaultsJson(newTable)) }
             .put("prefs", prefs.toJson())
@@ -201,6 +206,7 @@ data class Settings(
                 renderScale = o.optDouble("render_scale", 1.0),
                 newNoteStyle = pageStyle(o.optJSONObject("new_note_style")),
                 newNoteFlow = o.optJSONObject("new_note_flow")?.let { flowDefaults(it) },
+                textBox = o.optJSONObject("text_box")?.let { boxDefaults(it) },
                 newCanvasBackground = canvasBackground(o.optJSONObject("new_canvas_background")),
                 newTable = tableDefaults(o.optJSONObject("new_table")),
                 prefs = Preferences.fromJson(o.optJSONObject("prefs")),
@@ -296,6 +302,30 @@ data class Settings(
                 patternColor = rgba(o.optJSONArray("pattern_color")) ?: d.patternColor,
                 spacing = o.optDouble("spacing", d.spacing),
                 paperColor = rgba(o.optJSONArray("paper_color")),
+            )
+        }
+
+        private fun boxDefaultsJson(d: BoxDefaults) = JSONObject()
+            .put("face", d.face.id)
+            .put("size_pt", d.sizePt)
+            .apply { d.color?.let { put("color", rgbaArr(it)) } }
+            .apply { d.box.fill?.let { put("fill", rgbaArr(it)) } }
+            .apply { d.box.border?.let { put("border", rgbaArr(it)) } }
+            .put("border_width", d.box.borderWidth)
+            .put("corner", d.box.corner)
+
+        private fun boxDefaults(o: JSONObject): BoxDefaults {
+            val d = BoxDefaults()
+            return BoxDefaults(
+                face = FontFace(o.optString("face", d.face.id)),
+                sizePt = o.optDouble("size_pt", d.sizePt),
+                color = rgba(o.optJSONArray("color")),
+                box = BoxStyle(
+                    fill = rgba(o.optJSONArray("fill")),
+                    border = rgba(o.optJSONArray("border")),
+                    borderWidth = o.optDouble("border_width", 0.0).coerceIn(0.0, BoxStyle.MAX_BORDER),
+                    corner = o.optDouble("corner", 0.0).coerceIn(0.0, BoxStyle.MAX_CORNER),
+                ),
             )
         }
 

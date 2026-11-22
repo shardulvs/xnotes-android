@@ -651,5 +651,22 @@ class SettingsTest {
         assertEquals(shape, back)
         assertEquals("uml_aggregation_elbow", back.connector!!.key)
     }
-}
 
+    @Test fun theTextBoxDefaultsRoundTrip() {
+        val box = com.xnotes.core.model.BoxDefaults(
+            face = com.xnotes.core.pal.FontFace.SERIF,
+            sizePt = 18.0,
+            color = com.xnotes.core.model.Rgba(10, 20, 30, 255),
+            box = com.xnotes.core.model.BoxStyle(
+                fill = com.xnotes.core.model.Rgba(255, 241, 150, 255),
+                border = com.xnotes.core.model.Rgba(0, 0, 0, 255),
+                borderWidth = 2.5,
+                corner = 8.0,
+            ),
+        )
+        val back = Settings.fromJson(Settings().copy(textBox = box).toJson())
+        assertEquals(box, back.textBox)
+        // Unset, it stays the factory's and is not written.
+        assertEquals(null, Settings.fromJson(Settings().toJson()).textBox)
+    }
+}
