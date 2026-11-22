@@ -961,11 +961,17 @@ private fun FiltersPage(editor: Editor, s: ViewState, onBack: () -> Unit) {
     fun set(f: (ViewOverrides) -> ViewOverrides) = s.apply(editor, f(editor.viewOverrides))
 
     PanelHeader(stringResource(R.string.caption_pdf_filters), onBack)
-    HeldSlider(stringResource(R.string.filter_contrast), vs.contrast, 200) { v -> set { it.copy(contrast = v) } }
-    HeldSlider(stringResource(R.string.filter_invert), vs.invert, 100) { v -> set { it.copy(invert = v) } }
-    HeldSlider(stringResource(R.string.filter_brightness), vs.brightness, 200) { v -> set { it.copy(brightness = v) } }
-    HeldSlider(stringResource(R.string.filter_sepia), vs.sepia, 200) { v -> set { it.copy(sepia = v) } }
-    Spacer(Modifier.height(6.dp))
+    // The gap between sliders is twice the one under a label, so each reads with its own.
+    PanelCard(padding = PaddingValues(start = 12.dp, top = 14.dp, end = 12.dp, bottom = 12.dp)) {
+        HeldSlider(stringResource(R.string.filter_contrast), vs.contrast, 200) { v -> set { it.copy(contrast = v) } }
+        Spacer(Modifier.height(16.dp))
+        HeldSlider(stringResource(R.string.filter_invert), vs.invert, 100) { v -> set { it.copy(invert = v) } }
+        Spacer(Modifier.height(16.dp))
+        HeldSlider(stringResource(R.string.filter_brightness), vs.brightness, 200) { v -> set { it.copy(brightness = v) } }
+        Spacer(Modifier.height(16.dp))
+        HeldSlider(stringResource(R.string.filter_sepia), vs.sepia, 200) { v -> set { it.copy(sepia = v) } }
+    }
+    Spacer(Modifier.height(10.dp))
     PanelCard(padding = PaddingValues(vertical = 2.dp)) {
         BlendRow(stringResource(R.string.filter_multiply), vs.multiply, PdfColorFilter.MULTIPLY_OFF) { c -> set { it.copy(multiply = c) } }
         CardDivider()
@@ -983,7 +989,6 @@ private fun HeldSlider(label: String, value: Int, max: Int, onSet: (Int) -> Unit
     var held by remember { mutableStateOf<Int?>(null) }
     val shown = held ?: value
     PanelSlider(label, "$shown%", shown.toFloat(), 0f..max.toFloat(), onChangeFinished = { held?.let(onSet); held = null }) { held = it.roundToInt() }
-    Spacer(Modifier.height(6.dp))
 }
 
 /**
