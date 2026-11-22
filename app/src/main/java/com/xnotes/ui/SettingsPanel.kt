@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -59,6 +60,7 @@ import androidx.compose.ui.unit.sp
 import com.xnotes.R
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
+import com.xnotes.ui.theme.nested
 import com.xnotes.ui.theme.toComposeColor
 
 /*
@@ -242,7 +244,7 @@ internal fun PanelSegmented(
 ) {
     val palette = LocalPalette.current
     val outer = MaterialTheme.shapes.medium
-    val inner = MaterialTheme.shapes.small
+    val inner = outer.nested(3.dp, LocalDensity.current)
     Row(
         Modifier
             .fillMaxWidth()

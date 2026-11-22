@@ -58,6 +58,7 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -88,6 +89,7 @@ import com.xnotes.settings.MaterialColourMode
 import com.xnotes.settings.SwatchRole
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
+import com.xnotes.ui.theme.nested
 import com.xnotes.ui.theme.toComposeColor
 import kotlinx.coroutines.delay
 
@@ -888,7 +890,7 @@ internal fun ColorOrNone(
     val on = value != null
     val shown = value ?: kept ?: suggested
     val outer = MaterialTheme.shapes.medium
-    val inner = MaterialTheme.shapes.small
+    val inner = outer.nested(3.dp, LocalDensity.current)
     val chosen = palette.selectionBackground.toComposeColor()
     val onChosen = palette.selectionForeground.toComposeColor()
     Row(
