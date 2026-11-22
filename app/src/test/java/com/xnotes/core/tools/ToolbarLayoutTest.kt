@@ -103,6 +103,13 @@ class ToolbarLayoutTest {
         val back = ToolbarLayout.fromRaw(raw)
         assertEquals(ToolbarLayout.NOTE_ITEMS, back.items().toSet())
         assertTrue(back.items().none { it.id in old })
+        // The three sections that held only these go too.
+        assertEquals(ToolbarLayout.DEFAULT.sections.size, back.sections.size)
+    }
+
+    @Test fun aSectionStoredEmptyStays() {
+        val raw = ToolbarLayout.DEFAULT.toRaw() + listOf(emptyList())
+        assertEquals(ToolbarLayout.DEFAULT.sections.size + 1, ToolbarLayout.fromRaw(raw).sections.size)
     }
 
     @Test fun missingTextBoxWithoutTextAppendsToLastSection() {

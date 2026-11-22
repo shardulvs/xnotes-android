@@ -218,7 +218,9 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
                 )
             }
             if (sections.all { it.entries.isEmpty() }) return fallback
-            return ToolbarLayout(sections).withMissingItemsAppended(among)
+            // A section emptied by dropped items goes with them; one stored empty is the user's and stays.
+            val kept = sections.filterIndexed { i, s -> s.entries.isNotEmpty() || rawSections[i].isEmpty() }
+            return ToolbarLayout(kept).withMissingItemsAppended(among)
         }
     }
 }
