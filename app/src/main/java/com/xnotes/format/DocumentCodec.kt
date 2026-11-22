@@ -1332,7 +1332,8 @@ class DocumentCodec(
                     pending.add(PendingAudio(items.size + pending.size, asset, s.rect, s.rid, s.name, s.durationMs, s.peaks ?: ByteArray(0), s.locked, s.group))
                 }
             }
-            TextItem.KIND -> items.add(buildText(s))
+            // A box is dropped when left empty; one saved mid-typing with no words yet goes the same way.
+            TextItem.KIND -> buildText(s).takeIf { it.text.isNotBlank() }?.let { items.add(it) }
             ShapeItem.KIND, ShapeItem.GLYPHS_KIND, ShapeItem.FILL_KIND -> {
                 val c = s.connector
                 items.add(if (c != null && s.kind == ShapeItem.KIND) buildConnector(s, c, glue) else buildShape(s))

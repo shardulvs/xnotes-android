@@ -46,6 +46,18 @@ class History(private val limit: Int = DEFAULT_LIMIT) {
         undoStack.addLast(command)
     }
 
+    /**
+     * Take back off the top every newest edit [mine] claims, oldest first, without undoing any:
+     * for a caller folding its last few steps into one, or dropping steps whose subject is gone.
+     * Whatever could be redone goes too, since it was recorded against what these were.
+     */
+    fun takeLastWhile(mine: (Command) -> Boolean): List<Command> {
+        val out = ArrayDeque<Command>()
+        while (undoStack.isNotEmpty() && mine(undoStack.last())) out.addFirst(undoStack.removeLast())
+        if (out.isNotEmpty()) redoStack.clear()
+        return out
+    }
+
     fun clear() {
         undoStack.clear()
         redoStack.clear()

@@ -75,8 +75,8 @@ import com.xnotes.ui.theme.toComposeColor
 import kotlin.math.roundToInt
 
 /**
- * The bottom text-format strip, shown while the inline text tool is armed (and no
- * legacy box edit is open). Sits as the last child of the editor column, so the
+ * The bottom text-format strip, shown while the inline text tool is armed, and for a
+ * text box being typed in or selected with its tool (and no label edit is open). Sits as the last child of the editor column, so the
  * adjustResize window floats it directly above the soft keyboard. Controls, in
  * order: checkbox item, font colour, highlight, font face, size, bold/italic/
  * underline/strikethrough, heading level, ordered and unordered lists, code block
@@ -86,10 +86,12 @@ import kotlin.math.roundToInt
  */
 @Composable
 fun TextFormatBar(editor: Editor) {
-    if (editor.tool != Tool.TEXT || editor.editingField != null) return
-    val palette = LocalPalette.current
     editor.flowSelTick // recompose whenever the caret, selection or pending style moves
     editor.contentVersion
+    // A text box gets the same strip, less what a box does not hold.
+    val box = editor.boxBar
+    if ((editor.tool != Tool.TEXT && !box) || editor.editingField != null) return
+    val palette = LocalPalette.current
     val style = editor.flowCaretStyle()
     val para = editor.flowCaretParagraph()
     val inCell = para?.table != null
@@ -128,12 +130,14 @@ fun TextFormatBar(editor: Editor) {
             BarIcon(Icons.AutoMirrored.Filled.FormatListBulleted, stringResource(R.string.bullet_list), active = para?.list == ListKind.BULLET, enabled = !inCell) {
                 editor.flowToggleList(ListKind.BULLET)
             }
-            CodeBlockButton(editor, para?.codeLang, enabled = !inCell)
+            if (!box) CodeBlockButton(editor, para?.codeLang, enabled = !inCell)
             BarIcon(Icons.Filled.Functions, stringResource(R.string.equation), active = style.math, enabled = editor.flowEditingActive) {
                 editor.flowToggleMath()
             }
-            BarIcon(Icons.Outlined.TableChart, stringResource(R.string.insert_table), enabled = editor.flowEditingActive && !inCell) {
-                tableDialog = true
+            if (!box) {
+                BarIcon(Icons.Outlined.TableChart, stringResource(R.string.insert_table), enabled = editor.flowEditingActive && !inCell) {
+                    tableDialog = true
+                }
             }
             BarDivider()
             BarIcon(alignIcon(para?.align ?: ParaAlign.LEFT), stringResource(R.string.alignment), active = para != null && para.align != ParaAlign.LEFT) {

@@ -86,6 +86,9 @@ object InputRules {
 
     // --- detection ---
 
+    /** Whether [rule] makes something a text box holds: all but code blocks, quotes and callouts. */
+    fun fitsBox(rule: Rule): Boolean = rule !is Fence && rule !is Callout && !(rule is Block && rule.quote)
+
     /**
      * The rule typing [typed] with the caret now at [pos] triggers, or null. Only
      * plain typing reaches here: a paste builds its paragraphs through

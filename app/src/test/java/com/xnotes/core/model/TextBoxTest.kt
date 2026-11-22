@@ -199,4 +199,68 @@ class TextBoxTest {
         val t = box("x")
         assertEquals(CharStyle.DEFAULT, t.flow.paragraphs[0].runs[0].style)
     }
+
+    @Test fun aHuggingBoxGrowsAwayFromTheEdgeItIsAlignedTo() {
+        val left = box("ab", auto = true)
+        val centre = box("ab", auto = true)
+        val right = box("ab", auto = true)
+        FlowEditor(centre.flow).setParaStyle(FlowRange.caret(FlowPos.START)) { it.align = ParaAlign.CENTER }
+        FlowEditor(right.flow).setParaStyle(FlowRange.caret(FlowPos.START)) { it.align = ParaAlign.RIGHT }
+        for (t in listOf(left, centre, right)) t.reflow()
+        val mid = centre.bounds().centerX
+        val edge = right.bounds().right
+        for (t in listOf(left, centre, right)) {
+            FlowEditor(t.flow).insertText(FlowPos(0, 2), "cdefghij")
+            t.retype()
+        }
+        assertEquals(100.0, left.pos.x, 1e-9)
+        assertEquals(mid, centre.bounds().centerX, 1e-9)
+        assertEquals(edge, right.bounds().right, 1e-9)
+    }
+
+    @Test fun aSetWidthBoxStaysPutAsItIsTyped() {
+        val t = box("ab", width = 200.0)
+        FlowEditor(t.flow).setParaStyle(FlowRange.caret(FlowPos.START)) { it.align = ParaAlign.CENTER }
+        FlowEditor(t.flow).insertText(FlowPos(0, 2), "cdefghij")
+        t.retype()
+        assertEquals(100.0, t.pos.x, 1e-9)
+    }
+
+    @Test fun aBoxEditUndoesTheTextAndTheLayoutTogether() {
+        val t = box("ab", auto = true)
+        val before = t.bounds()
+        val (cmd, _) = FlowEditor(t.flow).insertText(FlowPos(0, 2), "cdefghij")
+        t.retype()
+        val edit = com.xnotes.core.history.BoxEdit(t, cmd!!)
+        assertTrue(t.bounds().w > before.w)
+        edit.undo()
+        assertEquals("ab", t.text)
+        assertEquals(before, t.bounds())
+        edit.redo()
+        assertEquals("abcdefghij", t.text)
+    }
+
+    @Test fun rebasingChangesTheBaseStyleAndGivesItBack() {
+        val t = TextItem(Pt(0.0, 0.0), text = "x", rgba = null, pointSize = 10.0, measurer = m)
+        val old = com.xnotes.core.history.BoxBase.of(t)
+        val cmd = com.xnotes.core.history.BoxEdit(t, com.xnotes.core.history.RebaseBox(t, old, old.copy(color = Rgba(9, 9, 9), sizePt = 20.0)))
+        cmd.redo()
+        assertEquals(Rgba(9, 9, 9), t.color)
+        assertEquals(20.0, t.pointSize, 1e-9)
+        assertEquals(m.lineHeight(t.font), t.textRect().h, 1e-9)
+        cmd.undo()
+        // A box following the theme goes back to following it, not to the colour that resolved to.
+        assertEquals(null, t.color)
+        assertEquals(10.0, t.pointSize, 1e-9)
+    }
+
+    @Test fun restylingTheFrameIsOneStepEitherWay() {
+        val t = box("x")
+        val framed = BoxStyle(fill = Rgba(1, 2, 3), corner = 4.0)
+        val cmd = com.xnotes.core.history.RestyleBox(t, t.box, framed)
+        cmd.redo()
+        assertEquals(framed, t.box)
+        cmd.undo()
+        assertEquals(BoxStyle.NONE, t.box)
+    }
 }

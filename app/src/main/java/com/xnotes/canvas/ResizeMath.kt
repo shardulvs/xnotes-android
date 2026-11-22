@@ -36,16 +36,13 @@ object ResizeMath {
             val r = b.right + pageTopLeft.x
             val t = b.top + pageTopLeft.y
             val bot = b.bottom + pageTopLeft.y
-            val cx = b.centerX + pageTopLeft.x
             val cy = b.centerY + pageTopLeft.y
-            // Eight handles: four corners + four side midpoints.
+            // Six handles: the corners scale it, the two sides set its width. Its text sets its height.
             listOf(
                 ResizeHandle(HandleId.TL, Pt(l, t)),
-                ResizeHandle(HandleId.T, Pt(cx, t)),
                 ResizeHandle(HandleId.TR, Pt(r, t)),
                 ResizeHandle(HandleId.R, Pt(r, cy)),
                 ResizeHandle(HandleId.BR, Pt(r, bot)),
-                ResizeHandle(HandleId.B, Pt(cx, bot)),
                 ResizeHandle(HandleId.BL, Pt(l, bot)),
                 ResizeHandle(HandleId.L, Pt(l, cy)),
             )
@@ -309,29 +306,5 @@ object ResizeMath {
         val sx = if (p.x >= anchor.x) 1.0 else -1.0
         val sy = if (p.y >= anchor.y) 1.0 else -1.0
         return Pt(anchor.x + sx * h * aspect, anchor.y + sy * h)
-    }
-
-    /**
-     * Text box rect resize via any of the 8 handles (page-local pointer). [width] is
-     * the wrap width; [height] is the reserved minimum (the box still grows to fit its
-     * text). The dragged edge follows the pointer, the opposite edge stays fixed, and
-     * both axes clamp to [MIN_SIZE]. Returns new (pos, width, height).
-     */
-    fun resizeText(pos: Pt, width: Double, height: Double, handle: HandleId, pointer: Pt): Triple<Pt, Double, Double> {
-        var left = pos.x
-        var top = pos.y
-        var right = pos.x + width
-        var bottom = pos.y + height
-        val movesLeft = handle == HandleId.TL || handle == HandleId.BL || handle == HandleId.L
-        val movesRight = handle == HandleId.TR || handle == HandleId.BR || handle == HandleId.R
-        val movesTop = handle == HandleId.TL || handle == HandleId.TR || handle == HandleId.T
-        val movesBottom = handle == HandleId.BL || handle == HandleId.BR || handle == HandleId.B
-        if (movesLeft) left = pointer.x
-        if (movesRight) right = pointer.x
-        if (movesTop) top = pointer.y
-        if (movesBottom) bottom = pointer.y
-        if (right - left < MIN_SIZE) { if (movesLeft) left = right - MIN_SIZE else right = left + MIN_SIZE }
-        if (bottom - top < MIN_SIZE) { if (movesTop) top = bottom - MIN_SIZE else bottom = top + MIN_SIZE }
-        return Triple(Pt(left, top), right - left, bottom - top)
     }
 }

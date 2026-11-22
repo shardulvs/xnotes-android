@@ -1,6 +1,7 @@
 package com.xnotes.core.history
 
 import com.xnotes.core.geometry.Rect
+import com.xnotes.core.model.BoxStyle
 import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.Document
 import com.xnotes.core.model.DrawStyle
@@ -20,7 +21,6 @@ import com.xnotes.core.model.TapeItem
 import com.xnotes.core.model.TapePattern
 import com.xnotes.core.model.TextItem
 import com.xnotes.core.model.TextMarkup
-import com.xnotes.core.model.TextStyle
 
 /**
  * A reversible edit (spec 07). A command is pushed onto the history **after**
@@ -220,31 +220,49 @@ class TransformItems(
     override fun touched(locate: (CanvasItem) -> Page?) = pagedItems(items, locate)
 }
 
-/** Change the text of an existing text box. */
-class EditText(
-    private val item: TextItem,
-    private val oldText: String,
-    private val newText: String,
-) : Command {
+/** An edit of the text in a box: [edit] on its flow, after which the box sets its text again. */
+class BoxEdit(val item: TextItem, private val edit: Command) : Command {
     override fun redo() {
-        item.text = newText
+        edit.redo()
+        item.retype()
     }
 
     override fun undo() {
-        item.text = oldText
+        edit.undo()
+        item.retype()
     }
 
     override fun touched(locate: (CanvasItem) -> Page?) = pagedItems(listOf(item), locate)
 }
 
-/** Restyle a text box (colour, point size, face) — geometry and text are untouched. */
-class RestyleText(
-    private val item: TextItem,
-    private val oldStyle: TextStyle,
-    private val newStyle: TextStyle,
-) : Command {
-    override fun redo() = newStyle.applyTo(item)
-    override fun undo() = oldStyle.applyTo(item)
+/** A text box's base style: what its text takes where a run says nothing of its own. A null [color] follows the theme. */
+data class BoxBase(val color: Rgba?, val sizePt: Double, val face: com.xnotes.core.pal.FontFace) {
+    companion object {
+        fun of(t: TextItem) = BoxBase(t.color, t.pointSize, t.face)
+    }
+}
+
+/** Change a text box's base style. Wrap it in a [BoxEdit], which sets the text again. */
+class RebaseBox(private val item: TextItem, private val old: BoxBase, private val new: BoxBase) : Command {
+    private fun put(b: BoxBase) {
+        item.flow.defaultColor = b.color
+        item.flow.defaultSizePt = b.sizePt
+        item.flow.defaultFace = b.face
+    }
+
+    override fun redo() = put(new)
+    override fun undo() = put(old)
+}
+
+/** Change a text box's own frame: its fill, border and corners. */
+class RestyleBox(private val item: TextItem, private val old: BoxStyle, private val new: BoxStyle) : Command {
+    override fun redo() {
+        item.box = new
+    }
+
+    override fun undo() {
+        item.box = old
+    }
 
     override fun touched(locate: (CanvasItem) -> Page?) = pagedItems(listOf(item), locate)
 }

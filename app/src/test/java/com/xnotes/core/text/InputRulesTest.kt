@@ -740,4 +740,26 @@ class InputRulesTest {
         assertEquals("10:30:00", typed("10:30:00").plainText())
         assertEquals(":nope:", typed(":nope:").plainText())
     }
+
+    // --- what a text box holds ---
+
+    private fun ruleFor(text: String): InputRules.Rule? {
+        val flow = TextFlow()
+        val (_, caret) = FlowEditor(flow).replaceRange(FlowRange.caret(FlowPos.START), text)
+        return InputRules.forTyped(flow, caret, text.takeLast(1))
+    }
+
+    @Test fun aBoxTakesListsHeadingsAndEmphasis() {
+        for (typed in listOf("- ", "1. ", "[ ] ", "# ", "**b**")) {
+            val rule = ruleFor(typed)
+            assertNotNull(typed, rule)
+            assertTrue(typed, InputRules.fitsBox(rule!!))
+        }
+    }
+
+    @Test fun aBoxLeavesQuotesAndCodeFencesAsTyped() {
+        assertFalse(InputRules.fitsBox(ruleFor("> ")!!))
+        val flow = TextFlow().apply { paragraphs.add(para("```kotlin")) }
+        assertFalse(InputRules.fitsBox(InputRules.forEnter(flow, FlowPos(0, 9))!!))
+    }
 }

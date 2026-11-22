@@ -49,6 +49,43 @@ class FlowTextController(
     private val onViewChanged: () -> Unit,
     private val requestRender: () -> Unit,
 ) {
+    /** The note's own flow, laid across its pages. */
+    private val pages = object : FlowSurface {
+        override val flow: TextFlow get() = this@FlowTextController.flow()
+        override val frame: FlowFrame? get() = this@FlowTextController.frame()
+
+        override fun localAt(content: Pt): Pair<Int, Pt>? = state.pagePointAt(content)
+
+        override fun toContent(page: Int, rect: Rect): Rect? =
+            if (state.pageRects.getOrNull(page) == null) null else state.fromPageSpaceRect(page, rect)
+
+        override fun lift(on: Boolean) {
+            state.flowLifted = on
+            invalidateFlowPages()
+        }
+
+        override fun changed(live: Boolean) = onChanged(live)
+
+        override fun grow(): List<Command> = autoAppendPages()
+
+        override fun fillHeight(): Double = slotHeight()
+    }
+
+    /** What is being typed in: the note's pages, unless a text box has taken the session. */
+    var surface: FlowSurface = pages
+        private set
+
+    /** The text box being typed in, or null while the pages are. */
+    val box: BoxSurface? get() = surface as? BoxSurface
+
+    /** Hand the caret to [to], or back to the pages with null. Any open session ends first. */
+    fun retarget(to: FlowSurface?) {
+        endSession()
+        surface = to ?: pages
+        pendingStyle = null
+        selection = FlowRange.caret(FlowPos.START)
+    }
+
     var active = false
         private set
 
@@ -80,6 +117,12 @@ class FlowTextController(
 
     /** The colour typed ==text== highlights in: the one selected on the toolbar. */
     var highlight: () -> Rgba = { CharStyle.DEFAULT_HIGHLIGHT }
+
+    /** Slash commands only run in the note's own text: a box holds none of what most of them make. */
+    private val slash: Boolean get() = slashCommands && box == null
+
+    /** Whether typed markdown may make [rule]'s block where the caret is. */
+    private fun fits(rule: InputRules.Rule): Boolean = box == null || InputRules.fitsBox(rule)
 
     /** Claims Enter while the emoji completion is open, so the host puts in its top emoji. */
     var onEmojiEnter: () -> Boolean = { false }
@@ -169,8 +212,7 @@ class FlowTextController(
         }
         active = true
         selection = range
-        state.flowLifted = true
-        invalidateFlowPages()
+        surface.lift(true)
         onSessionChanged(true)
         requestRender()
     }
@@ -183,8 +225,7 @@ class FlowTextController(
         if (!active) return
         flushBurst()
         active = false
-        state.flowLifted = false
-        invalidateFlowPages()
+        surface.lift(false)
         onSessionChanged(false)
         requestRender()
     }
@@ -217,13 +258,13 @@ class FlowTextController(
                 return
             }
         }
-        val (pi, local) = state.pagePointAt(content) ?: return
-        val hit = frame()?.hitTest(pi, local) ?: return
+        val (pi, local) = surface.localAt(content) ?: return
+        val hit = surface.frame?.hitTest(pi, local) ?: return
         pressHit = hit
         pressAnchor = when (hit) {
             is FlowHit.Caret -> hit.pos
             is FlowHit.Checkbox -> FlowPos(hit.paraIndex, 0)
-            FlowHit.BeyondEnd -> flow().endPos()
+            FlowHit.BeyondEnd -> surface.flow.endPos()
         }
         handler.removeCallbacks(longPressRun)
         handler.postDelayed(longPressRun, LONG_PRESS_MS)
@@ -236,8 +277,8 @@ class FlowTextController(
      */
     private fun onLongPressFired() {
         val anchor = pressAnchor ?: return
-        val held = state.pagePointAt(pressContent)?.let { (pi, local) ->
-            frame()?.tablePressAt(pi, local, TABLE_RULE_SLOP_DP * state.devicePxPerDp / state.zoom)
+        val held = surface.localAt(pressContent)?.let { (pi, local) ->
+            surface.frame?.tablePressAt(pi, local, TABLE_RULE_SLOP_DP * state.devicePxPerDp / state.zoom)
         }
         if (held != null && !held.second) {
             tableHold = true
@@ -253,7 +294,7 @@ class FlowTextController(
             selectionArmed = true
             armedAnchor = FlowRange.caret(selection.end)
         } else {
-            val word = wordRangeAt(flow(), anchor).normalized()
+            val word = wordRangeAt(surface.flow, anchor).normalized()
             selectionArmed = true
             armedAnchor = word
             selection = if (word.collapsed) FlowRange.caret(anchor) else word
@@ -342,7 +383,7 @@ class FlowTextController(
             null -> Unit
             is FlowHit.Checkbox -> {
                 flushBurst()
-                commitEdit(FlowEditor(flow()).toggleChecked(hit.paraIndex), null)
+                commitEdit(FlowEditor(surface.flow).toggleChecked(hit.paraIndex), null)
             }
             is FlowHit.Caret -> {
                 val isDouble = timeMs - lastTapAtMs < DOUBLE_TAP_MS &&
@@ -352,7 +393,7 @@ class FlowTextController(
                 if (active) placeCaret(hit.pos) else startSession(FlowRange.caret(hit.pos))
                 requestIme()
                 if (isDouble) {
-                    selection = wordRangeAt(flow(), hit.pos)
+                    selection = wordRangeAt(surface.flow, hit.pos)
                     imeSync()
                     requestRender()
                 }
@@ -368,8 +409,8 @@ class FlowTextController(
 
     /** Place the caret from a programmatic point (menu paste): tap semantics, no gestures. */
     fun tapAt(content: Pt) {
-        val (pi, local) = state.pagePointAt(content) ?: return
-        when (val hit = frame()?.hitTest(pi, local)) {
+        val (pi, local) = surface.localAt(content) ?: return
+        when (val hit = surface.frame?.hitTest(pi, local)) {
             null -> Unit
             is FlowHit.Caret ->
                 if (active) placeCaret(hit.pos) else startSession(FlowRange.caret(hit.pos))
@@ -381,17 +422,24 @@ class FlowTextController(
 
     /** A tap below the flow end: fill the gap with empty lines so the caret lands there. */
     private fun tapBeyondEnd(content: Pt) {
-        val (pi, local) = state.pagePointAt(content) ?: return
-        val f = frame() ?: return
-        var count = f.emptyLinesToReach(pi, local.y, slotHeight())
-        if (flow().paragraphs.isEmpty() && count <= 0) count = 1
-        if (!active) startSession(FlowRange.caret(flow().endPos()))
+        val flow = surface.flow
+        val slot = surface.fillHeight()
+        // A surface that does not fill takes the caret at its end instead.
+        if (slot <= 0.0) {
+            if (active) placeCaret(flow.endPos()) else startSession(FlowRange.caret(flow.endPos()))
+            return
+        }
+        val (pi, local) = surface.localAt(content) ?: return
+        val f = surface.frame ?: return
+        var count = f.emptyLinesToReach(pi, local.y, slot)
+        if (flow.paragraphs.isEmpty() && count <= 0) count = 1
+        if (!active) startSession(FlowRange.caret(flow.endPos()))
         if (count <= 0) {
-            placeCaret(flow().endPos())
+            placeCaret(flow.endPos())
             return
         }
         flushBurst()
-        val (cmd, caret) = FlowEditor(flow()).appendEmptyLines(count)
+        val (cmd, caret) = FlowEditor(flow).appendEmptyLines(count)
         commitEdit(cmd, caret)
     }
 
@@ -411,8 +459,8 @@ class FlowTextController(
     }
 
     fun selectAll() {
-        if (flow().paragraphs.isEmpty()) return
-        selection = FlowRange(FlowPos.START, flow().endPos())
+        if (surface.flow.paragraphs.isEmpty()) return
+        selection = FlowRange(FlowPos.START, surface.flow.endPos())
         imeSync()
         requestRender()
     }
@@ -427,7 +475,7 @@ class FlowTextController(
     fun applyReplace(range: FlowRange, text: String, style: CharStyle? = null): FlowPos {
         val r = range.normalized()
         if (r.start.para != r.end.para) {
-            val cells = CellIndex(flow().paragraphs)
+            val cells = CellIndex(surface.flow.paragraphs)
             if (cells.shapeOf(r) != SelShape.Text) {
                 // The model will not do what the mirror just did: resync it afterwards.
                 mirrorStale = true
@@ -436,11 +484,12 @@ class FlowTextController(
                 if (r != selection.normalized()) return selection.end
             }
         }
-        val para = flow().paragraphs.getOrNull(r.start.para)
+        val flow = surface.flow
+        val para = flow.paragraphs.getOrNull(r.start.para)
         if (text == "\n" && r.collapsed) {
-            if (slashCommands && onSlashEnter()) return selection.end
+            if (slash && onSlashEnter()) return selection.end
             if (markdownInput && onEmojiEnter()) return selection.end
-            InputRules.forEnter(flow(), r.start, markdownInput)?.let { return applyRule(it, r.start) }
+            InputRules.forEnter(flow, r.start, markdownInput)?.takeIf { fits(it) }?.let { return applyRule(it, r.start) }
         }
         // The armed style is only spent on text that actually lands; a deletion keeps it.
         val effStyle = style
@@ -452,14 +501,14 @@ class FlowTextController(
                 burstPara = para
                 burstBefore = ParaSnapshot.of(para)
             }
-            val (_, caret) = FlowEditor(flow()).replaceRange(r, text, effStyle)
-            onChanged(active)
-            burstExtras += autoAppendPages()
+            val (_, caret) = FlowEditor(flow).replaceRange(r, text, effStyle)
+            surface.changed(active)
+            burstExtras += surface.grow()
             selection = FlowRange.caret(caret)
             onTyped()
-            if (markdownInput) InputRules.forTyped(flow(), caret, text)?.let { return applyRule(it, caret) }
-            if (slashCommands && text == "/") {
-                SlashCommands.escapeAt(flow(), caret)?.let { return dropSlash(caret.para, it) }
+            if (markdownInput) InputRules.forTyped(flow, caret, text)?.takeIf { fits(it) }?.let { return applyRule(it, caret) }
+            if (slash && text == "/") {
+                SlashCommands.escapeAt(flow, caret)?.let { return dropSlash(caret.para, it) }
             }
             handler.removeCallbacks(idleFlush)
             handler.postDelayed(idleFlush, BURST_IDLE_MS)
@@ -473,11 +522,11 @@ class FlowTextController(
         // (commitEdit -> placeCaret clears it, hence re-armed after).
         val leavingHeading = para != null && para.headingLevel > 0 && r.start.offset >= para.length
         val carry = if (text.endsWith("\n") && !leavingHeading) {
-            effStyle ?: FlowEditor(flow()).charStyleAt(r.start)
+            effStyle ?: FlowEditor(flow).charStyleAt(r.start)
         } else {
             null
         }
-        val (cmd, caret) = FlowEditor(flow()).replaceRange(r, text, effStyle)
+        val (cmd, caret) = FlowEditor(flow).replaceRange(r, text, effStyle)
         commitEdit(cmd, caret)
         if (carry != null && carry != CharStyle.DEFAULT) pendingStyle = carry
         return caret
@@ -491,7 +540,7 @@ class FlowTextController(
     private fun dropSlash(para: Int, offset: Int): FlowPos {
         flushBurst()
         val caret = FlowPos(para, offset)
-        val cmd = FlowEditor(flow()).deleteRange(FlowRange(caret, FlowPos(para, offset + 1))).first
+        val cmd = FlowEditor(surface.flow).deleteRange(FlowRange(caret, FlowPos(para, offset + 1))).first
         mirrorStale = true
         commitEdit(cmd, caret)
         return caret
@@ -504,7 +553,7 @@ class FlowTextController(
      */
     private fun applyRule(rule: InputRules.Rule, at: FlowPos): FlowPos {
         flushBurst()
-        val result = InputRules.apply(flow(), at, rule, highlight())
+        val result = InputRules.apply(surface.flow, at, rule, highlight())
         mirrorStale = true
         commitEdit(result.command, result.caret)
         pendingStyle = result.pending
@@ -517,7 +566,7 @@ class FlowTextController(
      */
     fun replaceExternal(range: FlowRange, text: String, style: CharStyle? = null): FlowPos {
         flushBurst()
-        val (cmd, caret) = FlowEditor(flow()).replaceRange(range.normalized(), text, style)
+        val (cmd, caret) = FlowEditor(surface.flow).replaceRange(range.normalized(), text, style)
         commitEdit(cmd, caret)
         return caret
     }
@@ -534,9 +583,9 @@ class FlowTextController(
             caretTo?.let { placeCaret(it) }
             return
         }
-        onChanged(active)
-        val extras = autoAppendPages()
-        history.push(if (extras.isEmpty()) head else CompositeCommand(listOf(head) + extras))
+        surface.changed(active)
+        val extras = surface.grow()
+        history.push(surface.record(if (extras.isEmpty()) head else CompositeCommand(listOf(head) + extras)))
         caretTo?.let { selection = FlowRange.caret(it) }
         onEdited()
         onFlushed()
@@ -561,8 +610,8 @@ class FlowTextController(
         val cmds = listOfNotNull(edit) + extras
         when {
             cmds.isEmpty() -> return
-            cmds.size == 1 -> history.push(cmds[0])
-            else -> history.push(CompositeCommand(cmds))
+            cmds.size == 1 -> history.push(surface.record(cmds[0]))
+            else -> history.push(surface.record(CompositeCommand(cmds)))
         }
         onFlushed()
     }
@@ -586,10 +635,9 @@ class FlowTextController(
 
     fun ensureCaretVisible() {
         if (!active) return
-        val f = frame() ?: return
+        val f = surface.frame ?: return
         val (pi, rect) = f.caretRect(selection.end) ?: return
-        if (state.pageRects.getOrNull(pi) == null) return
-        val cr = state.fromPageSpaceRect(pi, rect)
+        val cr = surface.toContent(pi, rect) ?: return
         val topV = state.contentToViewport(Pt(0.0, cr.top)).y
         val bottomV = state.contentToViewport(Pt(0.0, cr.bottom)).y
         val margin = CARET_MARGIN * state.devicePxPerDp
@@ -609,10 +657,9 @@ class FlowTextController(
 
     /** The caret's on-screen rect (viewport px), for the IME's cursor anchor. */
     fun caretViewportRect(): Rect? {
-        val f = frame() ?: return null
+        val f = surface.frame ?: return null
         val (pi, rect) = f.caretRect(selection.end) ?: return null
-        if (state.pageRects.getOrNull(pi) == null) return null
-        val cr = state.fromPageSpaceRect(pi, rect)
+        val cr = surface.toContent(pi, rect) ?: return null
         val tl = state.contentToViewport(Pt(cr.left, cr.top))
         return Rect(tl.x, tl.y, cr.w * state.zoom, cr.h * state.zoom)
     }
@@ -620,19 +667,17 @@ class FlowTextController(
     /** Selection highlight + caret + drag handles, drawn in the interaction overlay (content space). */
     fun drawOverlay(r: com.xnotes.core.pal.Renderer) {
         if (!active) return
-        val f = frame() ?: return
+        val f = surface.frame ?: return
         val accent = state.palette.accent
         if (!selection.collapsed) {
             for ((pi, rect) in f.selectionRects(selection)) {
-                if (state.pageRects.getOrNull(pi) == null) continue
-                r.fillRect(state.fromPageSpaceRect(pi, rect), accent.withAlpha(70))
+                r.fillRect(surface.toContent(pi, rect) ?: continue, accent.withAlpha(70))
             }
             val norm = selection.normalized()
             handleCenter(norm.start, isStart = true)?.let { handles.draw(r, it, isStart = true, accent) }
             handleCenter(norm.end, isStart = false)?.let { handles.draw(r, it, isStart = false, accent) }
         } else {
             val (pi, cr) = f.caretRect(selection.end) ?: return
-            if (state.pageRects.getOrNull(pi) == null) return
             var top = cr.top
             var height = cr.h
             // A pending style (size bumped before typing) previews on the caret itself,
@@ -647,28 +692,30 @@ class FlowTextController(
                 }
             }
             val w = (FlowFrame.CARET_WIDTH / state.zoom).coerceAtLeast(0.75)
-            r.fillRect(state.fromPageSpaceRect(pi, Rect(cr.left - w / 2.0, top, w, height)), accent)
+            surface.toContent(pi, Rect(cr.left - w / 2.0, top, w, height))?.let { r.fillRect(it, accent) }
         }
     }
 
     /** Viewport point of the line middle at [pos]: the spot a handle drag really targets. */
     private fun caretAnchorViewport(pos: FlowPos): Pt? {
-        val f = frame() ?: return null
+        val f = surface.frame ?: return null
         val (pi, cr) = f.caretRect(pos) ?: return null
-        if (state.pageRects.getOrNull(pi) == null) return null
-        return state.contentToViewport(state.fromPageSpace(pi, Pt(cr.left, (cr.top + cr.bottom) / 2.0)))
+        val at = surface.toContent(pi, Rect(cr.left, (cr.top + cr.bottom) / 2.0, 0.0, 0.0)) ?: return null
+        return state.contentToViewport(Pt(at.left, at.top))
     }
 
     /** Content-space centre of the teardrop handle for the caret at [pos]. */
     private fun handleCenter(pos: FlowPos, isStart: Boolean): Pt? {
-        val f = frame() ?: return null
+        val f = surface.frame ?: return null
         val (pi, cr) = f.caretRect(pos) ?: return null
-        if (state.pageRects.getOrNull(pi) == null) return null
         // Hang the handle below the caret's *display* rect, so it reads screen-down even
         // when the page is rotated.
-        val crC = state.fromPageSpaceRect(pi, cr)
+        val crC = surface.toContent(pi, cr) ?: return null
         return handles.center(Pt(crC.left, crC.bottom), isStart)
     }
+
+    /** Whether a press at [viewport] lands on a handle of the open selection, which hang outside the text. */
+    fun grabsHandle(viewport: Pt): Boolean = active && !selection.collapsed && grabHandle(viewport) != null
 
     /** The handle a press at [viewport] grabs, preferring the nearer of the two. */
     private fun grabHandle(viewport: Pt): TextHandles.Handle? {
@@ -677,11 +724,11 @@ class FlowTextController(
     }
 
     private fun caretPosAt(content: Pt): FlowPos? {
-        val (pi, local) = state.pagePointAt(content) ?: return null
-        return when (val hit = frame()?.hitTest(pi, local) ?: return null) {
+        val (pi, local) = surface.localAt(content) ?: return null
+        return when (val hit = surface.frame?.hitTest(pi, local) ?: return null) {
             is FlowHit.Caret -> hit.pos
             is FlowHit.Checkbox -> FlowPos(hit.paraIndex, 0)
-            FlowHit.BeyondEnd -> flow().endPos()
+            FlowHit.BeyondEnd -> surface.flow.endPos()
         }
     }
 

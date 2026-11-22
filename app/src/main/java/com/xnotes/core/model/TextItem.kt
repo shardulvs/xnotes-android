@@ -14,6 +14,7 @@ import com.xnotes.core.text.FlowLayout
 import com.xnotes.core.text.FlowMargins
 import com.xnotes.core.text.FlowPainter
 import com.xnotes.core.text.PageBox
+import com.xnotes.core.text.ParaAlign
 import com.xnotes.core.text.Paragraph
 import com.xnotes.core.text.Run
 import com.xnotes.core.text.TextFlow
@@ -41,6 +42,14 @@ data class BoxStyle(
         const val MAX_CORNER = 48.0
     }
 }
+
+/** What a new text box starts as: the Text box tool's defaults. A null [color] follows the theme. */
+data class BoxDefaults(
+    val face: FontFace = FontFace.SANS,
+    val sizePt: Double = TextFlow.DEFAULT_SIZE_PT,
+    val color: Rgba? = null,
+    val box: BoxStyle = BoxStyle.NONE,
+)
 
 /** What a text box last set: its lines, the size they take, and a copy of the text no edit can reach. */
 class BoxContent(
@@ -89,6 +98,13 @@ class TextItem(
 
     private val host = measurer as? BoxTextHost
     private val layout = FlowLayout(measurer, host?.math).also { l -> l.autoColor = { host?.autoColor() } }
+
+    /** The formula showing its source because the caret is in it, as the layout asks while the box is typed in. */
+    var revealedMath: (Paragraph) -> Int
+        get() = layout.revealedMath
+        set(value) {
+            layout.revealedMath = value
+        }
 
     private var wrapWidth = width
     private var hugs = autoWidth
@@ -152,6 +168,22 @@ class TextItem(
     /** Lay the flow out afresh and publish it. Call after anything that changes the text or its styles. */
     fun reflow() {
         content = typeset()
+    }
+
+    /**
+     * [reflow] after an edit of the text: a box hugging its text grows away from the edge its
+     * first line is aligned to, so a centred label stays centred where it was put.
+     */
+    fun retype() {
+        val before = content.w
+        reflow()
+        if (!hugs) return
+        val grown = content.w - before
+        when (flow.paragraphs.firstOrNull()?.align) {
+            ParaAlign.CENTER -> pos = Pt(pos.x - grown / 2.0, pos.y)
+            ParaAlign.RIGHT -> pos = Pt(pos.x - grown, pos.y)
+            else -> Unit
+        }
     }
 
     /** Set the wrap width and whether the box hugs its text, in one layout. */

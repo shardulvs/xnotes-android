@@ -41,7 +41,6 @@ import com.xnotes.core.history.MovePages
 import com.xnotes.core.history.ReshapePages
 import com.xnotes.core.history.RefillShapes
 import com.xnotes.core.history.RestyleItems
-import com.xnotes.core.history.RestyleText
 import com.xnotes.core.model.Bookmark
 import com.xnotes.core.model.CanvasItem
 import com.xnotes.core.model.Document
@@ -1001,7 +1000,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         onViewChanged = { refreshView() },
         onFitWidthSnapped = { showZoomLockHint() },
         onFitWidthReleased = { hideZoomLockHint() },
-        onSelectionChanged = { selected -> hasSelection = selected; refreshTextBar() },
+        onSelectionChanged = { selected -> hasSelection = selected; flowSelTick++; refreshTextBar() },
         onToolChanged = { t ->
             tool = t
             if (t != Tool.TEXT) {
@@ -1039,6 +1038,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         requestRender = { onRender() },
     ).also { ctrl ->
         controller.flowText = ctrl
+        controller.boxReveal = { para -> revealedMathIn(para) }
+        controller.onBoxTyping = { typing ->
+            boxTyping = typing
+            boxRevealedMath = -1L
+            flowSelTick++
+        }
         ctrl.onHaptic = {
             runCatching { view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS) }
         }
@@ -1067,7 +1072,16 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             // reshape. The comparison is against what is published rather than
             // what was last asked for, because an edit lays out before it moves
             // the caret and can leave a frame behind that neither one matches.
-            if (revealedMathKey() != revealedMath) {
+            val box = ctrl.box
+            if (box != null) {
+                // A box sets its own text: opening or closing a formula there is its layout's to redo.
+                val key = revealedMathKey()
+                if (key != boxRevealedMath) {
+                    boxRevealedMath = key
+                    box.item.reflow()
+                    onRender()
+                }
+            } else if (revealedMathKey() != revealedMath) {
                 republishFlow(invalidate = true)
                 onRender()
             }
@@ -1083,7 +1097,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
         ctrl.onGatedTap = { endTableEdit() }
         ctrl.caretMetricsFor = { style ->
-            val flow = state.document.flow
+            val flow = ctrl.surface.flow
             val para = flow.paragraphs.getOrNull(ctrl.selection.normalized().start.para) ?: Paragraph()
             textMeasurer.metrics(com.xnotes.core.text.resolveFont(flow, para, style))
         }
@@ -1093,7 +1107,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     var flowSelTick by mutableStateOf(0)
         private set
 
-    private val flowInput = com.xnotes.canvas.FlowInput(view, flowText, { state.document.flow })
+    /** The text the caret is in: a text box's while one is being typed in, else the note's own. */
+    private val liveFlow: com.xnotes.core.text.TextFlow get() = flowText.surface.flow
+
+    /** True while a text box is being typed in (drives the format strip and Back). */
+    var boxTyping by mutableStateOf(false)
+        private set
+
+    private val flowInput = com.xnotes.canvas.FlowInput(view, flowText, { flowText.surface.flow })
         .also {
             view.flowInput = it
             it.onPaste = { pastePlainAtCaret() }
@@ -1483,11 +1504,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** The flow selection's viewport bounds (the caret's rect when collapsed). */
     private fun flowMenuAnchor(fallback: Pt): Rect {
         val sel = flowText.selection.normalized()
-        val rects = publishedFlow?.frame?.let { f ->
+        val surface = flowText.surface
+        val rects = surface.frame?.let { f ->
             val local = if (sel.collapsed) listOfNotNull(f.caretRect(sel.end)) else f.selectionRects(sel)
-            local.mapNotNull { (pi, r) ->
-                state.pageRects.getOrNull(pi)?.let { pr -> r.translate(pr.left, pr.top) }
-            }
+            local.mapNotNull { (pi, r) -> surface.toContent(pi, r) }
         }.orEmpty()
         if (rects.isEmpty()) return Rect(fallback.x, fallback.y, 0.0, 0.0)
         val tl = state.contentToViewport(Pt(rects.minOf { it.left }, rects.minOf { it.top }))
@@ -1504,6 +1524,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** Parse the clipboard's text as markdown and paste it at the caret's font size. */
     fun pasteMarkdownAtCaret() {
+        if (flowText.box != null) return pastePlainAtCaret() // tables, code and quotes have no place in a box
         if (!flowText.active) return
         val text = clipboardText() ?: return
         val caretSize = flowCaretStyle().sizePt
@@ -1530,6 +1551,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** Paste the clipboard's text as a code block, at the caret's font size. */
     fun pasteAsCodeAtCaret() {
+        if (flowText.box != null) return pastePlainAtCaret()
         if (!flowText.active) return
         val text = clipboardText() ?: return
         val lang = settings.prefs.defaultCodeLanguage.takeIf { it != "plain" } ?: ""
@@ -1633,6 +1655,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         } else {
             flowContextMenu = null
             flowInput.endSession()
+            // A session ended from outside (Escape) while a box was being typed in ends that typing too.
+            if (controller.editingItem != null) controller.commitTextEdit(select = true)
             refreshContent()
         }
         onRender()
@@ -2471,9 +2495,15 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** The address of a link in the text at [pageLocal] on page [pageIndex], within a finger's reach. */
     private fun flowLinkAt(pageIndex: Int, pageLocal: Pt): String? {
+        val slop = AUTO_LINK_SLOP_DP * state.devicePxPerDp / state.zoom
+        val page = state.document.pages.getOrNull(pageIndex) ?: return null
+        // A text box lies over the note's own text, and its links are its own.
+        (page.items.lastOrNull { it is TextItem && it.contains(pageLocal) } as? TextItem)?.let { box ->
+            box.content.frame.linkAt(0, Pt(pageLocal.x - box.pos.x, pageLocal.y - box.pos.y), slop)?.let { return it }
+        }
         val pf = publishedFlow ?: return null
-        val idx = state.document.pages.getOrNull(pageIndex)?.let { pf.indexOf[it] } ?: return null
-        return pf.frame.linkAt(idx, pageLocal, AUTO_LINK_SLOP_DP * state.devicePxPerDp / state.zoom)
+        val idx = pf.indexOf[page] ?: return null
+        return pf.frame.linkAt(idx, pageLocal, slop)
     }
 
     /** Open an external web/mail URL in the system handler. Restricted to safe schemes; never throws. */
@@ -3158,7 +3188,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     override fun commitText(text: String?) {
-        controller.commitTextEdit(text, restoreTool = true)
+        controller.commitTextEdit(text, select = true)
     }
 
     /** A one-finger drag over the editor scrolls the page (edit stays open), not the box's own text. */
@@ -7510,8 +7540,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             is DropAction.Recolour -> {
                 val item = action.item.takeIf(::onPage) ?: return
                 if (item is TextItem) {
-                    val before = TextStyle.of(item)
-                    RestyleText(item, before, before.copy(rgba = color))
+                    // A colour dropped on a box becomes its base text colour, which undo hands back as it was.
+                    val before = com.xnotes.core.history.BoxBase.of(item)
+                    com.xnotes.core.history.BoxEdit(item, com.xnotes.core.history.RebaseBox(item, before, before.copy(color = color)))
                 } else {
                     val before = DrawStyle.of(item) ?: return
                     RestyleItems(listOf(RestyleItems.Entry(item, before, before.copy(color = color))))
@@ -7671,6 +7702,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         // page to the cache thread instead, because repainting them all inline is a stall long
         // enough to time out input on a dense note.
         if (regions == null) state.refreshAllInk() else state.repairInkRegions(regions)
+        controller.dropTypingIfGone() // undo took the box being typed in off its page
         if (flowText.active) flowInput.reconcile() // undone/redone text must reach the IME mirror
         state.document.dirty = true
         state.clampScroll()
@@ -8682,10 +8714,63 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     // --- flow formatting (the bottom format bar + shortcuts) ---
 
+    /**
+     * The text box the format strip styles whole: one selected with the Text box tool while
+     * nothing is being typed. Its every character is then what the strip reads and changes.
+     */
+    private fun styledBox(): TextItem? =
+        if (flowText.active || tool != Tool.TEXT_BOX) null else controller.activeTextItem()
+
+    /** True while the format strip is a text box's: one is being typed in, or selected with its tool. */
+    val boxBar: Boolean get() = tool == Tool.TEXT_BOX && (boxTyping || (hasSelection && controller.activeTextItem() != null))
+
+    /** The text the strip reads and styles, and how much of it. */
+    private fun barFlow(): com.xnotes.core.text.TextFlow = styledBox()?.flow ?: liveFlow
+
+    private fun barRange(): FlowRange =
+        styledBox()?.let { FlowRange(FlowPos.START, it.flow.endPos()) } ?: flowText.selection.normalized()
+
+    /**
+     * Record [cmd], already applied to what the strip styles. In a session it is the session's
+     * edit; on a selected box, which painted over [boxWas] before it, it is one step of the box's.
+     */
+    private fun commitBarEdit(cmd: Command?, boxWas: Rect?) {
+        val box = styledBox()
+        if (box == null) {
+            flowText.commitEdit(cmd, null)
+            return
+        }
+        cmd ?: return
+        box.retype()
+        controller.recordBoxChange(box, controller.activeTextPage(), boxWas ?: box.paintBounds(), com.xnotes.core.history.BoxEdit(box, cmd))
+    }
+
+    /**
+     * Change the selected box's base colour, size or face, taking off every run the override of
+     * its own that would hide the change. One undo step.
+     */
+    private fun rebaseBox(box: TextItem, change: (com.xnotes.core.history.BoxBase) -> com.xnotes.core.history.BoxBase) {
+        val old = com.xnotes.core.history.BoxBase.of(box)
+        val new = change(old)
+        if (new == old) return
+        val was = box.paintBounds()
+        val all = FlowRange(FlowPos.START, box.flow.endPos())
+        val clear = FlowEditor(box.flow).setCharStyle(all) {
+            it.copy(
+                color = if (new.color != old.color) null else it.color,
+                sizePt = if (new.sizePt != old.sizePt) null else it.sizePt,
+                face = if (new.face != old.face) null else it.face,
+            )
+        }
+        val base = com.xnotes.core.history.RebaseBox(box, old, new).also { it.redo() }
+        commitBarEdit(CompositeCommand(listOfNotNull(clear, base)), was)
+        flowSelTick++
+    }
+
     /** The style the bar reports: pending/typing style at a caret, the first char of a selection. */
     fun flowCaretStyle(): CharStyle {
-        val sel = flowText.selection.normalized()
-        val editor = FlowEditor(state.document.flow)
+        val sel = barRange()
+        val editor = FlowEditor(barFlow())
         return if (sel.collapsed) {
             flowText.pendingStyle ?: editor.charStyleAt(sel.start)
         } else {
@@ -8695,9 +8780,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** The paragraph under the caret / selection start, for the bar's paragraph toggles. */
     fun flowCaretParagraph(): Paragraph? =
-        state.document.flow.paragraphs.getOrNull(flowText.selection.normalized().start.para)
+        barFlow().paragraphs.getOrNull(barRange().start.para)
 
-    fun flowDefaultSizePt(): Double = state.document.flow.defaultSizePt
+    fun flowDefaultSizePt(): Double = barFlow().defaultSizePt
     /**
      * The flow's base text colour for the active paper: the near-white default on
      * dark/OLED paper, a near-black on light paper (where near-white would vanish).
@@ -8706,11 +8791,17 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (palette.isDark) com.xnotes.core.text.TextFlow.DEFAULT_COLOR else Rgba(28, 28, 28, 255)
 
     /** The effective base text colour: the flow's explicit default, else the theme auto colour. */
-    fun flowDefaultColor(): Rgba = state.document.flow.defaultColor ?: defaultTextColor()
-    fun flowDefaultFace(): FontFace = state.document.flow.defaultFace
+    fun flowDefaultColor(): Rgba = barFlow().defaultColor ?: defaultTextColor()
+    fun flowDefaultFace(): FontFace = barFlow().defaultFace
 
     /** Rewrite character styles over the selection, or arm them for the next typed run. */
     fun flowSetChar(apply: (CharStyle) -> CharStyle) {
+        styledBox()?.let { box ->
+            val was = box.paintBounds()
+            commitBarEdit(FlowEditor(box.flow).setCharStyle(barRange()) { apply(it) }, was)
+            flowSelTick++
+            return
+        }
         if (!flowText.active) return
         val sel = flowText.selection.normalized()
         if (sel.collapsed) {
@@ -8720,7 +8811,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             return
         }
         flowText.flushBurst()
-        flowText.commitEdit(FlowEditor(state.document.flow).setCharStyle(sel) { apply(it) }, null)
+        flowText.commitEdit(FlowEditor(liveFlow).setCharStyle(sel) { apply(it) }, null)
         flowSelTick++
     }
 
@@ -8734,25 +8825,40 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     fun flowToggleItalic() = flowToggleStyle({ it.italic }) { s, v -> s.copy(italic = v) }
     fun flowToggleUnderline() = flowToggleStyle({ it.underline }) { s, v -> s.copy(underline = v) }
     fun flowToggleStrike() = flowToggleStyle({ it.strike }) { s, v -> s.copy(strike = v) }
-    fun flowSetCharColor(c: Rgba?) = flowSetChar { it.copy(color = c) }
+    /** On a selected box these three change its base style, so headings and later typing follow. */
+    fun flowSetCharColor(c: Rgba?) {
+        styledBox()?.let { box -> return rebaseBox(box) { it.copy(color = c) } }
+        flowSetChar { it.copy(color = c) }
+    }
+
     fun flowSetCharHighlight(c: Rgba?) = flowSetChar { it.copy(highlight = c) }
-    fun flowSetCharFace(f: FontFace?) = flowSetChar { it.copy(face = f) }
+
+    fun flowSetCharFace(f: FontFace?) {
+        styledBox()?.let { box -> return if (f != null) rebaseBox(box) { it.copy(face = f) } else flowSetChar { it.copy(face = null) } }
+        flowSetChar { it.copy(face = f) }
+    }
 
     /** The size the bar shows: the caret style's own, else the one its paragraph sets text at. */
     fun flowShownSizePt(): Double =
-        flowCaretStyle().sizePt ?: flowCaretParagraph()?.textSizePt(state.document.flow) ?: flowDefaultSizePt()
+        flowCaretStyle().sizePt ?: flowCaretParagraph()?.textSizePt(barFlow()) ?: flowDefaultSizePt()
 
     /** Step the bar's shown size by [delta] and apply that one size across the selection. */
     fun flowAdjustSize(delta: Double) {
+        styledBox()?.let { box ->
+            val target = (box.pointSize + delta).coerceIn(6.0, 96.0)
+            return rebaseBox(box) { it.copy(sizePt = target) }
+        }
         val target = (flowShownSizePt() + delta).coerceIn(6.0, 96.0)
         flowSetChar { it.copy(sizePt = target) }
     }
 
     /** Apply a paragraph-property change over the selection as one undo step. */
     private fun flowParaOp(mutate: (Paragraph) -> Unit) {
-        if (!flowText.active) return
+        val box = styledBox()
+        if (!flowText.active && box == null) return
         flowText.flushBurst()
-        flowText.commitEdit(FlowEditor(state.document.flow).setParaStyle(flowText.selection, mutate), null)
+        val was = box?.paintBounds()
+        commitBarEdit(FlowEditor(barFlow()).setParaStyle(barRange(), mutate), was)
         flowSelTick++
     }
 
@@ -8776,9 +8882,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * markdown shortcuts off.
      */
     fun flowSetHeading(level: Int) {
-        if (!flowText.active) return
-        val flow = state.document.flow
-        val sel = flowText.selection.normalized()
+        val box = styledBox()
+        if (!flowText.active && box == null) return
+        val flow = barFlow()
+        val sel = barRange()
+        val boxWas = box?.paintBounds()
         val last = sel.end.para.coerceAtMost(flow.paragraphs.size - 1)
         if (sel.start.para > last) return
         // Read before the flag moves: only a paragraph that *was* a heading gets its
@@ -8797,8 +8905,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                 it.copy(bold = level > 0, sizePt = null)
             }?.let { cmds += it }
         }
-        flowText.commitEdit(ed.combined(cmds), null)
-        if (sel.collapsed) flowText.pendingStyle = if (level > 0) Paragraph.HEADING_STYLE else CharStyle.DEFAULT
+        commitBarEdit(ed.combined(cmds), boxWas)
+        if (box == null && sel.collapsed) flowText.pendingStyle = if (level > 0) Paragraph.HEADING_STYLE else CharStyle.DEFAULT
         flowSelTick++
     }
 
@@ -8816,7 +8924,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (!markdownInput || !flowText.active) return null
         val sel = flowText.selection
         if (!sel.collapsed || slashQuery() != null) return null
-        val q = com.xnotes.core.text.EmojiShortcodes.queryAt(state.document.flow, sel.start) ?: return null
+        val q = com.xnotes.core.text.EmojiShortcodes.queryAt(liveFlow, sel.start) ?: return null
         val d = emojiDismissed
         if (d != null && d.para == q.para && d.offset == q.colon) return null
         return q
@@ -8856,7 +8964,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         flowText.flushBurst()
         // The IME still holds the shortcode the edit is about to replace.
         flowText.mirrorStale = true
-        val (cmd, caret) = com.xnotes.core.text.EmojiShortcodes.replace(state.document.flow, q, emoji)
+        val (cmd, caret) = com.xnotes.core.text.EmojiShortcodes.replace(liveFlow, q, emoji)
         flowText.commitEdit(cmd, caret)
         emojiSelected = -1
         flowSelTick++
@@ -8880,7 +8988,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (!slashCommands || !flowText.active) return null
         val sel = flowText.selection
         if (!sel.collapsed) return null
-        val q = SlashCommands.queryAt(state.document.flow, sel.start) ?: return null
+        val q = SlashCommands.queryAt(liveFlow, sel.start) ?: return null
         val d = slashDismissed
         if (d != null && d.para == q.para && d.offset == q.slash) return null
         return q
@@ -8970,7 +9078,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         flowText.flushBurst()
         // The IME still holds the query text the strip is about to remove.
         flowText.mirrorStale = true
-        val flow = state.document.flow
+        val flow = liveFlow
         val (cmd, caret) = if (stamp != null) {
             SlashCommands.replace(flow, q, stamp)
         } else {
@@ -9026,7 +9134,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * in one is left as it is: a callout's kind is set when it is made and never changed.
      */
     fun flowStartQuote(kind: com.xnotes.core.text.CalloutKind?) {
-        val flow = state.document.flow
+        if (flowText.box != null) return // a text box holds none of these
+        val flow = liveFlow
         val sel = flowText.selection.normalized()
         val paras = (sel.start.para..sel.end.para).mapNotNull { flow.paragraphs.getOrNull(it) }
         if (paras.any { it.quote != null }) return
@@ -9036,8 +9145,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** Break the page at the caret: what follows it starts the next page. Tables cannot hold one. */
     fun flowInsertPageBreak() {
+        if (flowText.box != null) return // a text box holds none of these
         if (!flowText.active) return
-        val flow = state.document.flow
+        val flow = liveFlow
         val sel = flowText.selection.normalized()
         if (flow.paragraphs.getOrNull(sel.start.para)?.table != null) return
         flowText.flushBurst()
@@ -9058,6 +9168,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** Toggle the paragraph(s) into code lines in the last-used language, or back to plain. */
     fun flowToggleCode() {
+        if (flowText.box != null) return // a text box holds none of these
         if (flowCaretParagraph()?.codeLang != null) {
             flowParaOp { it.codeLang = null }
         } else {
@@ -9075,10 +9186,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** Pick a code language: retarget the caret's whole code block, or start one. */
     fun flowSetCodeLanguage(token: String) {
+        if (flowText.box != null) return // a text box holds none of these
         if (!flowText.active) return
         if (flowCaretParagraph()?.codeLang != null) {
             val lang = if (token == "plain") "" else token
-            val flow = state.document.flow
+            val flow = liveFlow
             val sel = flowText.selection.normalized()
             var first = sel.start.para
             while (first > 0 && flow.paragraphs[first - 1].codeLang != null) first--
@@ -9152,9 +9264,10 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** Insert an empty table at the caret (never inside another table) as one undo step. */
     fun flowInsertTable(rows: Int, cols: Int, style: TableStyle) {
+        if (flowText.box != null) return // a text box holds none of these
         if (!flowText.active) return
         flowText.flushBurst()
-        val (cmd, caret) = TableEditor(state.document.flow).insertTable(
+        val (cmd, caret) = TableEditor(liveFlow).insertTable(
             flowText.selection.normalized().end,
             rows.coerceIn(1, TableDefaults.MAX_ROWS),
             cols.coerceIn(1, TableDefaults.MAX_COLS),
@@ -9694,7 +9807,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val on = !flowCaretStyle().math
         flowText.flushBurst()
         flowText.commitEdit(
-            FlowEditor(state.document.flow).setCharStyle(sel) { it.copy(math = on) },
+            FlowEditor(liveFlow).setCharStyle(sel) { it.copy(math = on) },
             null,
         )
         flowSelTick++
@@ -9714,7 +9827,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         flowText.flushBurst()
         flowText.mirrorStale = true
         val at = flowText.selection.normalized().start
-        val (cmd, caret) = FlowEditor(state.document.flow).insertText(at, text, CharStyle(math = true))
+        val (cmd, caret) = FlowEditor(liveFlow).insertText(at, text, CharStyle(math = true))
         flowText.commitEdit(cmd, caret)
         flowText.pendingStyle = CharStyle.DEFAULT
         flowSelTick++
@@ -9727,6 +9840,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * matches where the caret is.
      */
     private var revealedMath = -1L
+
+    /** The same for the text box being typed in, which lays its own text out. */
+    private var boxRevealedMath = -1L
 
     /**
      * The formula an arrow key stepped into at one of its edges, or -1. A formula's
@@ -9749,7 +9865,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         // Selecting over a formula is not editing it, and a drag whose end walks
         // through one would otherwise re-shape the flow on every pointer move.
         if (!sel.collapsed) return -1L
-        val para = state.document.flow.paragraphs.getOrNull(sel.start.para) ?: return -1L
+        val para = liveFlow.paragraphs.getOrNull(sel.start.para) ?: return -1L
         val held = if ((mathHeld ushr 32).toInt() == sel.start.para) (mathHeld and 0xFFFFFFFFL).toInt() else -1
         val start = MathCaret.revealed(para, sel.start.offset, held)
         return if (start < 0) -1L else packMath(sel.start.para, start)
@@ -9759,7 +9875,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private fun revealedMathIn(para: Paragraph): Int {
         val key = revealedMathKey()
         if (key < 0L) return -1
-        if (state.document.flow.paragraphs.getOrNull((key ushr 32).toInt()) !== para) return -1
+        if (liveFlow.paragraphs.getOrNull((key ushr 32).toInt()) !== para) return -1
         return (key and 0xFFFFFFFFL).toInt()
     }
 
@@ -9768,7 +9884,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (mathHeld < 0L) return false
         val sel = flowText.selection
         if (!sel.collapsed || (mathHeld ushr 32).toInt() != sel.start.para) return false
-        val para = state.document.flow.paragraphs.getOrNull(sel.start.para) ?: return false
+        val para = liveFlow.paragraphs.getOrNull(sel.start.para) ?: return false
         return MathCaret.holds(para, sel.start.offset, (mathHeld and 0xFFFFFFFFL).toInt())
     }
 
@@ -9782,7 +9898,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (!flowText.active) return false
         val sel = flowText.selection
         if (!sel.collapsed) return false
-        val para = state.document.flow.paragraphs.getOrNull(sel.start.para) ?: return false
+        val para = liveFlow.paragraphs.getOrNull(sel.start.para) ?: return false
         val start = MathCaret.edgeAt(para, sel.start.offset, delta)
         if (start < 0) return false
         val key = packMath(sel.start.para, start)
@@ -9802,7 +9918,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (mathHeld < 0L || !flowText.active) return false
         val sel = flowText.selection
         if (!sel.collapsed || (mathHeld ushr 32).toInt() != sel.start.para) return false
-        val para = state.document.flow.paragraphs.getOrNull(sel.start.para) ?: return false
+        val para = liveFlow.paragraphs.getOrNull(sel.start.para) ?: return false
         val held = (mathHeld and 0xFFFFFFFFL).toInt()
         if (MathCaret.exitAt(para, sel.start.offset, delta, held) < 0) return false
         settleMathEdge(-1L)
@@ -9831,7 +9947,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      */
     private fun mathStyleAt(pos: FlowPos): CharStyle? {
         if (mathHeld < 0L || (mathHeld ushr 32).toInt() != pos.para) return null
-        val para = state.document.flow.paragraphs.getOrNull(pos.para) ?: return null
+        val para = liveFlow.paragraphs.getOrNull(pos.para) ?: return null
         return MathCaret.heldStyle(para, pos.offset, (mathHeld and 0xFFFFFFFFL).toInt())
     }
 
@@ -9873,7 +9989,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private fun flowCopySelection(cut: Boolean) {
         val sel = flowText.selection.normalized()
         if (sel.collapsed) return
-        val flow = state.document.flow
+        val flow = liveFlow
         val text = CellIndex(flow.paragraphs).textOf(flow.paragraphs, sel)
         val cm = appContext.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
             as? android.content.ClipboardManager ?: return
@@ -9894,7 +10010,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (!flowText.active) return false
         val sel = flowText.selection.normalized()
         if (!sel.collapsed || sel.start.offset != 0) return false
-        val flow = state.document.flow
+        val flow = liveFlow
         if (sel.start.para !in flow.paragraphs.indices) return false
         val rule = InputRules.forBackspace(flow, sel.start)
             ?: return flowTableEdge(sel.start.para, forward = false)
@@ -9916,7 +10032,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         if (!flowText.active) return false
         val sel = flowText.selection.normalized()
         if (!sel.collapsed) return false
-        val flow = state.document.flow
+        val flow = liveFlow
         val para = flow.paragraphs.getOrNull(sel.start.para) ?: return false
         if (sel.start.offset < para.length) return false
         if (flowTableEdge(sel.start.para, forward = true)) return true
@@ -9936,7 +10052,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * line beside it. Returns true when the key is spent.
      */
     private fun flowTableEdge(p: Int, forward: Boolean): Boolean {
-        val flow = state.document.flow
+        val flow = liveFlow
         val cells = CellIndex(flow.paragraphs)
         val block = cells.blockAt(p)
         if (block != null) {
@@ -9954,7 +10070,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      * last cell appends a row. False outside tables (the key types a tab).
      */
     private fun flowTabCell(back: Boolean): Boolean {
-        val flow = state.document.flow
+        val flow = liveFlow
         val cells = CellIndex(flow.paragraphs)
         val p = flowText.selection.end.para
         val block = cells.blockAt(p) ?: return false
@@ -9985,7 +10101,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         // would eat a character of LaTeX with nothing on screen to show for it,
         // and the equation would quietly become a different one.
         if (stepIntoMath(if (forward) 1 else -1)) return
-        val flow = state.document.flow
+        val flow = liveFlow
         val g = flow.globalOffset(sel.start)
         val range = if (forward) {
             if (g >= flow.globalOffset(flow.endPos())) return
@@ -10003,14 +10119,14 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         // shared with the next formula would step straight from one into the other.
         if (!extend && stepOutOfMath(delta)) return
         if (!extend && stepIntoMath(delta)) return
-        val flow = state.document.flow
+        val flow = liveFlow
         val g = (flow.globalOffset(flowText.selection.end) + delta)
             .coerceIn(0, flow.globalOffset(flow.endPos()))
         flowMoveTo(flow.posAtGlobal(g), extend)
     }
 
     private fun flowMoveWord(forward: Boolean, extend: Boolean) {
-        val flow = state.document.flow
+        val flow = liveFlow
         flowMoveTo(wordBoundary(flow, flowText.selection.end, forward), extend)
     }
 
@@ -10020,7 +10136,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             flowText.applyReplace(sel, "")
             return
         }
-        val flow = state.document.flow
+        val flow = liveFlow
         val to = wordBoundary(flow, sel.start, forward)
         if (to == sel.start) return
         val range = if (forward) FlowRange(sel.start, to) else FlowRange(to, sel.start)
@@ -10028,12 +10144,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     private fun flowMoveVertical(dir: Int, extend: Boolean) {
-        val pos = publishedFlow?.frame?.moveVertical(flowText.selection.end, dir) ?: return
+        val pos = flowText.surface.frame?.moveVertical(flowText.selection.end, dir) ?: return
         flowMoveTo(pos, extend)
     }
 
     private fun flowLineEdge(start: Boolean, extend: Boolean) {
-        val pos = publishedFlow?.frame?.lineEdge(flowText.selection.end, start) ?: return
+        val pos = flowText.surface.frame?.lineEdge(flowText.selection.end, start) ?: return
         flowMoveTo(pos, extend)
     }
 

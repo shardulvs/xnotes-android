@@ -376,4 +376,31 @@ class HistoryTest {
         assertNull(h.nextUndo)
         assertSame(cmd, h.nextRedo)
     }
+
+    @Test fun takingBackTheNewestStepsLeavesTheRestAndClearsRedo() {
+        val page = Page(100.0, 100.0)
+        val h = History()
+        val old = AddItem(page, strokeAt(1.0))
+        val a = AddItem(page, strokeAt(2.0))
+        val b = AddItem(page, strokeAt(3.0))
+        h.push(old)
+        h.push(a)
+        h.push(b)
+        val mine = setOf<Command>(a, b)
+        // Oldest first, and nothing is undone by it.
+        assertEquals(listOf<Command>(a, b), h.takeLastWhile { it in mine })
+        assertTrue(h.nextUndo === old)
+        assertFalse(h.canRedo)
+    }
+
+    @Test fun takingBackStopsAtTheFirstStepThatIsNotClaimed() {
+        val page = Page(100.0, 100.0)
+        val h = History()
+        val a = AddItem(page, strokeAt(1.0))
+        val other = AddItem(page, strokeAt(2.0))
+        h.push(a)
+        h.push(other)
+        assertTrue(h.takeLastWhile { it === a }.isEmpty())
+        assertTrue(h.nextUndo === other)
+    }
 }
