@@ -1621,6 +1621,8 @@ private fun EditorPane(
                 val bar: @Composable () -> Unit = {
                     com.xnotes.ui.InfiniteToolbar(
                         canvas,
+                        fullscreen = actions.fullscreen,
+                        onToggleFullscreen = actions.onToggleFullscreen,
                         onOpenBackstage = actions.onOpenBackstage,
                         onInsertImage = { actions.onInsertCanvasImage(editor, null) },
                         onClosePane = onClose,

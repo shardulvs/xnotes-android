@@ -47,6 +47,8 @@ private val CANVAS_TOOL_OF: Map<ToolbarItem, Tool> = mapOf(
 @Composable
 fun InfiniteToolbar(
     editor: InfiniteEditor,
+    fullscreen: Boolean,
+    onToggleFullscreen: () -> Unit,
     onOpenBackstage: () -> Unit,
     onInsertImage: () -> Unit = {},
     onClosePane: (() -> Unit)? = null,
@@ -81,8 +83,15 @@ fun InfiniteToolbar(
     // opens it, so the five colours are both the ink and the way to change it.
     var switcherIndex by remember { mutableStateOf<Int?>(null) }
 
-    // Pinned outside the scrolling strip so closing a split pane is always one tap away.
-    ToolbarFrame(armed = editor.tool, trailing = onClosePane?.let { { ClosePaneButton(it) } }) {
+    // Pinned outside the scrolling strip, so the settings and closing a split pane are always one tap away.
+    ToolbarFrame(
+        armed = editor.tool,
+        trailing = {
+            CanvasSettingsButton(editor, fullscreen, onToggleFullscreen)
+            onClosePane?.let { ClosePaneButton(it) }
+            BarEndGap()
+        },
+    ) {
         val sections = editor.toolbarLayout.visibleSections
         sections.forEachIndexed { index, section ->
             if (index > 0) Separator()
