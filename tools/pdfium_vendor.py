@@ -427,13 +427,14 @@ def readme_field(src, d, field):
     return None
 
 
-def write_third_party(path, src, rev, branch, files):
-    """Lists PDFium and every third_party component the vendored files use."""
+def write_third_party(path, src, rev, branch, files, patches=()):
+    """Lists PDFium, our patches to it and every third_party component the vendored files use."""
     deps = load_deps(f"{src}/DEPS")["deps"]
     lines = [BLOCK_BEGIN,
              "pdfium/           https://pdfium.googlesource.com/pdfium",
              f"                  {branch + ', ' if branch else ''}commit {rev}",
              "                  (BSD-3-Clause, Apache-2.0)"]
+    lines += [f"{'':18}changed by tools/pdfium-patches/{p}" for p in patches]
     comps = sorted({"/".join(f.split("/")[:2]) for f in files if f.startswith("third_party/")})
     for c in comps:
         entry = deps.get(f"{c}/src") or deps.get(c)
@@ -455,7 +456,7 @@ def write_third_party(path, src, rev, branch, files):
         f.write(text)
 
 
-def cmd_vendor(src, work, dest, ninja, rev, branch=None):
+def cmd_vendor(src, work, dest, ninja, rev, branch=None, *patches):
     graph = json.load(open(f"{work}/graph.json"))
     kept, files = {}, set()
     for abi, targets in graph.items():
@@ -471,7 +472,7 @@ def cmd_vendor(src, work, dest, ninja, rev, branch=None):
         os.makedirs(os.path.dirname(f"{out}/{f}"), exist_ok=True)
         shutil.copy2(f"{src}/{f}", f"{out}/{f}")
     write_cmake(f"{dest}/pdfium.cmake", rev, graph, kept)
-    write_third_party(f"{dest}/THIRD_PARTY", src, rev, branch, files)
+    write_third_party(f"{dest}/THIRD_PARTY", src, rev, branch, files, patches)
     total = {abi: len({s for t in g.values() for s in t["sources"]}) for abi, g in graph.items()}
     for abi in sorted(graph):
         print(f"{abi}: {len(kept[abi])} of {total[abi]} sources reach the link")

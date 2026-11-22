@@ -4,14 +4,16 @@
 # PDFium commit.
 #
 # Dev machine only. The Gradle and F-Droid builds compile the committed tree and
-# never run this. Needs curl, tar, unzip, python3 and the SDK's pinned NDK and
-# CMake.
+# never run this. Needs curl, tar, unzip, patch, python3 and the SDK's pinned NDK
+# and CMake.
 #
 #   tools/pdfium-sync.sh            fetch the pinned sources, then regenerate
 #   tools/pdfium-sync.sh --offline  regenerate from the sources already fetched
 #
 # 1. Fetch: gitiles tarballs at the commits PDFium's DEPS pins (much faster than
-#    gclient's git fetches, and no depot_tools), plus GN from CIPD.
+#    gclient's git fetches, and no depot_tools), plus GN from CIPD. Our own
+#    changes to PDFium are tools/pdfium-patches/*.patch, applied to the fetched
+#    sources in name order; change PDFium there, never in the vendored tree.
 # 2. GN: the build graph of //:pdfium for each ABI, as project.json.
 # 3. Probe: compile that graph with the pinned NDK and CMake, and link it rooted
 #    at the public API (saving excluded). The link map shows which sources reach
@@ -99,6 +101,22 @@ fi
 got=$(cat "$SRC/.xnotes-rev" 2>/dev/null || true)
 [ "$got" = "$PDFIUM_REV" ] || { echo "no sources for $PDFIUM_REV; run without --offline" >&2; exit 1; }
 
+# Patches go onto the files as fetched, put back first, so one edited or removed
+# since the last run leaves nothing behind.
+PRISTINE=$SRC/.xnotes-pristine
+if [ -d "$PRISTINE" ]; then cp -r "$PRISTINE/." "$SRC/"; fi
+PATCHES=()
+for p in "$TOOLS"/pdfium-patches/*.patch; do
+    [ -e "$p" ] || continue
+    while read -r f; do
+        [ -e "$PRISTINE/$f" ] && continue
+        mkdir -p "$PRISTINE/$(dirname "$f")" && cp "$SRC/$f" "$PRISTINE/$f"
+    done < <(sed -n 's|^+++ b/||p' "$p")
+    patch -d "$SRC" -p1 -s -N -F0 -r - --no-backup-if-mismatch < "$p" \
+        || { echo "$p does not apply" >&2; exit 1; }
+    PATCHES+=("$(basename "$p")")
+done
+
 # gclient would write this from DEPS' gclient_gn_args.
 cat > "$SRC/build/config/gclient_args.gni" <<EOF
 build_with_chromium = false
@@ -166,7 +184,7 @@ done
 # the probe again from the vendored tree (another directory) and check that it
 # defines exactly the same symbols.
 python3 "$TOOLS/pdfium_vendor.py" vendor "$SRC" "$WORK" "$DEST" "$CMAKE_DIR/ninja" \
-    "$PDFIUM_REV" "$PDFIUM_BRANCH"
+    "$PDFIUM_REV" "$PDFIUM_BRANCH" ${PATCHES[@]+"${PATCHES[@]}"}
 # A vendored file that git ignores would be missing from every clone.
 ignored=$(git -C "$ROOT" ls-files --others --ignored --exclude-standard "$DEST/pdfium")
 [ -z "$ignored" ] || { printf "git ignores vendored files:\n%s\n" "$ignored" >&2; exit 1; }
