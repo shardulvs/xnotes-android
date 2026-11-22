@@ -2976,6 +2976,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         prefsVersion++
     }
 
+    /** Put the toolbar on [position], floating or docked there, as a carry of the bar chose. */
+    fun placeToolbar(position: com.xnotes.settings.ToolbarPosition, floating: Boolean) {
+        val look = toolbarLook.copy(position = position, floating = floating)
+        if (look != toolbarLook) applyHomePreferences(preferences.copy(toolbarLook = look))
+    }
+
     /** Apply an edited toolbar layout live and persist (used by the toolbar customiser). */
     fun applyToolbarLayout(layout: ToolbarLayout) {
         toolbarLayout = layout
