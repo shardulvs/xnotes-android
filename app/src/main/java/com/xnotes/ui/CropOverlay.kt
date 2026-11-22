@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -132,9 +133,8 @@ fun CropOverlay(host: CropHost) {
             Modifier
                 .offset { IntOffset((frame.centerX - bar.width / 2f).roundToInt(), y.roundToInt().coerceAtLeast(0)) }
                 .onSizeChanged { bar = it }
-                .clip(MaterialTheme.shapes.medium)
-                .background(palette.menuBg.toComposeColor())
-                .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium),
+                .floatingBar()
+                .padding(horizontal = BAR_END),
         ) {
             TextButton(onClick = { host.finishCrop(null) }) { Text(stringResource(R.string.cancel)) }
             TextButton(onClick = { host.finishCrop(part) }) { Text(stringResource(R.string.done)) }

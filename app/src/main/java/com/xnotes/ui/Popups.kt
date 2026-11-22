@@ -43,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -716,6 +717,19 @@ internal fun AlertDialog(
         shape = shape,
         containerColor = containerColor,
     )
+}
+
+/** A bar's icons sit this far in from its rounded ends. */
+internal val BAR_END = 4.dp
+
+/** The frame of a bar floating by what it acts on: the menus' surface as a pill, lifted off the page. */
+@Composable
+internal fun Modifier.floatingBar(shape: Shape = MaterialTheme.shapes.extraLarge): Modifier {
+    val palette = LocalPalette.current
+    return shadow(6.dp, shape)
+        .background(palette.menuBg.toComposeColor(), shape)
+        .border(1.dp, palette.border.toComposeColor(), shape)
+        .clip(shape)
 }
 
 /** A menu's rows sit this far in from its edges, so a press or the current choice is a pill. */

@@ -80,9 +80,8 @@ fun TextStyleBar(editor: TextEditHost) {
                 .offset(xDp, yDp)
                 .height(44.dp)
                 .onSizeChanged { measuredWidthPx = it.width.toFloat() }
-                .clip(MaterialTheme.shapes.medium)
-                .background(palette.menuBg.toComposeColor())
-                .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium),
+                .floatingBar()
+                .padding(horizontal = BAR_END),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             FacePicker(current = bar.face) { editor.setTextFace(it) }

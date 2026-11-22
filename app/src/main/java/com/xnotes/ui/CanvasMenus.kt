@@ -208,7 +208,7 @@ fun SelectionMenu(
     val crops = host.canCropSelection()
     val textBox = host.selectedTextBox()
     val barHeightPx = with(density) { 48.dp.toPx() }
-    val barWidthPx = with(density) { ((6 + (if (audio != null) 1 else 0) + (if (crops) 1 else 0) + (if (textBox != null) 2 else 0)) * 46).dp.toPx() }
+    val barWidthPx = with(density) { ((6 + (if (audio != null) 1 else 0) + (if (crops) 1 else 0) + (if (textBox != null) 2 else 0)) * 46 + 8).dp.toPx() }
     val gap = with(density) { 10.dp.toPx() }
     val centerX = ((rect.left + rect.right) / 2.0).toFloat()
     val xPx = (centerX - barWidthPx / 2f).coerceAtLeast(with(density) { 8.dp.toPx() })
@@ -225,9 +225,8 @@ fun SelectionMenu(
         Row(
             modifier = Modifier
                 .offset(xDp, yDp)
-                .clip(MaterialTheme.shapes.medium)
-                .background(palette.menuBg.toComposeColor())
-                .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium),
+                .floatingBar()
+                .padding(horizontal = BAR_END),
         ) {
             if (audio != null) {
                 val playing = AudioPlayback.session?.let { it.item === audio && it.playing } == true
@@ -545,7 +544,7 @@ fun ScreenshotMenu(editor: Editor, onShare: (java.io.File) -> Unit) {
     val density = LocalDensity.current
 
     val barHeightPx = with(density) { 44.dp.toPx() }
-    val barWidthPx = with(density) { 216.dp.toPx() }
+    val barWidthPx = with(density) { 224.dp.toPx() }
     val gap = with(density) { 10.dp.toPx() }
     val centerX = ((rect.left + rect.right) / 2.0).toFloat()
     val xPx = (centerX - barWidthPx / 2f).coerceAtLeast(with(density) { 8.dp.toPx() })
@@ -557,9 +556,8 @@ fun ScreenshotMenu(editor: Editor, onShare: (java.io.File) -> Unit) {
     Row(
         modifier = Modifier
             .offset(with(density) { xPx.toDp() }, with(density) { yPx.toDp() })
-            .clip(MaterialTheme.shapes.medium)
-            .background(palette.menuBg.toComposeColor())
-            .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium),
+            .floatingBar()
+            .padding(horizontal = BAR_END),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
@@ -665,7 +663,7 @@ fun FlowEditMenu(editor: Editor) {
     var pasteOpen by remember { mutableStateOf(false) }
 
     val barHeightPx = with(density) { 48.dp.toPx() }
-    val barWidthPx = with(density) { (4 * 46).dp.toPx() }
+    val barWidthPx = with(density) { (4 * 46 + 8).dp.toPx() }
     val gap = with(density) { 10.dp.toPx() }
     // When pushed below the selection, also clear the teardrop handles hanging there.
     val handleClearance = with(density) { (2 * com.xnotes.canvas.TextHandles.RADIUS_DP).dp.toPx() }
@@ -682,9 +680,8 @@ fun FlowEditMenu(editor: Editor) {
         Row(
             modifier = Modifier
                 .offset(with(density) { xPx.toDp() }, with(density) { yPx.toDp() })
-                .clip(MaterialTheme.shapes.medium)
-                .background(palette.menuBg.toComposeColor())
-                .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium),
+                .floatingBar()
+                .padding(horizontal = BAR_END),
         ) {
             ActionIcon(XnotesIcons.cut, stringResource(R.string.cut), enabled = hasSelection, shortcut = Keys.CUT) {
                 editor.flowCut(); editor.dismissFlowContextMenu()
@@ -731,7 +728,7 @@ fun PdfSelectionMenu(editor: Editor) {
     var overflowOpen by remember { mutableStateOf(false) }
 
     val barHeightPx = with(density) { 48.dp.toPx() }
-    val barWidthPx = with(density) { ((1 + PDF_MARKS.size + if (actions.isEmpty()) 0 else 1) * 46).dp.toPx() }
+    val barWidthPx = with(density) { ((1 + PDF_MARKS.size + if (actions.isEmpty()) 0 else 1) * 46 + 8).dp.toPx() }
     val gap = with(density) { 10.dp.toPx() }
     val margin = with(density) { 8.dp.toPx() }
     // When pushed below the selection, also clear the teardrop handles hanging there.
@@ -749,9 +746,8 @@ fun PdfSelectionMenu(editor: Editor) {
         Row(
             modifier = Modifier
                 .offset(with(density) { xPx.toDp() }, with(density) { yPx.toDp() })
-                .clip(MaterialTheme.shapes.medium)
-                .background(palette.menuBg.toComposeColor())
-                .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium),
+                .floatingBar()
+                .padding(horizontal = BAR_END),
         ) {
             ActionIcon(XnotesIcons.copy, stringResource(R.string.copy), shortcut = Keys.COPY) { editor.copyPdfText() }
             for ((type, icon, label) in PDF_MARKS) {
@@ -791,7 +787,7 @@ fun MarkupMenu(editor: Editor) {
     var kindsOpen by remember { mutableStateOf(false) }
     val icons = 5 + if (menu.openLink != null) 1 else 0
     val barHeightPx = with(density) { 48.dp.toPx() }
-    val barWidthPx = with(density) { (icons * 46).dp.toPx() }
+    val barWidthPx = with(density) { (icons * 46 + 8).dp.toPx() }
     val gap = with(density) { 10.dp.toPx() }
     val margin = with(density) { 8.dp.toPx() }
     val rect = menu.anchor
@@ -806,9 +802,8 @@ fun MarkupMenu(editor: Editor) {
         Row(
             modifier = Modifier
                 .offset(with(density) { xPx.toDp() }, with(density) { yPx.toDp() })
-                .clip(MaterialTheme.shapes.medium)
-                .background(palette.menuBg.toComposeColor())
-                .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium),
+                .floatingBar()
+                .padding(horizontal = BAR_END),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box {
@@ -879,9 +874,7 @@ fun MarkupNotePeek(editor: Editor) {
             }
             .widthIn(max = 300.dp)
             .heightIn(max = maxHeight)
-            .clip(MaterialTheme.shapes.medium)
-            .background(palette.menuBg.toComposeColor())
-            .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium)
+            .floatingBar(MaterialTheme.shapes.large)
             .verticalScroll(scroll)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {
@@ -955,7 +948,7 @@ private fun tableBarRect(editor: Editor, table: com.xnotes.core.text.FlowTable, 
     editor.tableChromeTick
     val (pi, frag) = editor.tableFrags(table).firstOrNull() ?: return null
     val t = editor.pageRectToViewport(pi, frag.rect) ?: return null
-    val w = with(density) { (TABLE_BAR_ICONS * 46).dp.toPx() }
+    val w = with(density) { (TABLE_BAR_ICONS * 46 + 8).dp.toPx() }
     val h = with(density) { 48.dp.toPx() }
     val margin = with(density) { 8.dp.toPx() }
     val gap = with(density) { 10.dp.toPx() }
@@ -983,9 +976,8 @@ fun FlowTableMenu(editor: Editor) {
         Row(
             modifier = Modifier
                 .offset(with(density) { bar.left.toDp() }, with(density) { bar.top.toDp() })
-                .clip(MaterialTheme.shapes.medium)
-                .background(palette.menuBg.toComposeColor())
-                .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium),
+                .floatingBar()
+                .padding(horizontal = BAR_END),
         ) {
             ActionIcon(XnotesIcons.tableEdit, stringResource(R.string.edit_table)) { editor.startTableEdit(table) }
             ActionIcon(XnotesIcons.magicWand, stringResource(R.string.fit_columns)) { editor.tableAutoFit(table) }

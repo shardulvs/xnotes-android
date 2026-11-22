@@ -85,9 +85,7 @@ fun SlashMenu(editor: Editor) {
             .offset(with(density) { x.toDp() }, with(density) { y.coerceAtLeast(0f).toDp() })
             .width(MENU_WIDTH)
             .heightIn(max = ROW_HEIGHT * VISIBLE_ROWS + 8.dp)
-            .clip(MaterialTheme.shapes.medium)
-            .background(palette.menuBg.toComposeColor())
-            .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium)
+            .floatingBar(MaterialTheme.shapes.large)
             .padding(vertical = 4.dp)
             .verticalScroll(scroll),
     ) {
@@ -120,9 +118,11 @@ private fun SlashRow(
         modifier = Modifier
             .fillMaxWidth()
             .height(ROW_HEIGHT)
+            .padding(horizontal = 6.dp, vertical = 1.dp)
+            .clip(MaterialTheme.shapes.small)
             .background(if (highlighted) palette.selectionBackground.toComposeColor() else Color.Transparent)
             .clickable(enabled = ready, onClick = onPick)
-            .padding(horizontal = 10.dp),
+            .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -187,9 +187,7 @@ fun EmojiMenu(editor: Editor) {
         modifier = Modifier
             .offset(with(density) { x.toDp() }, with(density) { y.coerceAtLeast(0f).toDp() })
             .width(MENU_WIDTH)
-            .clip(MaterialTheme.shapes.medium)
-            .background(palette.menuBg.toComposeColor())
-            .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.medium)
+            .floatingBar(MaterialTheme.shapes.large)
             .padding(vertical = 4.dp),
     ) {
         for ((i, match) in matches.withIndex()) {
@@ -200,9 +198,11 @@ fun EmojiMenu(editor: Editor) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(ROW_HEIGHT)
+                    .padding(horizontal = 6.dp, vertical = 1.dp)
+                    .clip(MaterialTheme.shapes.small)
                     .background(if (highlighted) palette.selectionBackground.toComposeColor() else Color.Transparent)
                     .clickable { editor.pickEmoji(query, emoji) }
-                    .padding(horizontal = 10.dp),
+                    .padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(emoji, fontSize = 18.sp)
