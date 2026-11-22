@@ -203,10 +203,8 @@ class CanvasState(
      *  rows alike — equal to [sideMargin] so spacing always matches the margin preference. */
     val pageGap: Double get() = sideMargin
 
-    /** Margin (content px) above and below the content. Paginated it follows [sideMargin], so a
-     *  0 px preference lets the fit-height magnet fill the viewport; vertical scrolling keeps the
-     *  fixed [MARGIN] that holds the first page clear of the toolbar. */
-    val vertMargin: Double get() = if (verticalScroll) MARGIN else sideMargin
+    /** Margin (content px) above and below the content: [sideMargin] too, so a page is framed evenly. */
+    val vertMargin: Double get() = sideMargin
 
     /** How pages group into layout rows (Single / Double / Cover); see [rowRanges]. */
     var viewingMode: ViewingMode = ViewingMode.SINGLE
@@ -792,7 +790,7 @@ class CanvasState(
         if (verticalScroll) {
             // Rows stack top-down, centred against the widest row.
             val maxW = rowWidths.max()
-            var y = vertMargin // vertical top margin (keeps the page below the toolbar)
+            var y = vertMargin
             for ((ri, row) in rows.withIndex()) {
                 var x = sideMargin + (maxW - rowWidths[ri]) / 2.0
                 for (i in row) {

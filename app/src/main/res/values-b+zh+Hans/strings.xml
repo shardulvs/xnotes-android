@@ -373,7 +373,7 @@
     <string name="toggle_previous">切换上一个工具</string>
     <string name="pref_filename_template_help">YYYY YY MM DD HH mm ss 会展开为创建日期和时间。# 会变为序号以确保文件夹中的名称不重复。</string>
     <string name="pref_next_note_named">下一个笔记将命名为 %1$s</string>
-    <string name="pref_side_margin_px">"侧边距  %1$d px"</string>
+    <string name="pref_side_margin_px">"页边距  %1$d px"</string>
     <string name="pref_cache_memory_auto">"缓存内存  自动（%1$d MB）"</string>
     <string name="pref_cache_memory_mb">"缓存内存  %1$d MB"</string>
     <string name="pref_toolbar_colours_n">"工具栏颜色  %1$d"</string>
