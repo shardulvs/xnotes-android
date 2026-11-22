@@ -290,20 +290,32 @@ class TextItem(
     /**
      * Text never rotates. A uniform (corner) scale grows every text size with the box; a scale
      * along x alone sets the wrap width, which ends the box hugging its text. Height always
-     * follows the text, so a scale along y alone only moves the box. The inset does not scale.
+     * follows the text, and the inset does not scale, so the box is not quite the size the scale
+     * asks for: the corner or edge the scale holds still is what stays where it is.
      */
     override fun applyTransform(t: Affine) {
         val b = bounds()
-        val corner = t.apply(Pt(b.left, b.top))
-        pos = Pt(corner.x + PAD_X, corner.y + PAD_Y)
-        if (t.isUniformScale) {
-            if (t.scaleX == 1.0) return
-            scaleText(t.scaleX)
-            if (!hugs) wrapWidth = (b.w * t.scaleX - 2 * PAD_X).coerceAtLeast(MIN_TEXT_WIDTH)
-            reflow()
-        } else if (t.scaleX != 1.0) {
-            wrap((b.w * t.scaleX - 2 * PAD_X).coerceAtLeast(MIN_TEXT_WIDTH), false)
+        if (!t.isAxisAligned || t.a <= 0.0 || t.d <= 0.0) {
+            // A turn carries the box's corner round with it and leaves the box upright.
+            val corner = t.apply(Pt(b.left, b.top))
+            pos = Pt(corner.x + PAD_X, corner.y + PAD_Y)
+            return
         }
+        // Where in the box the still point lies, held to the box for one outside it (a group's).
+        val u = if (t.a == 1.0) 0.0 else ((t.e / (1.0 - t.a) - b.left) / b.w).coerceIn(0.0, 1.0)
+        val v = if (t.d == 1.0) 0.0 else ((t.f / (1.0 - t.d) - b.top) / b.h).coerceIn(0.0, 1.0)
+        val held = t.apply(Pt(b.left + u * b.w, b.top + v * b.h))
+        if (t.isUniformScale) {
+            if (t.a != 1.0) {
+                scaleText(t.a)
+                if (!hugs) wrapWidth = (b.w * t.a - 2 * PAD_X).coerceAtLeast(MIN_TEXT_WIDTH)
+                reflow()
+            }
+        } else if (t.a != 1.0) {
+            wrap((b.w * t.a - 2 * PAD_X).coerceAtLeast(MIN_TEXT_WIDTH), false)
+        }
+        val now = content
+        pos = Pt(held.x - u * (now.w + 2 * PAD_X) + PAD_X, held.y - v * (now.h + 2 * PAD_Y) + PAD_Y)
     }
 
     /** Multiply every text size in the box by [s]; the caller sets the text afresh. */
@@ -396,7 +408,7 @@ data class TextStyle(val rgba: Rgba, val pointSize: Double, val face: FontFace) 
 }
 
 /** Snapshot of a text box's transformable geometry: place, wrap width, and every text size a scale changes. */
-private class TextSnapshot(
+private data class TextSnapshot(
     val pos: Pt,
     val width: Double,
     val autoWidth: Boolean,

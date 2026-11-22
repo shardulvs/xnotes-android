@@ -2565,8 +2565,9 @@ class InteractionController(
             if (state.pageRects.getOrNull(sel.pageIndex) == null) continue
             sel.item.applyTransform(state.affineToPageSpace(sel.pageIndex, world))
         }
-        // A pill stops at its smallest by itself, so its box is read back from it.
-        if (txItems.isNotEmpty() && txItems.all { it.item is AudioItem }) selObb = selectionBox()
+        // A pill stops at its smallest by itself, so its box is read back from it; and a text
+        // box is as tall as its text sets, whatever the handle asked for.
+        if (txItems.isNotEmpty() && (txItems.all { it.item is AudioItem } || txItems.all { it.item is TextItem })) selObb = selectionBox()
         for ((pi, f) in follows) {
             if (state.pageRects.getOrNull(pi) == null) continue
             f.follow(state.affineToPageSpace(pi, world))

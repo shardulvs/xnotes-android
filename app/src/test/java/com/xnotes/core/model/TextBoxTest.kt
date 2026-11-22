@@ -306,4 +306,50 @@ class TextBoxTest {
         box("see https://example.org now").paint(r)
         assertFalse(r.ops.any { it.startsWith("linkArea") })
     }
+
+    @Test fun aSnapshotOfAnUnchangedBoxEqualsTheLast() {
+        // A handle pressed and let go without a drag must read as no change.
+        val t = box("same", auto = true)
+        assertEquals(t.snapshotGeometry(), t.snapshotGeometry())
+        val before = t.snapshotGeometry()
+        t.translate(1.0, 0.0)
+        assertFalse(before == t.snapshotGeometry())
+    }
+
+    @Test fun scalingFromACornerHoldsTheOppositeOneStill() {
+        val t = box("hold this corner", auto = true)
+        val b = t.bounds()
+        // Dragging the top-left handle scales about the bottom-right corner.
+        t.applyTransform(Affine.scaleAbout(Pt(b.right, b.bottom), 1.5, 1.5))
+        assertEquals(b.right, t.bounds().right, 1e-9)
+        assertEquals(b.bottom, t.bounds().bottom, 1e-9)
+        assertEquals(15.0, t.pointSize, 1e-9)
+    }
+
+    @Test fun aSideDragHoldsTheOtherSideStill() {
+        val t = box("one two three four", width = 200.0)
+        val b = t.bounds()
+        // Dragging the left handle inward scales along x about the right edge; the text wraps taller.
+        t.applyTransform(Affine.scaleAbout(Pt(b.right, b.top), 0.4, 1.0))
+        assertEquals(b.right, t.bounds().right, 1e-9)
+        assertEquals(b.top, t.bounds().top, 1e-9)
+        assertTrue(t.bounds().h > b.h)
+    }
+
+    @Test fun aBoxInAScaledGroupMovesWithItsNearestCorner() {
+        val t = box("x", width = 100.0)
+        val b = t.bounds()
+        // The group's still point is its own corner, up and left of this box.
+        t.applyTransform(Affine.scaleAbout(Pt(0.0, 0.0), 2.0, 2.0))
+        assertEquals(b.left * 2.0, t.bounds().left, 1e-9)
+        assertEquals(b.top * 2.0, t.bounds().top, 1e-9)
+    }
+
+    @Test fun aMoveOnlyMoves() {
+        val t = box("x", auto = true)
+        val b = t.bounds()
+        t.applyTransform(Affine.translateBy(7.0, -3.0))
+        assertEquals(b.translate(7.0, -3.0), t.bounds())
+        assertTrue(t.autoWidth)
+    }
 }
