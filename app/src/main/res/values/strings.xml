@@ -962,6 +962,8 @@
     <string name="spectrum">Spectrum</string>
     <string name="caption_recent">Recent</string>
     <string name="eyedropper">Pick a colour from the screen</string>
+    <string name="hex" translatable="false">Hex</string>
+    <string name="previous_colour">Previous colour</string>
     <string name="eyedropper_hint">Touch a colour to pick it</string>
 
     <!-- Canvas and storage -->

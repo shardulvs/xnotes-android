@@ -748,6 +748,7 @@
     <string name="swatches">色板</string>
     <string name="spectrum">光谱</string>
     <string name="caption_recent">最近使用</string>
+    <string name="previous_colour">之前的颜色</string>
 
     <!-- Canvas and storage -->
     <string name="pull_to_add_page">拉动以添加页面</string>

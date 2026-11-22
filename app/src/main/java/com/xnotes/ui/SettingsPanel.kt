@@ -230,13 +230,14 @@ internal fun PanelChip(text: String, selected: Boolean = false, icon: ImageVecto
     }
 }
 
-/** A row of [count] equal segments, the [selected] one filled; [segment] draws each. */
+/** A row of [count] equal segments, the [selected] one filled; [segment] draws each. [sunken] on a card, not on the sheet. */
 @Composable
 internal fun PanelSegmented(
     count: Int,
     selected: Int,
     onSelect: (Int) -> Unit,
     height: Dp = 34.dp,
+    sunken: Boolean = true,
     segment: @Composable (index: Int, on: Boolean) -> Unit,
 ) {
     val palette = LocalPalette.current
@@ -246,8 +247,10 @@ internal fun PanelSegmented(
         Modifier
             .fillMaxWidth()
             .clip(outer)
-            .background(palette.bg.toComposeColor())
-            .border(1.dp, palette.border.toComposeColor(), outer)
+            .then(
+                if (sunken) Modifier.background(palette.bg.toComposeColor()).border(1.dp, palette.border.toComposeColor(), outer)
+                else Modifier.background(panelColors().card),
+            )
             .padding(3.dp),
     ) {
         for (i in 0 until count) {
@@ -267,9 +270,9 @@ internal fun PanelSegmented(
 
 /** [PanelSegmented] with a word on each segment. */
 @Composable
-internal fun PanelSegmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, height: Dp = 34.dp) {
+internal fun PanelSegmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, height: Dp = 34.dp, sunken: Boolean = true) {
     val palette = LocalPalette.current
-    PanelSegmented(options.size, selected, onSelect, height) { i, on ->
+    PanelSegmented(options.size, selected, onSelect, height, sunken) { i, on ->
         Text(
             options[i],
             color = (if (on) palette.selectionForeground else palette.textDim).toComposeColor(),

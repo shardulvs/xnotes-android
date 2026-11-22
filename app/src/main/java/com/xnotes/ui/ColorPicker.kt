@@ -16,21 +16,28 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -41,16 +48,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.xnotes.R
@@ -59,10 +73,7 @@ import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.ColorMath
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
-import kotlin.math.atan2
-import kotlin.math.cos
 import kotlin.math.roundToInt
-import kotlin.math.sin
 
 // --- The 13×13 swatch matrix --------------------------------------------------------------------
 // 13 hues across; 12 hue×shade rows that ramp from a pale tint at the top, through the pure hue,
@@ -87,14 +98,25 @@ private val SWATCH_SHADES: List<Pair<Double, Double>> = listOf(
     1.00 to 0.18, // near-black
 )
 
-private const val CELL = 18 // swatch cell size, dp
-private const val GRID_W = 282 // popup width: 13 cells + 12 gaps + horizontal padding, dp
+private const val CELL = 18 // swatch cell size outside the picker, dp
+private const val COLUMNS = 13
+
+/** The matrix's colours row by row: the twelve shades of each hue, then the greys. */
+private val SWATCHES: List<List<Rgba>> =
+    SWATCH_SHADES.map { (s, v) -> SWATCH_HUES.map { ColorMath.hsvToRgb(it, s, v) } } +
+        listOf((0 until COLUMNS).map { val g = ((1.0 - it / 12.0) * 255).roundToInt(); Rgba(g, g, g) })
+
+private val DIALOG_WIDTH = 300.dp
+
+/** The recents block over the matrix: its caption, its row and the gaps around them. */
+private val RECENTS_HEIGHT = 56.dp
 
 /**
  * The shared colour picker (spec 10 §4). Two tabs over one live colour:
  *  - **Swatches**: recent colours plus the [SWATCH_HUES]×[SWATCH_SHADES] matrix and a greyscale row.
- *  - **Spectrum**: a hue ring with an inner saturation/value square, drag to pick.
- * A footer under both tabs always shows the current colour with editable HEX and R/G/B fields.
+ *  - **Spectrum**: a saturation/value field over a hue bar, drag to pick.
+ * A footer under both tabs shows the colour the picker opened with beside the current one, with
+ * editable HEX and R/G/B fields.
  *
  * Colours are opaque (the picker never sets alpha; tools that need translucency, e.g. the
  * highlighter, own their own opacity control). [onPick] fires on every *commit* — a swatch tap, a
@@ -109,11 +131,11 @@ internal fun ColorPickerPopup(
     onDismiss: () -> Unit,
     onPick: (Rgba) -> Unit,
 ) {
-    val palette = LocalPalette.current
-    var current by remember { mutableStateOf(initial?.copy(a = 255) ?: Rgba(255, 255, 255)) }
+    val was = remember { initial?.copy(a = 255) }
+    var current by remember { mutableStateOf(was ?: Rgba(255, 255, 255)) }
     // Hue and saturation are kept explicitly, because a colour does not always carry them: black has
     // no defined hue *or* saturation, and any grey has no hue. Re-deriving them from [current] would
-    // send the markers home the moment a drag reached the square's bottom edge or the ring a grey.
+    // send the markers home the moment a drag reached the field's bottom edge or its grey side.
     val startHsv = remember { ColorMath.rgbToHsv(current) }
     var hue by remember { mutableStateOf(startHsv[0]) }
     var sat by remember { mutableStateOf(startHsv[1]) }
@@ -129,81 +151,129 @@ internal fun ColorPickerPopup(
     }
     fun commit(c: Rgba) { applyLive(c); onPick(c) }
 
-    DropdownMenu(expanded = true, onDismissRequest = onDismiss) {
-        Column(Modifier.width(GRID_W.dp).padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                TabChip(stringResource(R.string.swatches), tab == 0) { tab = 0 }
-                TabChip(stringResource(R.string.spectrum), tab == 1) { tab = 1 }
-                if (LocalEyedropper.current) {
-                    Spacer(Modifier.weight(1f))
-                    val label = stringResource(R.string.eyedropper)
-                    Tooltip(label) {
-                        Icon(
-                            XnotesIcons.eyedropper,
-                            contentDescription = label,
-                            tint = palette.text.toComposeColor(),
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .clickable { Eyedropper.arm { commit(it) } }
-                                .padding(4.dp)
-                                .size(20.dp),
+    DropdownMenu(expanded = true, onDismissRequest = onDismiss, shape = MaterialTheme.shapes.extraLarge, containerColor = panelColors().sheet) {
+        // Sized text keeps material's 24sp line otherwise, which the fixed rows clip.
+        ProvideTextStyle(LocalTextStyle.current.copy(lineHeight = 1.3.em)) {
+            Column(Modifier.width(DIALOG_WIDTH).padding(horizontal = 10.dp, vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(Modifier.weight(1f)) {
+                        PanelSegmented(listOf(stringResource(R.string.swatches), stringResource(R.string.spectrum)), tab, { tab = it }, height = 30.dp, sunken = false)
+                    }
+                    if (LocalEyedropper.current) EyedropperButton { Eyedropper.arm { commit(it) } }
+                }
+                // The matrix is a square of the card's width, and both tabs take its height, so
+                // switching tabs never resizes the dialog.
+                val body = DIALOG_WIDTH - 40.dp + if (recents.isEmpty()) 0.dp else RECENTS_HEIGHT
+                PanelCard(padding = PaddingValues(10.dp)) {
+                    when (tab) {
+                        0 -> SwatchesTab(recents, current, Modifier.height(body)) { commit(it) }
+                        else -> SpectrumTab(
+                            hue, sat, value, current,
+                            onShade = { s, v ->
+                                sat = s
+                                value = v
+                                current = ColorMath.hsvToRgb(hue, s, v)
+                            },
+                            onHue = { h ->
+                                hue = h
+                                current = ColorMath.hsvToRgb(h, sat, value)
+                            },
+                            onCommit = { onPick(current) },
+                            modifier = Modifier.height(body),
                         )
                     }
                 }
+                PanelCard(padding = PaddingValues(10.dp)) { ColorFooter(was, current) { commit(it) } }
             }
-            Spacer(Modifier.size(12.dp))
-            when (tab) {
-                0 -> SwatchesTab(recents, current) { commit(it) }
-                else -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    SpectrumWheel(
-                        hue = hue,
-                        sat = sat,
-                        value = value,
-                        onPreview = { h, s, v ->
-                            hue = h
-                            sat = s
-                            value = v
-                            current = ColorMath.hsvToRgb(h, s, v)
-                        },
-                        onCommit = { onPick(current) },
-                        modifier = Modifier.size(210.dp),
-                    )
-                }
-            }
-            Spacer(Modifier.size(12.dp))
-            Box(Modifier.fillMaxWidth().height(1.dp).background(palette.border.toComposeColor()))
-            Spacer(Modifier.size(10.dp))
-            ColorFooter(current) { commit(it) }
         }
     }
 }
 
 @Composable
-private fun SwatchesTab(recents: List<Rgba>, current: Rgba, onPick: (Rgba) -> Unit) {
-    // The full-width rows give every cell an equal `weight` so 13 columns divide the row exactly —
-    // a fixed cell size would accumulate dp→px rounding and clip the rightmost column.
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        if (recents.isNotEmpty()) {
-            Caption(stringResource(R.string.caption_recent))
-            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                recents.take(13).forEach { c -> SwatchCell(c, c == current, Modifier.size(CELL.dp)) { onPick(c) } }
-            }
-            Spacer(Modifier.size(6.dp))
+private fun EyedropperButton(onClick: () -> Unit) {
+    val label = stringResource(R.string.eyedropper)
+    Tooltip(label) {
+        Box(
+            Modifier
+                .size(36.dp)
+                .clip(MaterialTheme.shapes.medium)
+                .background(panelColors().card)
+                .clickable(role = Role.Button, onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(XnotesIcons.eyedropper, label, tint = LocalPalette.current.textDim.toComposeColor(), modifier = Modifier.size(18.dp))
         }
-        SWATCH_SHADES.forEach { (s, v) ->
-            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                SWATCH_HUES.forEach { h ->
-                    val c = ColorMath.hsvToRgb(h, s, v)
-                    SwatchCell(c, c == current, Modifier.weight(1f).aspectRatio(1f)) { onPick(c) }
+    }
+}
+
+@Composable
+private fun SwatchesTab(recents: List<Rgba>, current: Rgba, modifier: Modifier = Modifier, onPick: (Rgba) -> Unit) {
+    Column(modifier) {
+        if (recents.isNotEmpty()) {
+            PanelCaption(stringResource(R.string.caption_recent))
+            Spacer(Modifier.height(6.dp))
+            // The recents sit on the matrix's own columns, so each lines up with the hue under it.
+            Row {
+                for (i in 0 until COLUMNS) {
+                    Box(Modifier.weight(1f).height(20.dp), contentAlignment = Alignment.Center) {
+                        recents.getOrNull(i)?.let { c -> RecentDot(c, c == current) { onPick(c) } }
+                    }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+        SwatchMatrix(current, onPick, Modifier.fillMaxWidth().aspectRatio(1f))
+    }
+}
+
+/** A recent colour; the one in use shrinks inside a ring. */
+@Composable
+private fun RecentDot(color: Rgba, selected: Boolean, onClick: () -> Unit) {
+    val palette = LocalPalette.current
+    val base = Modifier.size(18.dp).clip(CircleShape).clickable(onClick = onClick)
+    Box(
+        if (selected) base.border(2.dp, palette.text.toComposeColor(), CircleShape).padding(4.dp).background(color.toComposeColor(), CircleShape)
+        else base.background(color.toComposeColor()).border(1.dp, palette.border.toComposeColor(), CircleShape),
+    )
+}
+
+/** The whole matrix as one drawing: flush cells, rounded outer corners, the chosen cell raised in a ring. */
+@Composable
+private fun SwatchMatrix(current: Rgba, onPick: (Rgba) -> Unit, modifier: Modifier = Modifier) {
+    val pick = rememberUpdatedState(onPick)
+    Canvas(
+        modifier.pointerInput(Unit) {
+            detectTapGestures { at ->
+                val col = (at.x * COLUMNS / size.width).toInt().coerceIn(0, COLUMNS - 1)
+                val row = (at.y * SWATCHES.size / size.height).toInt().coerceIn(0, SWATCHES.size - 1)
+                pick.value(SWATCHES[row][col])
+            }
+        },
+    ) {
+        // Whole-px cell edges, so no seam shows between two cells.
+        fun edge(i: Int, count: Int, span: Float) = (i * span / count).roundToInt().toFloat()
+        val rows = SWATCHES.size
+        var chosen: Rect? = null
+        val outline = Path().apply { addRoundRect(RoundRect(Rect(Offset.Zero, size), CornerRadius(10.dp.toPx()))) }
+        clipPath(outline) {
+            for (row in 0 until rows) {
+                for (col in 0 until COLUMNS) {
+                    val c = SWATCHES[row][col]
+                    val cell = Rect(edge(col, COLUMNS, size.width), edge(row, rows, size.height), edge(col + 1, COLUMNS, size.width), edge(row + 1, rows, size.height))
+                    drawRect(c.toComposeColor(), cell.topLeft, cell.size)
+                    if (c == current) chosen = cell
                 }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            (0..12).forEach { i ->
-                val g = ((1.0 - i / 12.0) * 255).roundToInt()
-                val c = Rgba(g, g, g)
-                SwatchCell(c, c == current, Modifier.weight(1f).aspectRatio(1f)) { onPick(c) }
+        chosen?.let { cell ->
+            val raised = cell.inflate(cell.width * 0.07f)
+            fun plate(color: Color, grow: Float) {
+                val r = raised.inflate(grow)
+                drawRoundRect(color, r.topLeft, r.size, CornerRadius(5.dp.toPx() + grow))
             }
+            plate(Color.Black.copy(alpha = 0.6f), 3.5.dp.toPx())
+            plate(Color.White, 2.dp.toPx())
+            plate(current.toComposeColor(), 0f)
         }
     }
 }
@@ -246,179 +316,163 @@ private fun SwatchCell(color: Rgba, selected: Boolean, modifier: Modifier = Modi
     )
 }
 
-// --- Spectrum: hue ring + inner saturation/value square ----------------------------------------
+// --- Spectrum: a saturation/value field over a hue bar ------------------------------------------
 
-private const val RING_FRAC = 0.13f // ring thickness as a fraction of the wheel diameter
-private const val SQUARE_FRAC = 0.94f // inset of the SV square inside the ring's inner circle
+private val KNOB = 11.dp // the field knob's radius
+private val HUE_KNOB = 12.dp // the hue knob's radius, and how far the bar's ends sit in from its edges
 
 /**
- * The wheel reports edits through [onPreview] (live, applied on every touch sample) and [onCommit]
- * (once, on release) so the caller can paint a smooth preview without committing each sample. It is
- * driven by [hue]/[sat]/[value] from above; touching the ring changes hue, touching the square
- * changes saturation/value.
+ * The spectrum reports edits live through [onShade] and [onHue] (every touch sample) and once
+ * through [onCommit] (on release), so the caller can paint a smooth preview without committing
+ * each sample. The field fills whatever height the bar leaves.
  */
 @Composable
-private fun SpectrumWheel(
+private fun SpectrumTab(
     hue: Double,
     sat: Double,
     value: Double,
-    onPreview: (Double, Double, Double) -> Unit,
+    current: Rgba,
+    onShade: (Double, Double) -> Unit,
+    onHue: (Double) -> Unit,
     onCommit: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val border = LocalPalette.current.border.toComposeColor()
-    // The gesture coroutine outlives recompositions, so read the latest inputs/callbacks via refs.
-    val hsv = rememberUpdatedState(Triple(hue, sat, value))
-    val preview = rememberUpdatedState(onPreview)
-    val commit = rememberUpdatedState(onCommit)
-    Canvas(
-        modifier.pointerInput(Unit) {
-            fun emit(pos: Offset, onRing: Boolean) {
-                val (h, s, v) = hsv.value
-                val r = pickFromTouch(pos.x, pos.y, size.width.toFloat(), onRing, h, s, v)
-                preview.value(r[0], r[1], r[2])
-            }
-            awaitEachGesture {
-                val down = awaitFirstDown(requireUnconsumed = false)
-                // The target is latched at touch-down so a ring drag that wanders inward keeps
-                // editing hue instead of jumping to the square.
-                val onRing = hitsRing(down.position.x, down.position.y, size.width.toFloat())
-                emit(down.position, onRing)
-                down.consume()
-                while (true) {
-                    val event = awaitPointerEvent()
-                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                    if (!change.pressed) { change.consume(); break }
-                    emit(change.position, onRing)
-                    change.consume()
-                }
-                commit.value()
-            }
-        },
-    ) {
-        val (h, s, v) = hsv.value
-        drawWheel(h, s, v, border)
-    }
-}
-
-/** True when a touch belongs to the hue ring. Only the ring band itself counts; the corner gaps
- *  between the square and the ring's inner circle fall through to the square. */
-private fun hitsRing(x: Float, y: Float, s: Float): Boolean {
-    val c = s / 2f
-    val innerR = s / 2f - s * RING_FRAC
-    val dx = x - c
-    val dy = y - c
-    return dx * dx + dy * dy >= innerR * innerR
-}
-
-/** Map a touch point to (hue, saturation, value). [onRing] picks hue from the angle, otherwise the
- *  point is clamped into the S/V square. Coordinates that don't change keep [hue]/[sat]/[value]. */
-private fun pickFromTouch(x: Float, y: Float, s: Float, onRing: Boolean, hue: Double, sat: Double, value: Double): DoubleArray {
-    val c = s / 2f
-    val innerR = s / 2f - s * RING_FRAC
-    val side = innerR * 1.41421f * SQUARE_FRAC
-    val left = c - side / 2f
-    val top = c - side / 2f
-    return if (onRing) {
-        var deg = atan2((y - c).toDouble(), (x - c).toDouble()) * 180.0 / Math.PI
-        if (deg < 0) deg += 360.0
-        doubleArrayOf(deg, sat, value)
-    } else {
-        val ss = ((x - left) / side).coerceIn(0f, 1f).toDouble()
-        val vv = (1f - (y - top) / side).coerceIn(0f, 1f).toDouble()
-        doubleArrayOf(hue, ss, vv)
-    }
-}
-
-private fun DrawScope.drawWheel(hue: Double, sat: Double, value: Double, border: Color) {
-    val s = size.minDimension
-    val c = s / 2f
-    val center = Offset(c, c)
-    val ring = s * RING_FRAC
-    val innerR = s / 2f - ring
-    val rMid = innerR + ring / 2f
-    val side = innerR * 1.41421f * SQUARE_FRAC
-    val left = c - side / 2f
-    val top = c - side / 2f
-
-    // Hue ring (a thick sweep-gradient circle starting at red on the +x axis, clockwise).
-    val wheelHues = (0..12).map { ColorMath.hsvToRgb(it * 30.0, 1.0, 1.0).toComposeColor() }
-    drawCircle(Brush.sweepGradient(wheelHues, center), radius = rMid, center = center, style = Stroke(width = ring))
-
-    // SV square: white → pure hue across, transparent → black down.
-    val hueColor = ColorMath.hsvToRgb(hue, 1.0, 1.0).toComposeColor()
-    val tl = Offset(left, top)
-    val sz = Size(side, side)
-    drawRect(Brush.horizontalGradient(listOf(Color.White, hueColor), startX = left, endX = left + side), topLeft = tl, size = sz)
-    drawRect(Brush.verticalGradient(listOf(Color.Transparent, Color.Black), startY = top, endY = top + side), topLeft = tl, size = sz)
-    drawRect(border, topLeft = tl, size = sz, style = Stroke(1.dp.toPx()))
-
-    // Hue marker (a ring riding the colour band).
-    val hr = hue * Math.PI / 180.0
-    val hm = Offset(c + (rMid * cos(hr)).toFloat(), c + (rMid * sin(hr)).toFloat())
-    drawCircle(Color.Black, radius = ring * 0.46f + 1.dp.toPx(), center = hm, style = Stroke(1.dp.toPx()))
-    drawCircle(Color.White, radius = ring * 0.46f, center = hm, style = Stroke(2.dp.toPx()))
-
-    // Saturation/value marker.
-    val mx = left + sat.toFloat() * side
-    val my = top + (1f - value.toFloat()) * side
-    val mr = 6.dp.toPx()
-    drawCircle(Color.Black, radius = mr + 1.dp.toPx(), center = Offset(mx, my), style = Stroke(1.dp.toPx()))
-    drawCircle(Color.White, radius = mr, center = Offset(mx, my), style = Stroke(2.dp.toPx()))
-}
-
-// --- Footer: current swatch + HEX / R,G,B fields, shared by both tabs ---------------------------
-
-@Composable
-private fun ColorFooter(current: Rgba, onColor: (Rgba) -> Unit) {
-    val palette = LocalPalette.current
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(
-                Modifier
-                    .size(30.dp)
-                    .clip(MaterialTheme.shapes.extraSmall)
-                    .background(current.toComposeColor())
-                    .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.extraSmall),
+    val pure = ColorMath.hsvToRgb(hue, 1.0, 1.0).toComposeColor()
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Canvas(
+            Modifier.fillMaxWidth().weight(1f).pickByDrag(onCommit) { at, size ->
+                onShade((at.x / size.width).coerceIn(0f, 1f).toDouble(), (1f - at.y / size.height).coerceIn(0f, 1f).toDouble())
+            },
+        ) {
+            // White to the pure hue across, clear to black down.
+            val corner = CornerRadius(10.dp.toPx())
+            drawRoundRect(Brush.horizontalGradient(listOf(Color.White, pure)), cornerRadius = corner)
+            drawRoundRect(Brush.verticalGradient(listOf(Color.Transparent, Color.Black)), cornerRadius = corner)
+            // Held just inside the field at its edges, so the card never cuts into the knob.
+            val inset = 3.dp.toPx()
+            val at = Offset(
+                (sat.toFloat() * size.width).coerceIn(inset, size.width - inset),
+                ((1f - value.toFloat()) * size.height).coerceIn(inset, size.height - inset),
             )
-            HexField(current, onColor, Modifier.weight(1f))
+            drawKnob(at, KNOB.toPx(), 2.5.dp.toPx(), current.toComposeColor())
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            ChannelField("R", current.r, Modifier.weight(1f)) { onColor(current.copy(r = it)) }
-            ChannelField("G", current.g, Modifier.weight(1f)) { onColor(current.copy(g = it)) }
-            ChannelField("B", current.b, Modifier.weight(1f)) { onColor(current.copy(b = it)) }
+        val ends = with(LocalDensity.current) { HUE_KNOB.toPx() }
+        Canvas(
+            Modifier.fillMaxWidth().height(28.dp).pickByDrag(onCommit) { at, size ->
+                onHue(((at.x - ends) / (size.width - 2 * ends)).coerceIn(0f, 1f) * 360.0)
+            },
+        ) {
+            // The rainbow runs between the knob's two end stops, so the knob always sits on its own hue.
+            val hues = (0..12).map { ColorMath.hsvToRgb(it * 30.0, 1.0, 1.0).toComposeColor() }
+            val thick = 14.dp.toPx()
+            drawRoundRect(
+                Brush.horizontalGradient(hues, startX = ends, endX = size.width - ends),
+                topLeft = Offset(0f, (size.height - thick) / 2),
+                size = Size(size.width, thick),
+                cornerRadius = CornerRadius(thick / 2),
+            )
+            val x = ends + (hue / 360.0).toFloat().coerceIn(0f, 1f) * (size.width - 2 * ends)
+            drawKnob(Offset(x, size.height / 2), HUE_KNOB.toPx(), 3.dp.toPx(), pure)
         }
     }
 }
 
+/** A round knob filled with the colour it stands on: a white rim, and a dark hairline to hold it on pale colours. */
+private fun DrawScope.drawKnob(at: Offset, radius: Float, rim: Float, fill: Color) {
+    drawCircle(Color.Black.copy(alpha = 0.5f), radius + 1.dp.toPx(), at)
+    drawCircle(Color.White, radius, at)
+    drawCircle(fill, radius - rim, at)
+}
+
+/** Every touch sample of a press or drag goes to [onMove] with the target's size; [onEnd] fires once at release. */
 @Composable
-private fun HexField(current: Rgba, onColor: (Rgba) -> Unit, modifier: Modifier = Modifier) {
-    val palette = LocalPalette.current
-    FieldFrame(modifier) {
-        Text("#", color = palette.textDim.toComposeColor(), fontSize = 13.sp)
-        NativeField(
-            value = Rgba.toHex(current).removePrefix("#").uppercase(),
-            onText = { raw -> if (raw.length == 6) Rgba.fromHex("#$raw")?.let { onColor(it.copy(a = 255)) } },
-            modifier = Modifier.weight(1f).padding(start = 4.dp),
-            maxLen = 6,
-            hexOnly = true,
-        )
+private fun Modifier.pickByDrag(onEnd: () -> Unit, onMove: (Offset, IntSize) -> Unit): Modifier {
+    // The gesture coroutine outlives recompositions, so read the latest callbacks via refs.
+    val move = rememberUpdatedState(onMove)
+    val end = rememberUpdatedState(onEnd)
+    return pointerInput(Unit) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false)
+            move.value(down.position, size)
+            down.consume()
+            while (true) {
+                val event = awaitPointerEvent()
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                if (!change.pressed) { change.consume(); break }
+                move.value(change.position, size)
+                change.consume()
+            }
+            end.value()
+        }
+    }
+}
+
+// --- Footer: the colour before and now + HEX / R,G,B fields, shared by both tabs ----------------
+
+@Composable
+private fun ColorFooter(was: Rgba?, current: Rgba, onColor: (Rgba) -> Unit) {
+    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+        WasNow(was, current) { was?.let(onColor) }
+        LabelledField(stringResource(R.string.hex), Modifier.weight(1f)) {
+            NativeField(
+                value = Rgba.toHex(current).removePrefix("#").uppercase(),
+                onText = { raw -> if (raw.length == 6) Rgba.fromHex("#$raw")?.let { onColor(it.copy(a = 255)) } },
+                modifier = Modifier.fillMaxWidth(),
+                maxLen = 6,
+                hexOnly = true,
+                centered = true,
+            )
+        }
+        ChannelField("R", current.r) { onColor(current.copy(r = it)) }
+        ChannelField("G", current.g) { onColor(current.copy(g = it)) }
+        ChannelField("B", current.b) { onColor(current.copy(b = it)) }
+    }
+}
+
+/** The colour the picker opened with beside the one it holds now; a tap on the first goes back to it. */
+@Composable
+private fun WasNow(was: Rgba?, current: Rgba, onRevert: () -> Unit) {
+    val shape = MaterialTheme.shapes.small
+    Row(Modifier.size(52.dp, 36.dp).clip(shape).border(1.dp, LocalPalette.current.border.toComposeColor(), shape)) {
+        if (was != null) {
+            Tooltip(stringResource(R.string.previous_colour), Modifier.weight(1f).fillMaxHeight()) {
+                Box(Modifier.fillMaxSize().background(was.toComposeColor()).clickable(role = Role.Button, onClick = onRevert))
+            }
+        }
+        Box(Modifier.weight(1f).fillMaxHeight().background(current.toComposeColor()))
     }
 }
 
 @Composable
-private fun ChannelField(label: String, value: Int, modifier: Modifier = Modifier, onChange: (Int) -> Unit) {
-    val palette = LocalPalette.current
-    FieldFrame(modifier) {
-        Text(label, color = palette.textDim.toComposeColor(), fontSize = 13.sp)
+private fun ChannelField(label: String, value: Int, onChange: (Int) -> Unit) {
+    LabelledField(label, Modifier.width(38.dp)) {
         NativeField(
             value = value.toString(),
             onText = { raw -> raw.toIntOrNull()?.let { onChange(it.coerceIn(0, 255)) } },
-            modifier = Modifier.weight(1f).padding(start = 6.dp),
+            modifier = Modifier.fillMaxWidth(),
             numeric = true,
             maxLen = 3,
-            endAlign = true,
+            centered = true,
         )
+    }
+}
+
+/** A sunken field under its [label]. */
+@Composable
+private fun LabelledField(label: String, modifier: Modifier = Modifier, field: @Composable () -> Unit) {
+    val palette = LocalPalette.current
+    val shape = MaterialTheme.shapes.small
+    Column(modifier) {
+        Text(label, color = palette.textDim.toComposeColor(), fontSize = 11.sp, maxLines = 1, modifier = Modifier.padding(start = 2.dp, bottom = 4.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(36.dp)
+                .clip(shape)
+                .background(palette.bg.toComposeColor())
+                .border(1.dp, palette.border.toComposeColor(), shape),
+            contentAlignment = Alignment.Center,
+        ) { field() }
     }
 }
 
@@ -439,6 +493,7 @@ internal fun NativeField(
     maxLen: Int = 6,
     hexOnly: Boolean = false,
     endAlign: Boolean = false,
+    centered: Boolean = false,
     autoFocus: Boolean = false,
     textSp: Float = 13f,
     onDone: (() -> Unit)? = null,
@@ -461,7 +516,11 @@ internal fun NativeField(
                     else -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
                 }
                 imeOptions = EditorInfo.IME_ACTION_DONE
-                gravity = (if (endAlign) Gravity.END else Gravity.START) or Gravity.CENTER_VERTICAL
+                gravity = when {
+                    centered -> Gravity.CENTER
+                    endAlign -> Gravity.END or Gravity.CENTER_VERTICAL
+                    else -> Gravity.START or Gravity.CENTER_VERTICAL
+                }
                 val filterList = mutableListOf<InputFilter>(InputFilter.LengthFilter(maxLen))
                 if (hexOnly) {
                     filterList.add(InputFilter { src, start, end, _, _, _ ->
@@ -524,34 +583,4 @@ internal fun FieldFrame(modifier: Modifier = Modifier, content: @Composable RowS
             .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) { content() }
-}
-
-@Composable
-private fun TabChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    val palette = LocalPalette.current
-    Box(
-        Modifier
-            .clip(MaterialTheme.shapes.extraSmall)
-            .background(if (selected) palette.selectionBackground.toComposeColor() else palette.surface.toComposeColor())
-            .border(1.dp, if (selected) palette.accent.toComposeColor() else palette.border.toComposeColor(), MaterialTheme.shapes.extraSmall)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 6.dp),
-    ) {
-        Text(
-            label,
-            color = if (selected) palette.selectionForeground.toComposeColor() else palette.text.toComposeColor(),
-            fontWeight = FontWeight.Medium,
-            fontSize = 12.sp,
-        )
-    }
-}
-
-@Composable
-private fun Caption(text: String) {
-    Text(
-        text,
-        color = LocalPalette.current.textDim.toComposeColor(),
-        fontSize = 12.sp,
-        modifier = Modifier.padding(vertical = 2.dp),
-    )
 }
