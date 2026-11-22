@@ -36,11 +36,13 @@ import com.xnotes.platform.AndroidRasterSurface
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.sin
 
 /**
  * The stroke [tool] draws with [config] as it stands: one canned pen gesture through the real
@@ -71,7 +73,7 @@ internal fun StrokePreview(tool: Tool, config: ToolConfig, host: ToolPopupHost, 
     }
 }
 
-/** The gesture the preview draws: a wave pressed lightly at its ends and moved quickest between its bends. */
+/** The gesture the preview draws: a wave pressed lightly at its ends and slowed into each of its bends. */
 private object StrokeSample {
     private const val POINTS = 120
 
@@ -81,9 +83,9 @@ private object StrokeSample {
     /** The narrowest the stroke may come out, in px. */
     private const val FAINTEST = 1.5
 
-    /** The gesture's slowest and quickest speeds in dp/ms, either side of where the speed pen thins. */
-    private const val SLOW = 0.08
-    private const val FAST = 1.2
+    /** The gesture's speeds in dp/ms: all but still at a bend, just past the default top speed between two. */
+    private const val SLOW = 0.05
+    private const val FAST = 0.7
 
     fun render(tool: Tool, config: ToolConfig, paper: Rgba, zoom: Double, w: Int, h: Int, density: Double): ImageBitmap {
         val surface = AndroidRasterSurface.create(w, h)
@@ -120,6 +122,9 @@ private object StrokeSample {
         val room = (ch / 2 - width / 2 - 5 * dp).coerceAtLeast(0.0)
         // A highlighter runs along a line of text; a pen gets a wave that turns it through every angle.
         val amp = if (tool == Tool.HIGHLIGHTER) min(room, 1.5 * dp) else min(room, ch * 0.27)
+        // The speed pen swells where the hand slows, so it gets more bends and a steadier press.
+        val turns = if (tool == Tool.SPEED) 2.2 else 1.2
+        val lightest = if (tool == Tool.SPEED) 0.55 else 0.2
         val out = ArrayList<Sample>(POINTS)
         var t = 0.0
         var px = 0.0
@@ -127,12 +132,13 @@ private object StrokeSample {
         for (i in 0 until POINTS) {
             val u = i / (POINTS - 1.0)
             val x = left + u * (right - left)
-            val y = cy + amp * cos(2 * PI * 1.2 * u) * (1 - 0.2 * u)
+            val phase = 2 * PI * turns * u
+            val y = cy + amp * cos(phase) * (1 - 0.2 * u)
             if (i > 0) {
-                val speed = SLOW + (FAST - SLOW) * (0.5 - 0.5 * cos(4 * PI * u))
+                val speed = SLOW + (FAST - SLOW) * abs(sin(phase)).pow(3)
                 t += hypot(x - px, y - py) / dp / speed
             }
-            val pressure = 0.2 + 0.8 * (0.5 - 0.5 * cos(2 * PI * u)).pow(0.7)
+            val pressure = lightest + (1 - lightest) * (0.5 - 0.5 * cos(2 * PI * u)).pow(0.7)
             out += Sample(x, y, pressure, t)
             px = x
             py = y
