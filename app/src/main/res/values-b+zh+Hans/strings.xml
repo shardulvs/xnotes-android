@@ -854,7 +854,6 @@
     <!-- Explorer -->
     <string name="sort_created">创建日期</string>
     <string name="select_all">全选</string>
-    <string name="close_view_options">关闭视图选项</string>
     <string name="opt_layout">布局</string>
     <string name="opt_rows">行</string>
     <string name="rows_comfortable">宽松</string>

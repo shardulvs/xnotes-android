@@ -976,24 +976,19 @@ internal fun SwatchCircles(store: SwatchStore, role: SwatchRole, selected: Rgba?
 /**
  * The colour-code picker shown inside a note/folder's overflow menu: a None row to clear the colour,
  * then the picker's full matrix (pale tints through near-black plus the greyscale row). [onPick] is
- * called with null for None. Rendered directly inside the menu's own dropdown column.
+ * called with null for None. Rendered directly inside the menu's own dropdown column, under a row
+ * leading back to the menu's own rows when it has them ([onBack]).
  */
 @Composable
-internal fun ColorCodeMenuContent(onPick: (Rgba?) -> Unit) {
+internal fun ColorCodeMenuContent(onBack: (() -> Unit)? = null, onPick: (Rgba?) -> Unit) {
     val palette = LocalPalette.current
-    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(
-            Modifier.clip(MaterialTheme.shapes.extraSmall).clickable { onPick(null) }.padding(vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                Modifier.size(20.dp).clip(RoundedCornerShape(2.dp))
-                    .border(1.dp, palette.border.toComposeColor(), RoundedCornerShape(2.dp)),
-            )
-            Text(stringResource(R.string.none), color = palette.text.toComposeColor(), fontSize = 13.sp, modifier = Modifier.padding(start = 8.dp))
-        }
-        FullSwatchGrid { onPick(it) }
-    }
+    if (onBack != null) MenuBack(stringResource(R.string.colour_code), onBack)
+    DropdownMenuItem(
+        text = { Text(stringResource(R.string.none)) },
+        onClick = { onPick(null) },
+        leadingIcon = { Box(Modifier.size(18.dp).border(1.5.dp, palette.textDim.toComposeColor(), CircleShape)) },
+    )
+    Box(Modifier.padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 4.dp)) { FullSwatchGrid { onPick(it) } }
 }
 
 /**

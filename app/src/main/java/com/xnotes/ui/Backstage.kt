@@ -1721,8 +1721,8 @@ private fun ExplorerSection(
                     var optionsOpen by remember { mutableStateOf(false) }
                     Box(Modifier.floatingBacking(liftNow, CircleShape, floatFill, floatEdge)) {
                         ExplorerIcon(XnotesIcons.sliders, stringResource(R.string.view_options)) { optionsOpen = true }
-                        DropdownMenu(expanded = optionsOpen, onDismissRequest = { optionsOpen = false }) {
-                            ViewOptionsContent(
+                        if (optionsOpen) {
+                            ViewOptionsMenu(
                                 view = view.copy(layout = layout),
                                 layouts = ExplorerLayout.entries.filter { !(compactScreen && it == ExplorerLayout.COLUMNS) },
                                 everyFolder = !prefs.perFolderViews,
@@ -1730,7 +1730,7 @@ private fun ExplorerSection(
                                 onChange = { v -> setView(if (v.layout == layout) v.copy(layout = view.layout) else v); if (v.layout != layout) columnsPick = null },
                                 onReset = { editor.setView(folderKey, null) },
                                 onEveryFolder = { every -> editor.applyHomePreferences(editor.preferences.copy(perFolderViews = !every)) },
-                                onClose = { optionsOpen = false },
+                                onDismiss = { optionsOpen = false },
                             )
                         }
                     }
@@ -1773,7 +1773,7 @@ private fun ExplorerSection(
                         ExplorerIcon(XnotesIcons.more, stringResource(R.string.more), fg) { moreOpen = true }
                         DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
                             if (colours) {
-                                ColorCodeMenuContent { c -> moreOpen = false; recolor(selection.toList(), c); selection.clear() }
+                                ColorCodeMenuContent({ colours = false }) { c -> moreOpen = false; recolor(selection.toList(), c); selection.clear() }
                             } else {
                                 // A lone item gets the rest of its own ⋮ here too, since the gallery, timeline and columns draw none.
                                 val one = selection.singleOrNull()
@@ -2206,7 +2206,7 @@ internal fun EntryMenu(
     LaunchedEffect(expanded) { if (!expanded) showColors = false }
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         if (showColors) {
-            ColorCodeMenuContent { c -> onDismiss(); onColor?.invoke(c) }
+            ColorCodeMenuContent({ showColors = false }) { c -> onDismiss(); onColor?.invoke(c) }
         } else {
             if (onPreview != null) MenuItem(stringResource(R.string.preview), XnotesIcons.eye, onClick = { onDismiss(); onPreview() })
             MenuItem(stringResource(R.string.rename), XnotesIcons.edit, onClick = { onDismiss(); onRename?.invoke() })

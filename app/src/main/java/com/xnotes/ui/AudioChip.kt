@@ -180,7 +180,7 @@ internal fun RecordingChip(session: AudioRecording.Session) {
         if (open) {
             DropdownMenu(expanded = true, onDismissRequest = { open = false }) {
                 Row(
-                    Modifier.padding(start = 16.dp, end = 18.dp, top = 6.dp, bottom = 6.dp).widthIn(min = 200.dp),
+                    Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 6.dp).widthIn(min = 200.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -197,7 +197,7 @@ internal fun RecordingChip(session: AudioRecording.Session) {
                     InsertMenuRow(XnotesIcons.pause, stringResource(R.string.recording_pause)) { open = false; AudioRecording.pause() }
                 }
                 InsertMenuRow(XnotesIcons.stop, stringResource(R.string.recording_stop_place)) { open = false; AudioRecording.stop() }
-                HorizontalDivider(Modifier.padding(vertical = 6.dp), color = palette.border.toComposeColor())
+                MenuDivider()
                 InsertMenuRow(XnotesIcons.trash, stringResource(R.string.recording_discard), color = palette.danger.toComposeColor()) {
                     open = false
                     AudioRecording.discard()

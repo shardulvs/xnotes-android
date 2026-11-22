@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -25,6 +26,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Switch
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -44,6 +46,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -367,155 +370,146 @@ internal fun RowCheck(selected: Boolean, modifier: Modifier = Modifier) {
 }
 
 /**
- * The View options popover's contents: every setting of [view] the current [layout] uses, applied as it's tapped.
+ * The explorer's View menu: every setting of [view] its layout uses, applied as it's tapped.
  * [everyFolder] is whether one view serves every folder; off, each folder keeps its own.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun ViewOptionsContent(
+internal fun ViewOptionsMenu(
     view: ExplorerView,
     layouts: List<ExplorerLayout>,
     everyFolder: Boolean,
     onChange: (ExplorerView) -> Unit,
     onReset: () -> Unit,
     onEveryFolder: (Boolean) -> Unit,
-    onClose: () -> Unit,
+    onDismiss: () -> Unit,
 ) {
     val palette = LocalPalette.current
     val layout = view.layout
-    Column(Modifier.widthIn(max = 372.dp).padding(start = 18.dp, end = 12.dp, top = 6.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.toolbar_view), color = palette.text.toComposeColor(), fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-            Text(
-                stringResource(R.string.reset),
-                color = palette.accent.toComposeColor(),
-                fontSize = 13.5.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.clip(MaterialTheme.shapes.extraSmall).clickable(onClick = onReset).padding(horizontal = 8.dp, vertical = 6.dp),
-            )
-            ExplorerIcon(XnotesIcons.close, stringResource(R.string.close_view_options), palette.textDim.toComposeColor(), onClick = onClose)
+    ToolMenu(
+        stringResource(R.string.toolbar_view),
+        onDismiss,
+        width = 360.dp,
+        action = { PanelChip(stringResource(R.string.reset), onClick = onReset) },
+    ) {
+        PanelSegmented(layouts.size, layouts.indexOf(layout), { onChange(view.copy(layout = layouts[it])) }, height = 54.dp, sunken = false) { i, on ->
+            val tint = (if (on) palette.selectionForeground else palette.textDim).toComposeColor()
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Icon(layoutIcon(layouts[i]), null, tint = tint, modifier = Modifier.size(20.dp))
+                Text(stringResource(layouts[i].labelRes), color = tint, fontSize = 11.5.sp, maxLines = 1)
+            }
         }
-        OptionBlock(stringResource(R.string.opt_layout)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                layouts.forEach { l ->
-                    val on = l == layout
-                    val shape = MaterialTheme.shapes.medium
-                    Column(
-                        Modifier
-                            .width(62.dp)
-                            .height(62.dp)
-                            .clip(shape)
-                            .background(if (on) palette.selectionBackground.toComposeColor() else Color.Transparent)
-                            .border(1.dp, if (on) palette.accent.toComposeColor() else palette.border.toComposeColor(), shape)
-                            .clickable { onChange(view.copy(layout = l)) },
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                    ) {
-                        val tint = (if (on) palette.selectionForeground else palette.textDim).toComposeColor()
-                        Icon(layoutIcon(l), null, tint = tint, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.height(5.dp))
-                        Text(stringResource(l.labelRes), color = tint, fontSize = 11.5.sp, lineHeight = 14.sp, maxLines = 1)
+        // How a file is drawn.
+        MenuCard(buildList<MenuGroup> {
+            if (layout == ExplorerLayout.LIST) {
+                add {
+                    ViewChoice(stringResource(R.string.opt_rows), listOf(stringResource(R.string.rows_comfortable), stringResource(R.string.rows_compact)), if (view.compactRows) 1 else 0) {
+                        onChange(view.copy(compactRows = it == 1))
+                    }
+                }
+            } else if (layout != ExplorerLayout.COLUMNS) {
+                add {
+                    val sizes = TileSize.entries
+                    ViewChoice(
+                        stringResource(R.string.opt_tile_size), sizes.map { it.label }, sizes.indexOf(view.tileSize),
+                        hint = if (layout == ExplorerLayout.GRID) stringResource(R.string.pinch_hint) else null,
+                    ) { onChange(view.copy(tileSize = sizes[it])) }
+                }
+            }
+            if (layout == ExplorerLayout.TIMELINE) {
+                add {
+                    ViewChoice(stringResource(R.string.opt_place_by), listOf(stringResource(R.string.sort_created), stringResource(R.string.sort_modified)), if (view.timelineByCreated) 0 else 1) {
+                        onChange(view.copy(timelineByCreated = it == 0))
                     }
                 }
             }
-        }
-        if (layout == ExplorerLayout.LIST) {
-            OptionBlock(stringResource(R.string.opt_rows)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ExplorerChip(stringResource(R.string.rows_comfortable), !view.compactRows) { onChange(view.copy(compactRows = false)) }
-                    ExplorerChip(stringResource(R.string.rows_compact), view.compactRows) { onChange(view.copy(compactRows = true)) }
-                }
-            }
-        } else if (layout != ExplorerLayout.COLUMNS) {
-            OptionBlock(stringResource(R.string.opt_tile_size)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TileSize.entries.forEach { t -> ExplorerChip(t.label, view.tileSize == t, Modifier.widthIn(min = 48.dp)) { onChange(view.copy(tileSize = t)) } }
-                }
-                if (layout == ExplorerLayout.GRID) {
-                    Text(stringResource(R.string.pinch_hint), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
-                }
-            }
-        }
-        if (layout == ExplorerLayout.TIMELINE) {
-            OptionBlock(stringResource(R.string.opt_place_by)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ExplorerChip(stringResource(R.string.sort_created), view.timelineByCreated) { onChange(view.copy(timelineByCreated = true)) }
-                    ExplorerChip(stringResource(R.string.sort_modified), !view.timelineByCreated) { onChange(view.copy(timelineByCreated = false)) }
-                }
-            }
-        }
-        if (layout == ExplorerLayout.GRID) {
-            OptionBlock(stringResource(R.string.opt_thumbnail)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ExplorerChip(stringResource(R.string.thumb_top), view.thumb == ThumbShape.TOP) { onChange(view.copy(thumb = ThumbShape.TOP)) }
-                    ExplorerChip(stringResource(R.string.thumb_page), view.thumb == ThumbShape.PAGE) { onChange(view.copy(thumb = ThumbShape.PAGE)) }
-                }
-            }
-        }
-        if (layout == ExplorerLayout.GRID || layout == ExplorerLayout.GALLERY || layout == ExplorerLayout.TIMELINE) {
-            OptionBlock(stringResource(R.string.opt_show_on_tiles)) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    @Composable
-                    fun toggle(label: String, on: Boolean, flip: () -> ExplorerView) =
-                        ExplorerChip(label, on, icon = if (on) XnotesIcons.check else XnotesIcons.plus) { onChange(flip()) }
-                    toggle(stringResource(R.string.group_kind), view.showKind) { view.copy(showKind = !view.showKind) }
-                    if (layout != ExplorerLayout.TIMELINE) {
-                        toggle(stringResource(R.string.show_page_count), view.showPages) { view.copy(showPages = !view.showPages) }
-                        toggle(stringResource(R.string.show_time), view.showTime) { view.copy(showTime = !view.showTime) }
-                        toggle(stringResource(R.string.sort_size), view.showSize) { view.copy(showSize = !view.showSize) }
+            if (layout == ExplorerLayout.GRID) {
+                add {
+                    ViewChoice(stringResource(R.string.opt_thumbnail), listOf(stringResource(R.string.thumb_top), stringResource(R.string.thumb_page)), if (view.thumb == ThumbShape.TOP) 0 else 1) {
+                        onChange(view.copy(thumb = if (it == 0) ThumbShape.TOP else ThumbShape.PAGE))
                     }
-                    toggle(stringResource(R.string.colour_code), view.showColour) { view.copy(showColour = !view.showColour) }
                 }
             }
-        }
-        if (layout != ExplorerLayout.COLUMNS && layout != ExplorerLayout.TIMELINE) {
-            OptionBlock(stringResource(R.string.opt_group_by)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    GroupBy.entries.forEach { g -> ExplorerChip(stringResource(g.labelRes), view.groupBy == g) { onChange(view.copy(groupBy = g)) } }
-                }
-            }
-        }
-        if (layout != ExplorerLayout.TIMELINE) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.sort_by), color = palette.accent.toComposeColor(), fontSize = 13.sp, modifier = Modifier.weight(1f))
-                    Text(directionLabel(view.sortKey, view.descending), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
-                }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(ExplorerSortKey.NAME to stringResource(R.string.sort_name), ExplorerSortKey.MODIFIED to stringResource(R.string.modified), ExplorerSortKey.CREATED to stringResource(R.string.created), ExplorerSortKey.SIZE to stringResource(R.string.sort_size)).forEach { (k, label) ->
-                        val active = view.sortKey == k
-                        ExplorerChip(label, active, trailing = if (active) (if (view.descending) XnotesIcons.arrowDown else XnotesIcons.arrowUp) else null) {
-                            onChange(if (active) view.copy(descending = !view.descending) else view.copy(sortKey = k, descending = k != ExplorerSortKey.NAME))
+            if (layout == ExplorerLayout.GRID || layout == ExplorerLayout.GALLERY || layout == ExplorerLayout.TIMELINE) {
+                add {
+                    Column(Modifier.padding(10.dp)) {
+                        PanelCaption(stringResource(R.string.opt_show_on_tiles))
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            @Composable
+                            fun toggle(label: String, on: Boolean, flip: () -> ExplorerView) =
+                                PanelChip(label, on, icon = if (on) XnotesIcons.check else XnotesIcons.plus) { onChange(flip()) }
+                            toggle(stringResource(R.string.group_kind), view.showKind) { view.copy(showKind = !view.showKind) }
+                            if (layout != ExplorerLayout.TIMELINE) {
+                                toggle(stringResource(R.string.show_page_count), view.showPages) { view.copy(showPages = !view.showPages) }
+                                toggle(stringResource(R.string.show_time), view.showTime) { view.copy(showTime = !view.showTime) }
+                                toggle(stringResource(R.string.sort_size), view.showSize) { view.copy(showSize = !view.showSize) }
+                            }
+                            toggle(stringResource(R.string.colour_code), view.showColour) { view.copy(showColour = !view.showColour) }
                         }
                     }
                 }
             }
-            OptionBlock(stringResource(R.string.kind_folders)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FolderPlacement.entries.forEach { f -> ExplorerChip(stringResource(f.labelRes), view.folders == f) { onChange(view.copy(folders = f)) } }
+        })
+        // How the files are ordered.
+        MenuCard(buildList<MenuGroup> {
+            if (layout != ExplorerLayout.COLUMNS && layout != ExplorerLayout.TIMELINE) {
+                add {
+                    val groups = GroupBy.entries
+                    ViewChoice(stringResource(R.string.opt_group_by), groups.map { stringResource(it.labelRes) }, groups.indexOf(view.groupBy)) {
+                        onChange(view.copy(groupBy = groups[it]))
+                    }
                 }
             }
-        }
-        HorizontalDivider(color = palette.border.toComposeColor())
-        Row(
-            Modifier.fillMaxWidth().clip(MaterialTheme.shapes.extraSmall).clickable { onEveryFolder(!everyFolder) }.padding(vertical = 2.dp),
-            verticalAlignment = Alignment.Top,
-        ) {
-            RowCheck(everyFolder, Modifier.padding(top = 3.dp))
-            Spacer(Modifier.width(12.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(stringResource(R.string.view_every_folder), color = palette.text.toComposeColor(), fontSize = 14.sp)
-                Text(stringResource(R.string.view_every_folder_hint), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
+            if (layout != ExplorerLayout.TIMELINE) {
+                add {
+                    val keys = listOf(ExplorerSortKey.NAME to R.string.sort_name, ExplorerSortKey.MODIFIED to R.string.modified, ExplorerSortKey.CREATED to R.string.created, ExplorerSortKey.SIZE to R.string.sort_size)
+                    Column(Modifier.padding(10.dp)) {
+                        PanelCaption(stringResource(R.string.sort_by)) { CaptionHint(directionLabel(view.sortKey, view.descending)) }
+                        // A second tap on the chosen field turns its order round.
+                        PanelSegmented(keys.size, keys.indexOfFirst { it.first == view.sortKey }, { i ->
+                            val k = keys[i].first
+                            onChange(if (k == view.sortKey) view.copy(descending = !view.descending) else view.copy(sortKey = k, descending = k != ExplorerSortKey.NAME))
+                        }) { i, on ->
+                            val tint = (if (on) palette.selectionForeground else palette.textDim).toComposeColor()
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text(stringResource(keys[i].second), color = tint, fontSize = 13.sp, fontWeight = if (on) FontWeight.Medium else FontWeight.Normal, maxLines = 1)
+                                if (on) Icon(if (view.descending) XnotesIcons.arrowDown else XnotesIcons.arrowUp, null, tint = tint, modifier = Modifier.size(13.dp))
+                            }
+                        }
+                    }
+                }
+                add {
+                    val places = FolderPlacement.entries
+                    ViewChoice(stringResource(R.string.kind_folders), places.map { stringResource(it.labelRes) }, places.indexOf(view.folders)) {
+                        onChange(view.copy(folders = places[it]))
+                    }
+                }
+            }
+        })
+        PanelCard(padding = PaddingValues(0.dp)) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(role = Role.Switch) { onEveryFolder(!everyFolder) }
+                    .padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f).padding(end = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(stringResource(R.string.view_every_folder), color = palette.text.toComposeColor(), fontSize = 14.sp)
+                    Text(stringResource(R.string.view_every_folder_hint), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
+                }
+                Switch(checked = everyFolder, onCheckedChange = onEveryFolder)
             }
         }
     }
 }
 
+/** One setting of the View menu: its [label], an optional [hint] beside it, over its [options]. */
 @Composable
-private fun OptionBlock(label: String, content: @Composable () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(label, color = LocalPalette.current.accent.toComposeColor(), fontSize = 13.sp)
-        content()
+private fun ViewChoice(label: String, options: List<String>, selected: Int, hint: String? = null, onSelect: (Int) -> Unit) {
+    Column(Modifier.padding(10.dp)) {
+        PanelCaption(label) { if (hint != null) CaptionHint(hint) }
+        PanelSegmented(options, selected, onSelect)
     }
 }
 
