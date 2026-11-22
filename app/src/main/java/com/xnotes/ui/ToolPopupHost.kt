@@ -55,6 +55,12 @@ interface ToolPopupHost : SwatchHost {
     /** Whether the open note has a PDF, whose text markups the eraser can take. */
     val hostHasPdf: Boolean get() = false
 
+    /** The paper under the nib: the page in view, or the canvas. */
+    val hostPaperColor: Rgba
+
+    /** Screen px to a content px, which sizes the stroke preview as the nib would draw it. */
+    val hostZoom: Double
+
     /** Peel back every tape in the open note or canvas, or cover them all again. */
     fun setAllTapePeeled(peeled: Boolean)
 }

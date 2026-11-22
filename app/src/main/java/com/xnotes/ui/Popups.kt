@@ -158,6 +158,7 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
     fun emit() = editor.updateToolConfig(tool, current())
 
     val active = editor.hostToolbarColors.getOrNull(editor.hostActiveColorIndex)
+    val ink = colorOverride ?: active ?: LocalPalette.current.text
     val hasPressure = tool == Tool.PEN || tool == Tool.CALLIGRAPHY || tool == Tool.SPEED || tool == Tool.TAPER
     // Glow is offered on every stroke tool except the highlighter (translucent) and the
     // dashed pen (it draws a line, not a fillable ribbon, so a halo has nothing to hug).
@@ -165,9 +166,10 @@ fun ToolConfigPopup(editor: ToolPopupHost, tool: Tool, onDismiss: () -> Unit) {
     val range = ToolConversions.widthRange(tool)
 
     ToolMenu(stringResource(tool.labelRes), onDismiss) {
-        // The stroke itself: its colour and its width.
+        // The stroke itself: how it comes out, its colour and its width.
         MenuCard(buildList<MenuGroup> {
             add {
+                StrokePreview(tool, current().copy(rgba = ink), editor, Modifier.padding(start = 10.dp, top = 10.dp, end = 10.dp))
                 // "Default" follows the toolbar's active ink colour; a colour picked here pins the tool to it.
                 MenuRow(stringResource(R.string.caption_colour)) {
                     ColorOrNone(

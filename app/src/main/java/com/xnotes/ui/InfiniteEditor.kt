@@ -1092,6 +1092,8 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     override val hostToolbarColors: List<Rgba> get() = toolbarColors
     override val hostActiveColorIndex: Int get() = activeColorIndex
     override val hostRecentColors: List<Rgba> get() = recentColors
+    override val hostPaperColor: Rgba get() = view.paperColor
+    override val hostZoom: Double get() = viewport.zoom
 
     /**
      * Recolour a swatch from the picker. The swatches belong to the host, which owns the settings

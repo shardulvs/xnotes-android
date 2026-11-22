@@ -108,6 +108,7 @@
     <string name="caption_strength">Strength</string>
     <string name="caption_crossover">Crossover</string>
     <string name="caption_neon">Neon</string>
+    <string name="stroke_preview">Stroke preview</string>
     <string name="tape_straight">Straight</string>
     <string name="tape_freehand">Freehand</string>
     <string name="tape_solid">Solid</string>
