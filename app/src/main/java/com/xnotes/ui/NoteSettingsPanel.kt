@@ -134,9 +134,9 @@ private fun ColumnScope.HomePage(editor: Editor, fullscreen: Boolean, onToggleFu
         }
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FitTile(stringResource(R.string.fit_page_short), Modifier.weight(1f), glyph = FitPageGlyph) { editor.fitPage() }
-            FitTile(stringResource(R.string.fit_width_short), Modifier.weight(1f), shortcut = Keys.FIT_ALL, glyph = FitWidthGlyph) { editor.fitWidth() }
-            FitTile(stringResource(R.string.fit_height_short), Modifier.weight(1f), glyph = FitHeightGlyph) { editor.fitHeight() }
+            FitTile(stringResource(R.string.fit_page_short), XnotesIcons.fitPage, Modifier.weight(1f)) { editor.fitPage() }
+            FitTile(stringResource(R.string.fit_width_short), XnotesIcons.fitWidth, Modifier.weight(1f), shortcut = Keys.FIT_ALL) { editor.fitWidth() }
+            FitTile(stringResource(R.string.fit_height_short), XnotesIcons.fitHeight, Modifier.weight(1f)) { editor.fitHeight() }
         }
     }
     Spacer(Modifier.height(10.dp))

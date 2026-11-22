@@ -8,7 +8,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -40,13 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -467,25 +460,10 @@ internal fun ZoomLockButton(locked: Boolean, onToggle: () -> Unit) {
     }
 }
 
-/** Colours a [FitGlyph] draws with. */
-internal class GlyphInk(val page: Color, val line: Color, val accent: Color)
-
+/** A fit button: the [icon] of what it fits over its [label]. */
 @Composable
-internal fun glyphInk(enabled: Boolean = true): GlyphInk {
+internal fun FitTile(label: String, icon: ImageVector, modifier: Modifier = Modifier, enabled: Boolean = true, shortcut: String? = null, onClick: () -> Unit) {
     val palette = LocalPalette.current
-    val a = if (enabled) 1f else 0.4f
-    return GlyphInk(
-        page = panelColors().card.copy(alpha = a),
-        line = palette.textDim.toComposeColor().copy(alpha = a),
-        accent = palette.accent.toComposeColor().copy(alpha = a),
-    )
-}
-
-/** A fit button: a drawing of what it fits over its [label]. */
-@Composable
-internal fun FitTile(label: String, modifier: Modifier = Modifier, enabled: Boolean = true, shortcut: String? = null, glyph: DrawScope.(GlyphInk) -> Unit, onClick: () -> Unit) {
-    val palette = LocalPalette.current
-    val ink = glyphInk(enabled)
     Tooltip(label, modifier, shortcut = shortcut) {
         Column(
             Modifier
@@ -496,68 +474,9 @@ internal fun FitTile(label: String, modifier: Modifier = Modifier, enabled: Bool
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            Canvas(Modifier.size(32.dp, 24.dp)) { glyph(ink) }
+            Icon(icon, null, tint = (if (enabled) palette.accent else palette.disabled).toComposeColor(), modifier = Modifier.size(28.dp, 24.dp))
             Spacer(Modifier.height(6.dp))
             Text(label, color = (if (enabled) palette.text else palette.disabled).toComposeColor(), fontSize = 12.sp, maxLines = 1)
         }
     }
-}
-
-/** Glyph paths are written on a 32 x 24 grid and scaled to the canvas. */
-private fun DrawScope.grid(vararg points: Pair<Float, Float>): Path {
-    val u = size.width / 32f
-    return Path().apply {
-        points.forEachIndexed { i, (x, y) -> if (i == 0) moveTo(x * u, y * u) else lineTo(x * u, y * u) }
-    }
-}
-
-private fun DrawScope.line(color: Color, width: Float, vararg points: Pair<Float, Float>) {
-    val u = size.width / 32f
-    drawPath(grid(*points), color, style = Stroke(width * u, cap = StrokeCap.Round, join = StrokeJoin.Round))
-}
-
-private fun DrawScope.sheet(ink: GlyphInk, l: Float, t: Float, r: Float, b: Float, openBottom: Boolean = false) {
-    val u = size.width / 32f
-    drawRect(ink.page, Offset(l * u, t * u), androidx.compose.ui.geometry.Size((r - l) * u, (b - t) * u))
-    if (openBottom) line(ink.line, 1.4f, l to b, l to t, r to t, r to b)
-    else line(ink.line, 1.4f, l to t, r to t, r to b, l to b, l to t)
-}
-
-private fun DrawScope.corners(ink: GlyphInk) {
-    line(ink.accent, 1.6f, 3f to 8f, 3f to 4f, 7f to 4f)
-    line(ink.accent, 1.6f, 25f to 4f, 29f to 4f, 29f to 8f)
-    line(ink.accent, 1.6f, 3f to 16f, 3f to 20f, 7f to 20f)
-    line(ink.accent, 1.6f, 29f to 16f, 29f to 20f, 25f to 20f)
-}
-
-/** The whole page framed by the four corners. */
-internal val FitPageGlyph: DrawScope.(GlyphInk) -> Unit = { ink ->
-    sheet(ink, 11f, 5f, 21f, 19f)
-    corners(ink)
-}
-
-/** A page running off the bottom, arrows across it. */
-internal val FitWidthGlyph: DrawScope.(GlyphInk) -> Unit = { ink ->
-    sheet(ink, 5f, 3.5f, 27f, 23f, openBottom = true)
-    line(ink.accent, 1.6f, 9f to 13f, 23f to 13f)
-    line(ink.accent, 1.6f, 12f to 10f, 9f to 13f, 12f to 16f)
-    line(ink.accent, 1.6f, 20f to 10f, 23f to 13f, 20f to 16f)
-}
-
-/** A page top to bottom, arrows down it. */
-internal val FitHeightGlyph: DrawScope.(GlyphInk) -> Unit = { ink ->
-    sheet(ink, 9.5f, 1.5f, 22.5f, 22.5f)
-    line(ink.accent, 1.6f, 16f to 6f, 16f to 18f)
-    line(ink.accent, 1.6f, 13f to 9f, 16f to 6f, 19f to 9f)
-    line(ink.accent, 1.6f, 13f to 15f, 16f to 18f, 19f to 15f)
-}
-
-/** Everything on the canvas framed by the four corners. */
-internal val FitAllGlyph: DrawScope.(GlyphInk) -> Unit = { ink ->
-    corners(ink)
-    val u = size.width / 32f
-    drawCircle(ink.page, 3.2f * u, Offset(12f * u, 13.5f * u))
-    drawCircle(ink.line, 3.2f * u, Offset(12f * u, 13.5f * u), style = Stroke(1.4f * u))
-    sheet(ink, 16.5f, 7.5f, 22.5f, 13.5f)
-    line(ink.line, 1.4f, 9f to 18.5f, 13f to 17f, 17f to 18.5f, 21f to 17f)
 }

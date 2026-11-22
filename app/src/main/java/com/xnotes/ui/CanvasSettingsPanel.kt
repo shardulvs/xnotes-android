@@ -90,7 +90,7 @@ private fun CanvasHome(editor: InfiniteEditor, fullscreen: Boolean, onToggleFull
             ZoomLockButton(editor.zoomLocked) { editor.toggleZoomLock() }
         }
         Spacer(Modifier.height(8.dp))
-        FitTile(stringResource(R.string.fit_all), Modifier.fillMaxWidth(), enabled = !editor.zoomLocked, shortcut = Keys.FIT_ALL, glyph = FitAllGlyph) { editor.zoomToFit() }
+        FitTile(stringResource(R.string.fit_all), XnotesIcons.fitAll, Modifier.fillMaxWidth(), enabled = !editor.zoomLocked, shortcut = Keys.FIT_ALL) { editor.zoomToFit() }
     }
     Spacer(Modifier.height(10.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

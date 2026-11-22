@@ -12,7 +12,7 @@ import androidx.compose.ui.unit.dp
  * The line-icon set (spec 11 §3), built as Compose [ImageVector]s straight from
  * the reference SVG path bodies (Feather/Lucide). Each is a 24x24 viewBox, 2px
  * round-capped stroke, no fill; the stroke colour is a placeholder recoloured by
- * the `Icon` tint at use.
+ * the `Icon` tint at use. The fit glyphs alone are 28 wide ([wide]).
  *
  * [icon] joins its path strings into one path before parsing, so every string after
  * the first must open with an ABSOLUTE moveto. A relative "m" there starts from the
@@ -20,13 +20,18 @@ import androidx.compose.ui.unit.dp
  */
 object XnotesIcons {
 
-    private fun icon(vararg pathData: String): ImageVector {
+    private fun icon(vararg pathData: String): ImageVector = build(24f, pathData)
+
+    /** An icon 28 across: room for an arrow between two walls at the set's stroke. */
+    private fun wide(vararg pathData: String): ImageVector = build(28f, pathData)
+
+    private fun build(width: Float, pathData: Array<out String>): ImageVector {
         val nodes = PathParser().parsePathString(pathData.joinToString(" ")).toNodes()
         return ImageVector.Builder(
             name = "xn",
-            defaultWidth = 24.dp,
+            defaultWidth = width.dp,
             defaultHeight = 24.dp,
-            viewportWidth = 24f,
+            viewportWidth = width,
             viewportHeight = 24f,
         ).addPath(
             pathData = nodes,
@@ -180,6 +185,12 @@ object XnotesIcons {
     val autoscroll = icon("M12 3v12", "M7 10l5 5 5-5", "M5 21h14")
     val contrast = icon(circle(12.0, 12.0, 9.0), "M12 3v18", "M12 7.5h4.5", "M12 12h6", "M12 16.5h4.5")
     val fullscreen = icon("M15 3h6v6", "M9 21H3v-6", "M21 3l-7 7", "M3 21l7-7")
+    // The fit tiles: what is fitted, held in corner brackets, or an arrow run out to two walls.
+    private val brackets = arrayOf("M5 7V5a2 2 0 0 1 2-2h2", "M19 3h2a2 2 0 0 1 2 2v2", "M23 17v2a2 2 0 0 1-2 2h-2", "M9 21H7a2 2 0 0 1-2-2v-2")
+    val fitPage = wide(*brackets, roundRect(10.5, 7.0, 7.0, 10.0, 1.0))
+    val fitWidth = wide("M4 5v14", "M24 5v14", "M8 12h12", "M11 9l-3 3 3 3", "M17 9l3 3-3 3")
+    val fitHeight = wide("M7 2h14", "M7 22h14", "M14 6v12", "M11 9l3-3 3 3", "M11 15l3 3 3-3")
+    val fitAll = wide(*brackets, "M9 13.5c1.5-4 3.5-4 5 0s3.5 3 5-1.5")
     val plus = icon("M12 5v14", "M5 12h14")
     val minus = icon("M5 12h14")
     // The flow bar's font-face button (Lucide "type").
