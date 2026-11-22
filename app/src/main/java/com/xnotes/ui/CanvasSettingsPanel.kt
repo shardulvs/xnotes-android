@@ -94,7 +94,7 @@ private fun CanvasHome(editor: InfiniteEditor, fullscreen: Boolean, onToggleFull
     }
     Spacer(Modifier.height(10.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        QuickTile(XnotesIcons.fullscreen, stringResource(R.string.toolbar_fullscreen), Keys.FULLSCREEN, fullscreen, Modifier.weight(1f)) { onToggleFullscreen() }
+        QuickTile(XnotesIcons.fullscreen, stringResource(R.string.toolbar_fullscreen), fullscreenState(fullscreen), fullscreen, Modifier.weight(1f)) { onToggleFullscreen() }
         QuickTile(
             XnotesIcons.map,
             stringResource(R.string.toolbar_minimap),

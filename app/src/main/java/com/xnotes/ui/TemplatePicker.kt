@@ -131,7 +131,7 @@ internal fun TemplateGrid(
     // Not a lazy grid: the menu measures its content's intrinsic size, which lazy layouts refuse.
     Row(Modifier.horizontalScroll(scroll), horizontalArrangement = Arrangement.spacedBy(gap)) {
         tiles.chunked(2).forEach { column ->
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 column.forEach { t ->
                     when (t) {
                         GridTile.Default -> GridCell(stringResource(R.string.default_choice), isSelected(t), thumbH, onClick = { onSelect(null) }) {
@@ -219,7 +219,9 @@ private fun GridCell(label: String, selected: Boolean, thumbH: Dp, onClick: () -
             color = (if (selected) palette.accent else palette.textDim).toComposeColor(),
             fontSize = 11.sp,
             fontWeight = if (selected) androidx.compose.ui.text.font.FontWeight.Medium else androidx.compose.ui.text.font.FontWeight.Normal,
-            maxLines = 1,
+            // Two lines hold every bundled name; all cells keep both so the rows stay level.
+            minLines = 2,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
         )

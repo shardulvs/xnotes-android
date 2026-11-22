@@ -86,8 +86,9 @@ internal fun Tooltip(
     }
 }
 
+/** Whether a hardware keyboard is there to press the shortcuts chrome names. */
 @Composable
-private fun keyboardAttached(): Boolean {
+internal fun keyboardAttached(): Boolean {
     val c = LocalConfiguration.current
     return c.keyboard != Configuration.KEYBOARD_NOKEYS && c.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO
 }

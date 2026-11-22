@@ -30,7 +30,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -52,6 +54,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.xnotes.R
 import com.xnotes.ui.icons.XnotesIcons
@@ -76,7 +79,10 @@ internal fun SettingsButton(open: Boolean, onOpen: (Boolean) -> Unit, content: @
     Box {
         ToolbarIcon(XnotesIcons.settings, stringResource(R.string.settings), active = open) { onOpen(!open) }
         DropdownMenu(expanded = open, onDismissRequest = { onOpen(false) }, shape = MaterialTheme.shapes.extraLarge) {
-            Column(Modifier.width(PANEL_WIDTH).padding(horizontal = 12.dp, vertical = 4.dp), content = content)
+            // Sized text keeps material's 24sp line otherwise, which the panel's fixed rows and tiles clip.
+            ProvideTextStyle(LocalTextStyle.current.copy(lineHeight = 1.3.em)) {
+                Column(Modifier.width(PANEL_WIDTH).padding(horizontal = 12.dp, vertical = 4.dp), content = content)
+            }
         }
     }
 }
@@ -358,11 +364,11 @@ internal fun QuickTile(
     }.toComposeColor()
     Column(
         modifier
-            .height(84.dp)
+            .height(92.dp)
             .clip(MaterialTheme.shapes.large)
             .background((if (active) palette.selectionBackground else palette.surface).toComposeColor())
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .padding(start = 14.dp, top = 13.dp, end = 12.dp, bottom = 12.dp),
+            .padding(start = 14.dp, top = 14.dp, end = 12.dp, bottom = 13.dp),
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
         Icon(icon, null, tint = iconTint, modifier = Modifier.size(22.dp))
@@ -458,9 +464,9 @@ internal fun glyphInk(enabled: Boolean = true): GlyphInk {
 internal fun FitTile(label: String, modifier: Modifier = Modifier, enabled: Boolean = true, shortcut: String? = null, glyph: DrawScope.(GlyphInk) -> Unit, onClick: () -> Unit) {
     val palette = LocalPalette.current
     val ink = glyphInk(enabled)
-    Tooltip(label, shortcut = shortcut) {
+    Tooltip(label, modifier, shortcut = shortcut) {
         Column(
-            modifier
+            Modifier
                 .height(62.dp)
                 .clip(MaterialTheme.shapes.medium)
                 .background(palette.surfaceHi.toComposeColor())

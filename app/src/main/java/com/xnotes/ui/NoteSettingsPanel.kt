@@ -142,7 +142,7 @@ private fun ColumnScope.HomePage(editor: Editor, fullscreen: Boolean, onToggleFu
     }
     Spacer(Modifier.height(10.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        QuickTile(XnotesIcons.fullscreen, stringResource(R.string.toolbar_fullscreen), Keys.FULLSCREEN, fullscreen, Modifier.weight(1f)) { onToggleFullscreen() }
+        QuickTile(XnotesIcons.fullscreen, stringResource(R.string.toolbar_fullscreen), fullscreenState(fullscreen), fullscreen, Modifier.weight(1f)) { onToggleFullscreen() }
         QuickTile(XnotesIcons.rotateRight, stringResource(R.string.rotate), "${vs.rotation}°", vs.rotation != 0, Modifier.weight(1f)) {
             editor.updateViewOverrides(editor.viewOverrides.copy(rotation = (vs.rotation + 90) % 360))
         }
@@ -165,6 +165,11 @@ private fun ColumnScope.HomePage(editor: Editor, fullscreen: Boolean, onToggleFu
         NavRow(stringResource(R.string.title_view), viewSubtitle(editor), onClick = { go(NotePage.VIEW) }) { ViewPreview(vs.mode) }
     }
 }
+
+/** What the Full screen tile says under its name: its key where there is a keyboard, else whether it is on. */
+@Composable
+internal fun fullscreenState(on: Boolean): String =
+    if (keyboardAttached()) Keys.FULLSCREEN else stringResource(if (on) R.string.on else R.string.off)
 
 /** "Limits off ›" at the zoom caption's end. */
 @Composable
@@ -190,8 +195,9 @@ private fun PageCard(editor: Editor) {
         editing = false
     }
     PanelCard {
+        val keys = keyboardAttached()
         PanelCaption(stringResource(if (editing) R.string.title_go_to_page else R.string.caption_page)) {
-            CaptionHint("${Keys.PREV_PAGE} · ${Keys.NEXT_PAGE}")
+            if (keys) CaptionHint("${Keys.PREV_PAGE} · ${Keys.NEXT_PAGE}")
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             RoundButton(XnotesIcons.prev, stringResource(R.string.previous_page)) { editor.prevPage() }
@@ -313,10 +319,14 @@ private fun StylesPreview(editor: Editor) {
                 .size(30.dp, 30.dp * (h / w).coerceIn(0.5, 1.4).toFloat())
                 .clip(RoundedCornerShape(3.dp))
                 .background(look.drawing.look.paper.toComposeColor())
-                .border(1.dp, LocalPalette.current.border.toComposeColor(), RoundedCornerShape(3.dp)),
+                .border(1.dp, previewEdge(), RoundedCornerShape(3.dp)),
         )
     }
 }
+
+/** The outline of a front-page preview, strong enough to hold a page the colour of the card. */
+@Composable
+private fun previewEdge(): Color = LocalPalette.current.textDim.toComposeColor().copy(alpha = 0.4f)
 
 @Composable
 private fun stylesSubtitle(editor: Editor): String {
@@ -357,8 +367,8 @@ private fun MarginsPreview(editor: Editor) {
     val color = (editor.currentPageMargins.color ?: editor.documentMargins.color)?.toComposeColor() ?: paper
     val (w, h) = editor.currentPageMm
     val f = effectiveMargins(editor)
-    val ink = MarginInk(paper, color, palette.border.toComposeColor(), palette.textDim.toComposeColor().copy(alpha = 0.25f), palette.accent.toComposeColor())
-    Canvas(Modifier.size(32.dp, 42.dp)) { marginPage(Rect(Offset.Zero, size), (h / w).toFloat(), f, ink, null, 1.dp.toPx()) }
+    val ink = MarginInk(paper, color, previewEdge(), palette.textDim.toComposeColor().copy(alpha = 0.25f), palette.accent.toComposeColor())
+    Canvas(Modifier.size(32.dp, 42.dp)) { marginPage(Rect(Offset.Zero, size), (h / w).toFloat(), f, ink, null, 1.dp.toPx(), rules = 6) }
 }
 
 @Composable
@@ -383,9 +393,10 @@ private fun filtersOn(vs: ViewSettings) = vs.contrast != 100 || vs.invert != 0 |
 @Composable
 private fun ViewPreview(mode: ViewingMode) {
     val palette = LocalPalette.current
-    val paper = palette.paper.toComposeColor()
+    // Drawn pages, not the note's paper, which can be the well's own colour.
+    val paper = palette.textDim.toComposeColor().copy(alpha = 0.6f)
     val well = palette.bg.toComposeColor()
-    val edge = palette.border.toComposeColor()
+    val edge = previewEdge()
     Canvas(Modifier.size(32.dp, 42.dp)) {
         val r = CornerRadius(3.dp.toPx())
         drawRoundRect(well, cornerRadius = r)
@@ -716,7 +727,7 @@ private class MarginInk(val paper: Color, val margin: Color, val edge: Color, va
  * A page of [aspect] (height over width) with its margins as fractions (left, top, right, bottom)
  * laid outside it, fitted into [area] and centred; the [selected] edge is tinted and outlined.
  */
-private fun DrawScope.marginPage(area: Rect, aspect: Float, f: FloatArray, ink: MarginInk, selected: PageEdge?, hairline: Float) {
+private fun DrawScope.marginPage(area: Rect, aspect: Float, f: FloatArray, ink: MarginInk, selected: PageEdge?, hairline: Float, rules: Int = 16) {
     val (l, t, r, b) = listOf(f[0], f[1], f[2], f[3])
     val unitsW = 1f + l + r
     val unitsH = aspect * (1f + t + b)
@@ -725,7 +736,7 @@ private fun DrawScope.marginPage(area: Rect, aspect: Float, f: FloatArray, ink: 
     val page = Rect(ext.left + l * s, ext.top + t * aspect * s, ext.right - r * s, ext.bottom - b * aspect * s)
     drawRect(ink.margin, ext.topLeft, ext.size)
     drawRect(ink.paper, page.topLeft, page.size)
-    val step = max(page.height / 16f, 3 * hairline)
+    val step = max(page.height / rules, 3 * hairline)
     var y = page.top + step
     while (y < page.bottom - step / 2) {
         drawLine(ink.rule, Offset(page.left + step / 2, y), Offset(page.right - step / 2, y), hairline)
