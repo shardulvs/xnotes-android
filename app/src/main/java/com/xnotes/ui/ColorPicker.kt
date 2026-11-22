@@ -440,6 +440,7 @@ internal fun NativeField(
     hexOnly: Boolean = false,
     endAlign: Boolean = false,
     autoFocus: Boolean = false,
+    textSp: Float = 13f,
     onDone: (() -> Unit)? = null,
 ) {
     val textColor = LocalPalette.current.text.toArgb()
@@ -453,7 +454,7 @@ internal fun NativeField(
                 minimumHeight = 0
                 includeFontPadding = false
                 isSingleLine = true
-                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13f)
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, textSp)
                 inputType = when {
                     decimal -> InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
                     numeric -> InputType.TYPE_CLASS_NUMBER

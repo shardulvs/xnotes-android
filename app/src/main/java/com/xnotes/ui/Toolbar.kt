@@ -89,6 +89,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun Toolbar(
     editor: Editor,
+    fullscreen: Boolean,
     onToggleFullscreen: () -> Unit,
     onOpenBackstage: () -> Unit,
     onInsertImage: () -> Unit,
@@ -123,8 +124,15 @@ fun Toolbar(
     var configForTool by remember { mutableStateOf<Tool?>(null) }
     var switcherIndex by remember { mutableStateOf<Int?>(null) }
     var renaming by remember { mutableStateOf(false) }
-    // Pinned outside the scrolling strip so closing a split pane is always one tap away.
-    ToolbarFrame(armed = editor.tool, trailing = onClosePane?.let { { ClosePaneButton(it) } }) {
+    // Pinned outside the scrolling strip, so the settings and closing a split pane are always one tap away.
+    ToolbarFrame(
+        armed = editor.tool,
+        trailing = {
+            NoteSettingsButton(editor, fullscreen, onToggleFullscreen, onImportTemplate)
+            onClosePane?.let { ClosePaneButton(it) }
+            BarEndGap()
+        },
+    ) {
         // The bar is driven by the user-customisable layout; separators sit between non-empty
         // sections, and each item dispatches to its renderer (see ToolbarItemView).
         editor.toolbarLayout.visibleSections.forEachIndexed { si, section ->
@@ -549,6 +557,12 @@ internal fun ClosePaneButton(onClose: () -> Unit) {
     ToolbarIcon(XnotesIcons.close, stringResource(R.string.close_pane), onClick = onClose)
 }
 
+/** The air after the pinned end of a bar, matching the scrolling strip's own. */
+@Composable
+internal fun BarEndGap() {
+    androidx.compose.foundation.layout.Spacer(if (LocalBar.current.vertical) Modifier.height(4.dp) else Modifier.width(4.dp))
+}
+
 /** A toolbar ink swatch; given a [drag] host and its [ink], it can also be pulled off the bar onto the page to fill. */
 @Composable
 internal fun Swatch(
@@ -592,7 +606,7 @@ internal fun Separator() {
 
 /** A hairline across the bar. */
 @Composable
-private fun Rule() {
+internal fun Rule() {
     val bar = LocalBar.current
     Box(
         Modifier

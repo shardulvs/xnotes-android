@@ -636,6 +636,7 @@ internal fun TemplateParamControls(
     dpi: Int,
     store: SwatchStore,
     captionGap: Dp = 0.dp,
+    chip: @Composable (label: String, selected: Boolean, onClick: () -> Unit) -> Unit = { l, s, c -> ModeChip(l, s, c) },
     apply: (PageStyle) -> Unit,
 ) {
     val k = dpi / 25.4
@@ -648,7 +649,7 @@ internal fun TemplateParamControls(
         val label = sp.label ?: stringResource(R.string.caption_spacing)
         StyleCaption("$label  ${"%.1f mm".format(spacing / k)}" + if (style.spacing == null) stringResource(R.string.default_suffix) else "")
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ModeChip(stringResource(R.string.default_choice), style.spacing == null) { apply(style.copy(spacing = null)) }
+            chip(stringResource(R.string.default_choice), style.spacing == null) { apply(style.copy(spacing = null)) }
             Slider(
                 value = spacing.toFloat().coerceIn(lo, hi),
                 onValueChange = { apply(style.copy(spacing = it.toDouble())) },
@@ -666,7 +667,7 @@ internal fun TemplateParamControls(
             StyleCaption(label)
             Spacer(Modifier.size(captionGap))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                ModeChip(stringResource(R.string.default_choice), own == null) {
+                chip(stringResource(R.string.default_choice), own == null) {
                     apply(style.copy(colors = style.colors?.minus(p.name)?.takeIf { it.isNotEmpty() }))
                 }
                 SwatchCircles(store, SwatchRole.TEMPLATE, own) {
@@ -686,7 +687,7 @@ internal fun TemplateParamControls(
         }
         StyleCaption("$label  $shown" + if (own == null) stringResource(R.string.default_suffix) else "")
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ModeChip(stringResource(R.string.default_choice), own == null) {
+            chip(stringResource(R.string.default_choice), own == null) {
                 apply(style.copy(params = style.params?.minus(p.name)?.takeIf { it.isNotEmpty() }))
             }
             val integer = p.type == com.xnotes.core.template.ParamType.INTEGER
@@ -1314,6 +1315,7 @@ internal fun DropdownMenu(
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
     properties: PopupProperties = PopupProperties(focusable = true),
+    shape: Shape = MaterialTheme.shapes.extraSmall,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val palette = LocalPalette.current
@@ -1326,6 +1328,7 @@ internal fun DropdownMenu(
         modifier = modifier,
         offset = LocalMenuOffset.current,
         properties = properties,
+        shape = shape,
         containerColor = palette.menuBg.toComposeColor(),
         border = BorderStroke(1.dp, palette.border.toComposeColor()),
     ) {

@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalDensity
@@ -163,6 +164,161 @@ internal fun TemplateStrip(
                 maxLines = 1,
             )
         }
+    }
+}
+
+/** A settings-panel template tile: the drawing inside a hairline, ringed in the accent when picked. */
+internal val GRID_TILE_W = 74.dp
+private val GRID_THUMB_W = 68.dp
+
+/** One tile of [TemplateGrid]. */
+private sealed interface GridTile {
+    data object Default : GridTile
+    data object None : GridTile
+    data class Library(val entry: TemplateLibrary.Entry) : GridTile
+    data object Import : GridTile
+}
+
+/**
+ * Every template two rows deep, scrolling sideways: Default first on a page level (the document's
+ * template, as this page would show it), then None, the library, and an Import tile. [selected] is
+ * the level's own template key, null for Default. A long press on an imported template offers to
+ * remove it, and on one only this note carries, to add it to the library.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun TemplateGrid(
+    entries: List<TemplateLibrary.Entry>,
+    selected: String?,
+    withDefault: Boolean,
+    inheritedKey: String,
+    paper: Rgba,
+    pageMm: Pair<Double, Double>,
+    drawing: (TemplateLibrary.Entry) -> TemplateDrawing,
+    onSelect: (String?) -> Unit,
+    onImport: () -> Unit,
+    onRemove: (String) -> Unit,
+    onKeep: (String) -> Unit,
+) {
+    val palette = LocalPalette.current
+    val aspect = (pageMm.second / pageMm.first).coerceIn(0.5, 2.0)
+    val thumbH = GRID_THUMB_W * aspect.toFloat()
+    val wPx = thumbPx(GRID_THUMB_W)
+    val tiles = buildList {
+        if (withDefault) add(GridTile.Default)
+        add(GridTile.None)
+        entries.forEach { add(GridTile.Library(it)) }
+        add(GridTile.Import)
+    }
+    fun isSelected(t: GridTile) = when (t) {
+        GridTile.Default -> selected == null
+        GridTile.None -> selected == PageTemplates.NONE || (!withDefault && selected == null)
+        is GridTile.Library -> t.entry.key == selected
+        GridTile.Import -> false
+    }
+    val gap = 8.dp
+    val scroll = rememberScrollState()
+    val colPx = with(LocalDensity.current) { (GRID_TILE_W + gap).toPx() }
+    LaunchedEffect(Unit) {
+        val i = tiles.indexOfFirst(::isSelected)
+        if (i >= 4) scroll.scrollTo(((i / 2 - 1) * colPx).toInt())
+    }
+    val inherited = entries.firstOrNull { it.key == inheritedKey }
+    // Not a lazy grid: the menu measures its content's intrinsic size, which lazy layouts refuse.
+    Row(Modifier.horizontalScroll(scroll), horizontalArrangement = Arrangement.spacedBy(gap)) {
+        tiles.chunked(2).forEach { column ->
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                column.forEach { t ->
+                    when (t) {
+                        GridTile.Default -> GridCell(stringResource(R.string.default_choice), isSelected(t), thumbH, onClick = { onSelect(null) }) {
+                            if (inherited != null) TemplateThumb(inherited, pageMm, drawing(inherited), wPx, thumbH)
+                            else Box(Modifier.size(GRID_THUMB_W, thumbH).background(paper.toComposeColor()))
+                        }
+                        GridTile.None -> GridCell(stringResource(R.string.none), isSelected(t), thumbH, onClick = { onSelect(PageTemplates.NONE) }) {
+                            Box(Modifier.size(GRID_THUMB_W, thumbH).background(paper.toComposeColor()))
+                        }
+                        is GridTile.Library -> key(t.entry.key) {
+                            val e = t.entry
+                            var menu by remember { mutableStateOf(false) }
+                            val removable = e.source == TemplateLibrary.Source.IMPORTED || e.source == TemplateLibrary.Source.NOTE
+                            Box {
+                                GridCell(e.template.name, isSelected(t), thumbH, onClick = { onSelect(e.key) }, onLongClick = if (removable) ({ menu = true }) else null) {
+                                    TemplateThumb(e, pageMm, drawing(e), wPx, thumbH)
+                                }
+                                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                    if (e.source == TemplateLibrary.Source.IMPORTED) {
+                                        DropdownMenuItem(text = { Text(stringResource(R.string.remove_template)) }, onClick = { menu = false; onRemove(e.key) })
+                                    } else {
+                                        DropdownMenuItem(text = { Text(stringResource(R.string.keep_template)) }, onClick = { menu = false; onKeep(e.key) })
+                                    }
+                                }
+                            }
+                        }
+                        GridTile.Import -> GridCell(stringResource(R.string.import_template), false, thumbH, onClick = onImport) {
+                            val line = palette.textDim.toComposeColor()
+                            Box(
+                                Modifier
+                                    .size(GRID_THUMB_W, thumbH)
+                                    .drawBehind {
+                                        val w = 1.5.dp.toPx()
+                                        drawRoundRect(
+                                            line.copy(alpha = 0.6f),
+                                            topLeft = androidx.compose.ui.geometry.Offset(w / 2, w / 2),
+                                            size = androidx.compose.ui.geometry.Size(size.width - w, size.height - w),
+                                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx()),
+                                            style = androidx.compose.ui.graphics.drawscope.Stroke(w, pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 4.dp.toPx()))),
+                                        )
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                androidx.compose.material3.Icon(com.xnotes.ui.icons.XnotesIcons.plus, null, tint = line, modifier = Modifier.size(22.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TemplateThumb(e: TemplateLibrary.Entry, pageMm: Pair<Double, Double>, d: TemplateDrawing, wPx: Int, thumbH: Dp) {
+    val bmp = rememberTemplateThumb(e.template, TemplateThumbs.spec(e.key, pageMm, d, wPx), keep = true)
+    if (bmp != null) Image(bmp, contentDescription = e.template.name, Modifier.size(GRID_THUMB_W, thumbH))
+    else Box(Modifier.size(GRID_THUMB_W, thumbH).background(d.look.paper.toComposeColor()))
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun GridCell(label: String, selected: Boolean, thumbH: Dp, onClick: () -> Unit, onLongClick: (() -> Unit)? = null, thumb: @Composable () -> Unit) {
+    val palette = LocalPalette.current
+    Column(
+        Modifier
+            .width(GRID_TILE_W)
+            .clip(MaterialTheme.shapes.extraSmall)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        val ring = RoundedCornerShape(6.dp)
+        Box(
+            Modifier
+                .size(GRID_TILE_W, thumbH + 6.dp)
+                .then(if (selected) Modifier.border(2.dp, palette.accent.toComposeColor(), ring) else Modifier)
+                .padding(3.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .border(1.dp, palette.border.toComposeColor(), RoundedCornerShape(3.dp)),
+            contentAlignment = Alignment.Center,
+        ) { thumb() }
+        Spacer(Modifier.height(5.dp))
+        Text(
+            label,
+            color = (if (selected) palette.accent else palette.textDim).toComposeColor(),
+            fontSize = 11.sp,
+            fontWeight = if (selected) androidx.compose.ui.text.font.FontWeight.Medium else androidx.compose.ui.text.font.FontWeight.Normal,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
@@ -296,7 +452,7 @@ internal class TemplateDrawing(val look: TemplateLook, val values: TemplateValue
 @Composable
 internal fun PrewarmTemplateThumbs(editor: Editor, popupOpen: Boolean) {
     val defaultPaper = LocalPalette.current.paper
-    val wPx = thumbPx(THUMB_W)
+    val wPx = thumbPx(GRID_THUMB_W)
     val version = TemplateLibraryUi.version
     LaunchedEffect(popupOpen, editor.noteOpen, editor.title, editor.pageIndex, version, defaultPaper, wPx) {
         if (popupOpen || !editor.noteOpen) return@LaunchedEffect

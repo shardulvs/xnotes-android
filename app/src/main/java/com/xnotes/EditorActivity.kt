@@ -1114,6 +1114,7 @@ private fun EditorScreen(
             }
 
             val actions = PaneActions(
+                fullscreen = fullscreen,
                 onToggleFullscreen = onToggleFullscreen,
                 onOpenBackstage = {
                     backstageView = com.xnotes.ui.BackstageView.HOME
@@ -1414,6 +1415,7 @@ private fun Modifier.endsPageSelection(editor: Editor): Modifier = pointerInput(
  * and a picker's result has to come back to the one that opened it.
  */
 private class PaneActions(
+    val fullscreen: Boolean,
     val onToggleFullscreen: () -> Unit,
     /** Leave for the backstage, closing every open pane. */
     val onOpenBackstage: () -> Unit,
@@ -1654,6 +1656,7 @@ private fun EditorPane(
                 val bar: @Composable () -> Unit = {
                     Box(Modifier.endsPageSelection(editor)) { Toolbar(
                         editor,
+                        fullscreen = actions.fullscreen,
                         onToggleFullscreen = actions.onToggleFullscreen,
                         onOpenBackstage = actions.onOpenBackstage,
                         onInsertImage = { actions.onInsertImage(editor, null) },
