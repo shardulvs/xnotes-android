@@ -464,18 +464,21 @@ internal fun ViewOptionsMenu(
                 add {
                     val keys = listOf(ExplorerSortKey.NAME to R.string.sort_name, ExplorerSortKey.MODIFIED to R.string.modified, ExplorerSortKey.CREATED to R.string.created, ExplorerSortKey.SIZE to R.string.sort_size)
                     Column(Modifier.padding(10.dp)) {
-                        PanelCaption(stringResource(R.string.sort_by)) { CaptionHint(directionLabel(view.sortKey, view.descending)) }
-                        // A second tap on the chosen field turns its order round.
-                        PanelSegmented(keys.size, keys.indexOfFirst { it.first == view.sortKey }, { i ->
-                            val k = keys[i].first
-                            onChange(if (k == view.sortKey) view.copy(descending = !view.descending) else view.copy(sortKey = k, descending = k != ExplorerSortKey.NAME))
-                        }) { i, on ->
-                            val tint = (if (on) palette.selectionForeground else palette.textDim).toComposeColor()
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                                Text(stringResource(keys[i].second), color = tint, fontSize = 13.sp, fontWeight = if (on) FontWeight.Medium else FontWeight.Normal, maxLines = 1)
-                                if (on) Icon(if (view.descending) XnotesIcons.arrowDown else XnotesIcons.arrowUp, null, tint = tint, modifier = Modifier.size(13.dp))
+                        // The order is turned round here, or by a second tap on the chosen field.
+                        PanelCaption(stringResource(R.string.sort_by)) {
+                            Row(
+                                Modifier.clip(MaterialTheme.shapes.extraSmall).clickable(role = Role.Button) { onChange(view.copy(descending = !view.descending)) }.padding(horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                CaptionValue(directionLabel(view.sortKey, view.descending))
+                                Icon(if (view.descending) XnotesIcons.arrowDown else XnotesIcons.arrowUp, null, tint = palette.accent.toComposeColor(), modifier = Modifier.size(14.dp))
                             }
                         }
+                        PanelSegmented(keys.map { stringResource(it.second) }, keys.indexOfFirst { it.first == view.sortKey }, { i ->
+                            val k = keys[i].first
+                            onChange(if (k == view.sortKey) view.copy(descending = !view.descending) else view.copy(sortKey = k, descending = k != ExplorerSortKey.NAME))
+                        })
                     }
                 }
                 add {

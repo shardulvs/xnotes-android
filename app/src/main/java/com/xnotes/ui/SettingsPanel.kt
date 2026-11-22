@@ -261,7 +261,8 @@ internal fun PanelSegmented(
                     .height(height)
                     .clip(inner)
                     .background(if (on) palette.selectionBackground.toComposeColor() else Color.Transparent)
-                    .clickable(role = Role.Tab) { onSelect(i) },
+                    .clickable(role = Role.Tab) { onSelect(i) }
+                    .padding(horizontal = 6.dp),
                 contentAlignment = Alignment.Center,
             ) { segment(i, on) }
         }
@@ -279,6 +280,7 @@ internal fun PanelSegmented(options: List<String>, selected: Int, onSelect: (Int
             fontSize = 13.sp,
             fontWeight = if (on) FontWeight.Medium else FontWeight.Normal,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

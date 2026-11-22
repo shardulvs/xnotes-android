@@ -50,7 +50,7 @@ import kotlin.math.roundToInt
  * panel's sheet, cards and controls at a menu's width, so the two read as one design.
  */
 
-internal val TOOL_MENU_WIDTH = 280.dp
+internal val TOOL_MENU_WIDTH = 300.dp
 
 /** A card's rows start and end this far in. */
 private val ROW_START = 14.dp
@@ -79,7 +79,8 @@ internal fun ToolMenu(
         // Sized text keeps material's 24sp line otherwise, which the fixed rows clip.
         ProvideTextStyle(LocalTextStyle.current.copy(lineHeight = 1.3.em)) {
             Column(Modifier.width(width).padding(horizontal = 10.dp, vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(Modifier.fillMaxWidth().height(32.dp).padding(start = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                // Held in from the sheet's round corners, which a title or chip at the cards' edge would crowd.
+                Row(Modifier.fillMaxWidth().padding(start = 14.dp, top = 4.dp, end = 4.dp).height(32.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         title,
                         color = LocalPalette.current.text.toComposeColor(),

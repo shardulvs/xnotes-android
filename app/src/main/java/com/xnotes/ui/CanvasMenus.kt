@@ -488,7 +488,7 @@ private fun SelectionStylePopup(host: SelectionMenuHost, onDismiss: () -> Unit) 
                 stringResource(R.string.change_style_hint),
                 color = palette.textDim.toComposeColor(),
                 fontSize = 12.sp,
-                modifier = Modifier.padding(start = 6.dp, end = 6.dp, bottom = 2.dp),
+                modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 2.dp),
             )
         }
     }

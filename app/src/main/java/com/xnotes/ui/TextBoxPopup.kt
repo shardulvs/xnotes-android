@@ -81,7 +81,7 @@ internal fun TextBoxConfigPopup(editor: Editor, onDismiss: () -> Unit) {
             stringResource(R.string.box_defaults_hint),
             color = palette.textDim.toComposeColor(),
             fontSize = 12.sp,
-            modifier = Modifier.padding(start = 6.dp, bottom = 2.dp),
+            modifier = Modifier.padding(start = 14.dp, end = 14.dp, bottom = 2.dp),
         )
         MenuCard(buildList<MenuGroup> {
             add { MenuRow(stringResource(R.string.font)) { FaceDropdown(d.face) { editor.saveBoxDefaults(d.copy(face = it)) } } }
