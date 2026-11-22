@@ -65,6 +65,9 @@ import java.util.zip.CRC32
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
+import com.xnotes.core.model.BoxStyle
+import com.xnotes.core.text.CharStyle
+import com.xnotes.core.text.TextFlow
 
 /** Thrown when a file is not a valid `.xnote` bundle. */
 class XNoteFormatException(message: String) : Exception(message)
@@ -497,24 +500,47 @@ class DocumentCodec(
         j.name("rec_ms").value(m.ms)
     }
 
+    /**
+     * The first fields are a plain box as every version reads it: where its text starts, what it
+     * wraps at, its words and one style. What only a rich box has follows, each field only when set.
+     */
     private fun writeText(j: JsonWrite, t: TextItem, id: Int?) {
+        // Published whole, so a keystroke landing mid-write cannot tear it.
+        val c = t.content
+        val flow = c.frozen
+        val box = t.box
         j.beginObject()
         j.name("kind").value(TextItem.KIND)
         id?.let { j.name("id").value(it) }
         j.name("pos").beginArray().value(t.pos.x).value(t.pos.y).endArray()
-        j.name("width").value(t.width)
-        j.name("text").value(t.text)
+        j.name("width").value(if (t.autoWidth) c.w else t.width)
+        j.name("text").value(c.plain)
         j.name("rgba")
-        writeRgba(j, t.rgba)
-        j.name("point_size").value(t.pointSize)
-        // Additive fields: written only when set, so older readers stay compatible
-        // and notes that use neither serialize exactly as before.
-        if (t.face != TextItem.DEFAULT_FACE) j.name("font_face").value(t.face.id)
+        writeRgba(j, c.frame.defaultColor)
+        j.name("point_size").value(flow.defaultSizePt)
+        if (flow.defaultFace != TextItem.DEFAULT_FACE) j.name("font_face").value(flow.defaultFace.id)
+        if (flow.defaultColor == null) j.name("auto_color").value(true)
+        if (t.autoWidth) j.name("auto_width").value(true)
+        if (isRich(flow)) j.name("flow").value(String(FlowXml.write(flow), Charsets.UTF_8))
+        box.fill?.let {
+            j.name("box_fill")
+            writeRgba(j, it)
+        }
+        box.border?.let {
+            j.name("box_border")
+            writeRgba(j, it)
+        }
+        if (box.borderWidth != 0.0) j.name("box_border_width").value(box.borderWidth)
+        if (box.corner != 0.0) j.name("box_corner").value(box.corner)
         t.sync?.let { writeSync(j, it) }
         if (t.locked) j.name("locked").value(true)
         t.group?.let { j.name("group").value(it) }
         j.endObject()
     }
+
+    /** Whether [flow] holds anything its plain text and the box's one style do not say. */
+    private fun isRich(flow: TextFlow): Boolean =
+        flow.paragraphs.any { p -> !p.isDefaultStyle() || p.runs.any { it.style != CharStyle.DEFAULT } }
 
     private fun writeShape(j: JsonWrite, s: ShapeItem, id: Int?) {
         // A shape older readers cannot draw goes down as the polygon they can, its real geometry after.
@@ -1150,6 +1176,13 @@ class DocumentCodec(
         var rgba: Rgba? = null
         var pointSize = TextItem.DEFAULT_POINT_SIZE
         var fontFace = ""
+        var autoColor = false
+        var autoWidth = false
+        var flowXml: String? = null
+        var boxFill: Rgba? = null
+        var boxBorder: Rgba? = null
+        var boxBorderWidth = 0.0
+        var boxCorner = 0.0
         var shape: String? = null
         var geom: String? = null
         var flipGeom: String? = null
@@ -1234,6 +1267,13 @@ class DocumentCodec(
                 "rgba" -> s.rgba = rgbaOrNull(p)
                 "point_size" -> s.pointSize = doubleOr(p, TextItem.DEFAULT_POINT_SIZE)
                 "font_face" -> s.fontFace = stringOr(p, "")
+                "auto_color" -> s.autoColor = boolOr(p, false)
+                "auto_width" -> s.autoWidth = boolOr(p, false)
+                "flow" -> s.flowXml = stringOrNull(p)
+                "box_fill" -> s.boxFill = rgbaOrNull(p)
+                "box_border" -> s.boxBorder = rgbaOrNull(p)
+                "box_border_width" -> s.boxBorderWidth = doubleOr(p, 0.0)
+                "box_corner" -> s.boxCorner = doubleOr(p, 0.0)
                 "shape" -> s.shape = stringOr(p, "")
                 "geom" -> s.geom = stringOrNull(p)
                 "flip_geom" -> s.flipGeom = stringOrNull(p)
@@ -1292,17 +1332,7 @@ class DocumentCodec(
                     pending.add(PendingAudio(items.size + pending.size, asset, s.rect, s.rid, s.name, s.durationMs, s.peaks ?: ByteArray(0), s.locked, s.group))
                 }
             }
-            TextItem.KIND -> items.add(
-                TextItem(
-                    pos = s.pos ?: Pt.ZERO,
-                    width = s.width,
-                    text = s.text,
-                    rgba = s.rgba ?: TextItem.DEFAULT_COLOR,
-                    pointSize = s.pointSize,
-                    face = FontFace.fromId(s.fontFace),
-                    measurer = textMeasurer,
-                ),
-            )
+            TextItem.KIND -> items.add(buildText(s))
             ShapeItem.KIND, ShapeItem.GLYPHS_KIND, ShapeItem.FILL_KIND -> {
                 val c = s.connector
                 items.add(if (c != null && s.kind == ShapeItem.KIND) buildConnector(s, c, glue) else buildShape(s))
@@ -1752,6 +1782,39 @@ class DocumentCodec(
             p.skipValue()
             null
         }
+    }
+
+    /**
+     * A box's own fields say its place, base style and frame; its rich text, when it has any, is
+     * the flow beside them, read for its paragraphs alone. Without one, or with one that will not
+     * parse, the plain words stand.
+     */
+    private fun buildText(s: ItemScratch): TextItem {
+        val color = if (s.autoColor) null else s.rgba ?: TextItem.DEFAULT_COLOR
+        val face = FontFace.fromId(s.fontFace)
+        val rich = s.flowXml?.let { xml ->
+            TextItem.boxFlow(color, s.pointSize, face).also { flow ->
+                FlowXml.readInto(flow, xml.toByteArray(Charsets.UTF_8))
+                TextItem.boxFlow(color, s.pointSize, face).let {
+                    flow.margins = it.margins
+                    flow.defaultColor = it.defaultColor
+                    flow.defaultSizePt = it.defaultSizePt
+                    flow.defaultFace = it.defaultFace
+                }
+            }.takeIf { it.paragraphs.isNotEmpty() }
+        }
+        val item = if (rich != null) {
+            TextItem(s.pos ?: Pt.ZERO, s.width, s.autoWidth, rich, textMeasurer)
+        } else {
+            TextItem(s.pos ?: Pt.ZERO, s.width, s.text, color, s.pointSize, face, textMeasurer, s.autoWidth)
+        }
+        if (s.boxFill != null || s.boxBorder != null || s.boxBorderWidth != 0.0 || s.boxCorner != 0.0) {
+            item.box = BoxStyle(
+                s.boxFill, s.boxBorder,
+                s.boxBorderWidth.coerceIn(0.0, BoxStyle.MAX_BORDER), s.boxCorner.coerceIn(0.0, BoxStyle.MAX_CORNER),
+            )
+        }
+        return item
     }
 
     private fun boolOr(p: JsonPull, def: Boolean): Boolean = boolOrNull(p) ?: def
