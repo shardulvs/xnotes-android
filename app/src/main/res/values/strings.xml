@@ -413,6 +413,7 @@
     <string name="show_sidebar">Show sidebar</string>
     <string name="preferences">Preferences</string>
     <string name="reset_to_defaults">Reset to defaults</string>
+    <string name="use_default">Use the default</string>
     <string name="pref_general">General</string>
     <string name="pref_ui_theme">UI theme</string>
     <string name="theme_system">System</string>

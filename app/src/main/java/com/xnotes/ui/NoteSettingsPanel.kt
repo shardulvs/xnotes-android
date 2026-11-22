@@ -472,12 +472,10 @@ private fun StylesPage(editor: Editor, s: StylesState, onImportTemplate: () -> U
     PanelHeader(stringResource(R.string.title_styles), onBack, onReset = if (s.tab == 0) ({ editor.resetDocumentStyle(s.memory); s.synced(editor) }) else null)
     PanelSegmented(listOf(stringResource(R.string.all_pages), stringResource(R.string.current_page)), s.tab, { s.tab = it })
 
-    Spacer(Modifier.height(16.dp))
-    PanelCaption(stringResource(R.string.caption_page_colour))
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        PanelChip(stringResource(R.string.default_choice), style.pageColor == null) { s.apply(editor, style.copy(pageColor = null)) }
-        SwatchCircles(editor, SwatchRole.PAPER, style.pageColor) { s.apply(editor, style.copy(pageColor = it)) }
-    }
+    Spacer(Modifier.height(12.dp))
+    MenuCard(listOf {
+        ColourRow(stringResource(R.string.caption_page_colour), style.pageColor, v.look.paper, editor, SwatchRole.PAPER) { s.apply(editor, style.copy(pageColor = it)) }
+    })
 
     Spacer(Modifier.height(16.dp))
     PanelCaption(stringResource(R.string.caption_template))
@@ -617,37 +615,9 @@ private fun CustomizePage(editor: Editor, s: StylesState, onBack: () -> Unit) {
         modifier = Modifier.padding(horizontal = 4.dp),
     )
     Spacer(Modifier.height(12.dp))
-    val drawn = TemplateDrawing.of(t, style.settings, v.lower?.settings, look.paper, dpi)
-    Box(
-        Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).background(palette.bg.toComposeColor()).padding(vertical = 14.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        TemplatePreview(t, v.shownKey, editor.currentPageMm, drawn.look.ink, drawn.look.accent, drawn.look.paper, drawn.values, 112.dp)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        TemplateCards(t, style, v.lower, look, dpi, editor, withPaper = false, withInk = true, apply = ::apply)
     }
-
-    if (t.usesInk) {
-        Spacer(Modifier.height(16.dp))
-        PanelCaption(stringResource(R.string.caption_pattern_colour))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            PanelChip(stringResource(R.string.default_choice), style.patternColor == null) { apply(style.copy(patternColor = null)) }
-            // Circles hold the hue at full strength; Opacity sets the alpha, so a pick keeps it.
-            SwatchCircles(editor, SwatchRole.LINES, style.patternColor?.copy(a = 255)) { apply(style.copy(patternColor = it.copy(a = look.ink.a))) }
-        }
-        Spacer(Modifier.height(12.dp))
-        val opacityPct = look.ink.a * 100f / 255f
-        PanelSlider(stringResource(R.string.caption_opacity), "${opacityPct.roundToInt()}%", opacityPct, 0f..100f) { pct ->
-            apply(style.copy(patternColor = look.ink.copy(a = (pct / 100f * 255f).roundToInt().coerceIn(0, 255))))
-        }
-    }
-    if (t.usesAccent) {
-        Spacer(Modifier.height(12.dp))
-        PanelCaption(stringResource(R.string.caption_accent_colour))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            PanelChip(stringResource(R.string.default_choice), style.accentColor == null) { apply(style.copy(accentColor = null)) }
-            SwatchCircles(editor, SwatchRole.ACCENT, style.accentColor?.copy(a = 255)) { apply(style.copy(accentColor = it.copy(a = look.accent.a))) }
-        }
-    }
-    TemplateParamControls(t, style, v.lower, dpi, editor, captionGap = 4.dp, chip = { l, sel, c -> PanelChip(l, sel, onClick = c) }, apply = ::apply)
 }
 
 // Margins

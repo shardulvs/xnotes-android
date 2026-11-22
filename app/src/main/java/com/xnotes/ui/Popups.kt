@@ -344,6 +344,99 @@ internal fun TemplateParamControls(
     }
 }
 
+/**
+ * The cards that set [t] on a page-style level: its colours (the paper when [withPaper], the
+ * template's ink and accent when [withInk], then its colour parameters), then its lengths and
+ * numbers. Each falls back to [lower] (the level below, when its values apply) and then the template.
+ */
+@Composable
+internal fun TemplateCards(
+    t: com.xnotes.core.template.Template?,
+    style: PageStyle,
+    lower: PageStyle?,
+    look: TemplateLook,
+    dpi: Int,
+    store: SwatchStore,
+    withPaper: Boolean,
+    withInk: Boolean,
+    apply: (PageStyle) -> Unit,
+) {
+    MenuCard(buildList<MenuGroup> {
+        if (withPaper) add {
+            ColourRow(stringResource(R.string.caption_paper), style.pageColor, look.paper, store, SwatchRole.PAPER) { apply(style.copy(pageColor = it)) }
+        }
+        if (t != null && withInk && t.usesInk) add {
+            // The colour holds the hue at full strength; Opacity sets the alpha, so a pick keeps it.
+            ColourRow(stringResource(R.string.caption_pattern_colour), style.patternColor?.copy(a = 255), look.ink.copy(a = 255), store, SwatchRole.LINES) {
+                apply(style.copy(patternColor = it?.copy(a = look.ink.a)))
+            }
+            val pct = look.ink.a * 100f / 255f
+            ParamSlider(stringResource(R.string.caption_opacity), "${pct.roundToInt()}%", pct, 0f..100f, own = style.patternColor != null, child = true) { v ->
+                apply(style.copy(patternColor = look.ink.copy(a = (v / 100f * 255f).roundToInt().coerceIn(0, 255))))
+            }
+        }
+        if (t != null && withInk && t.usesAccent) add {
+            ColourRow(stringResource(R.string.caption_accent_colour), style.accentColor?.copy(a = 255), look.accent.copy(a = 255), store, SwatchRole.ACCENT) {
+                apply(style.copy(accentColor = it?.copy(a = look.accent.a)))
+            }
+        }
+        for (p in t?.params.orEmpty()) {
+            if (p.type != com.xnotes.core.template.ParamType.COLOR) continue
+            add {
+                val suggested = lower?.colors?.get(p.name) ?: p.defaultColor ?: look.ink.copy(a = 255)
+                ColourRow(p.label ?: p.name.replaceFirstChar { it.uppercase() }, style.colors?.get(p.name), suggested, store, SwatchRole.TEMPLATE) { c ->
+                    val rest = style.colors?.minus(p.name)
+                    apply(style.copy(colors = if (c == null) rest?.takeIf { it.isNotEmpty() } else (rest ?: emptyMap()) + (p.name to c)))
+                }
+            }
+        }
+    })
+    if (t != null) MenuCard(templateValueGroups(t, style, lower, dpi, apply))
+}
+
+/** [t]'s lengths and numbers as sliders, the spacing one first and in mm like every other length. */
+private fun templateValueGroups(
+    t: com.xnotes.core.template.Template,
+    style: PageStyle,
+    lower: PageStyle?,
+    dpi: Int,
+    apply: (PageStyle) -> Unit,
+): List<MenuGroup> = buildList<MenuGroup> {
+    val k = dpi / 25.4
+    t.spacingParam?.let { sp ->
+        add {
+            val lo = ((sp.min ?: (sp.default / 4)) * k).toFloat()
+            val hi = ((sp.max ?: (sp.default * 4)) * k).toFloat().coerceAtLeast(lo + 1f)
+            val spacing = style.spacing ?: lower?.spacing ?: (sp.default * k)
+            ParamSlider(
+                sp.label ?: stringResource(R.string.caption_spacing), "%.1f mm".format(spacing / k), spacing.toFloat(), lo..hi,
+                own = style.spacing != null, onReset = { apply(style.copy(spacing = null)) },
+            ) { apply(style.copy(spacing = it.toDouble())) }
+        }
+    }
+    for (p in t.params) {
+        if (p === t.spacingParam || p.type == com.xnotes.core.template.ParamType.COLOR) continue
+        add {
+            val own = style.params?.get(p.name)
+            val value = p.clamp(own ?: lower?.params?.get(p.name) ?: p.default)
+            val lo = p.min ?: if (p.default > 0) p.default / 4 else p.default - 10
+            val hi = (p.max ?: if (p.default > 0) p.default * 4 else p.default + 10).coerceAtLeast(lo + 1e-6)
+            val shown = when (p.type) {
+                com.xnotes.core.template.ParamType.LENGTH -> "%.1f mm".format(value)
+                com.xnotes.core.template.ParamType.INTEGER -> value.roundToInt().toString()
+                else -> "%.2f".format(value).trimEnd('0').trimEnd('.', ',')
+            }
+            val integer = p.type == com.xnotes.core.template.ParamType.INTEGER
+            ParamSlider(
+                p.label ?: p.name.replaceFirstChar { it.uppercase() }, shown, value.toFloat(), lo.toFloat()..hi.toFloat(),
+                own = own != null,
+                steps = if (integer) ((hi - lo).roundToInt() - 1).coerceIn(0, 200) else 0,
+                onReset = { apply(style.copy(params = style.params?.minus(p.name)?.takeIf { it.isNotEmpty() })) },
+            ) { v -> apply(style.copy(params = (style.params ?: emptyMap()) + (p.name to p.clamp(v.toDouble())))) }
+        }
+    }
+}
+
 @Composable
 internal fun StyleCaption(text: String) {
     Text(

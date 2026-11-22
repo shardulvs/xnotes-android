@@ -40,6 +40,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupProperties
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.res.stringResource
+import com.xnotes.R
+import com.xnotes.core.model.Rgba
+import com.xnotes.settings.SwatchRole
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
@@ -181,6 +190,89 @@ internal fun MenuSlider(
             colors = if (step > 0f) NoTicks else SliderDefaults.colors(),
             modifier = Modifier.fillMaxWidth().height(32.dp),
         )
+    }
+}
+
+/**
+ * A slider whose [shown] value reads dim while it follows a default ([own] false); with its own
+ * value it takes the accent and, given [onReset], a way back to the default.
+ */
+@Composable
+internal fun ParamSlider(
+    label: String,
+    shown: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    own: Boolean,
+    steps: Int = 0,
+    child: Boolean = false,
+    onReset: (() -> Unit)? = null,
+    onChange: (Float) -> Unit,
+) {
+    val palette = LocalPalette.current
+    Column(Modifier.padding(start = 10.dp, end = 10.dp, top = if (child) 0.dp else 8.dp, bottom = 8.dp)) {
+        Row(
+            Modifier.fillMaxWidth().height(28.dp).padding(start = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                label,
+                color = palette.textDim.toComposeColor(),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(shown, color = (if (own) palette.accent else palette.textDim).toComposeColor(), fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            if (own && onReset != null) {
+                val tip = stringResource(R.string.use_default)
+                Tooltip(tip) {
+                    Box(
+                        Modifier.size(28.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onReset),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(Modifier.size(22.dp).background(panelColors().raised, CircleShape), contentAlignment = Alignment.Center) {
+                            Icon(XnotesIcons.restore, tip, tint = palette.text.toComposeColor(), modifier = Modifier.size(13.dp))
+                        }
+                    }
+                }
+            }
+        }
+        Slider(
+            value = value.coerceIn(range.start, range.endInclusive),
+            onValueChange = onChange,
+            valueRange = range,
+            steps = steps,
+            colors = if (steps > 0) NoTicks else SliderDefaults.colors(),
+            modifier = Modifier.fillMaxWidth().height(32.dp),
+        )
+    }
+}
+
+/**
+ * A colour on a card: [label], and Default beside the colour. Its picker offers the [role]'s
+ * circles first, and the colour last picked joins the front of them.
+ */
+@Composable
+internal fun ColourRow(label: String, value: Rgba?, suggested: Rgba, store: SwatchStore, role: SwatchRole, onChange: (Rgba?) -> Unit) {
+    MenuRow(label) {
+        ColorOrNone(stringResource(R.string.default_choice), value, suggested, onChange) { onDismiss, onPick ->
+            var last by remember { mutableStateOf<Rgba?>(null) }
+            ColorPickerPopup(
+                initial = value ?: suggested,
+                recents = store.swatches(role),
+                onDismiss = {
+                    last?.let { picked ->
+                        val next = (listOf(picked) + store.swatches(role).filter { it != picked }).take(store.swatches(role).size)
+                        next.forEachIndexed { i, c -> if (store.swatches(role).getOrNull(i) != c) store.setSwatch(role, i, c) }
+                    }
+                    onDismiss()
+                },
+                onPick = { last = it.copy(a = 255); onPick(it) },
+            )
+        }
     }
 }
 
