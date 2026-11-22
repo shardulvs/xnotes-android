@@ -234,6 +234,19 @@ object XnotesIcons {
         "M22 12.5 12 17.5 2 12.5",
         "M22 17.5 12 22.5 2 17.5",
     )
+    // The selection menu's own rows (Lucide: flip-horizontal, flip-vertical, group, ungroup, unlink).
+    val flipHorizontal = icon("M8 3H5a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h3", "M16 3h3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-3", "M12 20v2", "M12 14v2", "M12 8v2", "M12 2v2")
+    val flipVertical = icon("M21 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v3", "M21 16v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3", "M4 12H2", "M10 12H8", "M16 12h-2", "M22 12h-2")
+    val group = icon(
+        "M3 7V5c0-1.1.9-2 2-2h2", "M17 3h2c1.1 0 2 .9 2 2v2", "M21 17v2c0 1.1-.9 2-2 2h-2", "M7 21H5c-1.1 0-2-.9-2-2v-2",
+        roundRect(7.0, 7.0, 7.0, 5.0, 1.0), roundRect(10.0, 12.0, 7.0, 5.0, 1.0),
+    )
+    val ungroup = icon(roundRect(5.0, 4.0, 8.0, 6.0, 1.0), roundRect(11.0, 14.0, 8.0, 6.0, 1.0))
+    val unlink = icon(
+        "M18.84 12.25l1.72-1.71h-.02a5.004 5.004 0 0 0-.12-7.07 5.006 5.006 0 0 0-6.95 0l-1.72 1.71",
+        "M5.17 11.75l-1.71 1.71a5.004 5.004 0 0 0 .12 7.07 5.006 5.006 0 0 0 6.95 0l1.71-1.71",
+        "M8 2v3", "M2 8h3", "M16 19v3", "M19 16h3",
+    )
     /** Two panes with a divider down the middle: opening a pair of files side by side. */
     val split = icon(rect(3.0, 3.0, 18.0, 18.0), "M12 3v18")
 

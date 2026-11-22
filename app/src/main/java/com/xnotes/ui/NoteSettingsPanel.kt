@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -586,9 +585,9 @@ private fun SizeField(size: PageSize?, unset: String, modifier: Modifier, onSele
             Icon(XnotesIcons.chevronDown, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(16.dp))
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            DropdownMenuItem(text = { Text(unset) }, onClick = { onSelect(null); expanded = false })
+            ChoiceMenuItem(size == null, onClick = { onSelect(null); expanded = false }) { fg -> Text(unset, color = fg) }
             PageSize.entries.forEach { s ->
-                DropdownMenuItem(text = { Text(pageSizeLabel(s)) }, onClick = { onSelect(s); expanded = false })
+                ChoiceMenuItem(s == size, onClick = { onSelect(s); expanded = false }) { fg -> Text(pageSizeLabel(s), color = fg) }
             }
         }
     }

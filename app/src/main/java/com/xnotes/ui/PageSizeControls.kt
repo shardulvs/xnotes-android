@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -46,9 +45,9 @@ internal fun SizeDropdown(size: PageSize?, unset: String? = null, onSelect: (Pag
             Text(size?.let { pageSizeLabel(it) } ?: unset.orEmpty(), color = palette.text.toComposeColor(), fontSize = 14.sp)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            if (unset != null) DropdownMenuItem(text = { Text(unset) }, onClick = { onSelect(null); expanded = false })
+            if (unset != null) ChoiceMenuItem(size == null, onClick = { onSelect(null); expanded = false }) { fg -> Text(unset, color = fg) }
             PageSize.entries.forEach { s ->
-                DropdownMenuItem(text = { Text(pageSizeLabel(s)) }, onClick = { onSelect(s); expanded = false })
+                ChoiceMenuItem(s == size, onClick = { onSelect(s); expanded = false }) { fg -> Text(pageSizeLabel(s), color = fg) }
             }
         }
     }

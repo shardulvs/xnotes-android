@@ -15,16 +15,20 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
@@ -43,6 +47,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -660,7 +665,7 @@ internal fun DropdownMenu(
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
     properties: PopupProperties = PopupProperties(focusable = true),
-    shape: Shape = MaterialTheme.shapes.extraSmall,
+    shape: Shape = MaterialTheme.shapes.large,
     containerColor: Color = LocalPalette.current.menuBg.toComposeColor(),
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -713,7 +718,111 @@ internal fun AlertDialog(
     )
 }
 
-/** A text-label chip for a segmented picker (e.g. the eraser's STROKE/AREA modes). */
+/** A menu's rows sit this far in from its edges, so a press or the current choice is a pill. */
+private val MENU_ROW_INSET = 8.dp
+
+/**
+ * The app's menu row: rounded and inset from the menu's edges, its icons dim beside its label.
+ * [selected] fills it with the selection container and [danger] colours a destructive action.
+ * Shadows material3's composable like [DropdownMenu] does.
+ */
+@Composable
+internal fun DropdownMenuItem(
+    text: @Composable () -> Unit,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    leadingIcon: (@Composable () -> Unit)? = null,
+    trailingIcon: (@Composable () -> Unit)? = null,
+    enabled: Boolean = true,
+    selected: Boolean = false,
+    danger: Boolean = false,
+) {
+    val palette = LocalPalette.current
+    val fg = when {
+        !enabled -> palette.disabled
+        selected -> palette.selectionForeground
+        danger -> palette.danger
+        else -> palette.text
+    }.toComposeColor()
+    val iconTint = if (enabled && !selected && !danger) palette.textDim.toComposeColor() else fg
+    Row(
+        modifier
+            .fillMaxWidth()
+            .padding(horizontal = MENU_ROW_INSET, vertical = 1.dp)
+            .sizeIn(minWidth = 112.dp, maxWidth = 280.dp, minHeight = 42.dp)
+            .clip(MaterialTheme.shapes.small)
+            .background(if (selected) palette.selectionBackground.toComposeColor() else Color.Transparent)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(start = 12.dp, end = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (leadingIcon != null) {
+            CompositionLocalProvider(LocalContentColor provides iconTint) {
+                Box(Modifier.padding(end = 12.dp).widthIn(min = 20.dp), contentAlignment = Alignment.Center) { leadingIcon() }
+            }
+        }
+        CompositionLocalProvider(LocalContentColor provides fg) {
+            ProvideTextStyle(TextStyle(fontSize = 14.sp, lineHeight = 20.sp)) {
+                Box(Modifier.weight(1f).padding(vertical = 6.dp)) { text() }
+            }
+        }
+        if (trailingIcon != null) {
+            CompositionLocalProvider(LocalContentColor provides iconTint) {
+                Box(Modifier.padding(start = 12.dp)) { trailingIcon() }
+            }
+        }
+    }
+}
+
+/** A menu action: its [icon] and [label]; [more] marks one that opens further rows. */
+@Composable
+internal fun MenuItem(
+    label: String,
+    icon: ImageVector? = null,
+    enabled: Boolean = true,
+    danger: Boolean = false,
+    more: Boolean = false,
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = { Text(label) },
+        onClick = onClick,
+        leadingIcon = icon?.let { { Icon(it, contentDescription = null, modifier = Modifier.size(18.dp)) } },
+        trailingIcon = if (more) ({ Icon(XnotesIcons.next, contentDescription = null, modifier = Modifier.size(16.dp)) }) else null,
+        enabled = enabled,
+        danger = danger,
+    )
+}
+
+/** The first row of a menu's sub-page: its [label], and the way back to the rows it came from. */
+@Composable
+internal fun MenuBack(label: String, onBack: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label, fontWeight = FontWeight.Medium) },
+        onClick = onBack,
+        leadingIcon = { Icon(XnotesIcons.prev, contentDescription = stringResource(R.string.back), modifier = Modifier.size(18.dp)) },
+    )
+}
+
+/** The hairline between a menu's groups. */
+@Composable
+internal fun MenuDivider() {
+    Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).height(1.dp).background(LocalPalette.current.border.toComposeColor()))
+}
+
+/** A small heading over a group of a menu's rows. */
+@Composable
+internal fun MenuCaption(text: String) {
+    Text(
+        text,
+        color = LocalPalette.current.textDim.toComposeColor(),
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
+        maxLines = 1,
+        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 4.dp),
+    )
+}
+
 /** A menu row for one of several choices; the current one wears the selection container. */
 @Composable
 internal fun ChoiceMenuItem(
@@ -728,7 +837,7 @@ internal fun ChoiceMenuItem(
         text = { text(fg) },
         onClick = onClick,
         trailingIcon = trailingIcon?.let { icon -> { icon(fg) } },
-        modifier = if (selected) Modifier.background(palette.selectionBackground.toComposeColor()) else Modifier,
+        selected = selected,
     )
 }
 

@@ -54,7 +54,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -519,7 +518,7 @@ private fun BackstageRail(modifier: Modifier, nav: SidebarNav, onExpand: () -> U
                     Box {
                         RailItem(XnotesIcons.folder, pin.name, selected = i == nav.activePin, labelled = true, onLongClick = { menuOpen = true }) { nav.onOpenPin(pin) }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                            DropdownMenuItem(text = { Text(stringResource(R.string.unpin_from_sidebar)) }, onClick = { menuOpen = false; nav.onUnpin(pin) })
+                            MenuItem(stringResource(R.string.unpin_from_sidebar), XnotesIcons.pin, onClick = { menuOpen = false; nav.onUnpin(pin) })
                         }
                     }
                 }
@@ -690,8 +689,8 @@ private fun ColorCommand(color: Rgba, name: String, selected: Boolean, onClick: 
             )
         }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            DropdownMenuItem(text = { Text(stringResource(R.string.rename)) }, onClick = { menuOpen = false; onRename() })
-            DropdownMenuItem(text = { Text(stringResource(R.string.remove_name)) }, onClick = { menuOpen = false; onForget() })
+            MenuItem(stringResource(R.string.rename), XnotesIcons.edit, onClick = { menuOpen = false; onRename() })
+            MenuItem(stringResource(R.string.remove_name), XnotesIcons.close, onClick = { menuOpen = false; onForget() })
         }
     }
 }
@@ -742,7 +741,7 @@ private fun PinnedCommand(label: String, selected: Boolean, onClick: () -> Unit,
             )
         }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            DropdownMenuItem(text = { Text(stringResource(R.string.unpin_from_sidebar)) }, onClick = { menuOpen = false; onUnpin() })
+            MenuItem(stringResource(R.string.unpin_from_sidebar), XnotesIcons.pin, onClick = { menuOpen = false; onUnpin() })
         }
     }
 }
@@ -787,19 +786,14 @@ private fun NewItemMenuItems(
     onCreateMode: (CreateMode) -> Unit,
     onImportPdf: () -> Unit,
 ) {
-    val tint = LocalPalette.current.text.toComposeColor()
-    // Taller than a default menu row (the explorer's primary create affordance), but only as wide
-    // as the longest label plus a margin. The end padding is the larger of the two on purpose: the
-    // icons carry ~1dp of their own inset, so an equal split reads as tight on the text side.
-    val row = Modifier.height(52.dp)
-    val pad = PaddingValues(start = 14.dp, end = 18.dp)
+    val tint = LocalPalette.current.accent.toComposeColor()
+    // Taller and larger than a plain row: this is the explorer's primary create affordance.
     @Composable
     fun item(icon: ImageVector, label: String, onPick: () -> Unit) = DropdownMenuItem(
-        text = { Text(label, fontSize = 16.sp) },
+        text = { Text(label, fontSize = 15.sp) },
         leadingIcon = { Icon(icon, null, tint = tint, modifier = Modifier.size(21.dp)) },
         onClick = { onClose(); onPick() },
-        modifier = row,
-        contentPadding = pad,
+        modifier = Modifier.height(50.dp),
     )
     item(XnotesIcons.edit, stringResource(R.string.new_note_menu)) { onCreateMode(CreateMode.FILE) }
     item(XnotesIcons.canvas, stringResource(R.string.new_canvas_menu)) { onCreateMode(CreateMode.CANVAS) }
@@ -1746,13 +1740,13 @@ private fun ExplorerSection(
                         ExplorerIcon(XnotesIcons.more, stringResource(R.string.more)) { moreOpen = true }
                         DropdownMenu(expanded = moreOpen, onDismissRequest = { moreOpen = false }) {
                             NewItemMenuItems({ moreOpen = false }, onCreateMode, calls.importPdf)
-                            HorizontalDivider(color = palette.border.toComposeColor())
+                            MenuDivider()
                             clipboard?.let { clip ->
-                                DropdownMenuItem(text = { Text(pluralStringResource(R.plurals.paste_items_here, clip.entries.size, clip.entries.size)) }, onClick = { moreOpen = false; paste(clip) })
+                                MenuItem(pluralStringResource(R.plurals.paste_items_here, clip.entries.size, clip.entries.size), XnotesIcons.paste, onClick = { moreOpen = false; paste(clip) })
                             }
-                            DropdownMenuItem(text = { Text(stringResource(R.string.select_all)) }, onClick = { moreOpen = false; selection.clear(); selection.addAll(arranged.orEmpty()) })
-                            DropdownMenuItem(text = { Text(stringResource(R.string.change_folder)) }, onClick = { moreOpen = false; calls.pickRoot() })
-                            DropdownMenuItem(text = { Text(stringResource(R.string.forget_folder)) }, onClick = { moreOpen = false; editor.clearBrowseRoot() })
+                            MenuItem(stringResource(R.string.select_all), XnotesIcons.selectAll, onClick = { moreOpen = false; selection.clear(); selection.addAll(arranged.orEmpty()) })
+                            MenuItem(stringResource(R.string.change_folder), XnotesIcons.folder, onClick = { moreOpen = false; calls.pickRoot() })
+                            MenuItem(stringResource(R.string.forget_folder), XnotesIcons.close, onClick = { moreOpen = false; editor.clearBrowseRoot() })
                         }
                     }
                 }
@@ -1784,41 +1778,41 @@ private fun ExplorerSection(
                                 // A lone item gets the rest of its own ⋮ here too, since the gallery, timeline and columns draw none.
                                 val one = selection.singleOrNull()
                                 if (one != null && !one.isDir) {
-                                    DropdownMenuItem(text = { Text(stringResource(R.string.preview)) }, onClick = { moreOpen = false; selection.clear(); previewing = one })
+                                    MenuItem(stringResource(R.string.preview), XnotesIcons.eye, onClick = { moreOpen = false; selection.clear(); previewing = one })
                                 }
-                                DropdownMenuItem(text = { Text(stringResource(R.string.cut)) }, onClick = {
+                                MenuItem(stringResource(R.string.cut), XnotesIcons.cut, onClick = {
                                     moreOpen = false
                                     clipboard = ClipItem(selection.toList(), true)
                                     selection.clear()
                                 })
-                                DropdownMenuItem(text = { Text(stringResource(R.string.colour_code)) }, onClick = { colours = true })
+                                MenuItem(stringResource(R.string.colour_code), XnotesIcons.palette, more = true, onClick = { colours = true })
                                 if (one != null) {
                                     one.color?.let { c ->
-                                        DropdownMenuItem(text = { Text(stringResource(R.string.name_colour_ellipsis)) }, onClick = { moreOpen = false; selection.clear(); namingColor = c })
+                                        MenuItem(stringResource(R.string.name_colour_ellipsis), XnotesIcons.text, onClick = { moreOpen = false; selection.clear(); namingColor = c })
                                     }
                                     val pinLabel = if (one.isDir) {
                                         if (editor.isPinned(one.documentUri)) R.string.unpin_from_sidebar else R.string.pin_to_sidebar
                                     } else {
                                         if (editor.isNotePinned(one.documentUri)) R.string.unpin_from_top else R.string.pin_to_top
                                     }
-                                    DropdownMenuItem(text = { Text(stringResource(pinLabel)) }, onClick = {
+                                    MenuItem(stringResource(pinLabel), XnotesIcons.pin, onClick = {
                                         moreOpen = false
                                         selection.clear()
                                         if (one.isDir) host.menu.togglePin(one) else host.menu.toggleNotePin(one)
                                     })
-                                    if (!one.isDir) HorizontalDivider(color = palette.border.toComposeColor())
+                                    if (!one.isDir) MenuDivider()
                                 }
-                                DropdownMenuItem(text = { Text(stringResource(R.string.share)) }, enabled = files.size == selection.size, onClick = {
+                                MenuItem(stringResource(R.string.share), XnotesIcons.share, enabled = files.size == selection.size, onClick = {
                                     moreOpen = false
                                     val uris = files.map { it.documentUri }
                                     selection.clear()
                                     if (uris.size == 1) calls.shareFile(uris[0]) else calls.shareFiles(uris)
                                 })
                                 if (one != null && !one.isDir) {
-                                    DropdownMenuItem(text = { Text(stringResource(R.string.save_copy_ellipsis)) }, onClick = { moreOpen = false; selection.clear(); calls.saveCopyFile(one.documentUri) })
-                                    DropdownMenuItem(text = { Text(stringResource(R.string.export_pdf)) }, onClick = { moreOpen = false; selection.clear(); calls.exportFilePdf(one.documentUri) })
+                                    MenuItem(stringResource(R.string.save_copy_ellipsis), XnotesIcons.save, onClick = { moreOpen = false; selection.clear(); calls.saveCopyFile(one.documentUri) })
+                                    MenuItem(stringResource(R.string.export_pdf), XnotesIcons.pdfFile, onClick = { moreOpen = false; selection.clear(); calls.exportFilePdf(one.documentUri) })
                                     convertLabel(one)?.let { label ->
-                                        DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = {
+                                        MenuItem(stringResource(label), XnotesIcons.exportDoc, onClick = {
                                             moreOpen = false
                                             selection.clear()
                                             editor.convertDocument(one.documentUri) { refreshKey++ }
@@ -1828,7 +1822,7 @@ private fun ExplorerSection(
                                 // Notes and PDFs merge: a canvas has no pages, a folder no one order.
                                 val notes = selection.filter { !it.isDir && com.xnotes.core.util.DocumentKind.ofName(it.name).let { k -> k == com.xnotes.core.util.DocumentKind.NOTE || k == com.xnotes.core.util.DocumentKind.PDF } }
                                 if (notes.size >= 2 && notes.size == selection.size) {
-                                    DropdownMenuItem(text = { Text(stringResource(R.string.merge_ellipsis)) }, onClick = {
+                                    MenuItem(stringResource(R.string.merge_ellipsis), XnotesIcons.layers, onClick = {
                                         moreOpen = false
                                         merging = notes.toList()
                                     })
@@ -2214,26 +2208,26 @@ internal fun EntryMenu(
         if (showColors) {
             ColorCodeMenuContent { c -> onDismiss(); onColor?.invoke(c) }
         } else {
-            if (onPreview != null) DropdownMenuItem(text = { Text(stringResource(R.string.preview)) }, onClick = { onDismiss(); onPreview() })
-            DropdownMenuItem(text = { Text(stringResource(R.string.rename)) }, onClick = { onDismiss(); onRename?.invoke() })
-            if (onMoveTo != null) DropdownMenuItem(text = { Text(stringResource(R.string.move_to_folder_ellipsis)) }, onClick = { onDismiss(); onMoveTo() })
-            DropdownMenuItem(text = { Text(stringResource(R.string.copy)) }, onClick = { onDismiss(); onCopy?.invoke() })
-            DropdownMenuItem(text = { Text(stringResource(R.string.cut)) }, onClick = { onDismiss(); onCut?.invoke() })
-            if (onColor != null) DropdownMenuItem(text = { Text(stringResource(R.string.colour_code)) }, onClick = { showColors = true })
-            if (onNameColor != null) DropdownMenuItem(text = { Text(stringResource(R.string.name_colour_ellipsis)) }, onClick = { onDismiss(); onNameColor() })
+            if (onPreview != null) MenuItem(stringResource(R.string.preview), XnotesIcons.eye, onClick = { onDismiss(); onPreview() })
+            MenuItem(stringResource(R.string.rename), XnotesIcons.edit, onClick = { onDismiss(); onRename?.invoke() })
+            if (onMoveTo != null) MenuItem(stringResource(R.string.move_to_folder_ellipsis), XnotesIcons.moveToFolder, onClick = { onDismiss(); onMoveTo() })
+            MenuItem(stringResource(R.string.copy), XnotesIcons.copy, onClick = { onDismiss(); onCopy?.invoke() })
+            MenuItem(stringResource(R.string.cut), XnotesIcons.cut, onClick = { onDismiss(); onCut?.invoke() })
+            if (onColor != null) MenuItem(stringResource(R.string.colour_code), XnotesIcons.palette, more = true, onClick = { showColors = true })
+            if (onNameColor != null) MenuItem(stringResource(R.string.name_colour_ellipsis), XnotesIcons.text, onClick = { onDismiss(); onNameColor() })
             if (onTogglePin != null) {
-                DropdownMenuItem(text = { Text(if (pinned) stringResource(R.string.unpin_from_sidebar) else stringResource(R.string.pin_to_sidebar)) }, onClick = { onDismiss(); onTogglePin() })
+                MenuItem(if (pinned) stringResource(R.string.unpin_from_sidebar) else stringResource(R.string.pin_to_sidebar), XnotesIcons.pin, onClick = { onDismiss(); onTogglePin() })
             }
             if (onToggleNotePin != null) {
-                DropdownMenuItem(text = { Text(if (notePinned) stringResource(R.string.unpin_from_top) else stringResource(R.string.pin_to_top)) }, onClick = { onDismiss(); onToggleNotePin() })
+                MenuItem(if (notePinned) stringResource(R.string.unpin_from_top) else stringResource(R.string.pin_to_top), XnotesIcons.pin, onClick = { onDismiss(); onToggleNotePin() })
             }
-            DropdownMenuItem(text = { Text(deleteLabel) }, onClick = { onDismiss(); onDelete?.invoke() })
+            MenuItem(deleteLabel, XnotesIcons.trash, danger = true, onClick = { onDismiss(); onDelete?.invoke() })
             if (onShare != null) {
-                HorizontalDivider(color = palette.border.toComposeColor())
-                DropdownMenuItem(text = { Text(stringResource(R.string.share)) }, onClick = { onDismiss(); onShare() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.save_copy_ellipsis)) }, onClick = { onDismiss(); onSaveCopy?.invoke() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.export_pdf)) }, onClick = { onDismiss(); onExportPdf?.invoke() })
-                if (convertLabel != null) DropdownMenuItem(text = { Text(stringResource(convertLabel)) }, onClick = { onDismiss(); onConvert?.invoke() })
+                MenuDivider()
+                MenuItem(stringResource(R.string.share), XnotesIcons.share, onClick = { onDismiss(); onShare() })
+                MenuItem(stringResource(R.string.save_copy_ellipsis), XnotesIcons.save, onClick = { onDismiss(); onSaveCopy?.invoke() })
+                MenuItem(stringResource(R.string.export_pdf), XnotesIcons.pdfFile, onClick = { onDismiss(); onExportPdf?.invoke() })
+                if (convertLabel != null) MenuItem(stringResource(convertLabel), XnotesIcons.exportDoc, onClick = { onDismiss(); onConvert?.invoke() })
             }
         }
     }

@@ -19,8 +19,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -57,6 +55,7 @@ import com.xnotes.core.template.TemplatePainter
 import com.xnotes.core.template.TemplateValues
 import com.xnotes.platform.AndroidRenderer
 import com.xnotes.platform.TemplateLibrary
+import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
 import com.xnotes.ui.theme.toComposeColor
 import kotlinx.coroutines.Dispatchers
@@ -151,9 +150,9 @@ internal fun TemplateGrid(
                                 }
                                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                                     if (e.source == TemplateLibrary.Source.IMPORTED) {
-                                        DropdownMenuItem(text = { Text(stringResource(R.string.remove_template)) }, onClick = { menu = false; onRemove(e.key) })
+                                        MenuItem(stringResource(R.string.remove_template), XnotesIcons.trash, danger = true, onClick = { menu = false; onRemove(e.key) })
                                     } else {
-                                        DropdownMenuItem(text = { Text(stringResource(R.string.keep_template)) }, onClick = { menu = false; onKeep(e.key) })
+                                        MenuItem(stringResource(R.string.keep_template), XnotesIcons.download, onClick = { menu = false; onKeep(e.key) })
                                     }
                                 }
                             }

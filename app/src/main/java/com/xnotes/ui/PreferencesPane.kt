@@ -29,7 +29,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -1055,7 +1054,7 @@ private fun OptionDropdown(options: List<Pair<String, String>>, selectedId: Stri
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             options.forEach { (id, lbl) ->
-                DropdownMenuItem(text = { Text(lbl) }, onClick = { onSelect(id); expanded = false })
+                ChoiceMenuItem(id == selectedId, onClick = { onSelect(id); expanded = false }) { fg -> Text(lbl, color = fg) }
             }
         }
     }

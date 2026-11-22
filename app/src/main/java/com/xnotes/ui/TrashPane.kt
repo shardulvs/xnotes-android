@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -308,8 +307,8 @@ private fun TrashRow(
                     }
                 }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text(stringResource(R.string.restore)) }, onClick = { menu = false; onRestore() })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.delete_permanently)) }, onClick = { menu = false; onDelete() })
+                    MenuItem(stringResource(R.string.restore), XnotesIcons.restore, onClick = { menu = false; onRestore() })
+                    MenuItem(stringResource(R.string.delete_permanently), XnotesIcons.trash, danger = true, onClick = { menu = false; onDelete() })
                 }
             }
         }

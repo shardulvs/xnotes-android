@@ -30,7 +30,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -537,11 +536,10 @@ private const val MENU_ROTATE = 3
 @Composable
 private fun RotateRows(onBack: () -> Unit, onTurn: (Int) -> Unit) {
     val palette = LocalPalette.current
-    fun menuIcon(icon: ImageVector) = @Composable { Icon(icon, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp)) }
-    DropdownMenuItem(text = { Text(stringResource(R.string.back_rotate)) }, onClick = onBack)
-    DropdownMenuItem(text = { Text(stringResource(R.string.rotate_right)) }, leadingIcon = menuIcon(XnotesIcons.rotateRight), onClick = { onTurn(1) })
-    DropdownMenuItem(text = { Text(stringResource(R.string.rotate_left)) }, leadingIcon = menuIcon(XnotesIcons.rotateLeft), onClick = { onTurn(3) })
-    DropdownMenuItem(text = { Text(stringResource(R.string.rotate_upside_down)) }, leadingIcon = menuIcon(XnotesIcons.rotateHalf), onClick = { onTurn(2) })
+    MenuBack(stringResource(R.string.back_rotate), onBack)
+    MenuItem(stringResource(R.string.rotate_right), XnotesIcons.rotateRight, onClick = { onTurn(1) })
+    MenuItem(stringResource(R.string.rotate_left), XnotesIcons.rotateLeft, onClick = { onTurn(3) })
+    MenuItem(stringResource(R.string.rotate_upside_down), XnotesIcons.rotateHalf, onClick = { onTurn(2) })
 }
 
 @Composable
@@ -564,7 +562,6 @@ private fun PageContextMenu(
     var sub by remember { mutableStateOf(MENU_MAIN) }
     LaunchedEffect(expanded) { if (!expanded) sub = MENU_MAIN } // always reopen on the main page
     val one = listOf(index)
-    fun menuIcon(icon: ImageVector) = @Composable { Icon(icon, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp)) }
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         when (sub) {
             MENU_ROTATE -> RotateRows({ sub = MENU_MAIN }) { turns -> onDismiss(); editor.rotatePages(one, turns) }
@@ -580,29 +577,29 @@ private fun PageContextMenu(
             else -> {
                 // The cover is only ever the first page, so only it offers these.
                 if (isCover) {
-                    DropdownMenuItem(text = { Text(stringResource(R.string.change_cover)) }, leadingIcon = menuIcon(XnotesIcons.palette), onClick = { onDismiss(); onPickCover() })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.remove_cover)) }, leadingIcon = menuIcon(XnotesIcons.trash), onClick = { editor.removeCover(); onDismiss() })
-                    HorizontalDivider(color = palette.border.toComposeColor())
+                    MenuItem(stringResource(R.string.change_cover), XnotesIcons.palette, onClick = { onDismiss(); onPickCover() })
+                    MenuItem(stringResource(R.string.remove_cover), XnotesIcons.trash, danger = true, onClick = { editor.removeCover(); onDismiss() })
+                    MenuDivider()
                 } else if (index == 0) {
-                    DropdownMenuItem(text = { Text(stringResource(R.string.add_cover_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.palette), onClick = { onDismiss(); onPickCover() })
-                    HorizontalDivider(color = palette.border.toComposeColor())
+                    MenuItem(stringResource(R.string.add_cover_ellipsis), XnotesIcons.palette, onClick = { onDismiss(); onPickCover() })
+                    MenuDivider()
                 }
-                DropdownMenuItem(text = { Text(stringResource(R.string.add_page)) }, leadingIcon = menuIcon(XnotesIcons.plus), onClick = { editor.insertPageAfter(index); onDismiss() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.insert_pdf)) }, leadingIcon = menuIcon(XnotesIcons.importDoc), onClick = { onInsertPdf(index); onDismiss() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.duplicate)) }, leadingIcon = menuIcon(XnotesIcons.duplicate), onClick = { onDismiss(); editor.duplicatePages(one) })
-                DropdownMenuItem(text = { Text(stringResource(R.string.copy)) }, leadingIcon = menuIcon(XnotesIcons.copy), onClick = { editor.copyPages(one); onDismiss() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.cut)) }, leadingIcon = menuIcon(XnotesIcons.cut), onClick = { editor.cutPages(one); onDismiss() })
+                MenuItem(stringResource(R.string.add_page), XnotesIcons.plus, onClick = { editor.insertPageAfter(index); onDismiss() })
+                MenuItem(stringResource(R.string.insert_pdf), XnotesIcons.importDoc, onClick = { onInsertPdf(index); onDismiss() })
+                MenuItem(stringResource(R.string.duplicate), XnotesIcons.duplicate, onClick = { onDismiss(); editor.duplicatePages(one) })
+                MenuItem(stringResource(R.string.copy), XnotesIcons.copy, onClick = { editor.copyPages(one); onDismiss() })
+                MenuItem(stringResource(R.string.cut), XnotesIcons.cut, onClick = { editor.cutPages(one); onDismiss() })
                 if (editor.canPastePages) {
-                    DropdownMenuItem(text = { Text(stringResource(R.string.paste)) }, leadingIcon = menuIcon(XnotesIcons.paste), onClick = { editor.pastePagesAfter(index); onDismiss() })
+                    MenuItem(stringResource(R.string.paste), XnotesIcons.paste, onClick = { editor.pastePagesAfter(index); onDismiss() })
                 }
-                DropdownMenuItem(text = { Text(stringResource(R.string.rotate_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.rotateRight), onClick = { sub = MENU_ROTATE })
-                DropdownMenuItem(text = { Text(stringResource(R.string.page_size_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.pageSize), enabled = !isPdf, onClick = { onDismiss(); onPageSize() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.extract_to_new_note)) }, leadingIcon = menuIcon(XnotesIcons.extract), onClick = { onDismiss(); onExtract(false) })
-                DropdownMenuItem(text = { Text(stringResource(R.string.move_to_new_note)) }, leadingIcon = menuIcon(XnotesIcons.moveToFolder), onClick = { onDismiss(); onExtract(true) })
-                DropdownMenuItem(text = { Text(stringResource(R.string.erase_page)) }, leadingIcon = menuIcon(XnotesIcons.eraser), onClick = { editor.erasePages(one); onDismiss() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.delete)) }, leadingIcon = menuIcon(XnotesIcons.trash), onClick = { editor.deletePages(one); onDismiss() })
-                DropdownMenuItem(text = { Text(stringResource(R.string.share_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.share), onClick = { sub = MENU_SHARE })
-                DropdownMenuItem(text = { Text(stringResource(R.string.save_as_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.download), onClick = { sub = MENU_SAVE })
+                MenuItem(stringResource(R.string.rotate_ellipsis), XnotesIcons.rotateRight, more = true, onClick = { sub = MENU_ROTATE })
+                MenuItem(stringResource(R.string.page_size_ellipsis), XnotesIcons.pageSize, enabled = !isPdf, onClick = { onDismiss(); onPageSize() })
+                MenuItem(stringResource(R.string.extract_to_new_note), XnotesIcons.extract, onClick = { onDismiss(); onExtract(false) })
+                MenuItem(stringResource(R.string.move_to_new_note), XnotesIcons.moveToFolder, onClick = { onDismiss(); onExtract(true) })
+                MenuItem(stringResource(R.string.erase_page), XnotesIcons.eraser, danger = true, onClick = { editor.erasePages(one); onDismiss() })
+                MenuItem(stringResource(R.string.delete), XnotesIcons.trash, danger = true, onClick = { editor.deletePages(one); onDismiss() })
+                MenuItem(stringResource(R.string.share_ellipsis), XnotesIcons.share, more = true, onClick = { sub = MENU_SHARE })
+                MenuItem(stringResource(R.string.save_as_ellipsis), XnotesIcons.download, more = true, onClick = { sub = MENU_SAVE })
             }
         }
     }
@@ -640,10 +637,9 @@ private fun ExtractDialog(editor: Editor, indices: List<Int>, move: Boolean, onD
 @Composable
 private fun PageFormatRows(share: Boolean, onBack: () -> Unit, onPick: (image: Boolean) -> Unit) {
     val palette = LocalPalette.current
-    fun menuIcon(icon: ImageVector) = @Composable { Icon(icon, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp)) }
-    DropdownMenuItem(text = { Text(stringResource(if (share) R.string.back_share_as else R.string.back_save_as)) }, onClick = onBack)
-    DropdownMenuItem(text = { Text(stringResource(R.string.image_png)) }, leadingIcon = menuIcon(XnotesIcons.image), onClick = { onPick(true) })
-    DropdownMenuItem(text = { Text("PDF") }, leadingIcon = menuIcon(XnotesIcons.exportDoc), onClick = { onPick(false) })
+    MenuBack(stringResource(if (share) R.string.back_share_as else R.string.back_save_as), onBack)
+    MenuItem(stringResource(R.string.image_png), XnotesIcons.image, onClick = { onPick(true) })
+    MenuItem("PDF", XnotesIcons.pdfFile, onClick = { onPick(false) })
 }
 
 /**
@@ -694,7 +690,6 @@ private fun PageSelectionMore(
     var extracting by remember { mutableStateOf<Pair<List<Int>, Boolean>?>(null) }
     LaunchedEffect(open) { if (!open) sub = MENU_MAIN }
     extracting?.let { (picked, move) -> ExtractDialog(editor, picked, move) { extracting = null } }
-    fun menuIcon(icon: ImageVector) = @Composable { Icon(icon, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp)) }
     fun close() { open = false }
     sizing?.let { initial ->
         PageSizeDialog(initial, onApply = { sizing = null; editor.resizePages(editor.selectedPageIndices(), it) }) { sizing = null }
@@ -715,30 +710,25 @@ private fun PageSelectionMore(
                     }
                 }
                 else -> {
-                    DropdownMenuItem(text = { Text(stringResource(R.string.cut)) }, leadingIcon = menuIcon(XnotesIcons.cut), onClick = { close(); editor.cutPages(editor.selectedPageIndices()) })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.duplicate)) }, leadingIcon = menuIcon(XnotesIcons.duplicate), onClick = { close(); editor.duplicatePages(editor.selectedPageIndices()) })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.rotate_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.rotateRight), onClick = { sub = MENU_ROTATE })
+                    MenuItem(stringResource(R.string.cut), XnotesIcons.cut, onClick = { close(); editor.cutPages(editor.selectedPageIndices()) })
+                    MenuItem(stringResource(R.string.duplicate), XnotesIcons.duplicate, onClick = { close(); editor.duplicatePages(editor.selectedPageIndices()) })
+                    MenuItem(stringResource(R.string.rotate_ellipsis), XnotesIcons.rotateRight, more = true, onClick = { sub = MENU_ROTATE })
                     val plain = editor.selectedPagesInOrder().firstOrNull { it.pdfPage == null }
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.page_size_ellipsis)) },
-                        leadingIcon = menuIcon(XnotesIcons.pageSize),
-                        enabled = plain != null,
-                        onClick = {
-                            close()
-                            sizing = plain?.let { editor.pageSizeChoice(editor.pageIndexOf(it)) }
-                        },
-                    )
-                    DropdownMenuItem(text = { Text(stringResource(R.string.erase)) }, leadingIcon = menuIcon(XnotesIcons.eraser), onClick = { close(); editor.erasePages(editor.selectedPageIndices()) })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.extract_to_new_note)) }, leadingIcon = menuIcon(XnotesIcons.extract), onClick = {
+                    MenuItem(stringResource(R.string.page_size_ellipsis), XnotesIcons.pageSize, enabled = plain != null, onClick = {
+                        close()
+                        sizing = plain?.let { editor.pageSizeChoice(editor.pageIndexOf(it)) }
+                    })
+                    MenuItem(stringResource(R.string.erase), XnotesIcons.eraser, danger = true, onClick = { close(); editor.erasePages(editor.selectedPageIndices()) })
+                    MenuItem(stringResource(R.string.extract_to_new_note), XnotesIcons.extract, onClick = {
                         close()
                         extracting = editor.selectedPageIndices() to false
                     })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.move_to_new_note)) }, leadingIcon = menuIcon(XnotesIcons.moveToFolder), onClick = {
+                    MenuItem(stringResource(R.string.move_to_new_note), XnotesIcons.moveToFolder, onClick = {
                         close()
                         extracting = editor.selectedPageIndices() to true
                     })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.save_as_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.download), onClick = { sub = MENU_SAVE })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.share_ellipsis)) }, leadingIcon = menuIcon(XnotesIcons.share), onClick = { sub = MENU_SHARE })
+                    MenuItem(stringResource(R.string.save_as_ellipsis), XnotesIcons.download, more = true, onClick = { sub = MENU_SAVE })
+                    MenuItem(stringResource(R.string.share_ellipsis), XnotesIcons.share, more = true, onClick = { sub = MENU_SHARE })
                 }
             }
         }
@@ -958,7 +948,6 @@ private fun BookmarksTab(editor: Editor) {
 private fun BookmarkMenu(editor: Editor, mark: com.xnotes.core.model.Bookmark, onRename: () -> Unit) {
     val palette = LocalPalette.current
     var open by remember { mutableStateOf(false) }
-    fun menuIcon(icon: ImageVector) = @Composable { Icon(icon, null, tint = palette.textDim.toComposeColor(), modifier = Modifier.size(18.dp)) }
     Box {
         Tooltip(stringResource(R.string.bookmark_options)) {
             IconButton(onClick = { open = true }) {
@@ -966,8 +955,8 @@ private fun BookmarkMenu(editor: Editor, mark: com.xnotes.core.model.Bookmark, o
             }
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(text = { Text(stringResource(R.string.rename)) }, leadingIcon = menuIcon(XnotesIcons.edit), onClick = { open = false; onRename() })
-            DropdownMenuItem(text = { Text(stringResource(R.string.delete)) }, leadingIcon = menuIcon(XnotesIcons.trash), onClick = { open = false; editor.removeBookmark(mark) })
+            MenuItem(stringResource(R.string.rename), XnotesIcons.edit, onClick = { open = false; onRename() })
+            MenuItem(stringResource(R.string.delete), XnotesIcons.trash, danger = true, onClick = { open = false; editor.removeBookmark(mark) })
         }
     }
 }

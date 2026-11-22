@@ -788,7 +788,7 @@
     <string name="page_size_ellipsis">Page size…</string>
     <string name="apply">Apply</string>
     <string name="pdf_pages_keep_size">PDF pages keep their own size.</string>
-    <string name="back_rotate">"‹  Rotate"</string>
+    <string name="back_rotate">Rotate</string>
     <string name="rotate_right">Right</string>
     <string name="rotate_left">Left</string>
     <string name="rotate_upside_down">Upside down</string>
@@ -813,9 +813,9 @@
     <string name="bookmarks">Bookmarks</string>
     <string name="selected">Selected</string>
     <string name="page_options">Page options</string>
-    <string name="back_share_as">"‹  Share as"</string>
+    <string name="back_share_as">Share as</string>
     <string name="image_png">Image (PNG)</string>
-    <string name="back_save_as">"‹  Save as"</string>
+    <string name="back_save_as">Save as</string>
     <string name="add_page">Add page</string>
     <string name="insert_pdf">Insert PDF</string>
     <string name="erase_page">Erase page</string>

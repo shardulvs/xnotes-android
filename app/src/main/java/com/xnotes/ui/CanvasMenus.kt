@@ -26,7 +26,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.GridOff
 import androidx.compose.material.icons.outlined.TableChart
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -253,7 +252,7 @@ fun SelectionMenu(
                     properties = PopupProperties(focusable = false),
                 ) {
                     for ((how, label) in ARRANGE_ROWS) {
-                        DropdownMenuItem(text = { Text(stringResource(label)) }, onClick = { arrangeOpen = false; host.arrange(how) })
+                        MenuItem(stringResource(label), onClick = { arrangeOpen = false; host.arrange(how) })
                     }
                 }
             }
@@ -267,85 +266,47 @@ fun SelectionMenu(
                 ) {
                     // A lone recording's own actions come first.
                     if (audio != null) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.rename)) },
-                            onClick = { overflowOpen = false; renamingAudio = audio },
-                        )
+                        MenuItem(stringResource(R.string.rename), XnotesIcons.edit) { overflowOpen = false; renamingAudio = audio }
                         onSaveAudio?.let { save ->
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.audio_save)) },
-                                onClick = { overflowOpen = false; save(audio) },
-                            )
+                            MenuItem(stringResource(R.string.audio_save), XnotesIcons.download) { overflowOpen = false; save(audio) }
                         }
                         onShareAudio?.let { share ->
-                            DropdownMenuItem(
-                                text = { Text(stringResource(R.string.audio_share)) },
-                                onClick = { overflowOpen = false; share(audio) },
-                            )
+                            MenuItem(stringResource(R.string.audio_share), XnotesIcons.share) { overflowOpen = false; share(audio) }
                         }
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.audio_unlink)) },
-                            onClick = { overflowOpen = false; host.unlinkSelectedAudio() },
-                        )
-                        androidx.compose.material3.HorizontalDivider(color = palette.border.toComposeColor())
+                        MenuItem(stringResource(R.string.audio_unlink), XnotesIcons.unlink) { overflowOpen = false; host.unlinkSelectedAudio() }
+                        MenuDivider()
                     }
                     // Empty when nothing selected carries ink or a fill: an image or a text box has
                     // no colour-and-width pair to restyle.
                     val styles = host.selectionStyles()
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.change_style)) },
-                        enabled = styles.isNotEmpty() || host.selectionFills().isNotEmpty(),
-                        onClick = { overflowOpen = false; styleOpen = true },
-                    )
+                    MenuItem(stringResource(R.string.change_style), XnotesIcons.palette, enabled = styles.isNotEmpty() || host.selectionFills().isNotEmpty()) {
+                        overflowOpen = false; styleOpen = true
+                    }
                     if (host.canLabelSelection()) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.shape_label)) },
-                            onClick = { overflowOpen = false; host.labelSelection() },
-                        )
+                        MenuItem(stringResource(R.string.shape_label), XnotesIcons.text) { overflowOpen = false; host.labelSelection() }
                     }
                     if (host.canRerouteSelection()) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.connector_reroute)) },
-                            onClick = { overflowOpen = false; host.rerouteSelection() },
-                        )
+                        MenuItem(stringResource(R.string.connector_reroute), XnotesIcons.magicWand) { overflowOpen = false; host.rerouteSelection() }
                     }
                     val mirrors = host.canMirrorSelection()
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.mirror_left_right)) },
-                        enabled = mirrors,
-                        onClick = { overflowOpen = false; host.mirrorSelection(upsideDown = false) },
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.mirror_upside_down)) },
-                        enabled = mirrors,
-                        onClick = { overflowOpen = false; host.mirrorSelection(upsideDown = true) },
-                    )
+                    MenuItem(stringResource(R.string.mirror_left_right), XnotesIcons.flipHorizontal, enabled = mirrors) {
+                        overflowOpen = false; host.mirrorSelection(upsideDown = false)
+                    }
+                    MenuItem(stringResource(R.string.mirror_upside_down), XnotesIcons.flipVertical, enabled = mirrors) {
+                        overflowOpen = false; host.mirrorSelection(upsideDown = true)
+                    }
                     if (host.canGroupSelection()) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.group)) },
-                            onClick = { overflowOpen = false; host.groupSelection() },
-                        )
+                        MenuItem(stringResource(R.string.group), XnotesIcons.group) { overflowOpen = false; host.groupSelection() }
                     }
                     if (host.canUngroupSelection()) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.ungroup)) },
-                            onClick = { overflowOpen = false; host.ungroupSelection() },
-                        )
+                        MenuItem(stringResource(R.string.ungroup), XnotesIcons.ungroup) { overflowOpen = false; host.ungroupSelection() }
                     }
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.copy_as_image)) },
-                        onClick = { overflowOpen = false; host.copySelectionAsImage() },
-                    )
+                    MenuItem(stringResource(R.string.lock), XnotesIcons.lock) { overflowOpen = false; host.lockSelection() }
+                    MenuDivider()
+                    MenuItem(stringResource(R.string.copy_as_image), XnotesIcons.image) { overflowOpen = false; host.copySelectionAsImage() }
                     onShareImage?.let { share ->
-                        DropdownMenuItem(
-                            text = { Text(stringResource(R.string.share_as_image)) },
-                            onClick = { overflowOpen = false; host.selectionImageForShare()?.let(share) },
-                        )
+                        MenuItem(stringResource(R.string.share_as_image), XnotesIcons.share) { overflowOpen = false; host.selectionImageForShare()?.let(share) }
                     }
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.lock)) },
-                        onClick = { overflowOpen = false; host.lockSelection() },
-                    )
                 }
                 if (styleOpen) {
                     // Closing settles any preview the slider left open.
@@ -673,24 +634,16 @@ fun LongPressMenu(host: LongPressMenuHost, onInsertImageAt: (com.xnotes.core.geo
         DropdownMenu(expanded = true, onDismissRequest = { host.dismissContextMenu() }) {
             val locked = target.locked
             if (locked != null) {
-                DropdownMenuItem(text = { Text(stringResource(R.string.unlock)) }, onClick = {
-                    host.unlockItem(locked); host.dismissContextMenu()
-                })
+                MenuItem(stringResource(R.string.unlock), XnotesIcons.unlock) { host.unlockItem(locked); host.dismissContextMenu() }
                 return@DropdownMenu
             }
             if (host.hasClipboardItems) {
-                DropdownMenuItem(text = { Text(stringResource(R.string.paste_here)) }, onClick = {
-                    host.pasteItemsAt(target.content); host.dismissContextMenu()
-                })
+                MenuItem(stringResource(R.string.paste_here), XnotesIcons.paste) { host.pasteItemsAt(target.content); host.dismissContextMenu() }
             }
             if (host.clipboardHasImage) {
-                DropdownMenuItem(text = { Text(stringResource(R.string.paste_image)) }, onClick = {
-                    host.pasteClipboardImageAt(target.content); host.dismissContextMenu()
-                })
+                MenuItem(stringResource(R.string.paste_image), XnotesIcons.image) { host.pasteClipboardImageAt(target.content); host.dismissContextMenu() }
             }
-            DropdownMenuItem(text = { Text(stringResource(R.string.insert_image_ellipsis)) }, onClick = {
-                onInsertImageAt(target.content); host.dismissContextMenu()
-            })
+            MenuItem(stringResource(R.string.insert_image_ellipsis), XnotesIcons.plus) { onInsertImageAt(target.content); host.dismissContextMenu() }
         }
     }
 }
@@ -746,13 +699,13 @@ fun FlowEditMenu(editor: Editor) {
                     onDismissRequest = { pasteOpen = false },
                     properties = PopupProperties(focusable = false),
                 ) {
-                    DropdownMenuItem(text = { Text(stringResource(R.string.paste)) }, onClick = {
+                    MenuItem(stringResource(R.string.paste), onClick = {
                         pasteOpen = false; editor.pastePlainAtCaret(); editor.dismissFlowContextMenu()
                     })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.paste_markdown)) }, onClick = {
+                    MenuItem(stringResource(R.string.paste_markdown), onClick = {
                         pasteOpen = false; editor.pasteMarkdownAtCaret(); editor.dismissFlowContextMenu()
                     })
-                    DropdownMenuItem(text = { Text(stringResource(R.string.paste_code)) }, onClick = {
+                    MenuItem(stringResource(R.string.paste_code), onClick = {
                         pasteOpen = false; editor.pasteAsCodeAtCaret(); editor.dismissFlowContextMenu()
                     })
                 }
@@ -813,7 +766,7 @@ fun PdfSelectionMenu(editor: Editor) {
                         properties = PopupProperties(focusable = false),
                     ) {
                         for ((label, app) in actions) {
-                            DropdownMenuItem(text = { Text(label) }, onClick = {
+                            MenuItem(label, onClick = {
                                 overflowOpen = false
                                 editor.processPdfText(app)
                             })
@@ -882,7 +835,8 @@ fun MarkupMenu(editor: Editor) {
                     for ((type, icon, label) in PDF_MARKS) {
                         DropdownMenuItem(
                             text = { Text(stringResource(label)) },
-                            leadingIcon = { Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                            leadingIcon = { Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                            selected = type == m.type,
                             onClick = {
                                 kindsOpen = false
                                 if (type != m.type) editor.retypeMarkup(type)

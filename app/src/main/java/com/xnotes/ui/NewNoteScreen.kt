@@ -46,8 +46,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -711,7 +709,7 @@ internal fun NewNoteScreen(
                     fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 )
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text(stringResource(R.string.remove_template)) }, onClick = { menu = false; onRemove?.invoke() })
+                    MenuItem(stringResource(R.string.remove_template), XnotesIcons.trash, danger = true, onClick = { menu = false; onRemove?.invoke() })
                 }
             }
         }
