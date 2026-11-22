@@ -34,16 +34,9 @@
     <string name="toolbar_sidebar">侧边栏</string>
     <string name="undo">撤销</string>
     <string name="redo">重做</string>
-    <string name="toolbar_page_nav">页面导航</string>
-    <string name="toolbar_styles">样式</string>
-    <string name="toolbar_margins">页边距</string>
     <string name="toolbar_view">视图</string>
-    <string name="toolbar_zoom">缩放</string>
-    <string name="toolbar_fit">适应</string>
-    <string name="toolbar_zoom_lock">缩放锁定</string>
     <string name="toolbar_fullscreen">全屏</string>
     <string name="toolbar_colours">颜色</string>
-    <string name="toolbar_waypoints">保存的视图</string>
     <string name="toolbar_minimap">小地图</string>
     <string name="edge_left">左侧</string>
     <string name="edge_right">右侧</string>
@@ -111,7 +104,6 @@
     <string name="caption_autoscroll">自动滚动</string>
     <string name="caption_autoscroll_speed">速度</string>
     <string name="caption_pdf_filters">PDF 颜色滤镜</string>
-    <string name="adjust">调整</string>
     <string name="filter_contrast">对比度</string>
     <string name="filter_invert">反色</string>
     <string name="filter_brightness">亮度</string>
@@ -282,7 +274,6 @@
     <string name="caption_dashed">虚线笔</string>
     <string name="default_suffix">"  (默认)"</string>
     <string name="caption_opacity_percent">"不透明度  %1$d%%"</string>
-    <string name="caption_rotate_degrees">"旋转  %1$d°"</string>
     <string name="caption_glow_intensity">发光强度</string>
 
     <!-- Toolbar -->
@@ -303,9 +294,6 @@
     <string name="no_stickers">尚无贴纸。</string>
     <string name="stickers_hint">点按插入，长按移除</string>
     <string name="sticker">贴纸</string>
-    <string name="fit_page">显示完整页面</string>
-    <string name="fit_width">适应页面宽度</string>
-    <string name="fit_height">适应页面高度</string>
     <string name="err_rename_note">无法重命名笔记。</string>
     <string name="untitled">未命名</string>
     <string name="insert_image">插入图片</string>

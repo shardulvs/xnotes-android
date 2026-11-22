@@ -42,16 +42,9 @@
     <string name="toolbar_sidebar">Sidebar</string>
     <string name="undo">Undo</string>
     <string name="redo">Redo</string>
-    <string name="toolbar_page_nav">Page nav</string>
-    <string name="toolbar_styles">Styles</string>
-    <string name="toolbar_margins">Margins</string>
     <string name="toolbar_view">View</string>
-    <string name="toolbar_zoom">Zoom</string>
-    <string name="toolbar_fit">Fit</string>
-    <string name="toolbar_zoom_lock">Zoom lock</string>
     <string name="toolbar_fullscreen">Full screen</string>
     <string name="toolbar_colours">Colours</string>
-    <string name="toolbar_waypoints">Waypoints</string>
     <string name="toolbar_minimap">Minimap</string>
     <string name="settings">Settings</string>
     <string name="back">Back</string>
@@ -134,7 +127,6 @@
     <string name="caption_template">Template</string>
     <string name="caption_accent_colour">Accent colour</string>
     <string name="customize">Customize</string>
-    <string name="back_customize">"‹  Customize"</string>
     <string name="import_template">Import</string>
     <string name="remove_template">Remove from library</string>
     <string name="keep_template">Add to library</string>
@@ -156,7 +148,6 @@
     <string name="caption_autoscroll">Autoscroll</string>
     <string name="caption_autoscroll_speed">Speed</string>
     <string name="caption_pdf_filters">PDF colour filters</string>
-    <string name="adjust">Adjust</string>
     <string name="filter_contrast">Contrast</string>
     <string name="filter_invert">Invert</string>
     <string name="filter_brightness">Brightness</string>
@@ -327,8 +318,6 @@
     <string name="caption_dashed">Dashed</string>
     <string name="default_suffix">"  (default)"</string>
     <string name="caption_opacity_percent">"Opacity  %1$d%%"</string>
-    <string name="caption_value_percent">"%1$s  %2$d%%"</string>
-    <string name="caption_rotate_degrees">"Rotate  %1$d°"</string>
     <string name="caption_glow_intensity">Intensity</string>
 
     <!-- Toolbar -->
@@ -348,9 +337,6 @@
     <string name="no_stickers">No stickers yet.</string>
     <string name="stickers_hint">Tap to insert, hold to remove</string>
     <string name="sticker">Sticker</string>
-    <string name="fit_page">Fit whole page</string>
-    <string name="fit_width">Fit page width</string>
-    <string name="fit_height">Fit page height</string>
     <string name="err_rename_note">Couldn’t rename the note.</string>
     <string name="untitled">Untitled</string>
     <string name="insert_image">Insert image</string>

@@ -190,9 +190,6 @@ private fun ToolbarItemView(
     onTakePhoto: () -> Unit,
 ) {
     when (item) {
-        // Canvas-only items; a stored paged layout can never hold one, so nothing is drawn.
-        ToolbarItem.WAYPOINTS, ToolbarItem.MINIMAP, ToolbarItem.STYLES, ToolbarItem.ZOOM, ToolbarItem.FIT, ToolbarItem.ZOOM_LOCK -> Unit
-
         ToolbarItem.HOME -> ToolbarIcon(XnotesIcons.prev, stringResource(R.string.toolbar_home)) { onOpenBackstage() }
         // A name has no room down a side rail.
         ToolbarItem.TITLE -> if (!LocalBar.current.vertical) Tooltip(stringResource(R.string.rename_note)) {

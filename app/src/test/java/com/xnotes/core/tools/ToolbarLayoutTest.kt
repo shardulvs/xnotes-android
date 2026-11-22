@@ -194,11 +194,18 @@ class ToolbarLayoutTest {
         assertEquals(ToolbarLayout.CANVAS_ITEMS.size, items.size)
     }
 
-    @Test fun theTwoBarsDoNotShareTheirOwnItems() {
-        assertTrue(ToolbarItem.WAYPOINTS !in ToolbarLayout.NOTE_ITEMS)
-        assertTrue(ToolbarItem.MINIMAP !in ToolbarLayout.NOTE_ITEMS)
+    @Test fun theCanvasBarHoldsNoPageTools() {
         assertTrue(ToolbarItem.RULER !in ToolbarLayout.CANVAS_ITEMS)
         assertTrue(ToolbarItem.TEXT !in ToolbarLayout.CANVAS_ITEMS)
+        assertTrue(ToolbarLayout.NOTE_ITEMS.containsAll(ToolbarLayout.CANVAS_ITEMS))
+    }
+
+    @Test fun aStoredCanvasBarLosesItsViewItems() {
+        val old = listOf("styles", "waypoints", "minimap", "zoom", "fit", "zoom_lock")
+        val raw = ToolbarLayout.CANVAS_DEFAULT.toRaw() + listOf(old.map { it to true })
+        val back = ToolbarLayout.fromRaw(raw, ToolbarLayout.CANVAS_ITEMS, ToolbarLayout.CANVAS_DEFAULT)
+        assertEquals(ToolbarLayout.CANVAS_ITEMS, back.items().toSet())
+        assertTrue(back.items().none { it.id in old })
     }
 
     @Test fun theCanvasDefaultRoundTripsThroughRaw() {
@@ -224,10 +231,10 @@ class ToolbarLayoutTest {
 
     @Test fun aCanvasLayoutStoredBeforeAnItemExistedGrowsIt() {
         val raw = ToolbarLayout.CANVAS_DEFAULT.toRaw()
-            .map { s -> s.filterNot { it.first == ToolbarItem.MINIMAP.id } }
+            .map { s -> s.filterNot { it.first == ToolbarItem.IMAGE.id } }
         val back = ToolbarLayout.fromRaw(raw, ToolbarLayout.CANVAS_ITEMS, ToolbarLayout.CANVAS_DEFAULT)
         assertEquals(ToolbarLayout.CANVAS_ITEMS, back.items().toSet())
-        assertTrue(back.sections.last().entries.any { it.item == ToolbarItem.MINIMAP && it.visible })
+        assertTrue(back.sections.last().entries.any { it.item == ToolbarItem.IMAGE && it.visible })
     }
 
     @Test fun anEmptyCanvasLayoutFallsBackToTheCanvasDefault() {
