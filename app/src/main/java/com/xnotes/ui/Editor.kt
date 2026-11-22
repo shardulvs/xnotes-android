@@ -2216,16 +2216,21 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             if (slice != null) {
                 val rx = (slice.left * res).toInt()
                 val ry = (slice.top * res).toInt()
-                val rw = kotlin.math.ceil(slice.w * res).toInt()
-                val rh = kotlin.math.ceil(slice.h * res).toInt()
+                val rw = kotlin.math.ceil(slice.right * res).toInt() - rx
+                val rh = kotlin.math.ceil(slice.bottom * res).toInt() - ry
                 // A point is dpi/72 content px, not a fit to the paper: older imports stored whole
                 // points, so their PDF runs past the paper by under a point, cropped as before.
                 val pxPerPt = res * state.document.dpi / 72.0
                 src.renderRegion(pi, pxPerPt, rx, ry, rw, rh, pdfPageFilter(), markups)?.let { bg ->
+                    // Where those whole pixels lie: drawn there, two slices of a page meet with no seam.
+                    val at = Rect(rx / res, ry / res, rw / res, rh / res)
                     if (banded) {
-                        com.xnotes.core.model.Rooms.drawBanded(renderer, bg, Rect(rx / res, ry / res, rw / res, rh / res), page.rooms, sw, sh)
+                        com.xnotes.core.model.Rooms.drawBanded(renderer, bg, at, page.rooms, sw, sh)
                     } else {
-                        renderer.drawRaster(bg, slice)
+                        renderer.save()
+                        renderer.clipRect(slice)
+                        renderer.drawRaster(bg, at)
+                        renderer.restore()
                     }
                     bg.recycle()
                 }
