@@ -859,7 +859,6 @@
     <string name="rows_comfortable">宽松</string>
     <string name="rows_compact">紧凑</string>
     <string name="opt_tile_size">图块大小</string>
-    <string name="pinch_hint">也可以双指缩放网格来调整图块大小</string>
     <string name="opt_place_by">文件放置依据</string>
     <string name="opt_thumbnail">缩略图</string>
     <string name="thumb_top">页面顶部</string>
@@ -870,7 +869,6 @@
     <string name="colour_code">颜色标记</string>
     <string name="opt_group_by">分组方式</string>
     <string name="view_every_folder">在所有文件夹中使用此视图</string>
-    <string name="view_every_folder_hint">关闭时：每个文件夹记住自己的视图</string>
     <string name="sort_z_to_a">Z 到 A</string>
     <string name="sort_a_to_z">A 到 Z</string>
     <string name="largest_first">从大到小</string>

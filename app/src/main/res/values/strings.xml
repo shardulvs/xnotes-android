@@ -1079,7 +1079,6 @@
     <string name="rows_comfortable">Comfortable</string>
     <string name="rows_compact">Compact</string>
     <string name="opt_tile_size">Tile size</string>
-    <string name="pinch_hint">Or pinch the grid to resize tiles</string>
     <string name="opt_place_by">Place files by</string>
     <string name="opt_thumbnail">Thumbnail</string>
     <string name="thumb_top">Top of page</string>
@@ -1090,7 +1089,6 @@
     <string name="colour_code">Colour code</string>
     <string name="opt_group_by">Group by</string>
     <string name="view_every_folder">Use this view in every folder</string>
-    <string name="view_every_folder_hint">Off: each folder remembers its own view</string>
     <string name="sort_z_to_a">Z to A</string>
     <string name="sort_a_to_z">A to Z</string>
     <string name="largest_first">Largest first</string>

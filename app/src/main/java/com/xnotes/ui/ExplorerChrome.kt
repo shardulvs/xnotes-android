@@ -26,7 +26,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Switch
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -400,7 +399,7 @@ internal fun ViewOptionsMenu(
             }
         }
         // How a file is drawn.
-        MenuCard(buildList<MenuGroup> {
+        ViewCard(buildList<MenuGroup> {
             if (layout == ExplorerLayout.LIST) {
                 add {
                     ViewChoice(stringResource(R.string.opt_rows), listOf(stringResource(R.string.rows_comfortable), stringResource(R.string.rows_compact)), if (view.compactRows) 1 else 0) {
@@ -410,10 +409,7 @@ internal fun ViewOptionsMenu(
             } else if (layout != ExplorerLayout.COLUMNS) {
                 add {
                     val sizes = TileSize.entries
-                    ViewChoice(
-                        stringResource(R.string.opt_tile_size), sizes.map { it.label }, sizes.indexOf(view.tileSize),
-                        hint = if (layout == ExplorerLayout.GRID) stringResource(R.string.pinch_hint) else null,
-                    ) { onChange(view.copy(tileSize = sizes[it])) }
+                    ViewChoice(stringResource(R.string.opt_tile_size), sizes.map { it.label }, sizes.indexOf(view.tileSize)) { onChange(view.copy(tileSize = sizes[it])) }
                 }
             }
             if (layout == ExplorerLayout.TIMELINE) {
@@ -432,7 +428,7 @@ internal fun ViewOptionsMenu(
             }
             if (layout == ExplorerLayout.GRID || layout == ExplorerLayout.GALLERY || layout == ExplorerLayout.TIMELINE) {
                 add {
-                    Column(Modifier.padding(10.dp)) {
+                    Column {
                         PanelCaption(stringResource(R.string.opt_show_on_tiles))
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             @Composable
@@ -451,7 +447,7 @@ internal fun ViewOptionsMenu(
             }
         })
         // How the files are ordered.
-        MenuCard(buildList<MenuGroup> {
+        ViewCard(buildList<MenuGroup> {
             if (layout != ExplorerLayout.COLUMNS && layout != ExplorerLayout.TIMELINE) {
                 add {
                     val groups = GroupBy.entries
@@ -463,7 +459,7 @@ internal fun ViewOptionsMenu(
             if (layout != ExplorerLayout.TIMELINE) {
                 add {
                     val keys = listOf(ExplorerSortKey.NAME to R.string.sort_name, ExplorerSortKey.MODIFIED to R.string.modified, ExplorerSortKey.CREATED to R.string.created, ExplorerSortKey.SIZE to R.string.sort_size)
-                    Column(Modifier.padding(10.dp)) {
+                    Column {
                         // The order is turned round here, or by a second tap on the chosen field.
                         PanelCaption(stringResource(R.string.sort_by)) {
                             Row(
@@ -490,28 +486,28 @@ internal fun ViewOptionsMenu(
             }
         })
         PanelCard(padding = PaddingValues(0.dp)) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable(role = Role.Switch) { onEveryFolder(!everyFolder) }
-                    .padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f).padding(end = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(stringResource(R.string.view_every_folder), color = palette.text.toComposeColor(), fontSize = 14.sp)
-                    Text(stringResource(R.string.view_every_folder_hint), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
-                }
-                Switch(checked = everyFolder, onCheckedChange = onEveryFolder)
-            }
+            PanelSwitch(stringResource(R.string.view_every_folder), everyFolder, onChange = onEveryFolder)
         }
     }
 }
 
-/** One setting of the View menu: its [label], an optional [hint] beside it, over its [options]. */
+/** A card of the View menu's settings, set apart by space alone. */
 @Composable
-private fun ViewChoice(label: String, options: List<String>, selected: Int, hint: String? = null, onSelect: (Int) -> Unit) {
-    Column(Modifier.padding(10.dp)) {
-        PanelCaption(label) { if (hint != null) CaptionHint(hint) }
+private fun ViewCard(groups: List<MenuGroup>) {
+    if (groups.isEmpty()) return
+    PanelCard(padding = PaddingValues(start = 10.dp, top = 12.dp, end = 10.dp, bottom = 12.dp)) {
+        groups.forEachIndexed { i, group ->
+            if (i > 0) Spacer(Modifier.height(16.dp))
+            group()
+        }
+    }
+}
+
+/** One setting of the View menu: its [label] over its [options]. */
+@Composable
+private fun ViewChoice(label: String, options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+    Column {
+        PanelCaption(label)
         PanelSegmented(options, selected, onSelect)
     }
 }
