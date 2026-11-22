@@ -38,6 +38,7 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -929,6 +930,7 @@ internal fun NewNoteScreen(
                         }
                         Button(
                             onClick = { create() },
+                            shape = MaterialTheme.shapes.medium,
                             // While the note is written the button stays gold and spins; create() ignores another tap.
                             enabled = if (coverOnly) hasCover else sizeOk,
                             colors = ButtonDefaults.buttonColors(containerColor = accent, contentColor = palette.onAccent.toComposeColor()),
@@ -1022,7 +1024,7 @@ internal fun NewNoteScreen(
                             ) {
                                 item(span = { GridItemSpan(maxLineSpan) }) {
                                     Column(
-                                        Modifier.fillMaxWidth().padding(top = 12.dp).background(palette.bg.toComposeColor(), RoundedCornerShape(12.dp)).padding(14.dp),
+                                        Modifier.fillMaxWidth().padding(top = 12.dp).background(palette.bg.toComposeColor(), MaterialTheme.shapes.medium).padding(14.dp),
                                         verticalArrangement = Arrangement.spacedBy(12.dp),
                                     ) {
                                         Sheets(120.dp, 170.dp)
@@ -1040,7 +1042,7 @@ internal fun NewNoteScreen(
                                 Modifier
                                     .align(Alignment.BottomCenter)
                                     .fillMaxWidth()
-                                    .background(palette.menuBg.toComposeColor(), RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+                                    .background(palette.menuBg.toComposeColor(), MaterialTheme.shapes.large.copy(bottomStart = CornerSize(0), bottomEnd = CornerSize(0)))
                                     .clickable { tuneOpen = true }
                                     .padding(horizontal = 20.dp, vertical = 16.dp),
                                 verticalAlignment = Alignment.CenterVertically,

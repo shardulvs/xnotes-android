@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -303,8 +304,8 @@ private fun PlayerPanel(session: AudioPlayback.Session, onDismiss: () -> Unit) {
                     Modifier
                         .heightIn(min = 32.dp)
                         .widthIn(min = 60.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .border(1.dp, palette.border.toComposeColor(), RoundedCornerShape(8.dp))
+                        .clip(MaterialTheme.shapes.small)
+                        .border(1.dp, palette.border.toComposeColor(), MaterialTheme.shapes.small)
                         .clickable { AudioPlayback.cycleSpeed() }
                         .semantics { contentDescription = speedLabel }
                         .padding(horizontal = 12.dp, vertical = 6.dp),

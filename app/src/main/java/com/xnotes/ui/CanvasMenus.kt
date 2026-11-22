@@ -863,7 +863,7 @@ fun MarkupNotePeek(editor: Editor) {
             }
             .widthIn(max = 300.dp)
             .heightIn(max = maxHeight)
-            .floatingBar(MaterialTheme.shapes.large)
+            .floatingBar()
             .verticalScroll(scroll)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     ) {

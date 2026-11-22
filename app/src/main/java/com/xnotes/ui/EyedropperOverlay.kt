@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -94,7 +95,7 @@ fun EyedropperOverlay() {
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(top = 72.dp)
-                    .background(palette.menuBg.toComposeColor(), RoundedCornerShape(16.dp))
+                    .background(palette.menuBg.toComposeColor(), MaterialTheme.shapes.large)
                     .padding(horizontal = 14.dp, vertical = 8.dp),
             )
         } else {

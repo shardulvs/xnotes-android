@@ -178,7 +178,7 @@ private fun DetailRow(label: String, value: String) {
 @Composable
 private fun PreviewButton(icon: ImageVector, label: String, filled: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
     val palette = LocalPalette.current
-    val shape = MaterialTheme.shapes.extraLarge
+    val shape = MaterialTheme.shapes.medium
     val fg = when {
         !enabled -> palette.textDim.toComposeColor().copy(alpha = 0.5f)
         filled -> palette.onAccent.toComposeColor()

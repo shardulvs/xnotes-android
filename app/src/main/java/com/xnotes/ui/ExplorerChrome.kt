@@ -355,7 +355,7 @@ internal fun CheckRing(selected: Boolean, modifier: Modifier = Modifier) {
 @Composable
 internal fun RowCheck(selected: Boolean, modifier: Modifier = Modifier) {
     val palette = LocalPalette.current
-    val shape = RoundedCornerShape(3.dp)
+    val shape = MaterialTheme.shapes.extraSmall
     Box(
         modifier
             .size(18.dp)

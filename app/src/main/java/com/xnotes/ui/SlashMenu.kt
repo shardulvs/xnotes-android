@@ -85,7 +85,7 @@ fun SlashMenu(editor: Editor) {
             .offset(with(density) { x.toDp() }, with(density) { y.coerceAtLeast(0f).toDp() })
             .width(MENU_WIDTH)
             .heightIn(max = ROW_HEIGHT * VISIBLE_ROWS + 8.dp)
-            .floatingBar(MaterialTheme.shapes.large)
+            .floatingBar()
             .padding(vertical = 4.dp)
             .verticalScroll(scroll),
     ) {
@@ -187,7 +187,7 @@ fun EmojiMenu(editor: Editor) {
         modifier = Modifier
             .offset(with(density) { x.toDp() }, with(density) { y.coerceAtLeast(0f).toDp() })
             .width(MENU_WIDTH)
-            .floatingBar(MaterialTheme.shapes.large)
+            .floatingBar()
             .padding(vertical = 4.dp),
     ) {
         for ((i, match) in matches.withIndex()) {

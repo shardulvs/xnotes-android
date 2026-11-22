@@ -638,9 +638,9 @@ internal fun KindChip(icon: ImageVector, label: String, selected: Boolean, onCli
     Tooltip(label) {
         Box(
             Modifier
-                .clip(MaterialTheme.shapes.extraSmall)
+                .clip(MaterialTheme.shapes.small)
                 .background(if (selected) palette.selectionBackground.toComposeColor() else palette.surface.toComposeColor())
-                .border(1.dp, if (selected) palette.accent.toComposeColor() else palette.border.toComposeColor(), MaterialTheme.shapes.extraSmall)
+                .border(1.dp, if (selected) palette.accent.toComposeColor() else palette.border.toComposeColor(), MaterialTheme.shapes.small)
                 .clickable(onClick = onClick)
                 .padding(8.dp),
         ) {
@@ -722,9 +722,9 @@ internal fun AlertDialog(
 /** A bar's icons sit this far in from its rounded ends. */
 internal val BAR_END = 4.dp
 
-/** The frame of a bar floating by what it acts on: the menus' surface as a pill, lifted off the page. */
+/** The frame of a bar or card floating by what it acts on: the menus' surface and corners, lifted off the page. */
 @Composable
-internal fun Modifier.floatingBar(shape: Shape = MaterialTheme.shapes.extraLarge): Modifier {
+internal fun Modifier.floatingBar(shape: Shape = MaterialTheme.shapes.large): Modifier {
     val palette = LocalPalette.current
     return shadow(6.dp, shape)
         .background(palette.menuBg.toComposeColor(), shape)
@@ -860,9 +860,9 @@ internal fun ModeChip(label: String, selected: Boolean, onClick: () -> Unit) {
     val palette = LocalPalette.current
     Box(
         Modifier
-            .clip(MaterialTheme.shapes.extraSmall)
+            .clip(MaterialTheme.shapes.small)
             .background(if (selected) palette.selectionBackground.toComposeColor() else palette.surface.toComposeColor())
-            .border(1.dp, if (selected) palette.accent.toComposeColor() else palette.border.toComposeColor(), MaterialTheme.shapes.extraSmall)
+            .border(1.dp, if (selected) palette.accent.toComposeColor() else palette.border.toComposeColor(), MaterialTheme.shapes.small)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 6.dp),
     ) {

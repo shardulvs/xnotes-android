@@ -158,7 +158,7 @@ internal fun ColorPickerPopup(
     }
     fun commit(c: Rgba) { applyLive(c); onPick(c) }
 
-    DropdownMenu(expanded = true, onDismissRequest = onDismiss, shape = MaterialTheme.shapes.extraLarge, containerColor = panelColors().sheet) {
+    DropdownMenu(expanded = true, onDismissRequest = onDismiss, shape = MaterialTheme.shapes.large, containerColor = panelColors().sheet) {
         // Sized text keeps material's 24sp line otherwise, which the fixed rows clip.
         ProvideTextStyle(LocalTextStyle.current.copy(lineHeight = 1.3.em)) {
             Column(Modifier.width(DIALOG_WIDTH).padding(horizontal = 10.dp, vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -203,7 +203,7 @@ private fun EyedropperButton(onClick: () -> Unit) {
         Box(
             Modifier
                 .size(36.dp)
-                .clip(MaterialTheme.shapes.medium)
+                .clip(MaterialTheme.shapes.small)
                 .background(panelColors().card)
                 .clickable(role = Role.Button, onClick = onClick),
             contentAlignment = Alignment.Center,

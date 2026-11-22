@@ -95,7 +95,7 @@ internal fun SettingsButton(open: Boolean, onOpen: (Boolean) -> Unit, content: @
     Rule()
     Box {
         ToolbarIcon(XnotesIcons.settings, stringResource(R.string.settings), active = open) { onOpen(!open) }
-        DropdownMenu(expanded = open, onDismissRequest = { onOpen(false) }, shape = MaterialTheme.shapes.extraLarge, containerColor = panelColors().sheet) {
+        DropdownMenu(expanded = open, onDismissRequest = { onOpen(false) }, shape = MaterialTheme.shapes.large, containerColor = panelColors().sheet) {
             // Sized text keeps material's 24sp line otherwise, which the panel's fixed rows and tiles clip.
             ProvideTextStyle(LocalTextStyle.current.copy(lineHeight = 1.3.em)) {
                 Column(Modifier.width(PANEL_WIDTH).padding(horizontal = 12.dp, vertical = 4.dp), content = content)
@@ -129,7 +129,7 @@ internal fun PanelCard(
     Column(
         modifier
             .fillMaxWidth()
-            .clip(MaterialTheme.shapes.large)
+            .clip(MaterialTheme.shapes.medium)
             .background(panelColors().card)
             .padding(padding),
         content = content,
@@ -243,7 +243,7 @@ internal fun PanelSegmented(
     segment: @Composable (index: Int, on: Boolean) -> Unit,
 ) {
     val palette = LocalPalette.current
-    val outer = MaterialTheme.shapes.medium
+    val outer = if (sunken) MaterialTheme.shapes.small else MaterialTheme.shapes.medium
     val inner = outer.nested(3.dp, LocalDensity.current)
     Row(
         Modifier
@@ -387,7 +387,7 @@ internal fun QuickTile(
     Column(
         modifier
             .height(92.dp)
-            .clip(MaterialTheme.shapes.large)
+            .clip(MaterialTheme.shapes.medium)
             .background(if (active) palette.selectionBackground.toComposeColor() else panelColors().card)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(start = 14.dp, top = 14.dp, end = 12.dp, bottom = 13.dp),
@@ -405,7 +405,7 @@ internal fun QuickTile(
 @Composable
 internal fun ZoomStepper(percent: Int, enabled: Boolean, onOut: () -> Unit, onIn: () -> Unit, modifier: Modifier = Modifier) {
     val palette = LocalPalette.current
-    val shape = MaterialTheme.shapes.medium
+    val shape = MaterialTheme.shapes.small
     val tint = (if (enabled) palette.text else palette.disabled).toComposeColor()
     Row(
         modifier
@@ -445,7 +445,7 @@ internal fun ZoomStepper(percent: Int, enabled: Boolean, onOut: () -> Unit, onIn
 @Composable
 internal fun ZoomLockButton(locked: Boolean, onToggle: () -> Unit) {
     val palette = LocalPalette.current
-    val shape = MaterialTheme.shapes.medium
+    val shape = MaterialTheme.shapes.small
     val label = stringResource(if (locked) R.string.unlock_zoom else R.string.lock_zoom)
     Tooltip(label) {
         Box(
@@ -490,7 +490,7 @@ internal fun FitTile(label: String, modifier: Modifier = Modifier, enabled: Bool
         Column(
             Modifier
                 .height(62.dp)
-                .clip(MaterialTheme.shapes.medium)
+                .clip(MaterialTheme.shapes.small)
                 .background(panelColors().raised)
                 .clickable(enabled = enabled, role = Role.Button, onClick = onClick),
             horizontalAlignment = Alignment.CenterHorizontally,

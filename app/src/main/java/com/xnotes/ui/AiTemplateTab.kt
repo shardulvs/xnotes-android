@@ -141,6 +141,7 @@ internal fun AiTemplateTab(coversOnly: Boolean, wide: Boolean, onImport: () -> U
                 val done = copied == GUIDE
                 FilledTonalButton(
                     onClick = { guide?.let { copy(GUIDE, String(it, Charsets.UTF_8)) } },
+                    shape = MaterialTheme.shapes.medium,
                     enabled = guide != null,
                     colors = ButtonDefaults.filledTonalButtonColors(
                         containerColor = palette.selectionBackground.toComposeColor(),

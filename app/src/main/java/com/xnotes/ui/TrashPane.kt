@@ -107,7 +107,7 @@ internal fun TrashPane(editor: Editor, sidebarOpen: Boolean, onShowSidebar: () -
                 Text(stringResource(R.string.trash), color = palette.text.toComposeColor(), fontWeight = FontWeight.Bold, fontSize = 20.sp, maxLines = 1, modifier = Modifier.weight(1f))
                 ExplorerSearchField(query, { query = it }, expandedWidth = searchRoom.coerceIn(40.dp, 300.dp))
                 Spacer(Modifier.width(12.dp))
-                val shape = MaterialTheme.shapes.extraLarge
+                val shape = MaterialTheme.shapes.medium
                 val enabled = !busy && !items.isNullOrEmpty()
                 Row(
                     Modifier.onSizeChanged { emptyWidth = with(density) { it.width.toDp() } }

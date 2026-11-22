@@ -138,7 +138,7 @@ internal fun ToolbarFrame(
     val bar = barMetrics(look.size).copy(vertical = look.position.vertical)
     val glide = remember { ToolGlide() }
     val palette = LocalPalette.current
-    val shape = MaterialTheme.shapes.extraLarge
+    val shape = MaterialTheme.shapes.large
     // Docked, the strip fills its edge; floating, a pill only as long as its tools, up to that edge.
     val surface = if (!look.floating) {
         Modifier.background(palette.panel.toComposeColor())

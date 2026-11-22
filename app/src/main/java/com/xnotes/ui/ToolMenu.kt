@@ -73,7 +73,7 @@ internal fun ToolMenu(
         expanded = true,
         onDismissRequest = onDismiss,
         properties = PopupProperties(focusable = focusable),
-        shape = MaterialTheme.shapes.extraLarge,
+        shape = MaterialTheme.shapes.large,
         containerColor = panelColors().sheet,
     ) {
         // Sized text keeps material's 24sp line otherwise, which the fixed rows clip.
@@ -285,7 +285,7 @@ internal fun MenuAction(label: String, icon: ImageVector, modifier: Modifier = M
     Row(
         modifier
             .height(44.dp)
-            .clip(MaterialTheme.shapes.large)
+            .clip(MaterialTheme.shapes.medium)
             .background(panelColors().card)
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 10.dp),

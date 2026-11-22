@@ -889,7 +889,7 @@ internal fun ColorOrNone(
     var open by remember { mutableStateOf(false) }
     val on = value != null
     val shown = value ?: kept ?: suggested
-    val outer = MaterialTheme.shapes.medium
+    val outer = MaterialTheme.shapes.small
     val inner = outer.nested(3.dp, LocalDensity.current)
     val chosen = palette.selectionBackground.toComposeColor()
     val onChosen = palette.selectionForeground.toComposeColor()

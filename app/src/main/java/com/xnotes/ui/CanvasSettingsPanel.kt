@@ -227,7 +227,7 @@ private fun CanvasStylesPage(editor: InfiniteEditor, onBack: () -> Unit) {
 @Composable
 private fun PatternCard(p: PagePattern, bg: CanvasBackground, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val palette = LocalPalette.current
-    val shape = MaterialTheme.shapes.large
+    val shape = MaterialTheme.shapes.medium
     val paper = bg.paperColor?.toComposeColor() ?: palette.paper.toComposeColor()
     // The swatch shows the ruling plainly, whatever opacity the canvas uses.
     val ink = bg.patternColor.copy(a = maxOf(bg.patternColor.a, 150)).toComposeColor()
@@ -289,7 +289,7 @@ private fun WaypointsPage(editor: InfiniteEditor, onJumped: () -> Unit, onBack: 
     Spacer(Modifier.height(16.dp))
     PanelCaption(stringResource(R.string.caption_save_view))
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        val shape = MaterialTheme.shapes.medium
+        val shape = MaterialTheme.shapes.small
         Box(
             Modifier
                 .weight(1f)

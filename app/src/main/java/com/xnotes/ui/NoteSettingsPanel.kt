@@ -200,7 +200,7 @@ private fun PageCard(editor: Editor) {
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             RoundButton(XnotesIcons.prev, stringResource(R.string.previous_page)) { editor.prevPage() }
-            val shape = MaterialTheme.shapes.medium
+            val shape = MaterialTheme.shapes.small
             Row(
                 Modifier
                     .weight(1f)
@@ -568,7 +568,7 @@ private fun NewPageSize(editor: Editor) {
 private fun SizeField(size: PageSize?, unset: String, modifier: Modifier, onSelect: (PageSize?) -> Unit) {
     val palette = LocalPalette.current
     var expanded by remember { mutableStateOf(false) }
-    val shape = MaterialTheme.shapes.medium
+    val shape = MaterialTheme.shapes.small
     Box(modifier) {
         Row(
             Modifier
@@ -619,7 +619,7 @@ private fun CustomizePage(editor: Editor, s: StylesState, onBack: () -> Unit) {
     Spacer(Modifier.height(12.dp))
     val drawn = TemplateDrawing.of(t, style.settings, v.lower?.settings, look.paper, dpi)
     Box(
-        Modifier.fillMaxWidth().clip(MaterialTheme.shapes.large).background(palette.bg.toComposeColor()).padding(vertical = 14.dp),
+        Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).background(palette.bg.toComposeColor()).padding(vertical = 14.dp),
         contentAlignment = Alignment.Center,
     ) {
         TemplatePreview(t, v.shownKey, editor.currentPageMm, drawn.look.ink, drawn.look.accent, drawn.look.paper, drawn.values, 112.dp)
@@ -771,7 +771,7 @@ private fun DrawScope.marginPage(area: Rect, aspect: Float, f: FloatArray, ink: 
 @Composable
 private fun EdgePicker(aspect: Float, fractions: FloatArray, selected: PageEdge, ink: MarginInk, label: @Composable (PageEdge) -> String, onPick: (PageEdge) -> Unit) {
     val palette = LocalPalette.current
-    val shape = MaterialTheme.shapes.large
+    val shape = MaterialTheme.shapes.medium
     Box(
         Modifier
             .fillMaxWidth()
@@ -911,7 +911,7 @@ private fun filtersSummary(vs: ViewSettings): String {
 @Composable
 private fun ModeCard(mode: ViewingMode, label: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val palette = LocalPalette.current
-    val shape = MaterialTheme.shapes.large
+    val shape = MaterialTheme.shapes.medium
     val fill = if (selected) palette.selectionForeground.toComposeColor() else panelColors().raised
     val line = (if (selected) palette.selectionForeground else palette.textDim).toComposeColor()
     Column(
@@ -1056,7 +1056,7 @@ private fun LimitRow(label: String, enabled: Boolean, value: Int, onToggle: (Boo
     val palette = LocalPalette.current
     val color = (if (enabled) palette.text else palette.textDim).toComposeColor()
     val tint = (if (enabled) palette.text else palette.disabled).toComposeColor()
-    val shape = MaterialTheme.shapes.medium
+    val shape = MaterialTheme.shapes.small
     Row(Modifier.fillMaxWidth().height(60.dp).padding(start = 16.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = color, fontSize = 14.sp, modifier = Modifier.weight(1f))
         Row(

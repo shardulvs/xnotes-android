@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -205,7 +206,7 @@ private fun Toggle(label: String, description: String, on: Boolean, onToggle: ()
             Modifier
                 .size(32.dp)
                 .padding(3.dp)
-                .clip(RoundedCornerShape(6.dp))
+                .clip(MaterialTheme.shapes.small)
                 .background(if (on) palette.selectionBackground.toComposeColor() else Color.Transparent)
                 .toggleable(value = on, role = Role.Checkbox, onValueChange = { onToggle() })
                 .semantics { contentDescription = description },
@@ -307,7 +308,7 @@ private fun MatchRow(hit: SearchHit, current: Boolean, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 6.dp, vertical = 1.dp)
-            .clip(RoundedCornerShape(6.dp))
+            .clip(MaterialTheme.shapes.small)
             .background(if (current) palette.selectionBackground.toComposeColor() else Color.Transparent)
             .clickable(onClick = onClick)
             .padding(horizontal = 6.dp, vertical = 5.dp),
