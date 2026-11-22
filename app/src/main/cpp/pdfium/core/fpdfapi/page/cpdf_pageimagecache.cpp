@@ -283,8 +283,11 @@ CPDF_DIB::LoadState CPDF_PageImageCache::Entry::StartGetCachedBitmap(
   CPDF_DIB::LoadState ret = cur_bitmap_.AsRaw<CPDF_DIB>()->StartLoadDIBBase(
       true, pFormResources, pPageResources, bStdCS, eFamily, bLoadMask,
       max_size_required);
+  // xnotes: a decode at the picture's own size serves every size asked of it.
   cached_set_max_size_required_ =
-      (max_size_required.width != 0 && max_size_required.height != 0);
+      max_size_required.width != 0 && max_size_required.height != 0 &&
+      (cur_bitmap_->GetWidth() < image_->GetPixelWidth() ||
+       cur_bitmap_->GetHeight() < image_->GetPixelHeight());
   if (ret == CPDF_DIB::LoadState::kContinue) {
     return CPDF_DIB::LoadState::kContinue;
   }
