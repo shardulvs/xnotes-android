@@ -59,7 +59,7 @@ class PlaybackFadeCacheTest {
         st.refreshInkRegions(mapOf(page to late.paintBounds()))
 
         assertEquals("nothing is rasterized on the main thread", painted, faded.painter.ribbonRuns.size)
-        assertEquals("the page keeps its cache, or it blinks to bare paper", 1, st.cacheSnapshot().inkPages)
+        assertEquals("the page keeps its cache, or it blinks to bare paper", 1, st.inkLayer(st.document.pages[0])!!.built())
         assertSame("the faded surface shows until the rebuild lands", faded, st.cacheForOrSchedule(page)?.bands?.get(0)?.surface)
         assertEquals(1, jobs.size)
         jobs.removeFirst().invoke()

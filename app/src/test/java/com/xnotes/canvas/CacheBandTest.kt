@@ -1,5 +1,6 @@
 package com.xnotes.canvas
 
+import com.xnotes.core.FakeRasterSurface
 import com.xnotes.core.FakeRenderer
 import com.xnotes.core.FakeSurfaceFactory
 import com.xnotes.core.geometry.Rect
@@ -29,9 +30,10 @@ class CacheBandTest {
         /** How often each region of each page's background was rendered. */
         val pdfRenders = HashMap<Pair<Page, Rect>, Int>()
         private val cacheThread = ArrayDeque<() -> Unit>()
+        val factory = FakeSurfaceFactory()
         val st = CanvasState(
             Document((0 until pageCount).mapTo(mutableListOf()) { Page(595.0, pageH, pdfPage = it) }),
-            FakeSurfaceFactory(),
+            factory,
             Palette.DEFAULT,
         ).apply {
             viewingMode = mode
@@ -70,6 +72,16 @@ class CacheBandTest {
         fun renderedOnce(): Boolean = pdfRenders.values.all { it == 1 }
 
         fun built(page: Page): Int = (st.inkLayer(page)?.built() ?: 0) + (st.backgroundLayer(page)?.built() ?: 0)
+
+        /** Pages with a band of the layer [of] gives built. */
+        fun held(of: (Page) -> PageLayer?): Int = st.document.pages.count { (of(it)?.built() ?: 0) > 0 }
+
+        /** Surfaces made and not given back, against the bands the caches hold. */
+        fun unreturned(): Int = factory.created.count { !it.recycled }
+        fun bands(): Int = st.document.pages.sumOf { built(it) }
+        fun aBuiltBandWasGivenBack(): Boolean = st.document.pages.any { page ->
+            listOfNotNull(st.inkLayer(page), st.backgroundLayer(page)).any { l -> l.bands.any { (it?.surface as? FakeRasterSurface)?.recycled == true } }
+        }
     }
 
     private val screens = listOf(
@@ -113,13 +125,14 @@ class CacheBandTest {
         val h = Harness(40, 1440, 2204)
         h.st.goToPage(10)
         h.frame()
-        val cached = h.st.cacheSnapshot()
-        assertTrue(cached.inkPages > cached.visiblePages)
+        val ink = h.held { h.st.inkLayer(it) }
+        val pdf = h.held { h.st.backgroundLayer(it) }
+        assertTrue(ink > h.st.visiblePageRange()!!.let { it.last - it.first + 1 })
 
         h.st.zoomingInProgress = true
         h.frame()
-        assertEquals("ink evicted by a pinch", cached.inkPages, h.st.cacheSnapshot().inkPages)
-        assertEquals("PDF evicted by a pinch", cached.bgPages, h.st.cacheSnapshot().bgPages)
+        assertEquals("ink evicted by a pinch", ink, h.held { h.st.inkLayer(it) })
+        assertEquals("PDF evicted by a pinch", pdf, h.held { h.st.backgroundLayer(it) })
     }
 
     @Test fun flippingPaginatedPagesBackAndForthRendersNothingAgain() {
@@ -215,6 +228,30 @@ class CacheBandTest {
         assertEquals("the page stays ready under a steady scroll", 0, cold)
         assertTrue("a PDF band rendered twice ${h.pdfRenders.values}", h.renderedOnce())
         assertTrue("and its far end is never built", ink.bands.last() == null)
+    }
+
+    @Test fun whatLeavesTheCachesGivesItsPixelsBackAtOnce() {
+        val h = Harness(60, 1440, 2204)
+        h.st.goToPage(3)
+        h.frame()
+        val target = h.st.pageRects[50].top * h.st.zoom
+        while (h.st.scrollY < target) {
+            h.st.scrollBy(0.0, 400.0)
+            h.frame()
+            assertEquals("every surface not in the caches has been given back", h.bands(), h.unreturned())
+            assertTrue("and none still in them has", !h.aBuiltBandWasGivenBack())
+        }
+        assertTrue("with plenty evicted on the way", h.factory.created.size > 3 * h.bands())
+    }
+
+    @Test fun theLayersOfAnOldZoomAreGivenBackOnceTheNewOnesAreBuilt() {
+        val h = Harness(60, 1440, 2204)
+        h.st.goToPage(10)
+        h.frame()
+        h.st.setZoomAnchored(h.st.clearCenter(), h.st.zoom * 0.8)
+        repeat(3) { h.frame() }
+        assertEquals(h.bands(), h.unreturned())
+        assertTrue(!h.aBuiltBandWasGivenBack())
     }
 
     @Test fun anAutomaticBudgetIsTwelveScreensBetweenAFloorAndAShareOfMemory() {

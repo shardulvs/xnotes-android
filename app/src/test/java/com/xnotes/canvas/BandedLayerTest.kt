@@ -130,6 +130,37 @@ class BandedLayerTest {
         assertTrue(fresh.clips.isEmpty())
     }
 
+    @Test fun aBuildThrownAwayGivesItsPixelsBack() {
+        val factory = FakeSurfaceFactory()
+        val st = CanvasState(Document(mutableListOf(Page(300.0, 3000.0))), factory, Palette.DEFAULT).apply {
+            viewportW = 800
+            viewportH = 1000
+            relayout()
+        }
+        val page = st.document.pages[0]
+        val jobs = ArrayDeque<() -> Unit>()
+        st.runAsync = { jobs.addLast(it) }
+        st.drawInk(FakeRenderer(), page, Rect(0.0, 0.0, 300.0, 400.0))
+        st.invalidatePage(page) // an edit the build in flight knows nothing of
+        jobs.removeFirst()()
+        assertTrue("the surface it painted is never shown", factory.created.single().recycled)
+        assertEquals(0, st.inkLayer(page)?.built() ?: 0)
+    }
+
+    @Test fun aPageInvalidatedGivesItsBandsBack() {
+        val factory = FakeSurfaceFactory()
+        val st = CanvasState(Document(mutableListOf(Page(300.0, 3000.0))), factory, Palette.DEFAULT).apply {
+            viewportW = 800
+            viewportH = 1000
+            relayout()
+        }
+        val page = st.document.pages[0]
+        st.cacheFor(page)
+        assertTrue(factory.created.none { it.recycled })
+        st.invalidatePage(page)
+        assertTrue(factory.created.all { it.recycled })
+    }
+
     @Test fun aStrokeDrawnWhileItsBandIsBeingBuiltIsOnTheBandThatLands() {
         val st = state(3000.0)
         val page = st.document.pages[0]

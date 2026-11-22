@@ -62,6 +62,17 @@ class PageLayer(val grid: BandGrid) {
 
     fun built(): Int = bands.count { it != null }
 
+    /** Give band [k]'s pixels back, if it is built: it has left the caches. */
+    fun free(k: Int) {
+        bands[k]?.surface?.recycle()
+        bands[k] = null
+    }
+
+    /** [free] every band: the layer has left the caches. */
+    fun free() {
+        for (k in bands.indices) free(k)
+    }
+
     fun bytes(): Long {
         var n = 0L
         for (k in bands.indices) if (bands[k] != null) n += grid.bytes(k)
@@ -583,8 +594,9 @@ class CanvasState(
      * strokes/shapes/text), [bg] holds the rendered **background** layer (PDF/template),
      * which a page without one never gets. Both are blitted — background then ink — over
      * the paper fill. A layer is cut into bands ([BandGrid]): a long page is never one huge
-     * bitmap, and an edit touches only the bands it lands on. Surfaces are intentionally
-     * **not** recycled on eviction; GC reclaims them once nothing holds them. Main thread only.
+     * bitmap, and an edit touches only the bands it lands on. A band that leaves the caches
+     * gives its pixels back at once ([PageLayer.free]) rather than when the collector comes
+     * round, so what is held never runs far past the budget. Main thread only.
      */
     private class Layers(val bandPx: Int, val gutter: Int) {
         /** The layer each page draws from, at the footprint and resolution it shows at. */
@@ -606,7 +618,15 @@ class CanvasState(
          */
         var gen = 0
 
+        /** Let go of [page]'s layers. */
+        fun drop(page: Page) {
+            now.remove(page)?.free()
+            before.remove(page)?.free()
+        }
+
         fun clear() {
+            for (layer in now.values) layer.free()
+            for (layer in before.values) layer.free()
             now.clear()
             before.clear()
         }
@@ -1378,7 +1398,13 @@ class CanvasState(
             if (now != null && now.built() > 0) store.before[page] = now else store.before.remove(page)
             return old
         }
-        if (now != null && now.built() > 0 && (old == null || now.built() >= old.built())) store.before[page] = now
+        // One layer is kept to draw from meanwhile: whichever of the two holds more.
+        if (now != null && now.built() > 0 && (old == null || now.built() >= old.built())) {
+            old?.free()
+            store.before[page] = now
+        } else {
+            now?.free()
+        }
         val grid = BandGrid(footprint(page), clampedRes(page), sidewaysBands, store.bandPx, store.gutter)
         return PageLayer(grid).also { store.now[page] = it }
     }
@@ -1406,6 +1432,7 @@ class CanvasState(
         val layer = layerFor(ink, page)
         for (k in layer.bands.indices) {
             if (layer.bands[k]?.stale == false) continue
+            layer.free(k)
             layer.bands[k] = renderInk(page, layer.grid, k, cacheItems(page), includeFlow = !flowLifted)
         }
         return layer
@@ -1444,12 +1471,14 @@ class CanvasState(
                 if (ahead) prefetching = false
                 val meanwhile = store.meanwhile.remove(key)
                 if (gen == store.gen && store.now[page] === layer) {
+                    layer.free(k) // the out-of-date band it replaces
                     layer.bands[k] = band
                     // The build painted from what it read then; a repair since, as a playhead crossing ink, would be lost.
                     meanwhile?.let { repaintBand(grid, k, band, page, it) }
-                } else if (store.now[page] === layer && layer.bands[k]?.stale == true) {
+                } else {
+                    band.surface.recycle()
                     // Thrown away for an edit made since, with the band it was to replace still showing: ask again.
-                    schedule(store, page, layer, k)
+                    if (store.now[page] === layer && layer.bands[k]?.stale == true) schedule(store, page, layer, k)
                 }
                 // Repaint either way. A build the page outgrew mid-flight (a margin drag bumps the
                 // generation on every tick) is discarded here, and the draw loop is what schedules
@@ -1571,6 +1600,7 @@ class CanvasState(
         ) {
             return existing
         }
+        existing?.surface?.recycle()
         return buildHighlighter(stroke, res, g, opaque).also { hlCaches[stroke] = it }
     }
 
@@ -1607,6 +1637,7 @@ class CanvasState(
         val layer = layerFor(bg, page)
         for (k in layer.bands.indices) {
             if (layer.bands[k]?.stale == false) continue
+            layer.free(k)
             layer.bands[k] = renderBackground(page, layer.grid, k).also { it.seq = markupSeq }
         }
         return layer
@@ -1843,8 +1874,7 @@ class CanvasState(
     var paintLiftedUnderText: ((page: Page, r: Renderer) -> Unit)? = null
 
     fun invalidatePage(page: Page) {
-        ink.now.remove(page)
-        ink.before.remove(page)
+        ink.drop(page)
         if (roomView?.page === page && roomView?.live == false) roomView = null
         ink.gen++
         sharpGen++
@@ -1864,8 +1894,7 @@ class CanvasState(
     }
 
     fun invalidateBackground(page: Page) {
-        bg.now.remove(page)
-        bg.before.remove(page)
+        bg.drop(page)
         bg.gen++
         sharpGen++
     }
@@ -1894,6 +1923,7 @@ class CanvasState(
         ink.clear()
         bg.clear()
         unbaked.clear()
+        for (entry in hlCaches.values) entry.surface.recycle()
         hlCaches.clear()
         wetInk.clear()
         ink.gen++
@@ -2128,12 +2158,13 @@ class CanvasState(
         for (w in wanted) if (w.layer.bands[w.index] == null) unfinished += w.layer
         var total = 0L
         for (store in stores) {
-            store.before.keys.removeAll { page -> store.now[page]?.let { it !in unfinished } ?: true }
             for (map in arrayOf(store.now, store.before)) {
                 val each = map.entries.iterator()
                 while (each.hasNext()) {
                     val (page, layer) = each.next()
-                    if (page !in indexOfPage) {
+                    val done = map === store.before && store.now[page]?.let { it !in unfinished } ?: true
+                    if (done || page !in indexOfPage) {
+                        layer.free()
                         each.remove()
                         continue
                     }
@@ -2141,7 +2172,7 @@ class CanvasState(
                     for (k in layer.bands.indices) {
                         val wantedNow = layer.wantedAt[k] == stamp
                         val band = layer.bands[k]
-                        if (band != null && band.stale && !wantedNow && map === store.now) layer.bands[k] = null
+                        if (band != null && band.stale && !wantedNow && map === store.now) layer.free(k)
                         else if (band != null) total += layer.grid.bytes(k)
                         if (wantedNow || layer.bands[k] != null) keep = true
                     }
@@ -2163,14 +2194,20 @@ class CanvasState(
             spare.sortByDescending { it.distance }
             for (s in spare) {
                 if (total <= budget || s.distance <= 0.0) break
-                s.layer.bands[s.index] = null
+                s.layer.free(s.index)
                 total -= s.bytes
             }
         }
         if (hlCaches.isNotEmpty()) {
             val keep = HashSet<Stroke>()
             for (p in near) for (it in p.items) if (it is Stroke && it.tool == Tool.HIGHLIGHTER) keep.add(it)
-            hlCaches.keys.retainAll(keep)
+            val each = hlCaches.entries.iterator()
+            while (each.hasNext()) {
+                val (stroke, entry) = each.next()
+                if (stroke in keep) continue
+                entry.surface.recycle()
+                each.remove()
+            }
         }
         releaseGeometryExcept(near)
     }

@@ -17,7 +17,7 @@ import org.junit.Test
  * Guards the select-tool flicker fix: a selection edit must repair the page's ink cache
  * **in place** (the eraser's path) rather than dropping it for an async rebuild, and a
  * delete must never flush the (PDF/template) background cache. Both used to blank the whole
- * layer for a frame. We assert it at the cache-map level through [CanvasState.cacheSnapshot]:
+ * layer for a frame. We assert it at the cache-map level through [CanvasState.inkLayer]:
  * dropping a cache makes its page count fall to 0; an in-place repair leaves it standing.
  */
 class SelectionCacheRepairTest {
@@ -44,18 +44,18 @@ class SelectionCacheRepairTest {
         val st = state()
         val ctrl = controller(st)
         st.cacheFor(st.document.pages[0]) // warm the ink cache, as a draw frame would
-        assertEquals(1, st.cacheSnapshot().inkPages)
+        assertEquals(1, st.inkLayer(st.document.pages[0])!!.built())
 
         ctrl.selectAll() // lifts every item out of the cache
         assertEquals(
             "selecting must repair in place, not drop the page's ink cache",
-            1, st.cacheSnapshot().inkPages,
+            1, st.inkLayer(st.document.pages[0])!!.built(),
         )
 
         ctrl.escape() // dismiss the selection (clearSelection)
         assertEquals(
             "dismissing must repair in place, not drop the page's ink cache",
-            1, st.cacheSnapshot().inkPages,
+            1, st.inkLayer(st.document.pages[0])!!.built(),
         )
     }
 
@@ -65,16 +65,16 @@ class SelectionCacheRepairTest {
         val page = st.document.pages[0]
         st.cacheFor(page)
         st.backgroundFor(page)
-        assertEquals(1, st.cacheSnapshot().inkPages)
-        assertEquals(1, st.cacheSnapshot().bgPages)
+        assertEquals(1, st.inkLayer(st.document.pages[0])!!.built())
+        assertEquals(1, st.backgroundLayer(st.document.pages[0])!!.built())
 
         ctrl.selectAll()
         ctrl.deleteSelection()
 
         // The expensive PDF/template background must survive a delete — it used to be flushed by
         // invalidateAllCaches(), which is precisely what made the PDF layer flicker on delete/cut.
-        assertEquals("delete must not flush the background/PDF cache", 1, st.cacheSnapshot().bgPages)
+        assertEquals("delete must not flush the background/PDF cache", 1, st.backgroundLayer(st.document.pages[0])!!.built())
         // The ink layer stays cached too (repaired in place), never dropped to bare paper.
-        assertEquals(1, st.cacheSnapshot().inkPages)
+        assertEquals(1, st.inkLayer(st.document.pages[0])!!.built())
     }
 }
