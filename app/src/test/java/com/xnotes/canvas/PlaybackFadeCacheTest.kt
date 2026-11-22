@@ -33,12 +33,11 @@ class PlaybackFadeCacheTest {
 
     private val factory = FakeSurfaceFactory()
 
-    private fun state(vararg items: CanvasItem, maxCache: Double = 2048.0): CanvasState {
+    private fun state(vararg items: CanvasItem, viewW: Int = 800): CanvasState {
         val doc = Document(mutableListOf(Page(200.0, 200.0, items.toMutableList())))
         return CanvasState(doc, factory, Palette.DEFAULT).apply {
-            viewportW = 800
+            viewportW = viewW
             viewportH = 1000
-            maxCachePx = maxCache
             relayout()
         }
     }
@@ -95,7 +94,7 @@ class PlaybackFadeCacheTest {
 
     @Test fun aDeepZoomStaysSharpAsTheFadeComesOrGoes() {
         val late = ink(120.0, 120.0, 9_000)
-        val st = state(ink(20.0, 20.0, 1_000), late, maxCache = 100.0) // a 200px page is past the cap at zoom 1
+        val st = state(ink(20.0, 20.0, 1_000), late, viewW = 100) // a 200px page on a 100px view is past the cap at zoom 1
         val page = st.document.pages[0]
         val jobs = ArrayDeque<() -> Unit>()
         st.runAsync = { jobs.addLast(it) }

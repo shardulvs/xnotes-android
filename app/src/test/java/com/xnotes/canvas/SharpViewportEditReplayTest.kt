@@ -48,9 +48,8 @@ class SharpViewportEditReplayTest {
     private fun state(page: Page): CanvasState {
         val doc = Document(mutableListOf(page))
         return CanvasState(doc, factory, Palette.DEFAULT).apply {
-            viewportW = 800
+            viewportW = 100 // a 200px page is past the cap already at zoom 1
             viewportH = 1000
-            maxCachePx = 100.0 // a 200px page is past the cap already at zoom 1
             relayout()
             runAsync = { queued.add(it) }
             cacheFor(document.pages[0]) // soft cache in place, like the live draw loop keeps it

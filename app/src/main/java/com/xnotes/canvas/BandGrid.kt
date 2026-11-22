@@ -41,6 +41,12 @@ class BandGrid(val cover: Rect, val res: Double, val sideways: Boolean, val band
     /** The page-space rect band [k] shows. */
     fun shown(k: Int): Rect = span(from(k), to(k))
 
+    /** What of the footprint band [k] shows: [shown] without the part of a pixel the raster runs past the paper by. */
+    fun onPage(k: Int): Rect {
+        val s = shown(k)
+        return Rect.ltrb(s.left, s.top, min(s.right, cover.right), min(s.bottom, cover.bottom))
+    }
+
     /** The page-space rect band [k]'s surface holds: what it shows, and its gutters. */
     fun held(k: Int): Rect = span(heldFrom(k), heldTo(k))
 

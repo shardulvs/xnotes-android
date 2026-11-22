@@ -34,7 +34,6 @@ class BandedLayerTest {
         CanvasState(Document(mutableListOf(Page(300.0, height, items.toMutableList()))), FakeSurfaceFactory(), Palette.DEFAULT).apply {
             viewportW = 800
             viewportH = 1000
-            maxCachePx = 100_000.0
             relayout()
         }
 

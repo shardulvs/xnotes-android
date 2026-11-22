@@ -158,12 +158,6 @@ class CanvasState(
     var minZoom: Double = MIN_ZOOM
     var maxZoom: Double = MAX_ZOOM
 
-    /**
-     * Long-edge cap (content px) for the on-screen page caches; zoom past it renders the visible
-     * region live (the sharp viewport) instead of caching the whole page. User-set in preferences.
-     */
-    var maxCachePx: Double = 2048.0
-
     /** Bytes the page caches may hold, or 0 to size them from the viewport ([CacheBudget.automatic]). */
     var cacheLimit: Long = 0
 
@@ -1345,14 +1339,26 @@ class CanvasState(
 
     // --- page cache ---
 
-    private fun clampedRes(page: Page): Double {
-        var res = zoom * renderScale
-        // The footprint, not the outer size: room still under the pen must not resize the caches it is drawn through.
-        val f = footprint(page)
-        val longEdge = max(f.w, f.h)
-        if (longEdge * res > maxCachePx) res = maxCachePx / longEdge
-        return res.coerceAtLeast(0.01)
+    /** The width [page]'s footprint shows at: its height when the view turns it a quarter. */
+    private fun across(page: Page): Double = footprint(page).let { if (sidewaysBands) it.h else it.w }
+
+    /**
+     * The finest resolution [page] is cached at: where its row fills the viewport's width. A page
+     * however long is then never wider than the screen in its caches, so what they cost follows the
+     * screens of it held, not its size; zoom past this and the sharp viewport renders what shows.
+     * By footprints, not outer sizes: room still under the pen must not resize the caches it is
+     * drawn through.
+     */
+    private fun capRes(page: Page): Double {
+        if (viewportW <= 0) return Double.MAX_VALUE
+        val pages = document.pages
+        val row = indexOfPage[page]?.takeIf { pages.getOrNull(it) === page }?.let { rowOf(it) }
+        var w = if (row == null) across(page) else (row.last - row.first) * pageGap
+        if (row != null) for (i in row) w += across(pages[i])
+        return if (w <= 0.0) Double.MAX_VALUE else viewportW * renderScale / w
     }
+
+    private fun clampedRes(page: Page): Double = min(zoom * renderScale, capRes(page)).coerceAtLeast(0.01)
 
     /** True when the view shows pages a quarter turned, so their bands are cut across the page. */
     private val sidewaysBands: Boolean get() = rotationDeg == 90 || rotationDeg == 270
@@ -2002,7 +2008,7 @@ class CanvasState(
      * bitmaps stay in the maps, so [cacheForOrSchedule]/[backgroundForOrSchedule] keep
      * blitting them (scaled) for the new zoom until the sharp rebuild lands — avoiding the
      * one-frame empty-canvas flash that clearing would cause when a pinch ends. A page whose
-     * clamped resolution is unchanged (already at the [maxCachePx] cap) matches on res and
+     * clamped resolution is unchanged (already at its cap, see [capRes]) matches on res and
      * is returned as-is, so it is neither flashed nor needlessly rebuilt.
      *
      * Bumping the generations discards any in-flight build captured at the previous one, so
@@ -2026,10 +2032,11 @@ class CanvasState(
 
     /** How far band [k] of [grid], a layer of page [i], is from [view] (content space), in viewport px; 0 when it shows. */
     private fun distance(i: Int, grid: BandGrid, k: Int, view: Rect): Double {
-        val at = fromPageSpaceRect(i, grid.shown(k))
+        val at = fromPageSpaceRect(i, grid.onPage(k))
         val dx = max(max(view.left - at.right, at.left - view.right), 0.0)
         val dy = max(max(view.top - at.bottom, at.top - view.bottom), 0.0)
-        return max(dx, dy) * zoom
+        // To an eighth of a pixel, so two bands as far off as each other tie whatever the rounding on the way here.
+        return Math.round(max(dx, dy) * zoom * 8.0) / 8.0
     }
 
     /** Every band of the layers of [row]'s pages, each as far from [view] as it lies, plus [extra]. */
@@ -2194,15 +2201,15 @@ class CanvasState(
 
     // --- sharp viewport ---
 
-    /** True when the current zoom pushes a visible page past [maxCachePx] (its cache is clamped). */
+    /** True when the current zoom shows a visible page finer than it is cached ([capRes]). */
     fun isPastResolutionCap(): Boolean {
         val target = zoom * renderScale
         val visible = visibleContentRect()
         for (i in pageRects.indices) {
             val pr = pageRects.getOrNull(i) ?: continue
             if (!pr.intersects(visible)) continue
-            val page = document.pages[i]
-            if (target * max(outerW(page), outerH(page)) > maxCachePx) return true
+            val page = document.pages.getOrNull(i) ?: continue
+            if (target > capRes(page) * (1 + 1e-9)) return true
         }
         return false
     }

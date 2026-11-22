@@ -120,14 +120,14 @@ class MarginLayoutTest {
         val pending = mutableListOf<() -> Unit>()
         st.runAsync = { pending += it }
         val page = st.document.pages[0]
-        val bands = st.cacheFor(page).bands.size // rasterize at the current size
+        st.cacheFor(page) // rasterize at the current size
         page.margins = PageMargins(right = 0.5)
         st.relayout()
         st.invalidatePageGeometry()
 
         // Nothing to blit while the rebuild is in flight: bare paper beats a stretched page.
         assertNull(st.cacheForOrSchedule(page))
-        assertEquals("one build a band", bands, pending.size)
+        assertEquals("one build a band", st.inkLayer(page)!!.bands.size, pending.size)
 
         pending.forEach { it() }
         val rebuilt = st.cacheForOrSchedule(page)
@@ -164,8 +164,10 @@ class MarginLayoutTest {
         st.relayout()
         st.invalidatePageGeometry()
 
-        // The next frame is turned away: builds for this page's bands are already in flight.
+        // The next frame is turned away: a build for each of those bands is already in flight.
         assertNull(st.cacheForOrSchedule(page))
+        val wider = st.inkLayer(page)!!.bands.size // a wider page fills the view at a coarser resolution
+        assertTrue(wider <= bands)
         assertEquals(bands, pending.size)
 
         // Those builds are now stale and are dropped — but each must still ask for a repaint, or
@@ -175,7 +177,7 @@ class MarginLayoutTest {
         stale.forEach { it() }
         assertEquals(bands, repaints)
         assertNull(st.cacheForOrSchedule(page)) // the repaint's frame reschedules
-        assertEquals(bands, pending.size)
+        assertEquals(wider, pending.size)
 
         pending.toList().forEach { it() }
         val rebuilt = st.cacheForOrSchedule(page)

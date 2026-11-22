@@ -25,7 +25,6 @@ class CacheBandTest {
         mode: ViewingMode = ViewingMode.SINGLE,
         vertical: Boolean = true,
         pageH: Double = 842.0,
-        uncapped: Boolean = false,
     ) {
         /** How often each region of each page's background was rendered. */
         val pdfRenders = HashMap<Pair<Page, Rect>, Int>()
@@ -39,7 +38,6 @@ class CacheBandTest {
             verticalScroll = vertical
             viewportW = vw
             viewportH = vh
-            if (uncapped) maxCachePx = 1e9
             paintPageBackground = { page, _, _, region -> pdfRenders.merge(page to region, 1, Int::plus) }
             runAsync = { cacheThread.addLast(it) }
             relayout()
@@ -203,7 +201,7 @@ class CacheBandTest {
 
     @Test fun aVeryLongPageIsBuiltRoundTheScreenAndNoFurther() {
         // One page seventy screens long, cached at the size it shows at.
-        val h = Harness(1, 1440, 2204, pageH = 842.0 * 80, uncapped = true)
+        val h = Harness(1, 1440, 2204, pageH = 842.0 * 80)
         h.frame()
         val page = h.st.document.pages[0]
         val ink = h.st.inkLayer(page)!!
