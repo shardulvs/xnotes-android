@@ -500,6 +500,7 @@ internal fun NativeField(
     autoFocus: Boolean = false,
     textSp: Float = 13f,
     onDone: (() -> Unit)? = null,
+    onBlur: (() -> Unit)? = null,
 ) {
     val textColor = LocalPalette.current.text.toArgb()
     AndroidView(
@@ -537,6 +538,7 @@ internal fun NativeField(
                 }
                 filters = filterList.toTypedArray()
                 onImeBack = { clearFocus() }
+                if (onBlur != null) setOnFocusChangeListener { _, has -> if (!has) onBlur() }
                 setOnEditorActionListener { _, actionId, _ ->
                     if (actionId == EditorInfo.IME_ACTION_DONE) { onDone?.invoke(); clearFocus(); true } else false
                 }

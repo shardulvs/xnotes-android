@@ -715,6 +715,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     var readOnly by mutableStateOf(false)
         private set
 
+    /** Told of every press on the pages, so chrome over them can put away what a tap elsewhere should. */
+    var onCanvasPress: (() -> Unit)? = null
+
     /** Read-only waits while this note records, since a recording stamps what is written. */
     val canReadOnly: Boolean get() = AudioRecording.session?.owner !== this
 
@@ -1762,6 +1765,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
                     pdfTextMenu = null
                     markupMenu = null
                     canvasTouched = true
+                    onCanvasPress?.invoke()
                 }
                 android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
                     canvasTouched = false
@@ -2247,6 +2251,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             val dest = toc[k].destPage
             if (dest < 0) -1 else first[dest] ?: pages.indexOfLast { (it.pdfPage ?: -1) in 0..dest }
         }
+    }
+
+    /** The outline's entries with the note page each opens on, in outline order; one that leads nowhere is left out. */
+    fun tableOfContentsPages(): List<Pair<com.xnotes.platform.PdfOutlineEntry, Int>> {
+        val targets = tocTargets()
+        return toc.indices.mapNotNull { k -> targets[k].takeIf { it >= 0 }?.let { toc[k] to it } }
     }
 
     /** Records [doc] as the open note for source-PDF temp-file lifetime: deletes the previously open

@@ -26,6 +26,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -78,13 +79,17 @@ internal fun PlayGlyph(playing: Boolean, color: Color, size: Dp) {
 
 /**
  * Beside Insert while a recording's player is open in this pane: where playback stands, and a tap
- * opens the player. Down a side rail the time stacks, minutes over seconds.
+ * opens the player, which [onOpenChange] hears. Down a side rail the time stacks, minutes over seconds.
  */
 @Composable
-internal fun PlaybackChip(session: AudioPlayback.Session) {
+internal fun PlaybackChip(session: AudioPlayback.Session, onOpenChange: (Boolean) -> Unit = {}) {
     val palette = LocalPalette.current
     val bar = LocalBar.current
     var open by remember { mutableStateOf(false) }
+    DisposableEffect(open) {
+        onOpenChange(open)
+        onDispose { if (open) onOpenChange(false) }
+    }
     val time = AudioTime.format(session.position, session.duration >= 3_600_000)
     val fg = palette.selectionForeground.toComposeColor()
     val label = stringResource(R.string.audio_chip, time)

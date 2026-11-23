@@ -1,6 +1,7 @@
 package com.xnotes.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.animation.core.Ease
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -19,6 +20,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import com.xnotes.settings.ToolbarLanding
@@ -51,6 +53,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
@@ -102,7 +105,9 @@ internal val LocalToolbarCover = compositionLocalOf { PaddingValues(0.dp) }
  * floating bar is handed to [content] to lay over its canvas instead, and [onCover] learns how many
  * px of each edge (left, top, right, bottom) it covers so the canvas keeps its pages clear of it.
  * [strip] runs along the bottom as the bar does, docked or floating, and over a bar that is there
- * too. A long press on the bar lifts it, and [onPlace] hears where it was put down.
+ * too. A long press on the bar lifts it, and [onPlace] hears where it was put down. While
+ * [reading], the bar fades off toward its edge, its room goes to the pages and [islands] lie over
+ * the canvas in its place, covering nothing.
  */
 @Composable
 internal fun ColumnScope.ToolbarAround(
@@ -110,6 +115,8 @@ internal fun ColumnScope.ToolbarAround(
     onCover: (Double, Double, Double, Double) -> Unit,
     onPlace: (ToolbarPosition, floating: Boolean) -> Unit,
     strip: @Composable () -> Unit = {},
+    reading: Boolean = false,
+    islands: @Composable BoxScope.() -> Unit = {},
     content: @Composable (floatingBar: @Composable BoxScope.() -> Unit) -> Unit,
 ) {
     val look = LocalToolbarLook.current
@@ -119,10 +126,27 @@ internal fun ColumnScope.ToolbarAround(
     val latest by rememberUpdatedState(content)
     val body = remember { movableContentOf<@Composable BoxScope.() -> Unit> { floatingBar -> latest(floatingBar) } }
     val depth = barMetrics(look.size).thickness + FLOAT_MARGIN
-    val px = if (look.floating) with(LocalDensity.current) { depth.toPx().toDouble() } else 0.0
+    val floats = look.floating && !reading
+    val px = if (floats) with(LocalDensity.current) { depth.toPx().toDouble() } else 0.0
     // A floating strip covers the bottom too, over a bar floating there.
-    val stripPx = if (look.floating && move.strip > 0) move.strip + with(LocalDensity.current) { FLOAT_MARGIN.toPx().toDouble() } else 0.0
+    val stripPx = if (floats && move.strip > 0) move.strip + with(LocalDensity.current) { FLOAT_MARGIN.toPx().toDouble() } else 0.0
     val position = look.position
+    val fade by animateFloatAsState(if (reading) 0f else 1f, tween(BAR_FADE_MS, easing = Ease), label = "barFade")
+    val drift by animateFloatAsState(if (reading) 1f else 0f, tween(BAR_DRIFT_MS, easing = Ease), label = "barDrift")
+    // The bar stays only to fade, and takes no touch meanwhile.
+    val barUp = !reading || fade > 0f
+    val leaving = Modifier.graphicsLayer {
+        alpha = fade
+        val d = BAR_DRIFT.toPx() * drift
+        when (position) {
+            ToolbarPosition.TOP -> translationY = -d
+            ToolbarPosition.BOTTOM -> translationY = d
+            ToolbarPosition.LEFT -> translationX = -d
+            ToolbarPosition.RIGHT -> translationX = d
+        }
+    }
+    // Overlays keep clear of the islands along the top as they do of a floating bar.
+    val readingCover = PaddingValues(top = ISLAND_MARGIN + barMetrics(look.size).thickness)
     SideEffect {
         onCover(
             if (position == ToolbarPosition.LEFT) px else 0.0,
@@ -134,21 +158,31 @@ internal fun ColumnScope.ToolbarAround(
     CompositionLocalProvider(LocalToolbarMove provides move) {
         Box(Modifier.weight(1f).fillMaxWidth().onGloballyPositioned { move.area = it }) {
             if (!look.floating) {
-                val docked = NoFloatingBar
+                // A docked bar lays nothing over the canvas; only the islands do.
+                val docked: @Composable BoxScope.() -> Unit = { islands() }
+                // Read-only, it gives its room to the pages at once and fades out over them.
+                val dockedBar: @Composable () -> Unit = {
+                    if (barUp) Box(Modifier.zIndex(1f).yieldsRoom(reading, position).then(leaving)) {
+                        bar()
+                        if (reading) TouchSink()
+                    }
+                }
                 // Left and right are the screen's, as the canvas insets are, whatever the language.
                 val across = Arrangement.Absolute.Left
-                Column(Modifier.fillMaxSize()) {
-                    Box(Modifier.weight(1f).fillMaxWidth()) {
-                        when (position) {
-                            ToolbarPosition.TOP -> Column(Modifier.fillMaxSize()) { bar(); Box(Modifier.weight(1f).fillMaxWidth()) { body(docked) } }
-                            ToolbarPosition.BOTTOM -> body(docked)
-                            ToolbarPosition.LEFT -> Row(Modifier.fillMaxSize(), across) { bar(); Box(Modifier.weight(1f).fillMaxHeight()) { body(docked) } }
-                            ToolbarPosition.RIGHT -> Row(Modifier.fillMaxSize(), across) { Box(Modifier.weight(1f).fillMaxHeight()) { body(docked) }; bar() }
+                CompositionLocalProvider(LocalToolbarCover provides if (reading) readingCover else PaddingValues(0.dp)) {
+                    Column(Modifier.fillMaxSize()) {
+                        Box(Modifier.weight(1f).fillMaxWidth()) {
+                            when (position) {
+                                ToolbarPosition.TOP -> Column(Modifier.fillMaxSize()) { dockedBar(); Box(Modifier.weight(1f).fillMaxWidth()) { body(docked) } }
+                                ToolbarPosition.BOTTOM -> body(docked)
+                                ToolbarPosition.LEFT -> Row(Modifier.fillMaxSize(), across) { dockedBar(); Box(Modifier.weight(1f).fillMaxHeight()) { body(docked) } }
+                                ToolbarPosition.RIGHT -> Row(Modifier.fillMaxSize(), across) { Box(Modifier.weight(1f).fillMaxHeight()) { body(docked) }; dockedBar() }
+                            }
                         }
+                        Box(Modifier.onSizeChanged { move.strip = it.height }) { strip() }
+                        // The bar keeps the edge it is docked on, so the strip shows over it and never moves it.
+                        if (position == ToolbarPosition.BOTTOM) dockedBar()
                     }
-                    Box(Modifier.onSizeChanged { move.strip = it.height }) { strip() }
-                    // The bar keeps the edge it is docked on, so the strip shows over it and never moves it.
-                    if (position == ToolbarPosition.BOTTOM) bar()
                 }
             } else {
                 val cover = when (position) {
@@ -157,12 +191,16 @@ internal fun ColumnScope.ToolbarAround(
                     ToolbarPosition.LEFT -> PaddingValues.Absolute(left = depth)
                     ToolbarPosition.RIGHT -> PaddingValues.Absolute(right = depth)
                 }
-                CompositionLocalProvider(LocalToolbarCover provides cover) {
+                CompositionLocalProvider(LocalToolbarCover provides if (reading) readingCover else cover) {
                     Box(Modifier.fillMaxSize()) {
                         body {
-                            Box(Modifier.align(edgeOf(position)).padding(FLOAT_MARGIN)) { bar() }
+                            if (barUp) Box(Modifier.align(edgeOf(position)).padding(FLOAT_MARGIN).then(leaving)) {
+                                bar()
+                                if (reading) TouchSink()
+                            }
                             // The strip floats along the bottom of what the bar leaves clear.
-                            Box(Modifier.align(Alignment.BottomCenter).padding(cover).padding(FLOAT_MARGIN).onSizeChanged { move.strip = it.height }) { strip() }
+                            if (!reading) Box(Modifier.align(Alignment.BottomCenter).padding(cover).padding(FLOAT_MARGIN).onSizeChanged { move.strip = it.height }) { strip() }
+                            islands()
                         }
                     }
                 }
@@ -172,8 +210,31 @@ internal fun ColumnScope.ToolbarAround(
     }
 }
 
-/** What a docked bar hands its pane to lay over the canvas: nothing. */
-private val NoFloatingBar: @Composable BoxScope.() -> Unit = {}
+/** How the bar leaves for read-only and comes back: a fade, and a drift toward its edge. */
+private const val BAR_FADE_MS = 200
+private const val BAR_DRIFT_MS = 260
+private val BAR_DRIFT = 10.dp
+
+/**
+ * Measures the bar as ever, but while [yielding] takes no room along its edge, so the pages have
+ * it at once; the bar still draws there, over them, as it fades.
+ */
+private fun Modifier.yieldsRoom(yielding: Boolean, position: ToolbarPosition): Modifier = layout { measurable, constraints ->
+    val p = measurable.measure(constraints)
+    val across = position.vertical
+    layout(if (yielding && across) 0 else p.width, if (yielding && !across) 0 else p.height) {
+        p.place(
+            if (yielding && position == ToolbarPosition.RIGHT) -p.width else 0,
+            if (yielding && position == ToolbarPosition.BOTTOM) -p.height else 0,
+        )
+    }
+}
+
+/** Takes every touch on what it covers, so a fading bar's buttons can no longer be pressed. */
+@Composable
+private fun BoxScope.TouchSink() {
+    Box(Modifier.matchParentSize().pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } } })
+}
 
 /** Where a bar on [position] sits in its pane. */
 private fun edgeOf(position: ToolbarPosition): Alignment = when (position) {

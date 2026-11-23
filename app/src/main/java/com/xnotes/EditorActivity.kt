@@ -98,6 +98,7 @@ import com.xnotes.canvas.StylusButtonLatch
 import com.xnotes.ui.DialogButton
 import com.xnotes.ui.Editor
 import com.xnotes.ui.Toolbar
+import com.xnotes.ui.ReadingIslands
 import com.xnotes.ui.ToolbarAround
 import com.xnotes.ui.icons.XnotesIcons
 import com.xnotes.ui.theme.LocalPalette
@@ -1561,6 +1562,7 @@ private fun EditorPane(
     val palette = LocalPalette.current
     val focusRequester = remember { FocusRequester() }
     val focused = app.active === editor
+    val chrome = remember(editor) { com.xnotes.ui.ReadingChrome() }
     SideEffect { editor.openInPane = { uri -> actions.onOpenFile(editor, uri) } }
     // This pane owns the keyboard while it is the focused one; (re)grab it as that changes.
     LaunchedEffect(focused, editor.noteOpen) {
@@ -1571,7 +1573,11 @@ private fun EditorPane(
             while (true) {
                 // Initial pass and never consumed: the pane notices the touch, the canvas still gets it.
                 val event = awaitPointerEvent(PointerEventPass.Initial)
-                if (event.type == PointerEventType.Press) app.focusPane(editor.pane)
+                if (event.type == PointerEventType.Press) {
+                    app.focusPane(editor.pane)
+                    // Any touch brings a read-only note's islands back.
+                    if (editor.readOnly) chrome.wake()
+                }
             }
         }
     }
@@ -1654,7 +1660,19 @@ private fun EditorPane(
                 }
                 // The format bar runs along the bottom of the resized column, so right over the soft keyboard.
                 val strip: @Composable () -> Unit = { com.xnotes.ui.TextFormatBar(editor) }
-                ToolbarAround(bar, onCover = editor::setToolbarCover, onPlace = app::placeToolbar, strip = strip) { floatingBar ->
+                val islands: @Composable BoxScope.() -> Unit = {
+                    ReadingIslands(
+                        editor,
+                        chrome,
+                        fullscreen = actions.fullscreen,
+                        onToggleFullscreen = actions.onToggleFullscreen,
+                        onImportTemplate = actions.onImportTemplate,
+                        onHome = actions.onOpenBackstage,
+                        onClose = onClose,
+                        refocus = { runCatching { focusRequester.requestFocus() } },
+                    )
+                }
+                ToolbarAround(bar, onCover = editor::setToolbarCover, onPlace = app::placeToolbar, strip = strip, reading = editor.readOnly, islands = islands) { floatingBar ->
                     Row(modifier = Modifier.fillMaxSize()) {
                         if (editor.sidebarVisible) {
                             com.xnotes.ui.SidePanel(
