@@ -92,7 +92,6 @@ internal fun NoteSettingsButton(
     fullscreen: Boolean,
     onToggleFullscreen: () -> Unit,
     onImportTemplate: () -> Unit,
-    rule: Boolean = true,
     onOpenChange: (Boolean) -> Unit = {},
 ) {
     var open by remember { mutableStateOf(false) }
@@ -101,7 +100,7 @@ internal fun NoteSettingsButton(
         onOpenChange(open)
         onDispose { if (open) onOpenChange(false) }
     }
-    SettingsButton(open, { open = it }, rule) { NotePanel(editor, fullscreen, onToggleFullscreen, onImportTemplate) { open = false } }
+    SettingsButton(open, { open = it }) { NotePanel(editor, fullscreen, onToggleFullscreen, onImportTemplate) { open = false } }
 }
 
 @Composable

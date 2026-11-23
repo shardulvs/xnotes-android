@@ -351,7 +351,7 @@ private fun GearIsland(
         Island(modifier) {
             // The panel hangs just under the island, its end lined up with the island's.
             CompositionLocalProvider(LocalMenuOffset provides DpOffset(ISLAND_PAD, (bar.thickness - bar.button) / 2 + PANEL_GAP)) {
-                NoteSettingsButton(editor, fullscreen, onToggleFullscreen, onImportTemplate, rule = false) { chrome.panelOpen = it }
+                NoteSettingsButton(editor, fullscreen, onToggleFullscreen, onImportTemplate) { chrome.panelOpen = it }
             }
             if (onClose != null) {
                 Separator()

@@ -81,13 +81,14 @@ fun InfiniteToolbar(
     // opens it, so the five colours are both the ink and the way to change it.
     var switcherIndex by remember { mutableStateOf<Int?>(null) }
 
-    // Pinned outside the scrolling strip, so the settings and closing a split pane are always one tap away.
+    // Pinned outside the scrolling strip, so closing a split pane is always one tap away.
     ToolbarFrame(
         armed = editor.tool,
         trailing = {
-            CanvasSettingsButton(editor, fullscreen, onToggleFullscreen)
-            onClosePane?.let { ClosePaneButton(it) }
-            BarEndGap()
+            onClosePane?.let {
+                ClosePaneButton(it)
+                BarEndGap()
+            }
         },
     ) {
         val sections = editor.toolbarLayout.visibleSections
@@ -170,6 +171,8 @@ fun InfiniteToolbar(
                 }
             }
         }
+        if (sections.isNotEmpty()) Separator()
+        CanvasSettingsButton(editor, fullscreen, onToggleFullscreen)
 
         if (!LocalBar.current.vertical) editor.renderFailure?.let {
             Separator()

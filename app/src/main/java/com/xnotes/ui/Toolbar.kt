@@ -119,13 +119,14 @@ fun Toolbar(
     var configForTool by remember { mutableStateOf<Tool?>(null) }
     var switcherIndex by remember { mutableStateOf<Int?>(null) }
     var renaming by remember { mutableStateOf(false) }
-    // Pinned outside the scrolling strip, so the settings and closing a split pane are always one tap away.
+    // Pinned outside the scrolling strip, so closing a split pane is always one tap away.
     ToolbarFrame(
         armed = editor.tool,
         trailing = {
-            NoteSettingsButton(editor, fullscreen, onToggleFullscreen, onImportTemplate)
-            onClosePane?.let { ClosePaneButton(it) }
-            BarEndGap()
+            onClosePane?.let {
+                ClosePaneButton(it)
+                BarEndGap()
+            }
         },
     ) {
         // The bar is driven by the user-customisable layout; separators sit between non-empty
@@ -151,6 +152,8 @@ fun Toolbar(
                 )
             }
         }
+        if (editor.toolbarLayout.visibleSections.isNotEmpty()) Separator()
+        NoteSettingsButton(editor, fullscreen, onToggleFullscreen, onImportTemplate)
     }
 
     if (renaming) {

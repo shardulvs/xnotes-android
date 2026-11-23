@@ -82,10 +82,9 @@ internal fun panelColors(): PanelColors {
     else PanelColors(p.menuBg.toComposeColor(), p.surface.toComposeColor(), p.surfaceHi.toComposeColor())
 }
 
-/** The gear, pinned past the bar's scrolling tools behind a [rule], and the panel [content] fills while [open]. */
+/** The gear, and the panel [content] fills while [open]. */
 @Composable
-internal fun SettingsButton(open: Boolean, onOpen: (Boolean) -> Unit, rule: Boolean = true, content: @Composable ColumnScope.() -> Unit) {
-    if (rule) Rule()
+internal fun SettingsButton(open: Boolean, onOpen: (Boolean) -> Unit, content: @Composable ColumnScope.() -> Unit) {
     Box {
         ToolbarIcon(XnotesIcons.settings, stringResource(R.string.settings), active = open) { onOpen(!open) }
         DropdownMenu(expanded = open, onDismissRequest = { onOpen(false) }, shape = MaterialTheme.shapes.large, containerColor = panelColors().sheet) {

@@ -162,7 +162,7 @@ data class ToolbarLayout(val sections: List<ToolbarSection>) {
         /** Everything the paged bar can hold: the whole enum. Page, zoom and view settings live behind the gear on both bars. */
         val NOTE_ITEMS: Set<ToolbarItem> = ToolbarItem.entries.toSet()
 
-        /** The note bar as it ships; the gear after it is pinned to the bar, not part of the layout. */
+        /** The note bar as it ships; the gear after it is always on the bar, not part of the layout. */
         val DEFAULT: ToolbarLayout = of(
             listOf(ToolbarItem.HOME, ToolbarItem.TITLE),
             listOf(ToolbarItem.SIDEBAR),
