@@ -47,8 +47,9 @@ data class PinnedFolder(val uri: String, val name: String)
 
 /** All persistent non-document state (spec 09 §2). */
 data class Settings(
-    /** Global View-menu defaults; per-note [com.xnotes.canvas.ViewOverrides] shadow them. */
-    val viewDefaults: com.xnotes.canvas.ViewSettings = com.xnotes.canvas.ViewSettings(),
+    /** View-menu defaults while the app is light, and while it is dark or OLED; only their PDF filters differ. */
+    val viewDefaultsLight: com.xnotes.canvas.ViewSettings = com.xnotes.canvas.ViewSettings.factory(dark = false),
+    val viewDefaultsDark: com.xnotes.canvas.ViewSettings = com.xnotes.canvas.ViewSettings.factory(dark = true),
     val tools: Map<Tool, ToolConfig> = emptyMap(),
     val shapeConfig: ShapeConfig = ShapeConfig(),
     /** The toolbar swatches while the app is dark, and while it is light; slot for slot partners. */
@@ -102,6 +103,13 @@ data class Settings(
 
     fun toolbarColors(dark: Boolean): List<Rgba> = if (dark) toolbarColorsDark else toolbarColorsLight
 
+    fun viewDefaults(dark: Boolean): com.xnotes.canvas.ViewSettings = if (dark) viewDefaultsDark else viewDefaultsLight
+
+    /** Save [vs] as the [dark] theme's View defaults; the other theme takes its layout too. */
+    fun withViewDefaults(dark: Boolean, vs: com.xnotes.canvas.ViewSettings): Settings =
+        if (dark) copy(viewDefaultsDark = vs, viewDefaultsLight = viewDefaultsLight.withLayoutOf(vs))
+        else copy(viewDefaultsLight = vs, viewDefaultsDark = viewDefaultsDark.withLayoutOf(vs))
+
     /** Push a colour to the front of recent colours, de-duped, capped at 24. */
     fun rememberColor(c: Rgba): Settings =
         copy(recentColors = (listOf(c) + recentColors.filter { it != c }).take(24))
@@ -151,7 +159,8 @@ data class Settings(
             .apply { newCanvasBackground?.let { put("new_canvas_background", canvasBackgroundJson(it)) } }
             .apply { if (!newTable.isFactory) put("new_table", tableDefaultsJson(newTable)) }
             .put("prefs", prefs.toJson())
-            .put("view_defaults", com.xnotes.platform.ViewSettingsJson.write(JSONObject(), viewDefaults))
+            .put("view_defaults_light", com.xnotes.platform.ViewSettingsJson.write(JSONObject(), viewDefaultsLight, com.xnotes.canvas.ViewSettings.factory(dark = false)))
+            .put("view_defaults_dark", com.xnotes.platform.ViewSettingsJson.write(JSONObject(), viewDefaultsDark, com.xnotes.canvas.ViewSettings.factory(dark = true)))
             .put("finger_draw_auto_checked", fingerDrawAutoChecked)
             .put("pdf_notifications_asked", pdfNotificationsAsked)
     }
@@ -168,11 +177,11 @@ data class Settings(
             val shape = toolsObj?.optJSONObject("shape")?.let { shapeConfig(it) } ?: ShapeConfig()
 
             val (darkColors, lightColors) = toolbarColors(o)
+            val (viewLight, viewDark) = viewDefaults(o)
 
             return Settings(
-                viewDefaults = o.optJSONObject("view_defaults")
-                    ?.let { com.xnotes.platform.ViewSettingsJson.read(it) }
-                    ?: legacyViewDefaults(o.optJSONObject("prefs")),
+                viewDefaultsLight = viewLight,
+                viewDefaultsDark = viewDark,
                 tools = tools,
                 shapeConfig = shape,
                 toolbarColorsDark = darkColors,
@@ -240,6 +249,20 @@ data class Settings(
                 val uri = o.optString("uri", "").ifEmpty { return@mapNotNull null }
                 PinnedFolder(uri, o.optString("name", ""))
             }
+        }
+
+        /** The light and the dark View defaults. Settings from before the split kept one set for
+         *  every theme: unless it held a colour filter, both themes take their factory filters. */
+        private fun viewDefaults(o: JSONObject): Pair<com.xnotes.canvas.ViewSettings, com.xnotes.canvas.ViewSettings> {
+            val light = com.xnotes.canvas.ViewSettings.factory(dark = false)
+            val dark = com.xnotes.canvas.ViewSettings.factory(dark = true)
+            if (o.has("view_defaults_light") || o.has("view_defaults_dark")) return Pair(
+                o.optJSONObject("view_defaults_light")?.let { com.xnotes.platform.ViewSettingsJson.read(it, light) } ?: light,
+                o.optJSONObject("view_defaults_dark")?.let { com.xnotes.platform.ViewSettingsJson.read(it, dark) } ?: dark,
+            )
+            val old = o.optJSONObject("view_defaults")?.let { com.xnotes.platform.ViewSettingsJson.read(it) }
+                ?: legacyViewDefaults(o.optJSONObject("prefs"))
+            return if (old.filtersOn) old to old else light.withLayoutOf(old) to dark.withLayoutOf(old)
         }
 
         /** Settings written before the View menu's Global tab: the old PDF dark-mode

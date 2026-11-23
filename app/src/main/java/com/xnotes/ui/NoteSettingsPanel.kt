@@ -98,7 +98,7 @@ private fun NotePanel(editor: Editor, fullscreen: Boolean, onToggleFullscreen: (
     var visit by remember { mutableIntStateOf(0) }
     val styles = remember(visit) { StylesState(editor) }
     val margins = remember(visit) { MarginsState(editor) }
-    val view = remember(visit) { ViewState(editor) }
+    val view = remember(visit, editor.viewDefaultsDark) { ViewState(editor) }
     fun go(to: NotePage) {
         if (page == NotePage.HOME) visit++
         page = to
@@ -376,7 +376,7 @@ private fun viewSubtitle(editor: Editor): String {
     val parts = mutableListOf(stringResource(modeLabel(vs.mode)))
     if (vs.verticalScroll) parts += stringResource(R.string.vertical_scrolling_lower)
     if (vs.rotation != 0) parts += stringResource(R.string.rotated_degrees, vs.rotation)
-    if (filtersOn(vs)) parts += stringResource(R.string.filters_on)
+    if (vs.filtersOn) parts += stringResource(R.string.filters_on)
     return parts.joinToString(" · ")
 }
 
@@ -385,9 +385,6 @@ private fun modeLabel(m: ViewingMode) = when (m) {
     ViewingMode.DOUBLE -> R.string.view_double
     ViewingMode.COVER -> R.string.view_cover
 }
-
-private fun filtersOn(vs: ViewSettings) = vs.contrast != 100 || vs.invert != 0 || vs.brightness != 100 || vs.sepia != 0 ||
-    vs.multiply != PdfColorFilter.MULTIPLY_OFF || vs.screen != PdfColorFilter.SCREEN_OFF
 
 @Composable
 private fun ViewPreview(mode: ViewingMode) {
@@ -859,7 +856,7 @@ private fun ViewPage(editor: Editor, s: ViewState, onBack: () -> Unit, onFilters
     if (s.showDefaultRow && editor.viewOverrides != ViewOverrides()) {
         Spacer(Modifier.height(6.dp))
         PanelCheck(stringResource(R.string.default_for_all_notes), vs == editor.viewDefaults) { on ->
-            editor.updateViewDefaults(if (on) vs else s.openedDefaults.takeIf { it != vs } ?: ViewSettings())
+            editor.updateViewDefaults(if (on) vs else s.openedDefaults.takeIf { it != vs } ?: editor.factoryViewDefaults)
         }
     }
 }

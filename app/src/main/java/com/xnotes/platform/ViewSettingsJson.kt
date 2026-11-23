@@ -1,6 +1,5 @@
 package com.xnotes.platform
 
-import com.xnotes.canvas.PdfColorFilter
 import com.xnotes.canvas.ViewOverrides
 import com.xnotes.canvas.ViewSettings
 import com.xnotes.canvas.ViewingMode
@@ -9,39 +8,39 @@ import org.json.JSONObject
 
 /**
  * JSON (de)serialization for the global [ViewSettings] defaults (the View menu's Global
- * tab, stored in settings.json). Defaults are omitted on write and every field is
- * forgiving on read, so older files load with the field's default.
+ * tab, stored in settings.json). Fields equal to [base] are omitted on write and every field is
+ * forgiving on read, an absent one taking [base]'s value, so older files load with the default.
  */
 internal object ViewSettingsJson {
 
-    fun write(o: JSONObject, s: ViewSettings): JSONObject = o.apply {
-        if (s.mode != ViewingMode.SINGLE) put("mode", s.mode.id)
-        if (!s.verticalScroll) put("verticalScroll", false)
-        if (s.freeMovement) put("freeMovement", true)
-        if (s.contrast != 100) put("contrast", s.contrast)
-        if (s.invert != 0) put("invert", s.invert)
-        if (s.brightness != 100) put("brightness", s.brightness)
-        if (s.sepia != 0) put("sepia", s.sepia)
-        if (s.multiply != PdfColorFilter.MULTIPLY_OFF) put("multiply", Rgba.toHex(s.multiply))
-        if (s.screen != PdfColorFilter.SCREEN_OFF) put("screen", Rgba.toHex(s.screen))
-        if (s.keepImages) put("keepImages", true)
-        if (s.rotation != 0) put("rotation", s.rotation)
-        if (s.scrollbar) put("scrollbar", true)
+    fun write(o: JSONObject, s: ViewSettings, base: ViewSettings = ViewSettings()): JSONObject = o.apply {
+        if (s.mode != base.mode) put("mode", s.mode.id)
+        if (s.verticalScroll != base.verticalScroll) put("verticalScroll", s.verticalScroll)
+        if (s.freeMovement != base.freeMovement) put("freeMovement", s.freeMovement)
+        if (s.contrast != base.contrast) put("contrast", s.contrast)
+        if (s.invert != base.invert) put("invert", s.invert)
+        if (s.brightness != base.brightness) put("brightness", s.brightness)
+        if (s.sepia != base.sepia) put("sepia", s.sepia)
+        if (s.multiply != base.multiply) put("multiply", Rgba.toHex(s.multiply))
+        if (s.screen != base.screen) put("screen", Rgba.toHex(s.screen))
+        if (s.keepImages != base.keepImages) put("keepImages", s.keepImages)
+        if (s.rotation != base.rotation) put("rotation", s.rotation)
+        if (s.scrollbar != base.scrollbar) put("scrollbar", s.scrollbar)
     }
 
-    fun read(o: JSONObject): ViewSettings = ViewSettings(
-        mode = ViewingMode.fromId(o.optString("mode", ViewingMode.SINGLE.id)),
-        verticalScroll = o.optBoolean("verticalScroll", true),
-        freeMovement = o.optBoolean("freeMovement", false),
-        contrast = o.optInt("contrast", 100).coerceIn(0, 200),
-        invert = o.optInt("invert", 0).coerceIn(0, 100),
-        brightness = o.optInt("brightness", 100).coerceIn(0, 200),
-        sepia = o.optInt("sepia", 0).coerceIn(0, 200),
-        multiply = blendColor(o, "multiply") ?: PdfColorFilter.MULTIPLY_OFF,
-        screen = blendColor(o, "screen") ?: PdfColorFilter.SCREEN_OFF,
-        keepImages = o.optBoolean("keepImages", false),
-        rotation = ViewSettings.normalizeRotation(o.optInt("rotation", 0)),
-        scrollbar = o.optBoolean("scrollbar", false),
+    fun read(o: JSONObject, base: ViewSettings = ViewSettings()): ViewSettings = ViewSettings(
+        mode = ViewingMode.fromId(o.optString("mode", base.mode.id)),
+        verticalScroll = o.optBoolean("verticalScroll", base.verticalScroll),
+        freeMovement = o.optBoolean("freeMovement", base.freeMovement),
+        contrast = o.optInt("contrast", base.contrast).coerceIn(0, 200),
+        invert = o.optInt("invert", base.invert).coerceIn(0, 100),
+        brightness = o.optInt("brightness", base.brightness).coerceIn(0, 200),
+        sepia = o.optInt("sepia", base.sepia).coerceIn(0, 200),
+        multiply = blendColor(o, "multiply") ?: base.multiply,
+        screen = blendColor(o, "screen") ?: base.screen,
+        keepImages = o.optBoolean("keepImages", base.keepImages),
+        rotation = ViewSettings.normalizeRotation(o.optInt("rotation", base.rotation)),
+        scrollbar = o.optBoolean("scrollbar", base.scrollbar),
     )
 }
 

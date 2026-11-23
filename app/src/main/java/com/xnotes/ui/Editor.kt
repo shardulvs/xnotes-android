@@ -655,8 +655,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     var zoomLocked by mutableStateOf(false)
         private set
 
-    /** Global View-menu defaults every note without overrides follows (persisted in settings.json). */
-    var viewDefaults by mutableStateOf(settings.viewDefaults)
+    /** Whether [viewDefaults] is the dark and OLED set rather than the light one. */
+    var viewDefaultsDark by mutableStateOf(resolvedAppearance(settings.prefs) != "light")
+        private set
+
+    /** The theme's global View-menu defaults every note without overrides follows (persisted in settings.json). */
+    var viewDefaults by mutableStateOf(settings.viewDefaults(viewDefaultsDark))
         private set
 
     /** The open note's View-menu overrides (stored app-side like zoom/scroll). */
@@ -665,7 +669,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
 
     /** The open note's effective View settings: [viewOverrides] resolved over [viewDefaults].
      *  This is what the canvas, caches and thumbnails all consume. */
-    var viewSettings by mutableStateOf(settings.viewDefaults)
+    var viewSettings by mutableStateOf(viewDefaults)
         private set
 
     /** The View menu's autoscroll. Never a View setting: it starts off in every note, and only its speed is remembered. */
@@ -2841,6 +2845,17 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         view.requestRender()
     }
 
+    /** Thumbnails render with the theme, the page colour and the View defaults: a change to any starts a fresh cache. */
+    private fun useThumbnailTheme() {
+        val theme = "$palette|${state.pageColorOverride}|$viewDefaults"
+        if (thumbnailTheme == theme) return
+        thumbnailTheme = theme
+        thumbnailGeneration = thumbCache.useTheme(theme)
+        synchronized(noteThumbs) { noteThumbs.evictAll() }
+        synchronized(pageThumbs) { pageThumbs.evictAll() }
+        thumbnailVersion++
+    }
+
     private fun applyPagePrefsToState(p: Preferences) {
         palette = buildPalette(p)
         com.xnotes.platform.AppNightMode.follow(appContext, p.uiAppearance)
@@ -2864,14 +2879,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         pad.frontBuffering = !p.disableFrontBuffering
         infiniteOrNull?.pad?.frontBuffering = !p.disableFrontBuffering
         state.pageColorOverride = if (p.defaultTemplate == "color") p.pageColor else null
-        val theme = "$palette|${state.pageColorOverride}"
-        if (thumbnailTheme != theme) {
-            thumbnailTheme = theme
-            thumbnailGeneration = thumbCache.useTheme(theme)
-            synchronized(noteThumbs) { noteThumbs.evictAll() }
-            synchronized(pageThumbs) { pageThumbs.evictAll() }
-            thumbnailVersion++
-        }
+        useViewDefaultsFor(dark = resolvedAppearance(p) != "light")
+        useThumbnailTheme()
         controller.fingerDraws = p.fingerDraws
         controller.zoomLockPan = p.zoomLockPan
         controller.detectShapes = p.detectShapes
@@ -6401,14 +6410,29 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         viewStates.put(key, state.zoom, state.scrollX, state.scrollY, viewOverrides)
     }
 
-    /** Update the global View-menu defaults (the menu's "Default for all notes" checkbox),
-     *  persist them, and re-resolve the open note — a note only follows the change where it
-     *  has no override of its own. */
+    /** Update the theme's View-menu defaults (the menu's "Default for all notes" checkbox),
+     *  persist them, and re-resolve the open note in both panes; a note only follows the change
+     *  where it has no override of its own. The layout half is shared with the other theme. */
     fun updateViewDefaults(new: com.xnotes.canvas.ViewSettings) {
         if (viewDefaults == new) return
-        viewDefaults = new
-        settings = settings.copy(viewDefaults = new)
+        settings = settings.withViewDefaults(viewDefaultsDark, new)
         settingsRepo.save(settings)
+        for (editor in listOfNotNull(this, sibling)) {
+            editor.useViewDefaultsFor(editor.viewDefaultsDark)
+            editor.useThumbnailTheme()
+        }
+    }
+
+    /** The theme's View defaults before the user saved any. */
+    val factoryViewDefaults: com.xnotes.canvas.ViewSettings
+        get() = com.xnotes.canvas.ViewSettings.factory(viewDefaultsDark)
+
+    /** Follow the [dark] theme's View defaults (dark and OLED share one set). */
+    private fun useViewDefaultsFor(dark: Boolean) {
+        viewDefaultsDark = dark
+        val d = settings.viewDefaults(dark)
+        if (d == viewDefaults) return
+        viewDefaults = d
         applyResolvedViewSettings()
     }
 

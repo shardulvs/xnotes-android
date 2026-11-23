@@ -21,7 +21,8 @@ enum class ViewingMode(val id: String) {
 /**
  * A complete set of View-menu settings. Used in two roles: the app-wide **defaults**
  * (saved via the menu's "Default for all notes" checkbox, persisted in
- * [com.xnotes.settings.Settings]) and the **resolved** effective settings of the open
+ * [com.xnotes.settings.Settings], one set for light and one for dark and OLED, sharing their
+ * layout) and the **resolved** effective settings of the open
  * note ([ViewOverrides.resolve]). The colour filters follow CSS filter semantics and are
  * applied to the PDF page raster only, in the fixed order contrast, invert, brightness, sepia,
  * multiply, screen.
@@ -47,8 +48,25 @@ data class ViewSettings(
     /** Whether the canvas-area scrollbar is shown (off by default). */
     val scrollbar: Boolean = false,
 ) {
+    /** Whether any colour filter changes the PDF page. */
+    val filtersOn: Boolean
+        get() = contrast != 100 || invert != 0 || brightness != 100 || sepia != 0 ||
+            multiply != PdfColorFilter.MULTIPLY_OFF || screen != PdfColorFilter.SCREEN_OFF
+
+    /** These filters with [o]'s layout, the half both themes share. */
+    fun withLayoutOf(o: ViewSettings): ViewSettings = copy(
+        mode = o.mode,
+        verticalScroll = o.verticalScroll,
+        freeMovement = o.freeMovement,
+        rotation = o.rotation,
+        scrollbar = o.scrollbar,
+    )
+
     companion object {
         val ROTATIONS = listOf(0, 90, 180, 270)
+
+        /** The defaults until the user saves their own: dark and OLED invert PDF pages, and images keep their colours. */
+        fun factory(dark: Boolean): ViewSettings = ViewSettings(invert = if (dark) 95 else 0, keepImages = true)
 
         /** Snap any degree value onto the supported quarter turns. */
         fun normalizeRotation(deg: Int): Int = (((deg % 360) + 360) % 360) / 90 * 90
