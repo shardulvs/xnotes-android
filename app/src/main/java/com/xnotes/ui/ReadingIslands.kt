@@ -101,12 +101,9 @@ import kotlinx.coroutines.delay
 /*
  * What a read-only note shows in place of its toolbar: islands on the floating bar's pill, over
  * the page. Home and the side panel, the title and the gear along the top; the page arrows, the
- * page number and a scrubber along the bottom. All but the gear fade once the page is left alone,
- * and any touch in the pane brings them back.
+ * page number and a scrubber along the bottom. A tap on the page shows or hides all but the gear,
+ * and moving the page hides them.
  */
-
-/** How long the islands stay up after the last touch. */
-private const val IDLE_MS = 3000L
 
 /** How far the islands sit in from the canvas edges. */
 internal val ISLAND_MARGIN = 12.dp
@@ -163,10 +160,6 @@ private const val GEAR = "gear"
 /** One pane's reading islands: up or faded, and what holds them up. */
 internal class ReadingChrome {
     var awake by mutableStateOf(true)
-
-    /** Bumped by every press in the pane, which wakes the islands and starts their wait again. */
-    var touches by mutableIntStateOf(0)
-        private set
     var panelOpen by mutableStateOf(false)
     var playerOpen by mutableStateOf(false)
 
@@ -177,11 +170,6 @@ internal class ReadingChrome {
     var typing by mutableStateOf(false)
 
     val held: Boolean get() = panelOpen || playerOpen || scrubPage >= 0 || typing
-
-    fun wake() {
-        awake = true
-        touches++
-    }
 }
 
 /** How an island fades: gone at once once the note is written in again, back after a beat, away slowly. */
@@ -204,20 +192,25 @@ internal fun BoxScope.ReadingIslands(
     refocus: () -> Unit,
 ) {
     val reading = editor.readOnly
-    LaunchedEffect(reading, chrome.touches, chrome.held) {
-        chrome.awake = true
-        if (!reading || chrome.held) return@LaunchedEffect
-        delay(IDLE_MS)
-        chrome.awake = false
-    }
     LaunchedEffect(reading) {
+        chrome.awake = true
         chrome.scrubPage = -1
         chrome.typing = false
     }
-    // A tap on the pages puts the page field away.
+    // A tap on the pages shows or hides the islands, unless it only put the page field away; moving them hides the islands.
     DisposableEffect(editor) {
-        editor.onCanvasPress = { chrome.typing = false }
-        onDispose { editor.onCanvasPress = null }
+        var heldAtPress = false
+        editor.onCanvasPress = {
+            heldAtPress = chrome.held
+            chrome.typing = false
+        }
+        editor.onCanvasTap = { if (editor.readOnly && !heldAtPress) chrome.awake = !chrome.awake }
+        editor.onCanvasDrag = { if (editor.readOnly) chrome.awake = false }
+        onDispose {
+            editor.onCanvasPress = null
+            editor.onCanvasTap = null
+            editor.onCanvasDrag = null
+        }
     }
     val shown = reading && chrome.awake
     val alpha = animateFloatAsState(if (shown) 1f else 0f, fade(reading, shown, SHOW_MS, EaseOut), label = "islandsAlpha")

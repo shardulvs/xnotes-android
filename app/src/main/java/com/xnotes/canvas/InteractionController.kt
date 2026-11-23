@@ -193,6 +193,12 @@ class InteractionController(
     /** The view was panned or pinched by hand, as distinct from moved by the app. */
     var onUserMovedView: (() -> Unit)? = null
 
+    /** A hand pan or pinch moved the view past tap range: once a gesture, unlike [onUserMovedView]. */
+    var onUserDraggedView: (() -> Unit)? = null
+
+    /** A pan tap that nothing on the page took: no link, tape, pill, markup, note or selection. */
+    var onBareTap: (() -> Unit)? = null
+
     /** A finger tap that may land on an audio pill, at [pageLocal] on page [pageIndex]; true when one took it. */
     var onAudioTap: ((pageIndex: Int, pageLocal: Pt) -> Boolean)? = null
 
@@ -202,8 +208,8 @@ class InteractionController(
      */
     var onMarkupTap: ((at: Pt, withLink: Boolean) -> Boolean)? = null
 
-    /** A pan tap or a markup tool tap at viewport point [at], told before anything acts on it. */
-    var onTap: ((at: Pt) -> Unit)? = null
+    /** A pan tap or a markup tool tap at viewport point [at], told before anything acts on it; true when it put something away. */
+    var onTap: ((at: Pt) -> Boolean)? = null
 
     /** PDF text selection: a free pointer's long press on a PDF page selects there (installed by the Editor). */
     var pdfText: PdfTextController? = null
@@ -330,6 +336,7 @@ class InteractionController(
     private var panDownViewport = Pt.ZERO // where the current pan began (viewport px), for tap-to-dismiss
     private var panFromPenButton = false // a side-button pan parks where the pen lifted: no glide
     private var downStoppedFling = false // this touch landed on a moving glide, so its lift isn't a dismiss tap
+    private var viewDragged = false // this touch has panned or pinched the view past tap range
     private var panMayCommitText = false // pan begun off an open text box: a tap commits it, a drag scrolls
     private var downView: CanvasState.ViewSnapshot? = null // the view as this touch went down, put back if Android takes the touch back
     private var touchTakenBack = false // Android took back a finger of this touch, so the rest of it is ignored
@@ -360,6 +367,7 @@ class InteractionController(
 
     // PINCH
     private var pinchInitDist = 1.0
+    private var pinchInitMid = Pt.ZERO
     private var pinchInitZoom = 1.0
     private var pinchAnchorContent = Pt.ZERO
 
@@ -825,6 +833,7 @@ class InteractionController(
         if (!state.verticalScroll) clearFlipPull()
         stopOverscrollSettle() // ...and lets a re-grab take over the elastic mid-spring
         panMayCommitText = false // a fresh gesture; the editing branch below re-arms it if it applies
+        viewDragged = false
         lockedPressAt = null
         dismissPressAt = null
         markupPressAt = null
@@ -1151,7 +1160,7 @@ class InteractionController(
                 mode = PointerMode.IDLE
                 val upViewport = Pt(e.getX(idx).toDouble(), e.getY(idx).toDouble())
                 val tap = !downStoppedFling && upViewport.distanceTo(panDownViewport) <= TAP_SLOP
-                if (tap) onTap?.invoke(upViewport)
+                val putAway = tap && onTap?.invoke(upViewport) == true
                 if (panMayCommitText) {
                     // Press off the box while editing: only a tap commits (and re-arms the prior tool);
                     // a drag just scrolled with the edit kept live. Either way settle any elastic/glide.
@@ -1169,6 +1178,7 @@ class InteractionController(
                     // A finger tap (no drag) that didn't just halt a glide, landing off the current
                     // selection, dismisses it — the finger's counterpart to the stylus's empty-tap clear.
                     val linkHandled = !textCleared && tap && state.overscrollY <= 0.0 && tryLinkTap(content)
+                    if (tap && !putAway && !textCleared && !linkHandled && !hasSelection && e.eventTime - e.downTime < LONG_PRESS_MS) onBareTap?.invoke()
                     when {
                         textCleared || linkHandled -> Unit
                         state.overscrollY > 0.0 -> releaseOverscroll()
@@ -4252,6 +4262,7 @@ class InteractionController(
     private fun extendPan(vx: Double, vy: Double) {
         trackVelocity(vx, vy)
         onUserMovedView?.invoke()
+        noteViewDragged(Pt(vx, vy).distanceTo(panDownViewport) > TAP_SLOP)
         val dx = -(vx - lastPan.x)
         var dy = -(vy - lastPan.y)
         if (!state.verticalScroll) {
@@ -4652,7 +4663,15 @@ class InteractionController(
         pinchInitDist = a.distanceTo(b).coerceAtLeast(1.0)
         pinchInitZoom = state.zoom
         pinchAnchorContent = state.viewportToContent(mid)
+        pinchInitMid = mid
         startTrackingVelocity(mid.x, mid.y)
+    }
+
+    /** Tells [onUserDraggedView] the first time this touch has [moved] the view past tap range. */
+    private fun noteViewDragged(moved: Boolean) {
+        if (!moved || viewDragged) return
+        viewDragged = true
+        onUserDraggedView?.invoke()
     }
 
     private fun updatePinch(e: MotionEvent) {
@@ -4664,6 +4683,7 @@ class InteractionController(
         if (dist < 1e-3) return
         val mid = (a + b) * 0.5
         trackVelocity(mid.x, mid.y)
+        noteViewDragged(abs(dist - pinchInitDist) > TAP_SLOP || mid.distanceTo(pinchInitMid) > TAP_SLOP)
         // Zoom lock: pan only (keep the initial zoom).
         val raw = (pinchInitZoom * (dist / pinchInitDist)).coerceIn(state.minZoom, state.maxZoom)
         val wasFit = state.fitWidthActive || state.fitHeightActive

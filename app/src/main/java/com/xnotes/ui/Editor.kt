@@ -718,6 +718,12 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** Told of every press on the pages, so chrome over them can put away what a tap elsewhere should. */
     var onCanvasPress: (() -> Unit)? = null
 
+    /** Told of a tap on the pages that nothing on them took. */
+    var onCanvasTap: (() -> Unit)? = null
+
+    /** Told once a touch has dragged or pinched the pages past tap range. */
+    var onCanvasDrag: (() -> Unit)? = null
+
     /** Read-only waits while this note records, since a recording stamps what is written. */
     val canReadOnly: Boolean get() = AudioRecording.session?.owner !== this
 
@@ -1397,9 +1403,11 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     }
 
     /** A tap anywhere at viewport [at]: the note on show goes unless the tap is on its markup. */
-    private fun tapClosesNotePeek(at: Pt) {
-        val peek = notePeek ?: return
-        if (markupHit(at)?.markup !== peek.markup) notePeek = null
+    private fun tapClosesNotePeek(at: Pt): Boolean {
+        val peek = notePeek ?: return false
+        if (markupHit(at)?.markup === peek.markup) return false
+        notePeek = null
+        return true
     }
 
     /** Puts [after] in the menu markup's place as one undo step, and closes the menu. */
@@ -1792,6 +1800,8 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         controller.clipboardHasImage = { clipboardImageUri() != null }
         controller.onMarkupTap = { at, withLink -> tapMarkup(at, withLink) }
         controller.onTap = { at -> tapClosesNotePeek(at) }
+        controller.onBareTap = { onCanvasTap?.invoke() }
+        controller.onUserDraggedView = { onCanvasDrag?.invoke() }
         controller.onAudioTap = { pageIndex, local -> tapAudio(pageIndex, local) }
         controller.onUserMovedView = { AudioPlayback.userMoved(this) }
         // Whatever is added while this note records takes the recording's moment.

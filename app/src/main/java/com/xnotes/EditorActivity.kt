@@ -1573,11 +1573,7 @@ private fun EditorPane(
             while (true) {
                 // Initial pass and never consumed: the pane notices the touch, the canvas still gets it.
                 val event = awaitPointerEvent(PointerEventPass.Initial)
-                if (event.type == PointerEventType.Press) {
-                    app.focusPane(editor.pane)
-                    // Any touch brings a read-only note's islands back.
-                    if (editor.readOnly) chrome.wake()
-                }
+                if (event.type == PointerEventType.Press) app.focusPane(editor.pane)
             }
         }
     }
