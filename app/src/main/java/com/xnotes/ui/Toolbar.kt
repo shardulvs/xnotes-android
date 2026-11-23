@@ -320,11 +320,9 @@ internal class ToolGlide {
 internal val LocalToolGlide = staticCompositionLocalOf<ToolGlide?> { null }
 
 /** One hop of the glide along the bar: where it set out from and is headed, and how far it may stretch. */
-private class GlideTrip {
+internal class GlideTrip {
     var from = 0f
     var to = 0f
-    /** Where the circle sits across the bar. */
-    var across = 0f
     var stretch = 0f
     /** Stretch left over from a hop cut short, let go of over the new one. */
     var carry = 0f
@@ -336,31 +334,42 @@ private class GlideTrip {
     fun drawnOut(t: Float) = stretch * sin(PI * t).toFloat() + carry * (1 + cos(PI * t).toFloat()) / 2
 }
 
+/** A mark gliding along one axis, read while drawing: how faded in, where its centre is and how drawn out. */
+internal class Glide internal constructor(
+    private val trip: GlideTrip,
+    private val progress: Animatable<Float, *>,
+    private val shown: Animatable<Float, *>,
+) {
+    val visible: Float get() = shown.value
+    val center: Float get() = trip.x(progress.value)
+    val stretch: Float get() = trip.drawnOut(progress.value)
+
+    /** Where the mark starts along the axis, [length] long before stretching; the leading side takes most of the stretch, so the tail trails. */
+    fun start(length: Float): Float {
+        val ahead = if (trip.to >= trip.from) GLIDE_LEAD else 1 - GLIDE_LEAD
+        return center - length / 2 - stretch * (1 - ahead)
+    }
+}
+
 /**
- * Paints [glide]'s circle under the button keyed [armed]. On a change it eases across to the new
- * tool, drawn out in proportion to its speed: the stretch builds slowly, peaks midway and gathers
- * back into a circle as it lands.
+ * Glides to [along] (px) whenever it changes, drawn out in proportion to its speed: the stretch
+ * builds slowly, peaks midway and gathers back as it lands. Null fades the mark out.
  */
 @Composable
-internal fun Modifier.toolGlide(glide: ToolGlide, armed: Any?): Modifier {
-    val target = glide.centers[armed]
+internal fun rememberGlide(along: Float?): Glide {
     val density = LocalDensity.current
-    val bar = LocalBar.current
-    val r = with(density) { bar.circle.toPx() / 2 }
     val trip = remember { GlideTrip() }
     val progress = remember { Animatable(1f) }
     val shown = remember { Animatable(0f) }
-    LaunchedEffect(target) {
-        if (target == null) {
+    LaunchedEffect(along) {
+        if (along == null) {
             shown.animateTo(0f, tween(SELECT_FADE_MS))
             return@LaunchedEffect
         }
         val t = progress.value
-        val along = if (bar.vertical) target.y else target.x
         trip.carry = if (shown.value == 0f) 0f else trip.drawnOut(t)
         trip.from = if (shown.value == 0f) along else trip.x(t)
         trip.to = along
-        trip.across = if (bar.vertical) target.x else target.y
         val hopDp = abs(trip.to - trip.from) / density.density
         // Longer hops stretch further, levelling off towards the cap rather than hitting it.
         trip.stretch = with(density) { GLIDE_MAX_STRETCH.toPx() } * (1 - exp(-hopDp / GLIDE_REACH_DP))
@@ -368,23 +377,36 @@ internal fun Modifier.toolGlide(glide: ToolGlide, armed: Any?): Modifier {
         progress.snapTo(0f)
         progress.animateTo(1f, tween((GLIDE_BASE_MS + hopDp * GLIDE_MS_PER_DP).toInt().coerceAtMost(GLIDE_MAX_MS), easing = LinearEasing))
     }
+    return remember { Glide(trip, progress, shown) }
+}
+
+/** Paints [glide]'s circle under the button keyed [armed], gliding across to each new tool. */
+@Composable
+internal fun Modifier.toolGlide(glide: ToolGlide, armed: Any?): Modifier {
+    val target = glide.centers[armed]
+    val density = LocalDensity.current
+    val bar = LocalBar.current
+    val r = with(density) { bar.circle.toPx() / 2 }
+    val motion = rememberGlide(target?.let { if (bar.vertical) it.y else it.x })
+    // Where the circle sits across the bar, kept from the last tool so a fade out stays put.
+    val across = remember { floatArrayOf(0f) }
+    if (target != null) across[0] = if (bar.vertical) target.x else target.y
     val fill = LocalPalette.current.selectionBackground.toComposeColor()
     return onPlaced { glide.row = it }.drawBehind {
-        if (shown.value == 0f) return@drawBehind
-        val t = progress.value
-        val x = trip.x(t)
-        val s = trip.drawnOut(t)
-        // The leading side takes most of the stretch, so the tail seems to trail behind.
-        val ahead = if (trip.to >= trip.from) GLIDE_LEAD else 1 - GLIDE_LEAD
-        val start = x - r - s * (1 - ahead)
+        if (motion.visible == 0f) return@drawBehind
+        val s = motion.stretch
+        val start = motion.start(2 * r)
         drawRoundRect(
-            fill.copy(alpha = fill.alpha * shown.value),
-            topLeft = if (bar.vertical) Offset(trip.across - r, start) else Offset(start, trip.across - r),
+            fill.copy(alpha = fill.alpha * motion.visible),
+            topLeft = if (bar.vertical) Offset(across[0] - r, start) else Offset(start, across[0] - r),
             size = if (bar.vertical) Size(2 * r, 2 * r + s) else Size(2 * r + s, 2 * r),
             cornerRadius = CornerRadius(r),
         )
     }
 }
+
+/** How long a gliding mark's icon takes to turn, so it changes with the mark's arrival rather than ahead of it. */
+internal const val GLIDE_TINT_MS = 2 * SELECT_FADE_MS
 
 private val GLIDE_MAX_STRETCH = 48.dp
 private const val GLIDE_REACH_DP = 120f
@@ -419,7 +441,7 @@ internal fun ToolbarIcon(
             else -> palette.textDim.toComposeColor()
         },
         // A gliding circle takes a moment to arrive, so the icon turns with it rather than ahead of it.
-        tween(if (glide != null) 2 * SELECT_FADE_MS else SELECT_FADE_MS), label = "toolTint",
+        tween(if (glide != null) GLIDE_TINT_MS else SELECT_FADE_MS), label = "toolTint",
     )
     val fill by animateFloatAsState(if (active && glide == null) 1f else 0f, tween(SELECT_FADE_MS), label = "toolFill")
     if (glide != null) DisposableEffect(glide, glideKey) { onDispose { glide.centers.remove(glideKey) } }
