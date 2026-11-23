@@ -1,0 +1,15 @@
+- UI refresh
+- Read-only mode
+- Rich text boxes
+- Autoscroll
+- Pen opacity
+- Drag the toolbar to any edge
+- Colours for inserted space and margins
+- Adjust a screenshot capture before copying it
+- PDFs invert in dark themes by default
+- Improve page and PDF performance
+- Improve shape selection
+- Fix rotated scans drawing slightly skewed
+- Fix freezes with something on the clipboard
+- Fix a crash in Page size with some custom sizes
+- Fix the layout in right-to-left languages
