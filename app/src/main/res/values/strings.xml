@@ -58,6 +58,7 @@
     <string name="fit_width_short">Fit width</string>
     <string name="fit_height_short">Fit height</string>
     <string name="rotate">Rotate</string>
+    <string name="read_only">Read-only</string>
     <string name="on">On</string>
     <string name="caption_edge">Edge</string>
     <string name="tap_an_edge">Tap an edge to pick it</string>

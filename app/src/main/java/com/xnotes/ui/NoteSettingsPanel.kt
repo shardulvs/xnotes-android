@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -84,15 +85,27 @@ import kotlin.math.roundToInt
 
 private enum class NotePage(val depth: Int) { HOME(0), STYLES(1), MARGINS(1), VIEW(1), LIMITS(1), CUSTOMIZE(2), FILTERS(2) }
 
+/** The gear and its panel; [onOpenChange] hears it open and shut, as the reading islands must to stay up meanwhile. */
 @Composable
-internal fun NoteSettingsButton(editor: Editor, fullscreen: Boolean, onToggleFullscreen: () -> Unit, onImportTemplate: () -> Unit) {
+internal fun NoteSettingsButton(
+    editor: Editor,
+    fullscreen: Boolean,
+    onToggleFullscreen: () -> Unit,
+    onImportTemplate: () -> Unit,
+    rule: Boolean = true,
+    onOpenChange: (Boolean) -> Unit = {},
+) {
     var open by remember { mutableStateOf(false) }
     PrewarmTemplateThumbs(editor, open)
-    SettingsButton(open, { open = it }) { NotePanel(editor, fullscreen, onToggleFullscreen, onImportTemplate) }
+    DisposableEffect(open) {
+        onOpenChange(open)
+        onDispose { if (open) onOpenChange(false) }
+    }
+    SettingsButton(open, { open = it }, rule) { NotePanel(editor, fullscreen, onToggleFullscreen, onImportTemplate) { open = false } }
 }
 
 @Composable
-private fun NotePanel(editor: Editor, fullscreen: Boolean, onToggleFullscreen: () -> Unit, onImportTemplate: () -> Unit) {
+private fun NotePanel(editor: Editor, fullscreen: Boolean, onToggleFullscreen: () -> Unit, onImportTemplate: () -> Unit, close: () -> Unit) {
     var page by remember { mutableStateOf(NotePage.HOME) }
     // Each trip in from the front page reads the page as it is now, since the panel can turn pages.
     var visit by remember { mutableIntStateOf(0) }
@@ -105,7 +118,7 @@ private fun NotePanel(editor: Editor, fullscreen: Boolean, onToggleFullscreen: (
     }
     PanelPages(page, { it.depth }) { p ->
         when (p) {
-            NotePage.HOME -> HomePage(editor, fullscreen, onToggleFullscreen, ::go)
+            NotePage.HOME -> HomePage(editor, fullscreen, onToggleFullscreen, ::go, close)
             NotePage.STYLES -> StylesPage(editor, styles, onImportTemplate, onBack = { page = NotePage.HOME }, onCustomize = { page = NotePage.CUSTOMIZE })
             NotePage.CUSTOMIZE -> CustomizePage(editor, styles) { page = NotePage.STYLES }
             NotePage.MARGINS -> MarginsPage(editor, margins) { page = NotePage.HOME }
@@ -119,7 +132,7 @@ private fun NotePanel(editor: Editor, fullscreen: Boolean, onToggleFullscreen: (
 // Front page
 
 @Composable
-private fun ColumnScope.HomePage(editor: Editor, fullscreen: Boolean, onToggleFullscreen: () -> Unit, go: (NotePage) -> Unit) {
+private fun ColumnScope.HomePage(editor: Editor, fullscreen: Boolean, onToggleFullscreen: () -> Unit, go: (NotePage) -> Unit, close: () -> Unit) {
     val vs = editor.viewSettings
     PageCard(editor)
     Spacer(Modifier.height(10.dp))
@@ -142,8 +155,18 @@ private fun ColumnScope.HomePage(editor: Editor, fullscreen: Boolean, onToggleFu
     Spacer(Modifier.height(10.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         QuickTile(XnotesIcons.fullscreen, stringResource(R.string.toolbar_fullscreen), fullscreenState(fullscreen), fullscreen, Modifier.weight(1f)) { onToggleFullscreen() }
-        QuickTile(XnotesIcons.rotateRight, stringResource(R.string.rotate), "${vs.rotation}°", vs.rotation != 0, Modifier.weight(1f)) {
-            editor.updateViewOverrides(editor.viewOverrides.copy(rotation = (vs.rotation + 90) % 360))
+        // Turning it either way shuts the panel, so the page is in view as the bar or the islands come.
+        val reading = editor.readOnly
+        QuickTile(
+            XnotesIcons.bookOpen,
+            stringResource(R.string.read_only),
+            stringResource(if (reading) R.string.on else R.string.off),
+            reading,
+            Modifier.weight(1f),
+            enabled = reading || editor.canReadOnly,
+        ) {
+            close()
+            editor.toggleReadOnly()
         }
         val speed = stringResource(R.string.speed_mm_s, tenths(editor.autoScrollSpeed))
         QuickTile(
@@ -157,10 +180,13 @@ private fun ColumnScope.HomePage(editor: Editor, fullscreen: Boolean, onToggleFu
     }
     Spacer(Modifier.height(10.dp))
     PanelCard(padding = PaddingValues(0.dp)) {
-        NavRow(stringResource(R.string.title_styles), stylesSubtitle(editor), onClick = { go(NotePage.STYLES) }) { StylesPreview(editor) }
-        CardDivider(60.dp)
-        NavRow(stringResource(R.string.title_margins), marginsSubtitle(editor), onClick = { go(NotePage.MARGINS) }) { MarginsPreview(editor) }
-        CardDivider(60.dp)
+        // Styles and Margins change the pages, which a read-only note leaves as they are.
+        if (!editor.readOnly) {
+            NavRow(stringResource(R.string.title_styles), stylesSubtitle(editor), onClick = { go(NotePage.STYLES) }) { StylesPreview(editor) }
+            CardDivider(60.dp)
+            NavRow(stringResource(R.string.title_margins), marginsSubtitle(editor), onClick = { go(NotePage.MARGINS) }) { MarginsPreview(editor) }
+            CardDivider(60.dp)
+        }
         NavRow(stringResource(R.string.title_view), viewSubtitle(editor), onClick = { go(NotePage.VIEW) }) { ViewPreview(vs.mode) }
     }
 }
