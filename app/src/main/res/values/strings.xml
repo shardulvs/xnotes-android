@@ -829,7 +829,8 @@
     <string name="no_bookmarks">— no bookmarks —</string>
     <string name="add">Add</string>
     <string name="page_n">Page %1$d</string>
-    <string name="bookmark_entry">%1$s · p.%2$d</string>
+    <string name="expand_entry">Expand</string>
+    <string name="collapse_entry">Collapse</string>
 
     <!-- Selection and long-press menus -->
     <string name="bring_to_front">Bring to front</string>

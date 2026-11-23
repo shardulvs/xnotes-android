@@ -645,7 +645,8 @@
     <string name="no_bookmarks">— 没有书签 —</string>
     <string name="add">添加</string>
     <string name="page_n">第 %1$d 页</string>
-    <string name="bookmark_entry">%1$s · 第 %2$d 页</string>
+    <string name="expand_entry">展开</string>
+    <string name="collapse_entry">收起</string>
 
     <!-- Selection and long-press menus -->
     <string name="bring_to_front">置于顶层</string>

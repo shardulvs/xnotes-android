@@ -978,6 +978,9 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     var tocVersion by mutableStateOf(0)
         private set
 
+    /** The outline entries folded shut in the Contents tab, by index; a new outline opens unfolded. */
+    var tocFolded by mutableStateOf<Set<Int>>(emptySet())
+
     /** Bumped when the side-panel thumbnails must re-render (rotation or PDF filter change).
      *  Observed by the thumbnail producer. */
     var pdfThumbTick by mutableStateOf(0)
@@ -2156,6 +2159,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      *  outline; a read that finishes after another swap is dropped by the source-identity guard. */
     private fun refreshToc() {
         toc = emptyList()
+        tocFolded = emptySet()
         tocVersion++
         val src = pdfSource ?: return
         autosaveScope.launch {
@@ -2167,16 +2171,17 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
     }
 
-    /** Navigate to the page an outline [entry] points at: the note page whose [Page.pdfPage] is the
-     *  entry's source PDF page, falling back to the nearest preceding imported page so an entry into a
-     *  trimmed import still lands somewhere. No-op when the entry has no resolvable page. */
-    fun goToTocEntry(entry: com.xnotes.platform.PdfOutlineEntry) {
-        val dest = entry.destPage
-        if (dest < 0) return
+    /** The note page each outline entry opens, or -1: the page whose [Page.pdfPage] is the entry's
+     *  source PDF page, falling back to the nearest preceding imported page so an entry into a
+     *  trimmed import still lands somewhere. */
+    fun tocTargets(): IntArray {
         val pages = state.document.pages
-        val exact = pages.indexOfFirst { it.pdfPage == dest }
-        val target = if (exact >= 0) exact else pages.indexOfLast { (it.pdfPage ?: -1) in 0..dest }
-        if (target >= 0) goToPage(target)
+        val first = HashMap<Int, Int>()
+        pages.forEachIndexed { i, p -> p.pdfPage?.let { first.putIfAbsent(it, i) } }
+        return IntArray(toc.size) { k ->
+            val dest = toc[k].destPage
+            if (dest < 0) -1 else first[dest] ?: pages.indexOfLast { (it.pdfPage ?: -1) in 0..dest }
+        }
     }
 
     /** Records [doc] as the open note for source-PDF temp-file lifetime: deletes the previously open
