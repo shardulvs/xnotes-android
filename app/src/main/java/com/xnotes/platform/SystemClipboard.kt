@@ -2,7 +2,6 @@ package com.xnotes.platform
 
 import android.content.ClipboardManager
 import android.content.Context
-import android.net.Uri
 
 /**
  * What the Android clipboard is holding, in the terms this app cares about: an image.
@@ -12,28 +11,21 @@ import android.net.Uri
  */
 object SystemClipboard {
 
-    /** An image the clipboard is holding by uri, or null when it holds something else. */
-    fun imageUri(context: Context): Uri? {
-        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return null
-        val clip = cm.primaryClip ?: return null
-        if (clip.itemCount == 0) return null
-        val uri = clip.getItemAt(0).uri ?: return null
-        val type = context.contentResolver.getType(uri)
-        val isImage = type?.startsWith("image/") == true || clip.description?.hasMimeType("image/*") == true
-        return if (isImage) uri else null
-    }
+    private fun manager(context: Context) = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+
+    /** Whether the clip declares an image. Asks only the clipboard service, never the app that copied it, so a touch can afford it. */
+    fun hasImage(context: Context): Boolean = manager(context)?.primaryClipDescription?.hasMimeType("image/*") == true
+
+    /** Whether the clip declares text, asked as cheaply as [hasImage]. */
+    fun hasText(context: Context): Boolean = manager(context)?.primaryClipDescription?.hasMimeType("text/*") == true
 
     /** SVG markup sitting on the clipboard as plain text (copied source), as insertable bytes. */
-    fun svgBytes(context: Context): ByteArray? {
-        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return null
-        val text = cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.toString() ?: return null
+    private fun svgBytes(clip: android.content.ClipData): ByteArray? {
+        val text = clip.getItemAt(0).text?.toString() ?: return null
         val t = text.trimStart('﻿').trimStart()
         val looksSvg = t.startsWith("<svg") || ((t.startsWith("<?xml") || t.startsWith("<!")) && t.contains("<svg"))
         return if (looksSvg) text.toByteArray() else null
     }
-
-    /** Whether there is anything here worth offering a paste for. */
-    fun hasImage(context: Context): Boolean = imageUri(context) != null || svgBytes(context) != null
 
     /** Write [bmp] as a PNG to the FileProvider-exposed cache and make it the primary clip; false when that failed. */
     fun putImage(context: Context, bmp: android.graphics.Bitmap, label: String): Boolean = runCatching {
@@ -47,13 +39,15 @@ object SystemClipboard {
         true
     }.getOrDefault(false)
 
-    /** The clipboard's image as bytes, reading the uri or falling back to copied SVG source. */
+    /** The declared image's bytes, or copied SVG source. Reads from the app that copied it, so never call it on the main thread. */
     fun imageBytes(context: Context): ByteArray? {
-        imageUri(context)?.let { uri ->
+        val clip = manager(context)?.primaryClip?.takeIf { it.itemCount > 0 } ?: return null
+        val uri = clip.getItemAt(0).uri?.takeIf { clip.description.hasMimeType("image/*") }
+        if (uri != null) {
             runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }
                 .getOrNull()
                 ?.let { return it }
         }
-        return svgBytes(context)
+        return svgBytes(clip)
     }
 }

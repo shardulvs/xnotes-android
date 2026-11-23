@@ -1574,7 +1574,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         return clip.getItemAt(0).coerceToText(appContext)?.toString()?.takeIf { it.isNotEmpty() }
     }
 
-    fun clipboardHasText(): Boolean = clipboardText() != null
+    fun clipboardHasText(): Boolean = com.xnotes.platform.SystemClipboard.hasText(appContext)
 
     /** Viewport bounds the flow-editing action bar anchors to, or null when closed. */
     var flowContextMenu by mutableStateOf<Rect?>(null)
@@ -1797,7 +1797,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         // (mode/rotation/scroll direction/scrollbar) into it before the first document lands.
         onViewSettingsChanged(com.xnotes.canvas.ViewSettings(), viewSettings)
         view.onKey = { e -> e.action == android.view.KeyEvent.ACTION_DOWN && handleKeyDown(e) }
-        controller.clipboardHasImage = { clipboardImageUri() != null }
+        controller.clipboardHasImage = { com.xnotes.platform.SystemClipboard.hasImage(appContext) }
         controller.onMarkupTap = { at, withLink -> tapMarkup(at, withLink) }
         controller.onTap = { at -> tapClosesNotePeek(at) }
         controller.onBareTap = { onCanvasTap?.invoke() }
@@ -2036,7 +2036,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     // --- selection menu / clipboard ---
 
     override val hasClipboardItems: Boolean get() = controller.hasClipboardItems()
-    override val clipboardHasImage: Boolean get() = clipboardImageUri() != null
+    override val clipboardHasImage: Boolean get() = com.xnotes.platform.SystemClipboard.hasImage(appContext)
 
     override fun copySelection() = controller.copySelection()
     override fun cutSelection() = controller.cutSelection()
@@ -2194,23 +2194,15 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         controller.pasteItemsAt(content)
     }
 
-    override fun pasteClipboardImageAt(content: com.xnotes.core.geometry.Pt) {
-        val uri = clipboardImageUri() ?: run {
-            clipboardSvgBytes()?.let { insertImageAt(it, content) }
-                ?: run { message = appContext.getString(R.string.err_clipboard_no_image) }
-            return
+    override fun pasteClipboardImageAt(content: com.xnotes.core.geometry.Pt) = pasteClipboardImage(content)
+
+    /** Insert the clipboard's image at [at] (the current page when null), read off the main thread. */
+    private fun pasteClipboardImage(at: com.xnotes.core.geometry.Pt?) {
+        autosaveScope.launch {
+            val bytes = withContext(Dispatchers.IO) { com.xnotes.platform.SystemClipboard.imageBytes(appContext) }
+            if (bytes != null) insertImageAt(bytes, at) else message = appContext.getString(R.string.err_clipboard_no_image)
         }
-        runCatching { appContext.contentResolver.openInputStream(uri)?.use { it.readBytes() } }
-            .getOrNull()
-            ?.let { insertImageAt(it, content) }
-            ?: run { message = appContext.getString(R.string.err_clipboard_no_image) }
     }
-
-    /** SVG markup sitting on the clipboard as plain text (copied source), as insertable bytes. */
-    private fun clipboardSvgBytes(): ByteArray? = com.xnotes.platform.SystemClipboard.svgBytes(appContext)
-
-    private fun clipboardImageUri(): android.net.Uri? =
-        com.xnotes.platform.SystemClipboard.imageUri(appContext)
 
     private fun rebuildPdfSource() {
         pdfText.clear()
@@ -2761,19 +2753,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         insertImage(bytes)
     }
 
-    fun pasteImage() {
-        val clipboard = appContext.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-        val uri = clipboard?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri
-        if (uri == null) {
-            clipboardSvgBytes()?.let { insertImage(it) }
-                ?: run { message = appContext.getString(R.string.err_clipboard_no_image) }
-            return
-        }
-        runCatching { appContext.contentResolver.openInputStream(uri)?.use { it.readBytes() } }
-            .getOrNull()
-            ?.let { insertImage(it) }
-            ?: run { message = appContext.getString(R.string.err_clipboard_no_image) }
-    }
+    fun pasteImage() = pasteClipboardImage(null)
 
     /**
      * A [FlowLayout] carrying the active code theme, for transient layout passes (PDF

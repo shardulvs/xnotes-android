@@ -622,8 +622,10 @@ class InfiniteEditor(context: Context) : ToolPopupHost, SelectionMenuHost, LongP
     }
 
     override fun pasteClipboardImageAt(content: Pt) {
-        val bytes = com.xnotes.platform.SystemClipboard.imageBytes(appContext) ?: return
-        insertImage(bytes, content)
+        kotlin.concurrent.thread(name = "xnotes-clip-read", isDaemon = true) {
+            val bytes = com.xnotes.platform.SystemClipboard.imageBytes(appContext) ?: return@thread
+            mainHandler.post { insertImage(bytes, content) }
+        }
     }
 
     // --- crop: a lone picture cut down to part of itself, for good ---
