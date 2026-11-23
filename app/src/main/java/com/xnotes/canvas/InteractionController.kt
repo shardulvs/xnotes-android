@@ -1992,11 +1992,7 @@ class InteractionController(
         if (item != null && old != null) {
             val new = item.geometry()
             if (new != old) {
-                // A brand-new box travels with the AddItem pushed on commit, as when it is resized.
-                if (!editingIsNew) {
-                    history.push(ResizeItem(item, old, new))
-                    state.document.dirty = true
-                }
+                pushResize(item, old, new)
                 onContentChanged()
             }
         }
@@ -2362,6 +2358,15 @@ class InteractionController(
         requestRender()
     }
 
+    /** One [ResizeItem] for a settled resize or slide. A brand-new box is skipped: its geometry
+     *  travels with the AddItem pushed when the edit commits, so a ResizeItem would name
+     *  something the page does not hold yet. */
+    private fun pushResize(item: Resizable, old: GeoHandle, new: GeoHandle) {
+        if (item === editingText && editingIsNew) return
+        history.push(ResizeItem(item, old, new))
+        state.document.dirty = true
+    }
+
     private fun endResize() {
         val item = resizeItem as? Resizable
         val old = resizeOldGeom
@@ -2370,12 +2375,7 @@ class InteractionController(
             val new = item.geometry()
             if (new != old) {
                 changed = true
-                // A brand-new box isn't in the page yet: its geometry travels with the AddItem
-                // pushed on commit, so a ResizeItem would name something the page doesn't hold.
-                if (!(item === editingText && editingIsNew)) {
-                    history.push(ResizeItem(item, old, new))
-                    state.document.dirty = true
-                }
+                pushResize(item, old, new)
                 // The resized item stays lifted (overlay-drawn); the ink cache it was already
                 // lifted out of needs no repair — it is repainted at its new size on deselect.
                 onContentChanged()
