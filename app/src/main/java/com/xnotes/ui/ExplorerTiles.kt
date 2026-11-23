@@ -28,6 +28,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.key
@@ -106,6 +108,7 @@ internal class EntryActions(
     val share: (BrowseEntry) -> Unit,
     val saveCopy: (BrowseEntry) -> Unit,
     val exportPdf: (BrowseEntry) -> Unit,
+    val convert: (BrowseEntry) -> Unit,
     val preview: (BrowseEntry) -> Unit,
 )
 
@@ -148,7 +151,7 @@ internal class ExplorerBody(
 
     fun meta(e: BrowseEntry): DocMetaStore.Meta? = metas[e.documentUri]
 
-    fun kind(e: BrowseEntry): EntryKind = entryKind(e, meta(e))
+    fun kind(e: BrowseEntry): EntryKind = entryKind(e)
 
     fun pages(e: BrowseEntry): Int = meta(e)?.pages ?: 0
 
@@ -165,11 +168,14 @@ internal class ExplorerBody(
     fun colorOf(e: BrowseEntry): Rgba? = e.color.takeIf { view.showColour }
 }
 
-internal fun entryKind(e: BrowseEntry, meta: DocMetaStore.Meta?): EntryKind = when {
+/** What [e] is, which for a file is what its name says: a note made from a PDF is a note, and only a `.pdf` is a PDF. */
+internal fun entryKind(e: BrowseEntry): EntryKind = when {
     e.isDir -> EntryKind.FOLDER
-    DocumentKind.ofName(e.name) == DocumentKind.CANVAS -> EntryKind.CANVAS
-    meta?.pdf == true -> EntryKind.PDF
-    else -> EntryKind.NOTE
+    else -> when (DocumentKind.ofName(e.name)) {
+        DocumentKind.CANVAS -> EntryKind.CANVAS
+        DocumentKind.PDF -> EntryKind.PDF
+        else -> EntryKind.NOTE
+    }
 }
 
 internal fun kindIcon(k: EntryKind): ImageVector = when (k) {
@@ -198,10 +204,14 @@ internal fun EntryThumb(editor: Editor, entry: BrowseEntry, shape: ThumbShape, m
 @Composable
 internal fun rememberThumb(editor: Editor, entry: BrowseEntry, whole: Boolean): ImageBitmap? = key(editor, editor.thumbnailVersion) {
     val thumb by produceState<ImageBitmap?>(
-        if (whole) editor.cachedPageThumb(entry.documentUri) else editor.cachedNoteTile(entry.documentUri),
+        if (whole) editor.cachedPageThumb(entry.documentUri, entry.name, entry.modified) else editor.cachedNoteTile(entry.documentUri, entry.name, entry.modified),
         entry.documentUri, entry.modified, whole,
     ) {
-        value = if (whole) editor.pageThumbnail(entry.documentUri, entry.name) else editor.tileThumbnail(entry.documentUri, entry.name)
+        value = if (whole) {
+            editor.pageThumbnail(entry.documentUri, entry.name, entry.modified)
+        } else {
+            editor.tileThumbnail(entry.documentUri, entry.name, entry.modified)
+        }
     }
     thumb
 }
@@ -245,6 +255,37 @@ internal fun ThumbBadges(b: ExplorerBody, e: BrowseEntry, inset: Dp = 8.dp) {
         }
         val pages = b.pages(e)
         if (b.view.showPages && pages > 1) TileBadge(XnotesIcons.pages, "$pages", Modifier.align(Alignment.BottomEnd))
+        ExportRing(e, Modifier.align(Alignment.TopEnd))
+    }
+}
+
+/**
+ * A ring on the tile of a PDF whose pages are being drawn again, as far round as that has got.
+ * It reads the running exports itself, so their progress redraws the ring and nothing around it.
+ */
+@Composable
+internal fun ExportRing(e: BrowseEntry, modifier: Modifier = Modifier) {
+    if (e.isDir || DocumentKind.ofName(e.name) != DocumentKind.PDF) return
+    val running by com.xnotes.platform.PdfExports.progress.collectAsState()
+    if (running.isEmpty()) return
+    val key = remember(e.documentUri) { com.xnotes.platform.PdfExports.keyOf(e.documentUri) }
+    val fraction = running[key] ?: return
+    val palette = LocalPalette.current
+    Box(
+        modifier
+            .size(22.dp)
+            .clip(CircleShape)
+            .background(palette.bg.withAlpha(if (palette.isDark) 200 else 235).toComposeColor())
+            .border(1.dp, palette.border.toComposeColor(), CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        CircularProgressIndicator(
+            progress = { fraction },
+            modifier = Modifier.size(13.dp),
+            color = palette.accent.toComposeColor(),
+            trackColor = palette.border.toComposeColor(),
+            strokeWidth = 2.dp,
+        )
     }
 }
 
@@ -261,7 +302,14 @@ private fun EntryMenuButton(b: ExplorerBody, e: BrowseEntry, tint: Color, size: 
     }
 }
 
-/** An entry's overflow menu, with the file-only block for notes and canvases and the pin toggle for folders. */
+/** What converting [e] is called: a note becomes a PDF and a PDF a note, and nothing else converts. */
+internal fun convertLabel(e: BrowseEntry): Int? = if (e.isDir) null else when (DocumentKind.ofName(e.name)) {
+    DocumentKind.NOTE -> R.string.convert_to_pdf
+    DocumentKind.PDF -> R.string.convert_to_note
+    else -> null
+}
+
+/** An entry's overflow menu, with the file-only block for notes, PDFs and canvases and the pin toggle for folders. */
 @Composable
 internal fun EntryMenuFor(b: ExplorerBody, e: BrowseEntry, expanded: Boolean, onDismiss: () -> Unit) {
     val m = b.host.menu
@@ -271,6 +319,8 @@ internal fun EntryMenuFor(b: ExplorerBody, e: BrowseEntry, expanded: Boolean, on
         onShare = if (e.isDir) null else ({ m.share(e) }),
         onSaveCopy = { m.saveCopy(e) },
         onExportPdf = { m.exportPdf(e) },
+        convertLabel = convertLabel(e),
+        onConvert = { m.convert(e) },
         onColor = { c -> m.color(e, c) },
         pinned = e.isDir && b.host.isPinned(e),
         onTogglePin = if (e.isDir) ({ m.togglePin(e) }) else null,
@@ -546,6 +596,7 @@ internal fun GalleryItem(b: ExplorerBody, e: BrowseEntry, shelf: Dp) {
                     ThumbImage(img, whole = true, Modifier.fillMaxSize())
                     if (selected) Box(Modifier.fillMaxSize().background(palette.selectionBackground.withAlpha(77).toComposeColor()))
                     if (selecting) CheckRing(selected, Modifier.align(Alignment.TopStart).padding(6.dp))
+                    ExportRing(e, Modifier.align(Alignment.TopEnd).padding(6.dp))
                 }
             }
         }
@@ -595,6 +646,7 @@ internal fun TimelineCard(b: ExplorerBody, e: BrowseEntry, side: Dp) {
                     TileBadge(kindIcon(kind), if (kind == EntryKind.PDF) "PDF" else stringResource(R.string.kind_canvas), Modifier.align(Alignment.BottomStart).padding(6.dp))
                 }
             }
+            ExportRing(e, Modifier.align(Alignment.TopEnd).padding(6.dp))
             if (selecting) CheckRing(selected, Modifier.align(Alignment.TopStart).padding(6.dp))
         }
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {

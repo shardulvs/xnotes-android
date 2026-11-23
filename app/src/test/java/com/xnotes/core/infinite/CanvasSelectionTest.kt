@@ -415,6 +415,56 @@ class CanvasSelectionTest {
         assertEquals("item bounds cannot say what angle the ink is at", 0.0, sel.box!!.angle, 1e-9)
     }
 
+    // --- a lone line or arrow ---
+
+    private fun straight(kind: ShapeKind = ShapeKind.LINE) = ShapeItem(kind, Pt(0.0, 0.0), Pt(100.0, 50.0), Rgba(1, 2, 3, 255), 2.0)
+
+    @Test fun aLoneLineIsHeldByItsEndsAndHasNoGrip() {
+        for (kind in listOf(ShapeKind.LINE, ShapeKind.ARROW)) {
+            val l = straight(kind)
+            val sel = CanvasSelection(docOf(l))
+            sel.select(listOf(l))
+            assertEquals(listOf(HandleId.START, HandleId.END), sel.handles().map { it.id })
+            assertEquals(HandleId.START, sel.hitHandle(Pt(1.0, 1.0), 5.0))
+            assertEquals(HandleId.END, sel.hitHandle(Pt(100.0, 50.0), 5.0))
+            assertTrue(!sel.turns)
+            assertNull(sel.rotateGrip(30.0))
+        }
+    }
+
+    @Test fun aLineAmongOthersKeepsTheBox() {
+        val l = straight()
+        val sel = CanvasSelection(docOf(l))
+        sel.select(listOf(l, box(200.0, 0.0)))
+        assertEquals(8, sel.handles().size)
+        assertNotNull(sel.rotateGrip(30.0))
+    }
+
+    @Test fun draggingALinesEndTurnsItAboutTheOtherEnd() {
+        val l = straight()
+        val sel = CanvasSelection(docOf(l))
+        sel.select(listOf(l))
+        sel.beginTransform(rigid = true)
+        sel.resizeLive(HandleId.END, Pt(0.0, 80.0))
+        sel.resizeLive(HandleId.END, Pt(30.0, 120.0))
+        assertEquals(Pt(0.0, 0.0), l.start)
+        assertEquals(Pt(30.0, 120.0), l.end)
+        assertEquals(60.0, sel.box!!.center.y, 1.5)
+        sel.buildCommand(movedOnly = false)!!.undo()
+        assertEquals(Pt(0.0, 0.0), l.start)
+        assertEquals(Pt(100.0, 50.0), l.end)
+    }
+
+    @Test fun draggingALinesStartLeavesItsEnd() {
+        val l = straight()
+        val sel = CanvasSelection(docOf(l))
+        sel.select(listOf(l))
+        sel.beginTransform(rigid = true)
+        sel.resizeLive(HandleId.START, Pt(-20.0, 90.0))
+        assertEquals(Pt(-20.0, 90.0), l.start)
+        assertEquals(Pt(100.0, 50.0), l.end)
+    }
+
     // --- overlay geometry ---
 
     @Test fun theOverlayScalesItsOutlineWithTheZoom() {
@@ -428,6 +478,15 @@ class CanvasSelectionTest {
         val inSpan = span(zoomedIn[0].mesh)
         val outSpan = span(zoomedOut[0].mesh)
         assertTrue("the outline must stay one thickness on screen", outSpan > inSpan)
+    }
+
+    @Test fun aSelectionThatCannotTurnDrawsNoGrip() {
+        val sel = CanvasSelection(docOf())
+        sel.select(listOf(box(0.0, 0.0, 100.0, 100.0)))
+        val accent = com.xnotes.core.model.Rgba(0, 255, 0, 255)
+        fun top(parts: List<MeshPart>) = parts.minOf { p -> (0 until p.mesh.vertexCount).minOf { p.mesh.positions[2 * it + 1] } }
+        assertTrue(top(OverlayTessellator.selection(sel.box!!, 1.0, accent, 0.01)) < -30.0)
+        assertTrue(top(OverlayTessellator.selection(sel.box!!, 1.0, accent, 0.01, grip = false)) > -10.0)
     }
 
     @Test fun theBandAndLassoProduceGeometry() {

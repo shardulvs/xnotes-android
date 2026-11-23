@@ -55,7 +55,7 @@ class FitWidthSnapTest {
         assertFalse(st.fitWidthActive)
     }
 
-    @Test fun freeMovementCanBeTurnedOnWithoutAffectingVerticalMode() {
+    @Test fun freeMovementPinchesPastTheMagnetsInBothModes() {
         val st = state()
         st.verticalScroll = false
         st.relayout()
@@ -69,8 +69,11 @@ class FitWidthSnapTest {
 
         st.verticalScroll = true
         st.relayout()
-        val verticalFit = st.fitWidthZoom()
-        assertEquals(verticalFit, st.snapZoomToFit(verticalFit * 1.01), 1e-9)
+        val near = st.fitWidthZoom() * 1.01
+        assertEquals(near, st.snapZoomToFit(near), 1e-9)
+        assertFalse(st.fitWidthActive)
+        st.freeMovement = false
+        assertEquals(st.fitWidthZoom(), st.snapZoomToFit(near), 1e-9)
         assertTrue(st.fitWidthActive)
     }
 
@@ -211,6 +214,21 @@ class FitWidthSnapTest {
 
         assertEquals(st.fitWidthZoom(), st.zoom, 1e-9)
         assertTrue(st.zoom < wide)
+    }
+
+    @Test fun resizeUnderAZoomFloorKeepsTheLeftEdgeUnlessFreeVertical() {
+        for (free in listOf(false, true)) {
+            val st = state(viewportW = 1000)
+            st.insetLeft = 80.0
+            st.freeMovement = free
+            st.minZoom = st.fitWidthZoom() * 1.5 // the page stays wider than the screen at "fit width"
+            st.fitWidth()
+            st.viewportW = 900
+            st.relayout()
+            st.reflowFitWidthForResize()
+            if (free) assertEquals(st.clearCenter().x, st.contentToViewport(Pt(st.contentW / 2.0, 0.0)).x, 1e-6)
+            else assertEquals(-st.insetLeft, st.scrollX, 1e-9)
+        }
     }
 
     @Test fun resizeRefitsEvenWhenZoomLocked() {

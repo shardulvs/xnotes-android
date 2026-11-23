@@ -30,7 +30,7 @@ data class ViewSettings(
     val mode: ViewingMode = ViewingMode.SINGLE,
     /** True = continuous vertical scroll; false = paginated horizontal page-flip. */
     val verticalScroll: Boolean = true,
-    /** Paginated only: pages move up and down freely and pinches never snap to a fit. */
+    /** Pinches never snap to a fit. Vertical scroll: any page edge can reach the viewport centre. Paginated: pages move up and down freely. */
     val freeMovement: Boolean = false,
     val contrast: Int = 100, // 0..200, 100 = untouched
     val invert: Int = 0, // 0..100

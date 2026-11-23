@@ -77,8 +77,6 @@ import com.xnotes.core.stroke.Scribble
 import com.xnotes.core.stroke.Sample
 import com.xnotes.core.stroke.ShapeRecognizer
 import com.xnotes.core.stroke.Stabilizer
-import com.xnotes.core.stroke.SteadyReadout
-import com.xnotes.core.stroke.SteadyTrace
 import com.xnotes.core.stroke.StrokeSimplify
 import com.xnotes.core.tools.EraseMode
 import com.xnotes.core.tools.InkPalette
@@ -87,7 +85,6 @@ import com.xnotes.core.shapes.ShapeKind
 import com.xnotes.core.tools.MarkupMode
 import com.xnotes.core.tools.Tool
 import com.xnotes.core.tools.ToolConfig
-import com.xnotes.core.tools.ToolConversions
 import com.xnotes.core.tools.ToolDefaults
 import com.xnotes.ui.theme.Palette
 import kotlin.math.abs
@@ -103,7 +100,7 @@ import com.xnotes.core.model.sourcePoint
 enum class PointerMode {
     IDLE, DRAW, ERASE, BAND, LASSO_DRAW, SHOT, SHAPE, MOVE, RESIZE, TRANSFORM, PAN, PINCH, FLOW_TEXT,
     TEXT_DRAG, RULER_MOVE, RULER_TRANSFORM, RULER_ROTATE, PDF_TEXT, VERTEX, POLYGON, CONNECT, JOINT, SLIDE, TAPE, ROOM,
-    ROOM_BUTTON,
+    ROOM_BUTTON, SHOT_RESIZE, SHOT_MOVE,
 }
 
 /**
@@ -278,14 +275,6 @@ class InteractionController(
     /** The live stroke's stabilization, or null while its pen draws the nib as is. */
     private var steadier: Stabilizer? = null
 
-    /** Debug HUD: what stabilization did to the last stroke. */
-    val steadyReadout = SteadyReadout()
-
-    /** Whether strokes are measured for [steadyReadout]; true only while the debug HUD is up. */
-    var measureSteadying: () -> Boolean = { false }
-
-    private val steadyTrace = SteadyTrace()
-    private var tracing = false
     private var drawingPointerId = -1
     private var drawingIsStylus = false
 
@@ -322,6 +311,7 @@ class InteractionController(
     // the controller's selection/edit logic stays constructible — and unit-testable — off-device.
     private val choreographer by lazy { Choreographer.getInstance() }
     private var flinging = false
+    val isFlinging: Boolean get() = flinging
     private var flingVel = Pt.ZERO // scroll-space velocity, viewport px/s
     private var lastFlingMs = 0L
     private val flingFrame = Choreographer.FrameCallback { frameTimeNanos -> stepFling(frameTimeNanos) }
@@ -388,6 +378,11 @@ class InteractionController(
     private var screenshotOrigin = Pt.ZERO
     /** The edited box's geometry when its style bar started sliding it, for one undo step. */
     private var boxDragOldGeom: GeoHandle? = null
+    /** The frozen capture as it was when an adjust started, so a cancel can put it back. */
+    private var shotStart: Rect? = null
+    /** The handle being dragged on the frozen capture, and where the pen grabbed it. */
+    private var shotGrab: HandleId? = null
+    private var shotGrabAt = Pt.ZERO
 
     // ERASE
     private val eraseRemovals = mutableListOf<Pair<Page, CanvasItem>>()
@@ -815,6 +810,9 @@ class InteractionController(
             // off the selection it still pans.
             toolType == MotionEvent.TOOL_TYPE_FINGER && !fingerDraws && tool.fingerPansWhenOff &&
                 fingerHitsSelection(content) -> Tool.SELECT
+            // Likewise a frozen capture: a finger on a handle or inside it adjusts it.
+            toolType == MotionEvent.TOOL_TYPE_FINGER && !fingerDraws && tool == Tool.SCREENSHOT &&
+                fingerHitsCapture(content) -> Tool.SCREENSHOT
             // A finger otherwise pans instead of drawing/selecting/shaping/erasing (text stays usable by finger).
             toolType == MotionEvent.TOOL_TYPE_FINGER && !fingerDraws && tool.fingerPansWhenOff -> Tool.PAN
             else -> tool
@@ -948,7 +946,7 @@ class InteractionController(
             }
             effectiveTool == Tool.SELECT -> beginSelect(content)
             effectiveTool == Tool.LASSO -> beginLasso(content)
-            effectiveTool == Tool.SCREENSHOT -> beginScreenshot(content)
+            effectiveTool == Tool.SCREENSHOT -> beginScreenshotGesture(content)
             effectiveTool == Tool.SHAPE && selected -> dismissFirst(content)
             effectiveTool == Tool.SHAPE && shapeConfig.placesCorners -> beginPolygonTap(content)
             effectiveTool == Tool.SHAPE && shapeConfig.connector != null -> beginConnector(content)
@@ -962,9 +960,10 @@ class InteractionController(
         }
         // The flow caret owns its own long press (word selection), mid text-drag it is suppressed so
         // a hold-then-drag still sizes a box, and a markup drag held still is just a slow drag; room
-        // held still under the pen is just room opened slowly.
+        // held still under the pen is just room opened slowly, and so is a capture adjusted slowly.
         if (mode != PointerMode.FLOW_TEXT && mode != PointerMode.TEXT_DRAG && mode != PointerMode.PDF_TEXT &&
-            mode != PointerMode.POLYGON && mode != PointerMode.ROOM
+            mode != PointerMode.POLYGON && mode != PointerMode.ROOM &&
+            mode != PointerMode.SHOT_RESIZE && mode != PointerMode.SHOT_MOVE
         ) {
             armLongPress(Pt(vx, vy), content, isFinger, free)
         }
@@ -1060,6 +1059,8 @@ class InteractionController(
             PointerMode.BAND -> extendBand(content)
             PointerMode.LASSO_DRAW -> extendLasso(content)
             PointerMode.SHOT -> extendScreenshot(content)
+            PointerMode.SHOT_RESIZE -> extendScreenshotResize(content)
+            PointerMode.SHOT_MOVE -> extendScreenshotMove(content)
             PointerMode.MOVE -> extendMove(content)
             PointerMode.RESIZE -> extendResize(content)
             PointerMode.TRANSFORM -> extendTransform(content)
@@ -1142,6 +1143,8 @@ class InteractionController(
             PointerMode.BAND -> endBand()
             PointerMode.LASSO_DRAW -> endLasso()
             PointerMode.SHOT -> endScreenshot()
+            PointerMode.SHOT_RESIZE -> endScreenshotAdjust()
+            PointerMode.SHOT_MOVE -> endScreenshotAdjust()
             PointerMode.MOVE -> endMove(content)
             PointerMode.RESIZE -> endResize()
             PointerMode.TRANSFORM -> endTransform()
@@ -1259,8 +1262,6 @@ class InteractionController(
         stroke.addSample(Sample(first.x, first.y, pressure)) // first sample: t = 0
         steadier = Stabilizer.forStroke(cfg.stabilize && !straight, cfg.stabilizeTrail, cfg.stabilizeCrossover, speedScale)
         steadier?.start(down.x, down.y, 0.0)
-        tracing = measureSteadying()
-        if (tracing) steadyTrace.start(down.x, down.y)
         liveStroke = stroke
         strokePageIndex = pageIndex
         mode = PointerMode.DRAW
@@ -1321,7 +1322,6 @@ class InteractionController(
                 Pt(steady.x, steady.y)
             }
         }
-        if (tracing && steady != null) steadyTrace.add(nib.x, nib.y, content.x, content.y)
         // The pen has walked onto another page: carry the stroke over rather than let it slide
         // under the paper. A straight line is one segment by definition and never hands over.
         if (!stroke.straight) {
@@ -1473,7 +1473,6 @@ class InteractionController(
         val stroke = liveStroke
         val pi = strokePageIndex
         if (stroke != null && pi != null && !stroke.isEmpty) {
-            if (tracing && !tapCandidate) recordSteadying(stroke)
             // The pen is up: rebuild with lift-time rules on (a dot-sized calligraphy stroke
             // takes the nib's broad face) before the stroke is committed or held for fading.
             stroke.finished = true
@@ -1513,14 +1512,6 @@ class InteractionController(
             refreshSelectionMenu()
         }
         requestRender()
-    }
-
-    /** Debug HUD: log what stabilization did to the stroke just lifted, or that it was off. */
-    private fun recordSteadying(stroke: Stroke) {
-        val cfg = stroke.config
-        val effect = if (steadier != null) steadyTrace.measure(stroke.speedScale * SteadyTrace.MM_PER_DP) else null
-        steadyReadout.last =
-            SteadyReadout.Row(ToolConversions.trailToStrength(cfg.stabilizeTrail), ToolConversions.dpPerSToCrossover(cfg.stabilizeCrossover), effect)
     }
 
     /** Pen-up sample reduction: like the capture gate, the tolerance is screen-space — viewport
@@ -2056,7 +2047,7 @@ class InteractionController(
         val pageIndex = state.pageIndexAtContent(content)
         if (pageIndex != null) {
             val local = state.toPageSpace(pageIndex, content)
-            val hit = state.document.pages[pageIndex].items.lastOrNull { !it.locked && it.contains(local) }
+            val hit = SelectionMath.pick(state.document.pages[pageIndex].items, local, pickReach()) { !it.locked }
             if (hit != null) {
                 if (selection.none { it.item === hit }) setSelection(listOf(Selected(pageIndex, hit)))
                 beginMove(content)
@@ -2132,6 +2123,84 @@ class InteractionController(
     }
 
     // --- SCREENSHOT ---
+
+    /**
+     * A press with the screenshot tool. On a capture that is already frozen, a press on one of its
+     * handles resizes it and a press inside it moves it; anywhere else starts a fresh capture, so a
+     * drag still replaces the old one.
+     */
+    private fun beginScreenshotGesture(content: Pt) {
+        val rect = screenshotRect
+        if (rect != null) {
+            val grab = ResizeMath.hitHandle(ResizeMath.boxHandles(rect), content, HANDLE_HIT / state.zoom)
+            if (grab != null) {
+                shotStart = rect
+                shotGrab = grab
+                onScreenshotMenu(null) // hidden while the pen is down, so it never sits under it
+                mode = PointerMode.SHOT_RESIZE
+                return
+            }
+            if (rect.contains(content)) {
+                shotStart = rect
+                shotGrabAt = content
+                onScreenshotMenu(null)
+                mode = PointerMode.SHOT_MOVE
+                return
+            }
+        }
+        beginScreenshot(content)
+    }
+
+    /** Whether [content] lands on the frozen capture's handles or inside it. */
+    private fun fingerHitsCapture(content: Pt): Boolean {
+        val rect = screenshotRect ?: return false
+        return ResizeMath.hitHandle(ResizeMath.boxHandles(rect), content, HANDLE_HIT / state.zoom) != null || rect.contains(content)
+    }
+
+    /** Drag a handle of the frozen capture: the edge it moves follows the pen, the opposite one stays. */
+    private fun extendScreenshotResize(content: Pt) {
+        val start = shotStart ?: return
+        val grab = shotGrab ?: return
+        var left = start.left
+        var top = start.top
+        var right = start.right
+        var bottom = start.bottom
+        val dir = ResizeMath.handleDirection(grab)
+        // Floored at SHOT_MIN, so a capture can't be dragged across itself into nothing.
+        if (dir.x < 0) left = min(content.x, right - SHOT_MIN)
+        if (dir.x > 0) right = max(content.x, left + SHOT_MIN)
+        if (dir.y < 0) top = min(content.y, bottom - SHOT_MIN)
+        if (dir.y > 0) bottom = max(content.y, top + SHOT_MIN)
+        screenshotRect = Rect(left, top, right - left, bottom - top)
+        requestRender()
+    }
+
+    /** Drag inside the frozen capture: it moves whole, keeping the size it was adjusted to. */
+    private fun extendScreenshotMove(content: Pt) {
+        val start = shotStart ?: return
+        val d = content - shotGrabAt
+        screenshotRect = Rect(start.left + d.x, start.top + d.y, start.w, start.h)
+        requestRender()
+    }
+
+    /** The pen lifted off an adjust: the capture stays where it was left, with its menu on it. */
+    private fun endScreenshotAdjust() {
+        mode = PointerMode.IDLE
+        shotGrab = null
+        shotStart = null
+        refreshScreenshotMenu()
+        requestRender()
+    }
+
+    /** A cut-short adjust: the capture goes back where it was, with its menu on it. */
+    private fun abandonScreenshotAdjust() {
+        val start = shotStart ?: return
+        screenshotRect = start
+        shotGrab = null
+        shotStart = null
+        onScreenshotMenu(screenshotRectViewport(start))
+        requestRender()
+    }
 
     private fun beginScreenshot(content: Pt) {
         clearScreenshot() // drop any previous frozen capture + its menu
@@ -2454,6 +2523,9 @@ class InteractionController(
     }
 
     private fun dotReach(): Double = com.xnotes.core.infinite.OverlayTessellator.DOT_TOUCH_PX / state.zoom
+
+    /** How near a shape's outline a select press or a held finger picks it, in page units. */
+    private fun pickReach(): Double = SelectionMath.PICK_REACH_DP * state.devicePxPerDp / state.zoom
 
     /** A lone shape's point dots over its chrome: faint ones halfway along edges, solid ones on vertices. */
     private fun drawEditDots(r: Renderer) {
@@ -3559,8 +3631,7 @@ class InteractionController(
             tool == Tool.LASSO || tool == Tool.SHAPE || tool == Tool.TEXT || tool == Tool.TEXT_BOX || tool == Tool.TAPE
         val pageIndex = state.pageIndexAtContent(content)
         val hit = if (pageIndex != null) {
-            val local = state.toPageSpace(pageIndex, content)
-            state.document.pages[pageIndex].items.lastOrNull { it.contains(local) }
+            SelectionMath.pick(state.document.pages[pageIndex].items, state.toPageSpace(pageIndex, content), pickReach())
         } else {
             null
         }
@@ -4511,6 +4582,7 @@ class InteractionController(
         bandRect = null
         lassoPoints.clear()
         if (mode == PointerMode.SHOT) clearScreenshot() // a second finger turns the drag into a zoom
+        if (mode == PointerMode.SHOT_RESIZE || mode == PointerMode.SHOT_MOVE) abandonScreenshotAdjust()
         clearOverscroll() // a second finger ends any bottom-pull; the elastic snaps away
         clearFlipPull() // ...and any paginated edge-pull folds back into the scroll
         mode = PointerMode.PINCH
@@ -4644,6 +4716,8 @@ class InteractionController(
         textDragRect = null
         // Cancel an in-progress capture drag; a frozen capture (mode IDLE) survives.
         if (mode == PointerMode.SHOT) { screenshotRect = null; onScreenshotMenu(null) }
+        // A cancelled adjust puts the frozen capture back where it was.
+        if (mode == PointerMode.SHOT_RESIZE || mode == PointerMode.SHOT_MOVE) abandonScreenshotAdjust()
         if (mode == PointerMode.PINCH && state.zoomingInProgress) {
             state.zoomingInProgress = false
             state.invalidateCachesForZoom()
@@ -4720,7 +4794,16 @@ class InteractionController(
             }
 
             // Screenshot capture region: the live drag rect, kept frozen until "copy as image" is used.
-            screenshotRect?.let { r.strokeRect(it, chromePen(1.6)) }
+            screenshotRect?.let { shot ->
+                r.strokeRect(shot, chromePen(1.6))
+                // Once frozen, its handles stay on screen: the capture can be adjusted, not redrawn.
+                if (mode != PointerMode.SHOT) {
+                    val side = HANDLE_SIZE / state.zoom
+                    for (h in ResizeMath.boxHandles(shot)) {
+                        r.fillRect(Rect(h.content.x - side / 2, h.content.y - side / 2, side, side), state.palette.accent)
+                    }
+                }
+            }
 
             // Selection chrome.
             val accent = chromePen(1.3)

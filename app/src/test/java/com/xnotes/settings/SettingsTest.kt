@@ -177,6 +177,13 @@ class SettingsTest {
         assertFalse(back.pdfHeadingBookmarks)
     }
 
+    @Test fun autoScrollSpeedRoundTripsAndStaysInRange() {
+        assertEquals(Preferences.AUTOSCROLL_DEFAULT, Settings.fromJson(JSONObject()).prefs.autoScrollSpeed)
+        assertEquals(37, Settings.fromJson(Settings(prefs = Preferences(autoScrollSpeed = 37)).toJson()).prefs.autoScrollSpeed)
+        val wild = Settings(prefs = Preferences(autoScrollSpeed = 5000)).toJson()
+        assertEquals(Preferences.AUTOSCROLL_MAX, Settings.fromJson(wild).prefs.autoScrollSpeed)
+    }
+
     @Test fun customPageSizeRoundTripsAndSizesANewPage() {
         val prefs = Preferences(
             defaultPageSize = PageSize.CUSTOM,
@@ -368,6 +375,11 @@ class SettingsTest {
 
     @Test fun fingerDrawAutoCheckedDefaultsFalse() {
         assertFalse(Settings.fromJson(JSONObject()).fingerDrawAutoChecked)
+    }
+
+    @Test fun pdfNotificationsAskedDefaultsFalseAndRoundTrips() {
+        assertFalse(Settings.fromJson(JSONObject()).pdfNotificationsAsked)
+        assertTrue(Settings.fromJson(Settings(pdfNotificationsAsked = true).toJson()).pdfNotificationsAsked)
     }
 
     @Test fun fingerDrawAutoCheckedRoundTrips() {

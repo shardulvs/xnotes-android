@@ -495,7 +495,7 @@ internal fun NativeField(
             // Mirror the live colour only while the user isn't typing, so an edit isn't clobbered.
             if (!et.hasFocus() && et.text?.toString() != value) {
                 et.setText(value)
-                et.setSelection(value.length)
+                et.setSelection(et.text.length)
             }
         },
     )
