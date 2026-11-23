@@ -25,8 +25,8 @@ android {
         applicationId = "com.xnotes"
         minSdk = 26
         targetSdk = 36
-        versionCode = 71
-        versionName = "0.9.10"
+        versionCode = 72
+        versionName = "0.9.11"
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
         }
