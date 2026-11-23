@@ -123,11 +123,10 @@ private val TITLE_GAP = 10.dp
 private val TOP_DRIFT = 6.dp
 private val BOTTOM_DRIFT = 8.dp
 
-/** Islands come back quickly after a beat, and leave slowly. */
-private const val SHOW_MS = 220
-private const val SHOW_DRIFT_MS = 300
-private const val SHOW_DELAY_MS = 80
-private const val HIDE_MS = 650
+/** Islands answer a tap at once, coming and going alike. */
+private const val SHOW_MS = 150
+private const val SHOW_DRIFT_MS = 200
+private const val HIDE_MS = 150
 
 /** The glide the islands settle into place with. */
 private val Settle: Easing = CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)
@@ -172,10 +171,10 @@ internal class ReadingChrome {
     val held: Boolean get() = panelOpen || playerOpen || scrubPage >= 0 || typing
 }
 
-/** How an island fades: gone at once once the note is written in again, back after a beat, away slowly. */
+/** How an island fades: gone at once once the note is written in again, quickly otherwise. */
 private fun fade(reading: Boolean, shown: Boolean, ms: Int, easing: Easing): AnimationSpec<Float> = when {
     !reading -> snap()
-    shown -> tween(ms, SHOW_DELAY_MS, easing)
+    shown -> tween(ms, easing = easing)
     else -> tween(HIDE_MS, easing = EaseIn)
 }
 
@@ -215,7 +214,7 @@ internal fun BoxScope.ReadingIslands(
     val shown = reading && chrome.awake
     val alpha = animateFloatAsState(if (shown) 1f else 0f, fade(reading, shown, SHOW_MS, EaseOut), label = "islandsAlpha")
     val drift = animateFloatAsState(if (shown) 0f else 1f, fade(reading, shown, SHOW_DRIFT_MS, Settle), label = "islandsDrift")
-    val gear = animateFloatAsState(if (reading) 1f else 0f, if (reading) tween(SHOW_MS, SHOW_DELAY_MS, EaseOut) else snap(), label = "gearAlpha")
+    val gear = animateFloatAsState(if (reading) 1f else 0f, if (reading) tween(SHOW_MS, easing = EaseOut) else snap(), label = "gearAlpha")
     // Once faded out they leave, so a touch where they stood reaches the page.
     val gone by remember { derivedStateOf { alpha.value == 0f } }
     if (!reading) return
