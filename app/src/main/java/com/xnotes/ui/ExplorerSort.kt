@@ -19,14 +19,14 @@ internal fun explorerComparator(
     foldersFirst: Boolean = true,
     createdOf: (BrowseEntry) -> Long,
 ): Comparator<BrowseEntry> {
+    val byName = Comparator<BrowseEntry> { a, b -> compareNames(a.name, b.name) }
     val base: Comparator<BrowseEntry> = when (key) {
-        ExplorerSortKey.NAME -> Comparator { a, b -> compareNames(a.name, b.name) }
+        ExplorerSortKey.NAME -> byName
         ExplorerSortKey.MODIFIED -> compareBy({ it.modified }, { createdOf(it) })
         ExplorerSortKey.CREATED -> compareBy({ createdOf(it) }, { it.modified })
         ExplorerSortKey.SIZE -> compareBy({ it.size }, { createdOf(it) })
     }
-    val within = (if (descending) base.reversed() else base)
-        .thenComparator { a, b -> compareNames(a.name, b.name) }
+    val within = (if (descending) base.reversed() else base).then(byName)
     if (!foldersFirst) return within
     return Comparator { a, b ->
         when {
@@ -43,17 +43,22 @@ internal fun explorerComparator(
  *
  * Both names are walked one character, or one digit run, at a time instead of being turned into
  * sort keys: that keeps the answer a real total order, which a comparator has to be for a sort to
- * stay consistent.
+ * stay consistent. How a run is padded is settled last, so "page 09 a" comes before "page 9 z" and
+ * "page 9" before "page 09".
  */
 internal fun compareNames(a: String, b: String): Int {
     var i = 0
     var j = 0
+    // Runs holding the same value can still be padded differently; that only breaks the tie once
+    // every other character of the names has matched.
+    var padded = 0
     while (i < a.length && j < b.length) {
         if (a[i].isAsciiDigit() && b[j].isAsciiDigit()) {
             val endA = digitRunEnd(a, i)
             val endB = digitRunEnd(b, j)
             val byValue = compareDigitRuns(a, i, endA, b, j, endB)
             if (byValue != 0) return byValue
+            if (padded == 0) padded = (endA - i).compareTo(endB - j)
             i = endA
             j = endB
             continue
@@ -68,7 +73,7 @@ internal fun compareNames(a: String, b: String): Int {
     return when {
         i < a.length -> 1
         j < b.length -> -1
-        else -> 0
+        else -> padded
     }
 }
 
@@ -83,8 +88,8 @@ private fun digitRunEnd(s: String, start: Int): Int {
 
 /**
  * Compares two digit runs by value without building a number: a run long enough overflows every
- * built-in type, so the significant digits are compared as text, longest run first. Equal values
- * fall back to the run's length, so "9" sorts before "09" and padded names stay together.
+ * built-in type, so the significant digits are compared as text, longest run first. Runs holding
+ * the same value compare equal; their padding is left to [compareNames].
  */
 private fun compareDigitRuns(a: String, startA: Int, endA: Int, b: String, startB: Int, endB: Int): Int {
     var ia = startA
@@ -95,9 +100,9 @@ private fun compareDigitRuns(a: String, startA: Int, endA: Int, b: String, start
     val lengthB = endB - ib
     if (lengthA != lengthB) return if (lengthA < lengthB) -1 else 1
     while (ia < endA) {
-        if (a[ia] != b[ib]) return a[ia].compareTo(b[ib])
+        if (a[ia] != b[ib]) return if (a[ia] < b[ib]) -1 else 1
         ia++
         ib++
     }
-    return (endA - startA).compareTo(endB - startB)
+    return 0
 }
