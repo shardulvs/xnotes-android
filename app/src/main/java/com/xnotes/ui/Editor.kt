@@ -248,6 +248,21 @@ private val FIELD_CTRL_KEYS = setOf(
     android.view.KeyEvent.KEYCODE_DEL, android.view.KeyEvent.KEYCODE_FORWARD_DEL,
 )
 
+/** Ctrl shortcuts that change a note, which a read-only note leaves alone. */
+private val CTRL_EDIT_KEYS = setOf(
+    android.view.KeyEvent.KEYCODE_Z, android.view.KeyEvent.KEYCODE_X, android.view.KeyEvent.KEYCODE_V,
+    android.view.KeyEvent.KEYCODE_D, android.view.KeyEvent.KEYCODE_G, android.view.KeyEvent.KEYCODE_A,
+    android.view.KeyEvent.KEYCODE_LEFT_BRACKET, android.view.KeyEvent.KEYCODE_RIGHT_BRACKET,
+)
+
+/** Plain keys that change a note or arm a tool, left alone while it is read-only. */
+private val EDIT_KEYS = setOf(
+    android.view.KeyEvent.KEYCODE_DEL, android.view.KeyEvent.KEYCODE_FORWARD_DEL,
+    android.view.KeyEvent.KEYCODE_P, android.view.KeyEvent.KEYCODE_C, android.view.KeyEvent.KEYCODE_H,
+    android.view.KeyEvent.KEYCODE_E, android.view.KeyEvent.KEYCODE_V, android.view.KeyEvent.KEYCODE_L,
+    android.view.KeyEvent.KEYCODE_S, android.view.KeyEvent.KEYCODE_T,
+)
+
 /** How far off an address written in a PDF's text a tap may land and still open it. */
 private const val AUTO_LINK_SLOP_DP = 4.0
 
@@ -692,6 +707,56 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         private set
     var wandEnabled by mutableStateOf(false)
         private set
+
+    /**
+     * While true the open note is only read: the toolbar gives way to the reading islands, every
+     * pointer pans, and only bookmarks change. It lasts until the note closes; every note opens editable.
+     */
+    var readOnly by mutableStateOf(false)
+        private set
+
+    /** Read-only waits while this note records, since a recording stamps what is written. */
+    val canReadOnly: Boolean get() = AudioRecording.session?.owner !== this
+
+    /** Turn read-only on or off; on, whatever was being edited is let go of first. */
+    fun toggleReadOnly() {
+        val on = !readOnly
+        if (canvasOpen || (on && !canReadOnly)) return
+        if (on) {
+            commitText()
+            flowText.endSession()
+            endTableEdit()
+            tableMenu = null
+            flowContextMenu = null
+            markupMenu = null
+            dismissContextMenu()
+            clearPageSelection()
+        }
+        expectBarSpace()
+        controller.readOnly = on
+        readOnly = on
+        view.requestRender()
+    }
+
+    /** Every note opens editable, so closing or swapping one ends read-only, with nothing to keep in place. */
+    private fun endReadOnly() {
+        controller.readOnly = false
+        readOnly = false
+        coverReadOnly = false
+    }
+
+    /** A docked bar on the top or left gives its room to the pages or takes it back: they keep their place on screen. */
+    private fun expectBarSpace() {
+        val look = toolbarLook
+        if (look.floating || !noteOpen) return
+        val px = barMetrics(look.size).thickness.value * state.devicePxPerDp
+        when (look.position) {
+            com.xnotes.settings.ToolbarPosition.TOP -> state.expectEdgeMove(top = true, px)
+            com.xnotes.settings.ToolbarPosition.LEFT -> state.expectEdgeMove(top = false, px)
+            else -> Unit
+        }
+    }
+
     var hasSelection by mutableStateOf(false)
         private set
     var shapeConfig by mutableStateOf(ShapeConfig())
@@ -7432,6 +7497,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private fun replaceDocument(doc: Document) {
         AudioRecording.stopFor(this) // closing the note places its recording
         AudioPlayback.closeFor(this)
+        endReadOnly()
         saveViewState() // remember the outgoing folder note's view before switching away
         flowText.endSession() // flushes the typing burst so the autosave below carries it
         flushAutosave() // save the outgoing note if it was autosaving to the folder
@@ -7472,6 +7538,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     private fun dispatchTapGesture(action: String) = when {
         // The pen's taps arrive here whichever surface is up; a canvas on top must not edit the note under it.
         canvasOpen -> infinite.dispatchTapGesture(action)
+        readOnly -> Unit
         action == "undo" -> undo()
         action == "redo" -> redo()
         action == "toggle_pan" -> toggleTool(Tool.PAN)
@@ -8643,6 +8710,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         }
         val ctrl = e.isCtrlPressed
         val shift = e.isShiftPressed
+        if (readOnly && e.keyCode in (if (ctrl) CTRL_EDIT_KEYS else EDIT_KEYS)) return false
         when {
             ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_Z && shift -> redo()
             ctrl && e.keyCode == android.view.KeyEvent.KEYCODE_Z -> undo()
@@ -9066,16 +9134,24 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     /** The canvas viewport in px, so chrome anchored to a point can keep itself on screen. */
     fun viewportSize(): Pt = Pt(state.viewportW.toDouble(), state.viewportH.toDouble())
 
+    /** The read-only state the last toolbar cover was reported in. */
+    private var coverReadOnly = false
+
     /**
      * What a floating toolbar covers of this pane's pages, in px per edge. The fits, page jumps and
      * scroll range keep clear of it, and whatever sat at the clear area's corner stays there.
      */
     fun setToolbarCover(left: Double, top: Double, right: Double, bottom: Double) {
         val st = state
+        // A cover that comes or goes with read-only leaves the pages where they are on screen.
+        val keepPages = coverReadOnly != readOnly
+        coverReadOnly = readOnly
         if (st.insetLeft == left && st.insetTop == top && st.insetRight == right && st.insetBottom == bottom) return
         val widthChanged = left + right != st.insetLeft + st.insetRight
-        st.scrollX -= left - st.insetLeft
-        st.scrollY -= top - st.insetTop
+        if (!keepPages) {
+            st.scrollX -= left - st.insetLeft
+            st.scrollY -= top - st.insetTop
+        }
         st.insetLeft = left
         st.insetTop = top
         st.insetRight = right
@@ -10312,6 +10388,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
     fun newNote() {
         AudioRecording.stopFor(this) // closing the note places its recording
         AudioPlayback.closeFor(this)
+        endReadOnly()
         saveViewState()
         flushAutosave()
         autosaveUri = null
@@ -10448,6 +10525,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
             autosaveUri?.let { uri -> autosaveScope.launch { regenerateClosedNoteThumb(uri) } }
             autosaveUri = null
             noteOpen = false
+            endReadOnly()
             // Off the screen, with its last save in the file: a PDF's pages are drawn again now.
             releaseOpenPdf()
             com.xnotes.platform.PdfExports.kick()

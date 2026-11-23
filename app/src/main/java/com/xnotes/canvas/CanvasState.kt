@@ -162,6 +162,33 @@ class CanvasState(
     val clearW: Double get() = viewportW - insetLeft - insetRight
     val clearH: Double get() = viewportH - insetTop - insetBottom
 
+    /** While true the note is only read, so the view leaves out the affordances that edit it. */
+    var readOnly: Boolean = false
+
+    /** The view's top or left edge about to move by a docked bar's thickness, so the pages can stay put on screen. */
+    private var edgeMove: EdgeMove? = null
+
+    private class EdgeMove(val top: Boolean, val px: Double, val at: Long)
+
+    /** The next resize moves the view's top (else its left) edge by about [px]: scroll with it so the pages keep their place. */
+    fun expectEdgeMove(top: Boolean, px: Double) {
+        edgeMove = EdgeMove(top, px, System.nanoTime() / 1_000_000L)
+    }
+
+    /**
+     * A resize from [oldW] x [oldH] to the viewport now: when it is the edge move expected just
+     * before, scroll by the size change so what shows stays where it was. Any other resize drops it.
+     */
+    fun followEdgeMove(oldW: Int, oldH: Int) {
+        val m = edgeMove ?: return
+        edgeMove = null
+        if (System.nanoTime() / 1_000_000L - m.at > EDGE_MOVE_MS) return
+        val dw = viewportW - oldW
+        val dh = viewportH - oldH
+        if (m.top && dw == 0 && abs(abs(dh) - m.px) <= EDGE_MOVE_SLOP) scrollY -= dh
+        if (!m.top && dh == 0 && abs(abs(dw) - m.px) <= EDGE_MOVE_SLOP) scrollX -= dw
+    }
+
     /** The middle of the clear area, where zoom steps anchor. */
     fun clearCenter(): Pt = Pt(insetLeft + clearW / 2.0, insetTop + clearH / 2.0)
 
@@ -2539,6 +2566,10 @@ class CanvasState(
 
     companion object {
         const val MARGIN = 48.0
+
+        /** How long an expected edge move waits for its resize, and how far off a bar's thickness it may land, in px. */
+        private const val EDGE_MOVE_MS = 1000L
+        private const val EDGE_MOVE_SLOP = 3.0
         const val MIN_ZOOM = 0.12
         const val MAX_ZOOM = 16.0
         const val ZOOM_STEP = 1.25

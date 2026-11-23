@@ -386,6 +386,7 @@ class CanvasView @JvmOverloads constructor(
         st.viewportW = w
         st.viewportH = h
         st.relayout()
+        st.followEdgeMove(oldw, oldh)
         if (!st.didInitialFit && w > 0 && h > 0) {
             st.establishInitialView()
         } else if (w != oldw && w > 0) {
@@ -562,7 +563,7 @@ class CanvasView @JvmOverloads constructor(
         // Elastic "pull past the end to add a page" affordance, on top of everything (viewport space).
         if (st.overscrollY > 1.0) {
             drawOverscrollIndicator(canvas, st)
-        } else if (!st.verticalScroll && st.flipOffsetX > 1.0 && st.currentRow >= st.rowRanges().size - 1) {
+        } else if (!st.readOnly && !st.verticalScroll && st.flipOffsetX > 1.0 && st.currentRow >= st.rowRanges().size - 1) {
             drawFlipAddPageIndicator(canvas, st)
         }
 

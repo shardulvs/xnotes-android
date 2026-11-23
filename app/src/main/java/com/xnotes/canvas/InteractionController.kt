@@ -230,6 +230,31 @@ class InteractionController(
     /** Whether a finger draws (true) or pans (false). The stylus always uses the armed tool. */
     var fingerDraws: Boolean = false
 
+    /**
+     * While true the note is only read: every pointer acts as a panning finger, so a drag scrolls, a
+     * tap follows a link or peels tape and a long press selects PDF text, and nothing else changes.
+     * Turning it on lets go of whatever was being edited.
+     */
+    var readOnly: Boolean
+        get() = state.readOnly
+        set(value) {
+            if (value == state.readOnly) return
+            if (value) {
+                if (hoverActionTool != null) endHoverAction()
+                if (tool == Tool.INSERT_SPACE) insertSpace.hoverAt(null)
+                commitTextEdit()
+                flowText?.endSession()
+                abortGesture()
+                finishPolygonDraft()
+                clearSelection()
+                clearScreenshot()
+                eraserCursor = null
+                connectHot = emptyList()
+            }
+            state.readOnly = value
+            requestRender()
+        }
+
     /** Panning allowed while zoom is locked: "single" (default) | "double" | "none". */
     var zoomLockPan: String = "single"
 
@@ -710,6 +735,7 @@ class InteractionController(
     }
 
     fun onHover(e: MotionEvent): Boolean {
+        if (readOnly) return false
         if (handleHoverAction(e)) return true
         if (hoverConnect(e)) return true
         if (tool == Tool.INSERT_SPACE && mode == PointerMode.IDLE) {
@@ -813,8 +839,9 @@ class InteractionController(
         //  - the stylus eraser end, or the held side button, force the eraser/side-button tool;
         //  - a finger pans unless finger-draw is enabled;
         //  - otherwise the armed tool.
-        val buttonHeld = stylusButtons.heldFor(e)
+        val buttonHeld = stylusButtons.heldFor(e) && !readOnly
         val effectiveTool: Tool = when {
+            readOnly -> Tool.PAN
             toolType == MotionEvent.TOOL_TYPE_ERASER -> Tool.ERASER
             buttonHeld && penButtonTool != null -> penButtonTool!!
             // While something is selected, the stylus grabs that selection (resize on a handle,
@@ -834,7 +861,7 @@ class InteractionController(
             else -> tool
         }
         val isFinger = toolType == MotionEvent.TOOL_TYPE_FINGER
-        val free = FreePointer.isFree(tool, effectiveTool, isFinger)
+        val free = readOnly || FreePointer.isFree(tool, effectiveTool, isFinger)
 
         // A press off the box while editing. With a finger we defer: a tap commits (re-arming the
         // prior tool), a drag scrolls the page with the edit kept live (decided in handleUp's PAN
@@ -861,7 +888,7 @@ class InteractionController(
         }
 
         // A room's close button takes a press from a pen or a finger alike, and acts once it lifts there.
-        if (tool == Tool.INSERT_SPACE && toolType != MotionEvent.TOOL_TYPE_ERASER) {
+        if (tool == Tool.INSERT_SPACE && toolType != MotionEvent.TOOL_TYPE_ERASER && !readOnly) {
             insertSpace.buttonAt(Pt(vx, vy))?.let { button ->
                 roomButton = button
                 roomButtonAt = Pt(vx, vy)
@@ -873,7 +900,7 @@ class InteractionController(
         // Touching the ruler grabs it before the normal tool dispatch — for the stylus too, so a
         // pen-down ON the body moves it. A pen-down OFF the body falls through to drawing, where the
         // magnet snaps the in-progress stroke to the edge. Its buttons toggle; its body moves it.
-        if (ruler.visible) {
+        if (ruler.visible && !readOnly) {
             val v = Pt(vx, vy)
             val hi = ruler.hitHandle(v, rulerHandleDist(), (RULER_HANDLE_HIT * state.devicePxPerDp).coerceAtLeast(ruler.handleRadiusPx()))
             if (hi != null && !ruler.lockAngle) {
@@ -915,7 +942,7 @@ class InteractionController(
         val selected = hasSelection
 
         // With a connector armed, a press on a point it can glue to starts one, or only dismisses what is selected.
-        val inks = toolType != MotionEvent.TOOL_TYPE_FINGER || fingerDraws
+        val inks = (toolType != MotionEvent.TOOL_TYPE_FINGER || fingerDraws) && !readOnly
         if (connecting && inks && !buttonHeld && toolType != MotionEvent.TOOL_TYPE_ERASER && glueHitAt(content) != null) {
             cancelLongPress()
             if (polygonDraft != null) finishPolygonDraft()
@@ -3631,6 +3658,7 @@ class InteractionController(
     }
 
     private fun onDoubleTap(viewport: Pt, toolType: Int, selectedBefore: Set<CanvasItem>) {
+        if (readOnly) return
         val fingerPans = toolType == MotionEvent.TOOL_TYPE_FINGER && !fingerDraws && tool.fingerPansWhenOff
         if (tool != Tool.SHAPE && tool != Tool.SELECT && !fingerPans) return
         // The free polygon's own double tap closes its outline.
@@ -3653,8 +3681,8 @@ class InteractionController(
         // gesture. A stylus or mouse only has it when free, under the PAN tool, where it mirrors the
         // finger; otherwise it draws, so resting it never grabs or pops a menu.
         if (!isFinger && !free) return
-        val grabEligible = tool.isStroke || tool == Tool.PAN || tool == Tool.SELECT ||
-            tool == Tool.LASSO || tool == Tool.SHAPE || tool == Tool.TEXT || tool == Tool.TEXT_BOX || tool == Tool.TAPE
+        val grabEligible = !readOnly && (tool.isStroke || tool == Tool.PAN || tool == Tool.SELECT ||
+            tool == Tool.LASSO || tool == Tool.SHAPE || tool == Tool.TEXT || tool == Tool.TEXT_BOX || tool == Tool.TAPE)
         val pageIndex = state.pageIndexAtContent(content)
         val hit = if (pageIndex != null) {
             SelectionMath.pick(state.document.pages[pageIndex].items, state.toPageSpace(pageIndex, content), pickReach())
@@ -3665,18 +3693,19 @@ class InteractionController(
         longPressContent = content
         // A locked item cannot be picked up, so a held finger offers to release it instead. That is
         // the only way back: it is out of reach of the band, the lasso and every tap.
-        longPressLocked = hit?.takeIf { it.locked }
+        longPressLocked = hit?.takeIf { it.locked && !readOnly }
         longPressCandidate =
             if (grabEligible && hit != null && !hit.locked) Selected(pageIndex!!, hit) else null
-        // An item on top wins; a free pointer on the bare PDF selects its text.
+        // An item on top wins; a free pointer on the bare PDF selects its text. Read-only, nothing
+        // can be picked up, so the text under ink is selected too.
         val text = pdfText
-        if (free && text != null && hit == null && pageIndex != null && state.document.pages[pageIndex].pdfPage != null) {
+        if (free && text != null && (hit == null || readOnly) && pageIndex != null && state.document.pages[pageIndex].pdfPage != null) {
             longPressTextPage = pageIndex
             text.prefetch(pageIndex)
         }
         // Arm to grab an item, to unlock one, to select text, or (on empty space) to open the paste
         // menu when there is content to paste.
-        val showEmptyMenu = hit == null && (hasClipboardItems() || clipboardHasImage())
+        val showEmptyMenu = !readOnly && hit == null && (hasClipboardItems() || clipboardHasImage())
         if (longPressCandidate == null && longPressLocked == null && longPressTextPage < 0 && !showEmptyMenu) return
         val r = Runnable { triggerLongPress() }
         longPressRunnable = r
@@ -3727,7 +3756,7 @@ class InteractionController(
             val start = longPressStart
             val content = longPressContent
             pdfText?.longPress(textPage, state.toPageSpace(textPage, content)) {
-                if (hasClipboardItems() || clipboardHasImage()) onContextMenu(start, content, null)
+                if (!readOnly && (hasClipboardItems() || clipboardHasImage())) onContextMenu(start, content, null)
             }
         } else {
             // Empty space, or a locked item: open the context menu at the press point.
@@ -4253,7 +4282,7 @@ class InteractionController(
         // spuriously arming add-page (seen on first open, even on long PDFs). isDocumentEndVisible()
         // checks the last page's bottom against the viewport through the same transform that draws the
         // frame, so the affordance can never appear while the user can still see more document below.
-        if (leftoverY > 0.0 && state.isDocumentEndVisible()) {
+        if (leftoverY > 0.0 && !readOnly && state.isDocumentEndVisible()) {
             state.overscrollY = (state.overscrollY + leftoverY * OVERSCROLL_RESIST).coerceAtMost(OVERSCROLL_MAX)
             updateOverscrollArmed()
         }
@@ -4330,7 +4359,7 @@ class InteractionController(
         when {
             // Appending a new page remains distance-only to avoid unintended document edits.
             pull >= PaginatedFlipPolicy.addPageThreshold(state.viewportW, state.devicePxPerDp) &&
-                state.currentRow >= rows - 1 -> {
+                state.currentRow >= rows - 1 && !readOnly -> {
                 stopPageFlipAnimation()
                 clearFlipPull()
                 onAddPageAtEnd()
@@ -4898,17 +4927,17 @@ class InteractionController(
             }
 
             // Where a connector can glue, while one is armed or an end is being dragged.
-            if (marking) drawConnectionMarks(r)
+            if (marking && !readOnly) drawConnectionMarks(r)
 
             // Room on the pages, the cut a hovering pen would make, while Insert space is armed.
-            if (tool == Tool.INSERT_SPACE || insertSpace.active) insertSpace.drawOverlay(r, state.visibleContentRect())
+            if ((tool == Tool.INSERT_SPACE && !readOnly) || insertSpace.active) insertSpace.drawOverlay(r, state.visibleContentRect())
         }
 
         // Note icons: chrome of one size at any zoom, so in viewport space.
         noteIcons?.draw(r)
 
         // Each room's close button while Insert space is armed, and the room's height beside the pen while it drags.
-        if (tool == Tool.INSERT_SPACE || insertSpace.active) insertSpace.drawViewport(r)
+        if ((tool == Tool.INSERT_SPACE && !readOnly) || insertSpace.active) insertSpace.drawViewport(r)
 
         // Eraser cursor (viewport space, after the transform is restored).
         eraserCursor?.let {
@@ -4917,7 +4946,7 @@ class InteractionController(
         }
 
         // Ruler (viewport space; floats above all content and the live stroke).
-        if (ruler.visible) drawRuler(r)
+        if (ruler.visible && !readOnly) drawRuler(r)
     }
 
     /**
