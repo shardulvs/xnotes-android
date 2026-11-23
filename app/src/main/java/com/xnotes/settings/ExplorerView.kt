@@ -16,11 +16,11 @@ enum class ExplorerLayout(val id: String) {
 }
 
 /** How big the explorer draws its tiles; each step is fewer, larger columns. */
-enum class TileSize(val id: String, val label: String) {
-    S("s", "S"),
-    M("m", "M"),
-    L("l", "L"),
-    XL("xl", "XL");
+enum class TileSize(val id: String) {
+    S("s"),
+    M("m"),
+    L("l"),
+    XL("xl");
 
     companion object {
         fun fromId(id: String?): TileSize = entries.firstOrNull { it.id == id } ?: M
