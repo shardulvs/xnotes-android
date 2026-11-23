@@ -113,7 +113,7 @@ private fun QueryField(editor: Editor) {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(start = 8.dp, end = 8.dp, top = 2.dp, bottom = 2.dp)
+            .padding(start = 8.dp, end = 8.dp, top = 12.dp, bottom = 2.dp)
             .height(36.dp)
             .clip(CircleShape)
             .background(palette.surface.toComposeColor())
