@@ -381,8 +381,8 @@ private fun Modifier.carriesToolbar(move: ToolbarMove, look: ToolbarLook, thickn
 
 /**
  * The strip both toolbars are laid out in: a row along the top or bottom, a column down either
- * side. [content] runs along it and scrolls when it runs long, [trailing] stays pinned at the end,
- * and [armed] is the tool the gliding circle sits under.
+ * side. [content] runs along it, centred while it is short and scrolling once it runs long,
+ * [trailing] stays pinned at the end, and [armed] is the tool the gliding circle sits under.
  */
 @Composable
 internal fun ToolbarFrame(
@@ -430,6 +430,7 @@ internal fun ToolbarFrame(
                         .onSizeChanged { tools = it.height }
                         .padding(vertical = 4.dp)
                         .toolGlide(glide, armed),
+                    verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) { content() }
                 if (trailing != null) Column(Modifier.onSizeChanged { pinned = it.height }, horizontalAlignment = Alignment.CenterHorizontally) { trailing() }
@@ -446,6 +447,7 @@ internal fun ToolbarFrame(
                         .onSizeChanged { tools = it.width }
                         .padding(horizontal = 4.dp)
                         .toolGlide(glide, armed),
+                    horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                 ) { content() }
                 if (trailing != null) Row(Modifier.onSizeChanged { pinned = it.width }, verticalAlignment = Alignment.CenterVertically) { trailing() }
