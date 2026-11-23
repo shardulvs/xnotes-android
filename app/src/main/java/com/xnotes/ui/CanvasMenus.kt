@@ -701,9 +701,11 @@ fun PdfSelectionMenu(editor: Editor) {
     val density = LocalDensity.current
     val actions = remember { editor.pdfTextActions() }
     var overflowOpen by remember { mutableStateOf(false) }
+    // A read-only note's text is copied or handed on, never marked.
+    val marks = if (editor.readOnly) emptyList() else PDF_MARKS
 
     val barHeightPx = with(density) { 48.dp.toPx() }
-    val barWidthPx = with(density) { ((1 + PDF_MARKS.size + if (actions.isEmpty()) 0 else 1) * 46 + 8).dp.toPx() }
+    val barWidthPx = with(density) { ((1 + marks.size + if (actions.isEmpty()) 0 else 1) * 46 + 8).dp.toPx() }
     val gap = with(density) { 10.dp.toPx() }
     val margin = with(density) { 8.dp.toPx() }
     // When pushed below the selection, also clear the teardrop handles hanging there.
@@ -725,7 +727,7 @@ fun PdfSelectionMenu(editor: Editor) {
                 .padding(horizontal = BAR_END),
         ) {
             ActionIcon(XnotesIcons.copy, stringResource(R.string.copy), shortcut = Keys.COPY) { editor.copyPdfText() }
-            for ((type, icon, label) in PDF_MARKS) {
+            for ((type, icon, label) in marks) {
                 ActionIcon(icon, stringResource(label)) { editor.markPdfSelection(type) }
             }
             if (actions.isNotEmpty()) {
@@ -752,6 +754,7 @@ fun PdfSelectionMenu(editor: Editor) {
 /**
  * A markup's tap menu: its colour and kind (each a small list), its note, Copy (the text it marks),
  * Delete, and Open link when the tap was on a link. Placed like the selection bar, by the markup.
+ * On a read-only note it keeps only Copy and Open link.
  */
 @Composable
 fun MarkupMenu(editor: Editor) {
@@ -760,7 +763,8 @@ fun MarkupMenu(editor: Editor) {
     val density = LocalDensity.current
     var colorsOpen by remember { mutableStateOf(false) }
     var kindsOpen by remember { mutableStateOf(false) }
-    val icons = 5 + if (menu.openLink != null) 1 else 0
+    val reading = editor.readOnly
+    val icons = (if (reading) 1 else 5) + if (menu.openLink != null) 1 else 0
     val barHeightPx = with(density) { 48.dp.toPx() }
     val barWidthPx = with(density) { (icons * 46 + 8).dp.toPx() }
     val gap = with(density) { 10.dp.toPx() }
@@ -781,7 +785,7 @@ fun MarkupMenu(editor: Editor) {
                 .padding(horizontal = BAR_END),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box {
+            if (!reading) Box {
                 val colourLabel = stringResource(R.string.markup_colour)
                 Tooltip(colourLabel) {
                     IconButton(onClick = { colorsOpen = true }, modifier = Modifier.size(46.dp).semantics { contentDescription = colourLabel }) {
@@ -799,7 +803,7 @@ fun MarkupMenu(editor: Editor) {
                     }
                 }
             }
-            Box {
+            if (!reading) Box {
                 ActionIcon(markIcon(m.type), stringResource(R.string.markup_kind)) { kindsOpen = true }
                 DropdownMenu(expanded = kindsOpen, onDismissRequest = { kindsOpen = false }, properties = PopupProperties(focusable = false)) {
                     for ((type, icon, label) in PDF_MARKS) {
@@ -815,9 +819,9 @@ fun MarkupMenu(editor: Editor) {
                     }
                 }
             }
-            ActionIcon(XnotesIcons.note, stringResource(R.string.markup_note)) { editor.editMarkupNote() }
+            if (!reading) ActionIcon(XnotesIcons.note, stringResource(R.string.markup_note)) { editor.editMarkupNote() }
             ActionIcon(XnotesIcons.copy, stringResource(R.string.copy)) { editor.copyMarkupText() }
-            ActionIcon(XnotesIcons.trash, stringResource(R.string.delete)) { editor.deleteMarkup() }
+            if (!reading) ActionIcon(XnotesIcons.trash, stringResource(R.string.delete)) { editor.deleteMarkup() }
             if (menu.openLink != null) ActionIcon(XnotesIcons.link, stringResource(R.string.open_link)) { editor.openMarkupLink() }
         }
     }

@@ -232,6 +232,8 @@ private fun PagesTab(
     // contentVersion drives a fresh read of the order whenever the page list changes.
     val pages = remember(editor.contentVersion) { editor.pagesSnapshot() }
     val selecting = editor.inPageSelectionMode
+    // A read-only note's pages are only turned to: none is picked up, moved or given a menu.
+    val reading = editor.readOnly
     // One panel-wide "the list has stopped moving" flag. The custom scrollbar amplifies a slow
     // finger scrub into large page-space jumps, so the old per-row 150ms debounce still fired ~8
     // renders per window it swept past and stormed the CPU / the single-threaded PDF render lock.
@@ -291,7 +293,8 @@ private fun PagesTab(
             // Long-presses live on the panel, not the rows, so a drag keeps running while the list
             // scrolls its pressed row away: the first selects a page, a second on a selected page
             // picks the whole selection up. Taps stay with the rows.
-            .pointerInput(editor) {
+            .pointerInput(editor, reading) {
+                if (reading) return@pointerInput
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
                     // Only a held, near-still single finger qualifies; a lift, a scroll or a second finger ends the wait first.
@@ -384,7 +387,7 @@ private fun PagesTab(
         ) {
             itemsIndexed(pages, key = { _, page -> page.uid }) { index, page ->
                 val carried = drag?.pages?.any { it === page } == true
-                PageThumb(editor, index, page, selecting, settled, carried, Modifier.animateItem(), onSharePages, onSavePagesAsPdf, onSavePagesAsImages, onInsertPdf, onPickCover)
+                PageThumb(editor, index, page, selecting, settled, carried, reading, Modifier.animateItem(), onSharePages, onSavePagesAsPdf, onSavePagesAsImages, onInsertPdf, onPickCover)
             }
         }
         drag?.let { d ->
@@ -493,6 +496,8 @@ private fun PageThumb(
     settled: Boolean,
     /** Lifted in a drag: the row dims while the pages are carried. */
     carried: Boolean,
+    /** The note is read-only: a tap turns to the page and that is all. */
+    reading: Boolean,
     rowModifier: Modifier,
     onSharePages: (List<Int>, Boolean) -> Unit,
     onSavePagesAsPdf: (List<Int>) -> Unit,
@@ -538,7 +543,7 @@ private fun PageThumb(
                 // Tap navigates (or toggles selection in select mode). Long-presses belong to the
                 // panel (see PagesTab), so a drag survives the row scrolling away.
                 .clickable { if (selecting) editor.togglePageSelection(index) else editor.goToPage(index) }
-                .semantics { onLongClick { editor.togglePageSelection(index); true } },
+                .then(if (reading) Modifier else Modifier.semantics { onLongClick { editor.togglePageSelection(index); true } }),
         ) {
             bitmap?.let { Image(it, contentDescription = stringResource(R.string.page_n, index + 1), modifier = Modifier.fillMaxSize()) }
 
@@ -547,7 +552,7 @@ private fun PageThumb(
                 SelectMark(checked = true, Modifier.align(Alignment.TopStart))
             } else if (selecting) {
                 SelectMark(checked = false, Modifier.align(Alignment.TopStart))
-            } else {
+            } else if (!reading) {
                 // Three-dot menu, on a faint scrim so it reads over any thumbnail.
                 Box(Modifier.align(Alignment.TopEnd).padding(2.dp)) {
                     Tooltip(stringResource(R.string.page_options)) {
