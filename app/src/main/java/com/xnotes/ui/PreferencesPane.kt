@@ -307,6 +307,17 @@ fun PreferencesPane(
                     OptionDropdown(tapOptions, prefs.stylusButton2Tap) { update(prefs.copy(stylusButton2Tap = it)) }
                 }
             }
+            FieldLabel(stringResource(R.string.pref_honor_pencil_button))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(stringResource(R.string.pen_click), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
+                    OptionDropdown(tapOptions, prefs.honorPencilClick) { update(prefs.copy(honorPencilClick = it)) }
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(stringResource(R.string.pen_double_click), color = palette.textDim.toComposeColor(), fontSize = 12.sp)
+                    OptionDropdown(tapOptions, prefs.honorPencilDoubleClick) { update(prefs.copy(honorPencilDoubleClick = it)) }
+                }
+            }
             CheckRow(stringResource(R.string.pref_volume_keys_turn_pages), prefs.volumeKeysTurnPages) { update(prefs.copy(volumeKeysTurnPages = it)) }
 
             HorizontalDivider(color = palette.border.toComposeColor())

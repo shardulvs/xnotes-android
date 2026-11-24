@@ -59,6 +59,11 @@ data class Preferences(
     val stylusButton1Tap: String = "none",
     /** Action mapped to the second page-key side button (keycode 93); "none" disables it. */
     val stylusButton2Tap: String = "none",
+    /** Action mapped to a click of the HONOR Magic-Pencil side button, which the pen sends as
+     *  DPAD_DOWN (seen on the Magic-Pencil 4s, MagicOS 11); "none" leaves it turning the page. */
+    val honorPencilClick: String = "none",
+    /** Action mapped to a double click of the same button, sent as DPAD_UP; "none" leaves it turning the page. */
+    val honorPencilDoubleClick: String = "none",
     /** Whether the volume keys turn pages in a note (up for the previous page, down for the next). */
     val volumeKeysTurnPages: Boolean = false,
     /** Horizontal margin (px) on each side of the page column; 0 ⇒ fit-width fills the screen. */
@@ -149,6 +154,8 @@ data class Preferences(
         .put("stylus_button_tap", stylusButtonTap)
         .put("stylus_button_1_tap", stylusButton1Tap)
         .put("stylus_button_2_tap", stylusButton2Tap)
+        .put("honor_pencil_click", honorPencilClick)
+        .put("honor_pencil_double_click", honorPencilDoubleClick)
         .put("volume_keys_turn_pages", volumeKeysTurnPages)
         .put("side_margin", sideMargin)
         .put("hide_page_borders", hidePageBorders)
@@ -289,6 +296,8 @@ data class Preferences(
                 stylusButtonTap = tapAction("stylus_button_tap"),
                 stylusButton1Tap = tapAction("stylus_button_1_tap"),
                 stylusButton2Tap = tapAction("stylus_button_2_tap"),
+                honorPencilClick = tapAction("honor_pencil_click"),
+                honorPencilDoubleClick = tapAction("honor_pencil_double_click"),
                 volumeKeysTurnPages = o.optBoolean("volume_keys_turn_pages", false),
                 sideMargin = o.optDouble("side_margin", 16.0).coerceIn(0.0, 80.0),
                 hidePageBorders = o.optBoolean("hide_page_borders", false),

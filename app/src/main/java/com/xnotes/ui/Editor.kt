@@ -10309,6 +10309,7 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
      *  a held key that can also be clicked goes to both. Returns true when consumed, so the host
      *  swallows the key. */
     fun onStylusButtonKey(e: android.view.KeyEvent): Boolean {
+        if (isHonorPencilKey(e)) return onHonorPencilKey(e)
         if (e.keyCode == penDoubleTapKeycode) return onPenDoubleTapKey(e)
         if (e.keyCode in penButtonTapKeycodes) return onPenButtonTapKey(e)
         val down = when (e.action) {
@@ -10321,6 +10322,25 @@ class Editor(context: Context, val pane: Pane = Pane.PRIMARY) : ToolPopupHost, S
         val held = if (canvasOpen) infinite.onStylusButtonKey(e.keyCode, down) else controller.onStylusButtonKey(e.keyCode, down)
         if (held && e.keyCode in penButtonClickKeycodes) onPenButtonClick(e)
         return held
+    }
+
+    // The HONOR Magic-Pencil 4s on MagicOS 11 is a Bluetooth keyboard as far as its button goes:
+    // a click arrives as DPAD_DOWN and a double click as DPAD_UP, the pen telling the two apart
+    // itself, each as a down and an up a millisecond apart. Arrows are claimed only from the pen,
+    // so a hardware keyboard keeps them, and an unmapped one falls through and still pages the note.
+    private fun isHonorPencilKey(e: android.view.KeyEvent): Boolean =
+        (e.keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN || e.keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP) &&
+            e.device?.name?.startsWith("HONOR Magic-Pencil") == true
+
+    private fun onHonorPencilKey(e: android.view.KeyEvent): Boolean {
+        val action = if (e.keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN) {
+            preferences.honorPencilClick
+        } else {
+            preferences.honorPencilDoubleClick
+        }
+        if (action == "none") return false
+        if (e.action == android.view.KeyEvent.ACTION_DOWN && e.repeatCount == 0) dispatchTapGesture(action)
+        return true
     }
 
     // Pens with no side button (e.g. Huawei M-Pencil) report a barrel double-tap as a vendor key
