@@ -438,6 +438,9 @@
     <string name="pref_redmi_buttons">Redmi Smart Pen side buttons (tap)</string>
     <string name="pen_button_1">Button 1</string>
     <string name="pen_button_2">Button 2</string>
+    <string name="pref_honor_pencil_button">HONOR Magic-Pencil side button (tap)</string>
+    <string name="pen_click">Click</string>
+    <string name="pen_double_click">Double click</string>
     <string name="pref_new_notes">New notes</string>
     <string name="pref_filename_template">Filename template</string>
     <string name="pref_page">Page</string>

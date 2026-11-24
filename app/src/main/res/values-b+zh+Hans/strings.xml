@@ -334,6 +334,9 @@
     <string name="pref_redmi_buttons">Redmi Smart Pen 侧键（点按）</string>
     <string name="pen_button_1">按键 1</string>
     <string name="pen_button_2">按键 2</string>
+    <string name="pref_honor_pencil_button">HONOR Magic-Pencil 侧键（点按）</string>
+    <string name="pen_click">单击</string>
+    <string name="pen_double_click">双击</string>
     <string name="pref_new_notes">新笔记</string>
     <string name="pref_filename_template">文件名模板</string>
     <string name="pref_page">页面</string>

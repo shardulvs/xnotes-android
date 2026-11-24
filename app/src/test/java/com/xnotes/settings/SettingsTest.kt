@@ -190,6 +190,8 @@ class SettingsTest {
             stylusButtonTap = "toggle_pan",
             stylusButton1Tap = "toggle_previous",
             stylusButton2Tap = "undo",
+            honorPencilClick = "toggle_eraser",
+            honorPencilDoubleClick = "redo",
         )
         val back = Settings.fromJson(Settings(prefs = prefs).toJson()).prefs
         assertEquals("undo", back.twoFingerTap)
@@ -198,6 +200,8 @@ class SettingsTest {
         assertEquals("toggle_pan", back.stylusButtonTap)
         assertEquals("toggle_previous", back.stylusButton1Tap)
         assertEquals("undo", back.stylusButton2Tap)
+        assertEquals("toggle_eraser", back.honorPencilClick)
+        assertEquals("redo", back.honorPencilDoubleClick)
     }
 
     @Test fun frontBufferingIsOnUntilItIsTurnedOff() {
